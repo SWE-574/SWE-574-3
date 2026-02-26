@@ -1,3 +1,6 @@
 [submodule "mobile-client"]
 	path = mobile-client
 	url = https://github.com/SWE-574/mobile-client.git
+[submodule "web-server"]
+	path = web-server
+	url = https://github.com/SWE-574/web-server.git
