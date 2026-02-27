@@ -44,9 +44,10 @@ def provision_timebank(handshake: Handshake) -> bool:
         receiver = User.objects.select_for_update().get(id=receiver.id)
         hours = handshake.provisioned_hours
 
-        # Validate balance before transaction
-        if receiver.timebank_balance < hours:
-            raise ValueError("Insufficient TimeBank balance")
+        # Validate projected balance before transaction (should not go below -10.00)
+        projected_balance = receiver.timebank_balance - hours
+        if projected_balance < Decimal("-10.00"):
+            raise ValueError("Transaction would exceed maximum debt limit of 10 hours")
 
         # Use F() expression for atomic balance update
         receiver.timebank_balance = F("timebank_balance") - hours
