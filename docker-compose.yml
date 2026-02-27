@@ -1,0 +1,59 @@
+services:
+  backend:
+    build: ./backend
+    command: daphne -b 0.0.0.0 -p 8000 hive_project.asgi:application
+    volumes:
+      - ./backend:/code
+      - media_data:/code/media
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    environment:
+      - DB_NAME=the_hive_db
+      - DB_USER=your_postgres_user
+      - DB_PASSWORD=your_postgres_password
+      - DB_HOST=db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DJANGO_E2E=${DJANGO_E2E:-0}
+      - E2E=${E2E:-0}
+      - DISABLE_THROTTLING=1
+
+  frontend:
+    build: ./frontend
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"  # Vite default port
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://localhost:8000/api
+      - VITE_E2E=${VITE_E2E:-0}
+
+  db:
+    image: postgis/postgis:15-3.4
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=the_hive_db
+      - POSTGRES_USER=your_postgres_user
+      - POSTGRES_PASSWORD=your_postgres_password
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:
