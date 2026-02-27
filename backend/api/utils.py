@@ -13,7 +13,7 @@ from .cache_utils import invalidate_conversations, invalidate_transactions
 
 def can_user_post_offer(user: User) -> bool:
     """Allow posting until the user owes more than 10 hours."""
-    return user.timebank_balance <= Decimal("10.00")
+    return user.timebank_balance >= Decimal("-10.00")
 
 
 def get_provider_and_receiver(handshake: Handshake) -> tuple[User, User]:
