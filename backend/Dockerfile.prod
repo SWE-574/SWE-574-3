@@ -1,0 +1,77 @@
+# Multi-stage Dockerfile for production
+# Stage 1: Build dependencies
+FROM python:3.11-slim as builder
+
+WORKDIR /build
+
+# Install build dependencies including GDAL for PostGIS/GeoDjango
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    libpq-dev \
+    gdal-bin \
+    libgdal-dev \
+    libgeos-dev \
+    libproj-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set GDAL environment variables for pip install
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+
+# Copy requirements and install Python dependencies globally
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Production image
+FROM python:3.11-slim
+
+# Use /code for consistency with dev Dockerfile and settings.py
+WORKDIR /code
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install runtime dependencies including GDAL for GeoDjango
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    libpq-dev \
+    curl \
+    gdal-bin \
+    libgdal-dev \
+    libgeos-dev \
+    libproj-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set GDAL environment variables
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+
+# Copy Python dependencies from builder (installed globally in /usr/local)
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
+
+# Copy application code
+COPY --chown=appuser:appuser . /code/
+
+# Create logs, media, and staticfiles directories with proper ownership
+RUN mkdir -p /code/logs /code/media /code/staticfiles && \
+    chown -R appuser:appuser /code/logs /code/media /code/staticfiles && \
+    chmod +x /code/entrypoint.sh
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health/ || exit 1
+
+# Use entrypoint to run migrations, then exec the command
+ENTRYPOINT ["/code/entrypoint.sh"]
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "hive_project.asgi:application"]
