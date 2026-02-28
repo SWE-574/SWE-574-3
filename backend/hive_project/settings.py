@@ -12,9 +12,12 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -120,6 +123,19 @@ TEMPLATES = [
 WSGI_APPLICATION = 'hive_project.wsgi.application'
 ASGI_APPLICATION = 'hive_project.asgi.application'
 
+
+# GeoDjango — GDAL/GEOS library paths (macOS Homebrew)
+# Django 5+ doesn't try gdal3.12+ by name; set the path explicitly for local dev.
+import platform as _platform
+if _platform.system() == 'Darwin':
+    import subprocess as _sp
+    try:
+        _brew_prefix = _sp.check_output(['brew', '--prefix', 'gdal'], text=True).strip()
+        GDAL_LIBRARY_PATH = f'{_brew_prefix}/lib/libgdal.dylib'
+        _geos_prefix = _sp.check_output(['brew', '--prefix', 'geos'], text=True).strip()
+        GEOS_LIBRARY_PATH = f'{_geos_prefix}/lib/libgeos_c.dylib'
+    except Exception:
+        pass
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
