@@ -14,7 +14,7 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LOCAL DEVELOPMENT  (docker-compose.infra.yml for DB/Redis, local venv)
+# LOCAL DEVELOPMENT  (infra via docker compose, backend/frontend run natively)
 # ─────────────────────────────────────────────────────────────────────────────
 
 dev-setup: ## One-time local setup: venv, deps, infra, migrate, demo data
