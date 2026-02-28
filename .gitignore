@@ -216,3 +216,9 @@ frontend/.env.production
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# TLS certificates
+nginx/certs/
+
+# Static files
+backend/staticfiles
