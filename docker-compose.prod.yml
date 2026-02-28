@@ -1,12 +1,31 @@
 services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - frontend_static:/usr/share/nginx/html:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
     volumes:
       - media_data:/code/media
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
+    expose:
+      - "8000"
     depends_on:
       db:
         condition: service_healthy
@@ -50,15 +69,14 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.prod
       args:
-        - VITE_API_URL=${VITE_API_URL:-http://localhost:8000/api}
-    ports:
-      - "${FRONTEND_PORT:-5173}:5173"
-    depends_on:
-      backend:
-        condition: service_healthy
+        - VITE_API_URL=/api
+    volumes:
+      - frontend_static:/usr/share/nginx/html
+    expose:
+      - "80"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5173"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -109,6 +127,8 @@ services:
     command: redis-server --save 60 1000 --loglevel warning
     volumes:
       - redis_data:/data
+    expose:
+      - "6379"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -133,4 +153,4 @@ volumes:
   postgres_data:
   redis_data:
   media_data:
-
+  frontend_static:

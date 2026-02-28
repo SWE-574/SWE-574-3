@@ -1,0 +1,49 @@
+# Infrastructure only — PostGIS & Redis
+# Starts the external dependencies so the backend can run locally (outside Docker).
+#
+# Usage:
+#   docker compose -f docker-compose.infra.yml up -d
+#   docker compose -f docker-compose.infra.yml down
+#   docker compose -f docker-compose.infra.yml down -v   # also remove volumes
+
+services:
+  db:
+    image: imresamu/postgis-arm64:alpine-ver20251223-6b15838-2026w09
+    platform: linux/arm64/v8
+    container_name: hive_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME:-the_hive_db}
+      POSTGRES_USER:     ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres123}
+      PGDATA:            /var/lib/postgresql/data/pgdata
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: hive_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --loglevel warning
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

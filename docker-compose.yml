@@ -1,27 +1,40 @@
 services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
   backend:
     build: ./backend
     command: daphne -b 0.0.0.0 -p 8000 hive_project.asgi:application
     volumes:
       - ./backend:/code
       - media_data:/code/media
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     depends_on:
       db:
         condition: service_started
       redis:
         condition: service_started
     environment:
-      - DB_NAME=the_hive_db
-      - DB_USER=your_postgres_user
-      - DB_PASSWORD=your_postgres_password
+      - DB_NAME=${DB_NAME:-the_hive_db}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres123}
       - DB_HOST=db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DEBUG=${DEBUG:-True}
       - DJANGO_E2E=${DJANGO_E2E:-0}
       - E2E=${E2E:-0}
-      - DISABLE_THROTTLING=1
+      - DISABLE_THROTTLING=${DISABLE_THROTTLING:-1}
 
   frontend:
     build: ./frontend
@@ -29,29 +42,39 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    ports:
-      - "5173:5173"  # Vite default port
+    expose:
+      - "5173"
     depends_on:
       - backend
     environment:
-      - VITE_API_URL=http://localhost:8000/api
-      - VITE_E2E=${VITE_E2E:-0}
+      - VITE_API_URL=/api
 
   db:
     image: postgis/postgis:15-3.4
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     environment:
-      - POSTGRES_DB=the_hive_db
-      - POSTGRES_USER=your_postgres_user
-      - POSTGRES_PASSWORD=your_postgres_password
+      - POSTGRES_DB=${DB_NAME:-the_hive_db}
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres123}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    command: redis-server --appendonly yes --loglevel warning
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

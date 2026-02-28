@@ -201,6 +201,17 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+
+# Docker / local env
+.env
+.env.local
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
