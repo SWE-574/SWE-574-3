@@ -26,12 +26,17 @@ class TestCanUserPostOffer:
         assert can_user_post_offer(user) is True
     
     def test_cannot_post_when_balance_high(self):
-        """Test user cannot post when balance exceeds threshold"""
-        user = UserFactory(timebank_balance=Decimal('-11.00'))
+        """Test user cannot post when debt exceeds 10 hours.
+
+        -11.00 violates the DB check constraint (minimum -10.00), so we test
+        the pure function logic with a lightweight mock instead of a DB row.
+        """
+        from types import SimpleNamespace
+        user = SimpleNamespace(timebank_balance=Decimal('-11.00'))
         assert can_user_post_offer(user) is False
     
     def test_can_post_at_threshold(self):
-        """Test user can post at threshold"""
+        """Test user can post exactly at the -10-hour debt threshold"""
         user = UserFactory(timebank_balance=Decimal('-10.00'))
         assert can_user_post_offer(user) is True
 
