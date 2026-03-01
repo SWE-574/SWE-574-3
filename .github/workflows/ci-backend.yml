@@ -104,11 +104,7 @@ jobs:
         working-directory: backend
         run: |
           mkdir -p tests/reports/coverage
-          .venv/bin/pytest \
-            --junitxml=tests/reports/junit.xml \
-            --cov=api \
-            --cov-report=html:tests/reports/coverage \
-            --cov-report=term-missing
+          .venv/bin/pytest -c pytest-ci.ini
 
       - name: Upload JUnit report
         if: always()
