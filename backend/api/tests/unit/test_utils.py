@@ -27,12 +27,12 @@ class TestCanUserPostOffer:
     
     def test_cannot_post_when_balance_high(self):
         """Test user cannot post when balance exceeds threshold"""
-        user = UserFactory(timebank_balance=Decimal('11.00'))
+        user = UserFactory(timebank_balance=Decimal('-11.00'))
         assert can_user_post_offer(user) is False
     
     def test_can_post_at_threshold(self):
         """Test user can post at threshold"""
-        user = UserFactory(timebank_balance=Decimal('10.00'))
+        user = UserFactory(timebank_balance=Decimal('-10.00'))
         assert can_user_post_offer(user) is True
 
 

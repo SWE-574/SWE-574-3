@@ -53,6 +53,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Pin CI environment variables
+        # $GITHUB_ENV overrides act's .env injection AND any job-level env for
+        # all subsequent steps — the only reliable way to win the precedence war.
+        run: |
+          {
+            echo "DB_NAME=the_hive_db"
+            echo "DB_USER=postgres"
+            echo "DB_PASSWORD=postgres_ci"
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=5432"
+            echo "REDIS_HOST=127.0.0.1"
+            echo "REDIS_PORT=6379"
+            echo "SECRET_KEY=ci-secret-key-not-used-in-production"
+            echo "DEBUG=True"
+            echo "ALLOWED_HOSTS=localhost,127.0.0.1"
+            echo "DJANGO_SETTINGS_MODULE=hive_project.settings"
+          } >> "$GITHUB_ENV"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
