@@ -1,0 +1,42 @@
+name: CI — Frontend
+
+on:
+  push:
+    branches: [dev, "feature/**", "fix/**", "chore/**"]
+    paths: ["frontend/**", ".github/workflows/ci-frontend.yml"]
+  pull_request:
+    branches: [dev]
+    paths: ["frontend/**", ".github/workflows/ci-frontend.yml"]
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: node-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: node-
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Type-check & build
+        working-directory: frontend
+        env:
+          VITE_API_URL: /api
+        run: npm run build

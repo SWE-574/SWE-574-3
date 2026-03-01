@@ -1,0 +1,107 @@
+name: CI — Backend
+
+on:
+  push:
+    branches: [dev, "feature/**", "fix/**", "chore/**"]
+    paths: ["backend/**", ".github/workflows/ci-backend.yml"]
+  pull_request:
+    branches: [dev]
+    paths: ["backend/**", ".github/workflows/ci-backend.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      db:
+        image: postgis/postgis:15-3.4
+        env:
+          POSTGRES_DB: the_hive_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_NAME: the_hive_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres_ci
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      SECRET_KEY: ci-secret-key-not-used-in-production
+      DEBUG: "True"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DJANGO_SETTINGS_MODULE: hive_project.settings
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install GDAL / GEOS (GeoDjango)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gdal-bin libgdal-dev libgeos-dev
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: pip-
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Run migrations
+        working-directory: backend
+        run: .venv/bin/python manage.py migrate --no-input
+
+      - name: Run tests
+        working-directory: backend
+        run: |
+          mkdir -p tests/reports/coverage
+          .venv/bin/pytest \
+            --junitxml=tests/reports/junit.xml \
+            --cov=api \
+            --cov-report=html:tests/reports/coverage \
+            --cov-report=term-missing
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-junit
+          path: backend/tests/reports/junit.xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/tests/reports/coverage/

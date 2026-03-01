@@ -6,8 +6,9 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/templates/default.conf.template:ro
-      # Let's Encrypt — mount the full directory so symlinks in live/ resolve
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Let's Encrypt — mount the full directory so symlinks in live/ resolve.
+      # Override LETSENCRYPT_DIR in CI to point to a self-signed cert tree.
+      - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
     depends_on:
       backend:
         condition: service_healthy

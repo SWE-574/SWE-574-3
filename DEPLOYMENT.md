@@ -113,11 +113,11 @@ certbot certonly --standalone -d yourdomain.com
 # Certs land in /etc/letsencrypt/live/yourdomain.com/
 ```
 
-**3. Set `CERTS_DIR` in `.env`:**
+**3. Set `LETSENCRYPT_DIR` in `.env`:**
 
 ```dotenv
 DOMAIN=yourdomain.com
-CERTS_DIR=/etc/letsencrypt/live/yourdomain.com
+LETSENCRYPT_DIR=/etc/letsencrypt/live/yourdomain.com
 ```
 
 **4. Restart with HTTPS:**
@@ -161,7 +161,7 @@ docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
 | `DISABLE_THROTTLING` | `False` | | Dev convenience only |
 | `VITE_API_URL` | `/api` | | Frontend build-time var |
 | `DOMAIN` | `localhost` | ✓ | Nginx `server_name`; set to your public domain |
-| `CERTS_DIR` | `./nginx/certs` | ✓ | Path to `fullchain.pem` / `privkey.pem` |
+| `LETSENCRYPT_DIR` | `./nginx/certs` | ✓ | Path to `fullchain.pem` / `privkey.pem` |
 
 ---
 
