@@ -17,6 +17,12 @@ services:
     environment:
       - DOMAIN=${DOMAIN:-localhost}
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsk https://localhost/api/health/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     logging:
       driver: "json-file"
       options:

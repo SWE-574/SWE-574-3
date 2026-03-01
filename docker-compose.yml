@@ -23,6 +23,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/api/health/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     environment:
       - DB_NAME=${DB_NAME:-the_hive_db}
       - DB_USER=${DB_USER:-postgres}

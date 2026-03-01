@@ -222,3 +222,6 @@ nginx/certs/
 
 # Static files
 backend/staticfiles
+
+# Logs
+logs/
