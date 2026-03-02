@@ -4,8 +4,9 @@
 # ── Local dev config ──────────────────────────────────────────────────────────
 PYTHON  ?= python3
 VENV     = backend/.venv
-PIP      = $(CURDIR)/$(VENV)/bin/pip
-PYEXEC   = $(CURDIR)/$(VENV)/bin/python
+# Quoted so paths containing spaces (e.g. "My Projects/SWE-574-3") don't break
+PIP      = "$(CURDIR)/$(VENV)/bin/pip"
+PYEXEC   = "$(CURDIR)/$(VENV)/bin/python"
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -26,14 +27,19 @@ dev-setup: ## One-time local setup: venv, deps, infra, migrate, demo data
 	@if [ ! -f backend/.env ]; then \
 		cp .env.example backend/.env; \
 		sed -i '' 's|DB_HOST=localhost|DB_HOST=127.0.0.1|g' backend/.env; \
-		KEY=$$(cd backend && $(PYEXEC) -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"); \
-		sed -i '' "s|SECRET_KEY=.*|SECRET_KEY=$$KEY|" backend/.env; \
+		$(PYEXEC) -c " \
+import pathlib, sys; \
+from django.core.management.utils import get_random_secret_key; \
+p = pathlib.Path('backend/.env'); \
+lines = ['SECRET_KEY=' + get_random_secret_key() if l.startswith('SECRET_KEY=') else l for l in p.read_text().splitlines()]; \
+p.write_text('\n'.join(lines) + '\n') \
+"; \
 		echo "  Created backend/.env"; \
 	else \
 		echo "  backend/.env already exists, skipping."; \
 	fi
 	@echo "\033[1;34m[4/7] Starting infra (PostGIS + Redis)...\033[0m"
-	@docker compose -f docker-compose.infra.yml up -d
+	@docker compose -f docker-compose.infra.yml --env-file backend/.env up -d
 	@echo "  Waiting for database to accept connections (15s)..."
 	@sleep 15
 	@echo "\033[1;34m[5/7] Running Django migrations...\033[0m"
@@ -48,7 +54,7 @@ dev-setup: ## One-time local setup: venv, deps, infra, migrate, demo data
 
 dev: ## Start local dev: infra + backend (8000) + frontend (5173) in parallel
 	@echo "\033[1;34m→ Starting infra...\033[0m"
-	@docker compose -f docker-compose.infra.yml up -d
+	@docker compose -f docker-compose.infra.yml --env-file backend/.env up -d
 	@echo "\033[1;34m→ Starting backend (http://localhost:8000) and frontend (http://localhost:5173)...\033[0m"
 	@echo "  Press Ctrl+C to stop both.\n"
 	@trap 'kill 0; exit 0' INT TERM; \
@@ -58,7 +64,7 @@ dev: ## Start local dev: infra + backend (8000) + frontend (5173) in parallel
 
 dev-stop: ## Stop local infra (PostGIS + Redis containers)
 	@echo "\033[1;34m→ Stopping infra...\033[0m"
-	@docker compose -f docker-compose.infra.yml down
+	@docker compose -f docker-compose.infra.yml --env-file backend/.env down
 	@echo "\033[1;32m✓ Infra stopped.\033[0m"
 
 # ─────────────────────────────────────────────────────────────────────────────

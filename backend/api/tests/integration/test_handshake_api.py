@@ -107,7 +107,7 @@ class TestHandshakeViewSet:
         response = client.post(f'/api/handshakes/{handshake.id}/initiate/', {
             'exact_location': 'Test Location',
             'exact_duration': 2.0,
-            'scheduled_time': '2025-12-20T10:00:00Z'
+            'scheduled_time': '2027-12-20T10:00:00Z'
         })
         assert response.status_code == status.HTTP_200_OK
         

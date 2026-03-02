@@ -33,6 +33,20 @@ make dev-stop
 
 **Demo accounts** (password: `demo123`): `elif@demo.com`, `cem@demo.com`, `moderator@demo.com` (admin)
 
+> **Troubleshooting — port conflicts**
+>
+> If you already have PostgreSQL or Redis running natively on your machine, the default ports (5432 / 6379) will be taken. Override them in `backend/.env`:
+> ```dotenv
+> DB_PORT=55432    # Docker will expose PostGIS on this host port
+> REDIS_PORT=56379
+> ```
+> `make dev-setup` / `make dev` pass `--env-file backend/.env` to Docker Compose, so the containers will bind to the ports you specify.
+>
+> **Apple Silicon (ARM64):** The default PostGIS image is AMD64 and will show a platform warning. Set in `backend/.env`:
+> ```dotenv
+> POSTGIS_IMAGE=imresamu/postgis-arm64:alpine-ver20251223-6b15838-2026w09
+> ```
+
 | URL | Service |
 |-----|---------|
 | http://localhost:5173 | Frontend |
@@ -92,6 +106,50 @@ docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
 docker compose -f docker-compose.prod.yml exec backend python manage.py collectstatic --no-input
 ```
 
+### TLS — Let's Encrypt (Certbot)
+
+Nginx starts on port 80 first; Certbot gets the certificate; then Nginx switches to HTTPS.
+
+**1. Install Certbot**
+
+```bash
+apt install certbot python3-certbot-nginx -y
+```
+
+**2. Point your domain's A record to the server IP, then run:**
+
+```bash
+# Stop nginx so port 80 is free for the ACME challenge
+docker compose -f docker-compose.prod.yml stop nginx
+
+certbot certonly --standalone -d yourdomain.com
+
+# Certs land in /etc/letsencrypt/live/yourdomain.com/
+```
+
+**3. Set `LETSENCRYPT_DIR` in `.env`:**
+
+```dotenv
+DOMAIN=yourdomain.com
+LETSENCRYPT_DIR=/etc/letsencrypt/live/yourdomain.com
+```
+
+**4. Restart with HTTPS:**
+
+```bash
+docker compose -f docker-compose.prod.yml up -d nginx
+```
+
+**Auto-renewal** (add to crontab with `crontab -e`):
+
+```cron
+0 3 * * * docker compose -f /opt/thehive/docker-compose.prod.yml stop nginx \
+  && certbot renew --quiet \
+  && docker compose -f /opt/thehive/docker-compose.prod.yml start nginx
+```
+
+---
+
 **Update:**
 ```bash
 git pull
@@ -116,6 +174,8 @@ docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
 | `REDIS_HOST` | `localhost` | | `redis` inside Docker |
 | `DISABLE_THROTTLING` | `False` | | Dev convenience only |
 | `VITE_API_URL` | `/api` | | Frontend build-time var |
+| `DOMAIN` | `localhost` | ✓ | Nginx `server_name`; set to your public domain |
+| `LETSENCRYPT_DIR` | `./nginx/certs` | ✓ | Path to `fullchain.pem` / `privkey.pem` |
 
 ---
 

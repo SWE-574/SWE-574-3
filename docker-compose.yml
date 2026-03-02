@@ -20,9 +20,15 @@ services:
       - "8000"
     depends_on:
       db:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/api/health/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     environment:
       - DB_NAME=${DB_NAME:-the_hive_db}
       - DB_USER=${DB_USER:-postgres}
@@ -37,7 +43,9 @@ services:
       - DISABLE_THROTTLING=${DISABLE_THROTTLING:-1}
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      target: dev
     command: npm run dev -- --host 0.0.0.0 --port 5173
     volumes:
       - ./frontend:/app
@@ -50,7 +58,7 @@ services:
       - VITE_API_URL=/api
 
   db:
-    image: postgis/postgis:15-3.4
+    image: ${POSTGIS_IMAGE:-postgis/postgis:15-3.4}
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     environment:

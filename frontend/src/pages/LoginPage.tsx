@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import {
   Box,
@@ -37,16 +37,14 @@ const LoginPage = () => {
   const { login, isLoading } = useAuthStore()
 
   const [form, setForm] = useState({ email: '', password: '' })
-  const [error, setError] = useState('')
-
-  // Check for session_expired in URL params
-  useEffect(() => {
+  const [error, setError] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get('error') === 'session_expired') {
-      setError('Your session has expired. Please log in again.')
       window.history.replaceState({}, '', '/login')
+      return 'Your session has expired. Please log in again.'
     }
-  }, [])
+    return ''
+  })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

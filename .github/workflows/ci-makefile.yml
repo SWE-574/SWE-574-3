@@ -1,0 +1,47 @@
+name: CI — Makefile
+
+on:
+  push:
+    branches: [dev, "feature/**", "fix/**", "chore/**"]
+    paths: ["Makefile", ".github/workflows/ci-makefile.yml"]
+  pull_request:
+    branches: [dev]
+    paths: ["Makefile", ".github/workflows/ci-makefile.yml"]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify make help exits 0
+        run: make help
+
+      - name: Dry-run make dev-setup (syntax check)
+        run: make dev-setup --dry-run
+
+      - name: Confirm all .PHONY targets are reachable
+        run: |
+          PHONY_TARGETS=$(grep -E '^\.PHONY:' Makefile \
+            | sed 's/\.PHONY://' \
+            | tr ' \\' '\n' \
+            | sed 's/^[[:space:]]*//' \
+            | grep -v '^$')
+
+          echo "Declared .PHONY targets:"
+          echo "$PHONY_TARGETS"
+
+          MISSING=""
+          for target in $PHONY_TARGETS; do
+            if ! make "$target" --dry-run > /dev/null 2>&1; then
+              MISSING="$MISSING $target"
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Unreachable .PHONY targets:$MISSING"
+            exit 1
+          fi
+
+          echo "All .PHONY targets are reachable."
