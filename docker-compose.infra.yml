@@ -8,8 +8,7 @@
 
 services:
   db:
-    image: imresamu/postgis-arm64:alpine-ver20251223-6b15838-2026w09
-    platform: linux/arm64/v8
+    image: ${POSTGIS_IMAGE:-postgis/postgis:15-3.4}
     container_name: hive_db
     restart: unless-stopped
     environment:
