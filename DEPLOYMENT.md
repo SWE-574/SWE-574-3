@@ -33,6 +33,20 @@ make dev-stop
 
 **Demo accounts** (password: `demo123`): `elif@demo.com`, `cem@demo.com`, `moderator@demo.com` (admin)
 
+> **Troubleshooting — port conflicts**
+>
+> If you already have PostgreSQL or Redis running natively on your machine, the default ports (5432 / 6379) will be taken. Override them in `backend/.env`:
+> ```dotenv
+> DB_PORT=55432    # Docker will expose PostGIS on this host port
+> REDIS_PORT=56379
+> ```
+> `make dev-setup` / `make dev` pass `--env-file backend/.env` to Docker Compose, so the containers will bind to the ports you specify.
+>
+> **Apple Silicon (ARM64):** The default PostGIS image is AMD64 and will show a platform warning. Set in `backend/.env`:
+> ```dotenv
+> POSTGIS_IMAGE=imresamu/postgis-arm64:alpine-ver20251223-6b15838-2026w09
+> ```
+
 | URL | Service |
 |-----|---------|
 | http://localhost:5173 | Frontend |
