@@ -4,7 +4,7 @@
 
 failure-threshold: warning
 
-ignore:
+ignored:
   # apt-get: pinning versions is impractical in dev Dockerfiles; prod images are pinned
   - DL3008
   # pip install: --no-cache-dir is enforced in prod; dev Dockerfiles skip it intentionally
