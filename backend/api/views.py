@@ -1801,9 +1801,15 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                     denied_requesters = list(other_pending.values_list('requester_id', flat=True))
                     other_pending.update(status='denied')
 
+                    # Bulk-load all requester users to avoid N+1 queries.
+                    users_by_id = User.objects.in_bulk(denied_requesters)
+
                     for requester_id in denied_requesters:
+                        user = users_by_id.get(requester_id)
+                        if user is None:
+                            continue
                         create_notification(
-                            user=User.objects.get(pk=requester_id),
+                            user=user,
                             notification_type='handshake_denied',
                             title='Request Not Accepted',
                             message=f"All slots for '{service.title}' are now filled.",
