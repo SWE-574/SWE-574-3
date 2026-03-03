@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { usePolling } from '@/hooks/usePolling'
 import { useNavigate } from 'react-router-dom'
 import {
   Box,
@@ -21,12 +22,14 @@ import {
   FiMonitor,
   FiCalendar,
   FiLoader,
+  FiRefreshCw,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
 import { serviceAPI } from '@/services/serviceAPI'
+import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
-import { getErrorMessage } from '@/services/api'
 import type { Service } from '@/types'
+import type { Handshake } from '@/services/handshakeAPI'
 
 const YELLOW = '#F8C84A'
 const GREEN = '#2D5C4E'
@@ -69,16 +72,29 @@ const POLL_INTERVAL = 30_000
 const GEO_TIMEOUT = 10_000
 
 // ─── Component ────────────────────────────────────────────────────────────────
+// ─── Handshake status badge config ───────────────────────────────────────────
+const HANDSHAKE_BADGE: Record<
+  Handshake['status'],
+  { label: string; bg: string; color: string }
+> = {
+  pending:   { label: 'Interested',  bg: '#fef9c3', color: '#854d0e' },
+  accepted:  { label: 'Accepted',    bg: '#dcfce7', color: '#166534' },
+  completed: { label: 'Completed',   bg: '#d1fae5', color: '#065f46' },
+  denied:    { label: 'Declined',    bg: '#fee2e2', color: '#991b1b' },
+  cancelled: { label: 'Cancelled',   bg: '#f3f4f6', color: '#6b7280' },
+  reported:  { label: 'Reported',    bg: '#fee2e2', color: '#991b1b' },
+  paused:    { label: 'Paused',      bg: '#e0f2fe', color: '#0369a1' },
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 const DashboardPage = () => {
   const navigate = useNavigate()
-  useAuthStore()
+  const { isAuthenticated, user } = useAuthStore()
 
   const [activeFilter, setActiveFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [services, setServices] = useState<Service[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [fetchError, setFetchError] = useState<string | null>(null)
 
   // Location state
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
@@ -87,6 +103,11 @@ const DashboardPage = () => {
   const [locationEnabled, setLocationEnabled] = useState(() => localStorage.getItem('locationEnabled') === 'true')
   const [locationLoading, setLocationLoading] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(null)
+
+  // Outgoing: services I expressed interest in → serviceId → Handshake
+  const [handshakeMap, setHandshakeMap] = useState<Map<string, Handshake>>(new Map())
+  // Incoming: requests on MY services → serviceId → Handshake[]
+  const [incomingMap, setIncomingMap] = useState<Map<string, Handshake[]>>(new Map())
 
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -104,6 +125,86 @@ const DashboardPage = () => {
     distanceTimer.current = setTimeout(() => setDebouncedDistance(distanceKm), DEBOUNCE_DISTANCE)
     return () => { if (distanceTimer.current) clearTimeout(distanceTimer.current) }
   }, [distanceKm])
+
+  // ── Services polling ──────────────────────────────────────────────────────
+  const fetchServices = useCallback(async (signal: AbortSignal) => {
+    const params =
+      locationEnabled && userLocation
+        ? { lat: userLocation.lat, lng: userLocation.lng, distance: debouncedDistance }
+        : undefined
+
+    const data = await serviceAPI.list(params, signal)
+    // Backend already sends status='Active', but guard against stale cache or edge cases
+    const active = data.filter((s) => s.status?.toLowerCase() === 'active')
+    const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
+
+    let filtered = unique
+    if (activeFilter === 'online') {
+      filtered = filtered.filter((s) => s.location_type === 'Online')
+    } else if (activeFilter === 'recurrent') {
+      filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
+    } else if (activeFilter === 'newest') {
+      filtered = [...filtered].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )
+    } else if (activeFilter === 'weekend') {
+      filtered = filtered.filter((s) => {
+        const details = s.schedule_details?.toLowerCase() ?? ''
+        return details.includes('saturday') || details.includes('sunday') || details.includes('weekend')
+      })
+    }
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase()
+      filtered = filtered.filter(
+        (s) =>
+          s.title.toLowerCase().includes(q) ||
+          s.description.toLowerCase().includes(q) ||
+          s.tags?.some((t) => t.name.toLowerCase().includes(q)),
+      )
+    }
+    setServices(filtered)
+  }, [activeFilter, debouncedSearch, locationEnabled, userLocation, debouncedDistance])
+
+  const { isLoading, error: fetchError } = usePolling(
+    fetchServices,
+    [fetchServices],
+    { interval: POLL_INTERVAL },
+  )
+
+  // ── Handshakes polling (silent, no loading state needed) ──────────────────
+  const fetchHandshakes = useCallback(async (signal: AbortSignal) => {
+    if (!isAuthenticated) {
+      setHandshakeMap(new Map())
+      setIncomingMap(new Map())
+      return
+    }
+    const list = await handshakeAPI.list(signal)
+    const outgoing = new Map<string, Handshake>()
+    const incoming = new Map<string, Handshake[]>()
+    list.forEach((h) => {
+      const svcId =
+        typeof h.service === 'string'
+          ? h.service
+          : typeof h.service === 'object' && h.service && 'id' in h.service
+            ? (h.service as { id: string }).id
+            : undefined
+      if (!svcId) return
+      if (h.requester === user?.id) {
+        outgoing.set(svcId, h)
+      } else {
+        const arr = incoming.get(svcId) ?? []
+        arr.push(h)
+        incoming.set(svcId, arr)
+      }
+    })
+    setHandshakeMap(outgoing)
+    setIncomingMap(incoming)
+  }, [isAuthenticated, user?.id])
+
+  usePolling(fetchHandshakes, [fetchHandshakes], {
+    interval: POLL_INTERVAL,
+    enabled: isAuthenticated,
+  })
 
   // Request geolocation
   const requestLocation = useCallback(() => {
@@ -145,82 +246,6 @@ const DashboardPage = () => {
       requestLocation()
     }
   }, [locationEnabled, userLocation, requestLocation])
-
-  // Fetch & filter services
-  useEffect(() => {
-    let mounted = true
-    const controller = new AbortController()
-
-    const fetchServices = async () => {
-      try {
-        setIsLoading(true)
-        setFetchError(null)
-
-        const params =
-          locationEnabled && userLocation
-            ? { lat: userLocation.lat, lng: userLocation.lng, distance: debouncedDistance }
-            : undefined
-
-        const data = await serviceAPI.list(params, controller.signal)
-        if (!mounted || controller.signal.aborted) return
-
-        const unique = Array.from(new Map(data.map((s) => [s.id, s])).values())
-
-        let filtered = unique
-
-        if (activeFilter === 'online') {
-          filtered = filtered.filter((s) => s.location_type === 'Online')
-        } else if (activeFilter === 'recurrent') {
-          filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
-        } else if (activeFilter === 'newest') {
-          filtered = [...filtered].sort(
-            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-          )
-        } else if (activeFilter === 'weekend') {
-          filtered = filtered.filter((s) => {
-            const details = s.schedule_details?.toLowerCase() ?? ''
-            return details.includes('saturday') || details.includes('sunday') || details.includes('weekend')
-          })
-        }
-
-        if (debouncedSearch.trim()) {
-          const q = debouncedSearch.toLowerCase()
-          filtered = filtered.filter(
-            (s) =>
-              s.title.toLowerCase().includes(q) ||
-              s.description.toLowerCase().includes(q) ||
-              s.tags?.some((t) => t.name.toLowerCase().includes(q)),
-          )
-        }
-
-        if (mounted) {
-          setServices(filtered)
-          setIsLoading(false)
-        }
-      } catch (err: unknown) {
-        if (!mounted) return
-        const e = err as { name?: string; code?: string }
-        if (e?.name === 'AbortError' || e?.name === 'CanceledError' || e?.code === 'ERR_CANCELED') {
-          setIsLoading(false)
-          return
-        }
-        setFetchError(getErrorMessage(err, 'Failed to load services. Please try again.'))
-        setIsLoading(false)
-      }
-    }
-
-    fetchServices()
-    const timer = setInterval(fetchServices, POLL_INTERVAL)
-    const onVisible = () => { if (!document.hidden && mounted) fetchServices() }
-    document.addEventListener('visibilitychange', onVisible)
-
-    return () => {
-      mounted = false
-      controller.abort()
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [activeFilter, debouncedSearch, locationEnabled, userLocation, debouncedDistance])
 
   const distanceLabel =
     distanceKm <= 5 ? 'Nearby' : distanceKm <= 15 ? 'Local Area' : distanceKm <= 30 ? 'Wider Area' : 'City-wide'
@@ -404,11 +429,12 @@ const DashboardPage = () => {
         </Flex>
 
         {/* ── Service cards ── */}
-        {isLoading ? (
+        {/* Full spinner only on very first load (no data yet) */}
+        {isLoading && services.length === 0 ? (
           <Flex justify="center" py={16}>
             <Spinner size="lg" color="orange.400" />
           </Flex>
-        ) : fetchError ? (
+        ) : fetchError && services.length === 0 ? (
           <Flex justify="center" py={16}>
             <Text color="red.500">{fetchError}</Text>
           </Flex>
@@ -433,6 +459,23 @@ const DashboardPage = () => {
               const avatarUrl = owner?.avatar_url
               const isOffer = service.type === 'Offer'
 
+              // Ownership & handshake state
+              const isOwn = !!user && (owner?.id === user.id)
+              const handshake = handshakeMap.get(service.id)
+              // Recurrent services are ongoing — a completed handshake = one session done,
+              // not the service itself. Hide 'completed' badge for Recurrent.
+              const isRecurrent = service.schedule_type === 'Recurrent'
+              const showHandshakeBadge =
+                handshake &&
+                !(isRecurrent && handshake.status === 'completed')
+              const hsConfig = showHandshakeBadge ? HANDSHAKE_BADGE[handshake!.status] : null
+              const isDimmed = handshake?.status === 'denied' || handshake?.status === 'cancelled'
+
+              // Incoming requests on own services
+              const incomingList = isOwn ? (incomingMap.get(service.id) ?? []) : []
+              const pendingCount = incomingList.filter((h) => h.status === 'pending').length
+              const activeCount  = incomingList.filter((h) => ['pending', 'accepted'].includes(h.status)).length
+
               return (
                 <Box
                   key={service.id}
@@ -441,13 +484,14 @@ const DashboardPage = () => {
                   bg="white"
                   borderRadius="xl"
                   border="1px solid"
-                  borderColor="gray.200"
+                  borderColor={isOwn ? 'orange.200' : 'gray.200'}
                   p={6}
                   textAlign="left"
                   w="full"
                   transition="all 0.15s"
                   _hover={{ borderColor: 'orange.300', boxShadow: 'md' }}
                   cursor="pointer"
+                  opacity={isDimmed ? 0.65 : 1}
                 >
                   {/* User + title row */}
                   <Flex gap={3} mb={3} align="flex-start">
@@ -476,7 +520,8 @@ const DashboardPage = () => {
                       )}
                     </Box>
                     <Box flex={1} minW={0}>
-                      <Flex align="center" gap={2} mb={1} flexWrap="wrap">
+                      <Flex align="center" justify="space-between" gap={2} mb={1}>
+                        <Flex align="center" gap={2} flex={1} minW={0} flexWrap="wrap">
                         <Text fontWeight="700" color="gray.900" fontSize="sm" overflow="hidden" style={{ textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>
                           {service.title}
                         </Text>
@@ -490,6 +535,51 @@ const DashboardPage = () => {
                         >
                           {service.type === 'Need' ? 'Want' : service.type}
                         </Badge>
+                        {/* Ownership badge */}
+                        {isOwn && (
+                          <Badge
+                            fontSize="xs"
+                            px={2}
+                            py={0.5}
+                            borderRadius="full"
+                            bg="orange.50"
+                            color="orange.600"
+                            border="1px solid"
+                            borderColor="orange.200"
+                          >
+                            Your listing
+                          </Badge>
+                        )}
+                        {/* Handshake status badge */}
+                        {!isOwn && hsConfig && (
+                          <Badge
+                            fontSize="xs"
+                            px={2}
+                            py={0.5}
+                            borderRadius="full"
+                            style={{ background: hsConfig.bg, color: hsConfig.color }}
+                          >
+                            {hsConfig.label}
+                          </Badge>
+                        )}
+                        </Flex>
+                        {/* Incoming request count — inline, right side of title row */}
+                        {isOwn && activeCount > 0 && (
+                          <Box
+                            display="flex"
+                            alignItems="center"
+                            px={2}
+                            py={0.5}
+                            borderRadius="full"
+                            fontSize="11px"
+                            fontWeight={700}
+                            bg={pendingCount > 0 ? 'orange.500' : 'green.500'}
+                            color="white"
+                            flexShrink={0}
+                          >
+                            {activeCount} {activeCount === 1 ? 'request' : 'requests'}
+                          </Box>
+                        )}
                       </Flex>
                       <Text fontSize="xs" color="gray.400">
                         {name}
@@ -525,12 +615,31 @@ const DashboardPage = () => {
                   </HStack>
 
                   {/* Schedule */}
-                  {service.schedule_details && (
-                    <Flex align="center" gap={2} mb={3} fontSize="xs" color="gray.400">
-                      <FiCalendar size={12} />
-                      <Text>{service.schedule_details}</Text>
-                    </Flex>
-                  )}
+                  <Flex align="center" gap={3} mb={3} fontSize="xs" color="gray.400" flexWrap="wrap">
+                    {isRecurrent && (
+                      <Flex
+                        align="center"
+                        gap={1}
+                        px={2}
+                        py={0.5}
+                        borderRadius="full"
+                        bg="purple.50"
+                        color="purple.600"
+                        border="1px solid"
+                        borderColor="purple.100"
+                        fontWeight={600}
+                      >
+                        <FiRefreshCw size={10} />
+                        <Text>Recurrent</Text>
+                      </Flex>
+                    )}
+                    {service.schedule_details && (
+                      <Flex align="center" gap={1}>
+                        <FiCalendar size={12} />
+                        <Text>{service.schedule_details}</Text>
+                      </Flex>
+                    )}
+                  </Flex>
 
                   {/* Tags + participants */}
                   <Flex align="center" justify="space-between">
@@ -551,7 +660,14 @@ const DashboardPage = () => {
                     </HStack>
                     <Flex align="center" gap={1} fontSize="xs" color="gray.400">
                       <FiUsers size={11} />
-                      <Text>Max {service.max_participants}</Text>
+                      {service.max_participants > 1 ? (
+                        <Text>
+                          {service.participant_count ?? 0}/{service.max_participants}
+                          {' '}slots
+                        </Text>
+                      ) : (
+                        <Text>Max {service.max_participants}</Text>
+                      )}
                     </Flex>
                   </Flex>
                 </Box>

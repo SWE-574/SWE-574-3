@@ -8,6 +8,9 @@ export interface ServiceListParams {
   search?: string
   type?: 'Offer' | 'Need'
   status?: string
+  tags?: string
+  page?: number
+  page_size?: number
 }
 
 type ServiceListResponse = Service[] | { results: Service[]; count?: number }
@@ -21,6 +24,9 @@ export const serviceAPI = {
     if (params?.search) queryParams.search = params.search
     if (params?.type) queryParams.type = params.type
     if (params?.status) queryParams.status = params.status
+    if (params?.tags) queryParams.tags = params.tags
+    if (params?.page) queryParams.page = String(params.page)
+    if (params?.page_size) queryParams.page_size = String(params.page_size)
 
     const res = await apiClient.get<ServiceListResponse>('/services/', {
       params: queryParams,
@@ -30,8 +36,8 @@ export const serviceAPI = {
     return Array.isArray(data) ? data : (data.results ?? [])
   },
 
-  get: async (id: string): Promise<Service> => {
-    const res = await apiClient.get<Service>(`/services/${id}/`)
+  get: async (id: string, signal?: AbortSignal): Promise<Service> => {
+    const res = await apiClient.get<Service>(`/services/${id}/`, { signal })
     return res.data
   },
 
@@ -47,5 +53,27 @@ export const serviceAPI = {
 
   delete: async (id: string): Promise<void> => {
     await apiClient.delete(`/services/${id}/`)
+  },
+
+  expressInterest: async (serviceId: string, signal?: AbortSignal): Promise<{ id: string; status: string }> => {
+    const res = await apiClient.post<{ id: string; status: string }>(
+      `/services/${serviceId}/interest/`,
+      {},
+      { signal },
+    )
+    return res.data
+  },
+
+  report: async (
+    serviceId: string,
+    issueType: 'inappropriate_content' | 'spam' | 'service_issue' | 'scam' | 'harassment' | 'other',
+    description: string,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    await apiClient.post(
+      `/services/${serviceId}/report/`,
+      { issue_type: issueType, description },
+      { signal },
+    )
   },
 }

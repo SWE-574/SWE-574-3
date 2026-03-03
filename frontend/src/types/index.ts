@@ -117,7 +117,7 @@ export interface Service {
   description: string
   type: 'Offer' | 'Need'
   duration: number | string
-  status: 'active' | 'inactive' | 'completed'
+  status: 'Active' | 'Agreed' | 'Completed' | 'Cancelled' | 'active' | 'inactive' | 'completed'
   location_type: 'In-Person' | 'Online'
   location_area?: string
   // API returns location_lat/location_lng (backend field names)
