@@ -11,6 +11,12 @@ on:
       - ".github/workflows/ci-docker.yml"
   pull_request:
     branches: [dev]
+    paths:
+      - "docker-compose*.yml"
+      - "backend/Dockerfile*"
+      - "frontend/Dockerfile*"
+      - "nginx/**"
+      - ".github/workflows/ci-docker.yml"
 
 jobs:
   # ── 0. Dockerfile linting ────────────────────────────────────────────────────
@@ -61,7 +67,7 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.infra.yml down -v
+        run: docker compose -f docker-compose.infra.yml down -v || true
 
   # ── 2. Full local stack (docker-compose.yml) ─────────────────────────────────
   full-local:
@@ -109,7 +115,7 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose down -v || true
 
   # ── 3. Prod stack (docker-compose.prod.yml) ──────────────────────────────────
   prod:
@@ -201,4 +207,6 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.prod.yml down -v
+        run: |
+          # Guard: if checkout failed, the file won't exist
+          [ -f docker-compose.prod.yml ] && docker compose -f docker-compose.prod.yml down -v || true
