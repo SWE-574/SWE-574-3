@@ -481,7 +481,9 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
       fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
       if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
       if (type === 'Event' && eventDate && eventTime) {
-        fd.append('scheduled_time', `${eventDate}T${eventTime}:00`)
+        // Send as UTC ISO string so the backend stores the correct absolute time
+        // regardless of the server's TIME_ZONE setting.
+        fd.append('scheduled_time', new Date(`${eventDate}T${eventTime}:00`).toISOString())
       }
       tagIds.forEach((id) => fd.append('tag_ids', id))
       tagNames.forEach((name) => fd.append('tag_names', name))

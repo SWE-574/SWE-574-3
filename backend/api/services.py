@@ -494,7 +494,7 @@ class EventHandshakeService:
             # Bulk-mark unchecked participants as no-shows (single SQL UPDATE)
             no_show_qs = Handshake.objects.filter(service=service, status='accepted')
             no_show_requester_ids = list(no_show_qs.values_list('requester_id', flat=True))
-            no_show_qs.update(status='no_show')
+            no_show_qs.update(status='no_show', updated_at=timezone.now())
 
             # Process ban logic per affected user
             BAN_THRESHOLD = 3
@@ -572,7 +572,7 @@ class EventHandshakeService:
             participant_ids = list(
                 active_participants_qs.values_list('requester_id', flat=True)
             )
-            active_participants_qs.update(status='cancelled')
+            active_participants_qs.update(status='cancelled', updated_at=timezone.now())
 
             for user_id in participant_ids:
                 participant = User.objects.get(pk=user_id)

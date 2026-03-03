@@ -911,7 +911,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
         # Block edits to Event details once inside the 24-hour lockdown window.
         # Non-Event services are completely unaffected by this guard.
-        if service.type == 'Event' and service.is_in_lockdown_window:
+        # Admins are exempt so they can still toggle visibility or moderate.
+        is_admin = getattr(self.request.user, 'role', None) == 'admin'
+        if service.type == 'Event' and service.is_in_lockdown_window and not is_admin:
             raise PermissionDenied(
                 'Cannot edit event details within 24 hours of the scheduled start time.'
             )

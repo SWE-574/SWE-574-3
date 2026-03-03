@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Box, Flex, Stack, Text } from '@chakra-ui/react'
 import { FiX, FiCheckCircle, FiAlertCircle, FiUsers } from 'react-icons/fi'
 import type { Service } from '@/types'
@@ -13,7 +14,7 @@ import {
 
 // ─── Status badge config ──────────────────────────────────────────────────────
 
-const STATUS_BADGE: Record<string, { label: string; bg: string; color: string; icon?: React.ReactNode }> = {
+const STATUS_BADGE: Record<string, { label: string; bg: string; color: string; icon?: ReactNode }> = {
   accepted:   { label: 'Registered',  bg: GRAY100,   color: GRAY500  },
   checked_in: { label: 'Checked In',  bg: GREEN_LT,  color: GREEN    },
   no_show:    { label: 'No-Show',     bg: RED_LT,    color: RED      },

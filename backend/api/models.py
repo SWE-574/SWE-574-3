@@ -180,7 +180,7 @@ class Service(models.Model):
             return False
         from django.utils import timezone
         from datetime import timedelta
-        return timezone.now() > self.scheduled_time - timedelta(hours=24)
+        return timezone.now() >= self.scheduled_time - timedelta(hours=24)
 
     def save(self, *args, **kwargs):
         """

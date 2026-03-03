@@ -402,6 +402,8 @@ export default function ServiceDetailPage() {
   const isRecurr   = service?.schedule_type === 'Recurrent'
   const isFull     = service != null && service.max_participants > 0
     && (service.participant_count ?? 0) >= service.max_participants
+  const isOffer    = service?.type === 'Offer'
+  const isEvent    = service?.type === 'Event'
 
   const exId = (val: unknown): string | undefined => {
     if (!val) return undefined
@@ -412,6 +414,15 @@ export default function ServiceDetailPage() {
   const myHandshake = handshakes.find((h) => exId(h.service) === service?.id && exId(h.requester) === user?.id)
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
+
+  // Event-specific derived value — must come after exId / isEvent
+  const myEventHandshake = isEvent
+    ? handshakes.find((h) =>
+        exId(h.service) === service?.id &&
+        exId(h.requester) === user?.id &&
+        ['accepted', 'checked_in', 'no_show'].includes(h.status)
+      )
+    : undefined
 
   const handleExpressInterest = async () => {
     if (!service) return
@@ -539,17 +550,6 @@ export default function ServiceDetailPage() {
   }
 
   const gradient      = pickGradient(service)
-  const isOffer       = service.type === 'Offer'
-  const isEvent       = service.type === 'Event'
-
-  // Event-specific derived values (must come after isEvent)
-  const myEventHandshake = isEvent
-    ? handshakes.find((h) =>
-        exId(h.service) === service?.id &&
-        exId(h.requester) === user?.id &&
-        ['accepted', 'checked_in', 'no_show'].includes(h.status)
-      )
-    : undefined
 
   const images        = service.media?.filter((m) => (m.media_type ?? 'image') === 'image') ?? []
   const fillPct       = service.max_participants > 1

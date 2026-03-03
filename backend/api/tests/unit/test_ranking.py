@@ -78,6 +78,66 @@ class TestCalculateHotScore:
         assert active_score >= inactive_score
 
 
+    def test_event_nearly_full_gets_boost(self):
+        """Event at 75-99% capacity should get a 1.5× multiplier."""
+        service = ServiceFactory(
+            type='Event', status='Active', max_participants=4,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        base_score = calculate_hot_score(service)
+
+        # Fill to 75% (3 of 4)
+        for _ in range(3):
+            HandshakeFactory(service=service, status='accepted')
+
+        boosted_score = calculate_hot_score(service)
+        if base_score != 0:
+            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+
+    def test_event_below_75_pct_no_boost(self):
+        """Event below 75% capacity should NOT receive the multiplier."""
+        service = ServiceFactory(
+            type='Event', status='Active', max_participants=10,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        base_score = calculate_hot_score(service)
+
+        # Fill to 60% (6 of 10)
+        for _ in range(6):
+            HandshakeFactory(service=service, status='accepted')
+
+        score = calculate_hot_score(service)
+        assert score == pytest.approx(base_score, rel=1e-5)
+
+    def test_event_full_no_boost(self):
+        """Event at exactly 100% capacity should NOT receive the multiplier."""
+        service = ServiceFactory(
+            type='Event', status='Active', max_participants=4,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        base_score = calculate_hot_score(service)
+
+        for _ in range(4):
+            HandshakeFactory(service=service, status='accepted')
+
+        score = calculate_hot_score(service)
+        # At 100% capacity_ratio == 1.0  →  condition 0.75 <= ratio < 1.0 is False
+        assert score == pytest.approx(base_score, rel=1e-5)
+
+    def test_non_event_service_no_boost(self):
+        """Non-Event services should never receive the event multiplier."""
+        service = ServiceFactory(
+            type='Offer', status='Active', max_participants=4,
+        )
+        base_score = calculate_hot_score(service)
+
+        for _ in range(3):
+            HandshakeFactory(service=service, status='accepted')
+
+        score = calculate_hot_score(service)
+        assert score == pytest.approx(base_score, rel=1e-5)
+
+
 @pytest.mark.django_db
 @pytest.mark.unit
 class TestCalculateHotScoresBatch:
@@ -97,3 +157,17 @@ class TestCalculateHotScoresBatch:
             service.refresh_from_db()
             assert service.hot_score is not None
             assert service.hot_score >= 0
+
+    def test_batch_event_multiplier_matches_single(self):
+        """Batch scoring must match single-service scoring for Events."""
+        service = ServiceFactory(
+            type='Event', status='Active', max_participants=4,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        for _ in range(3):
+            HandshakeFactory(service=service, status='accepted')
+
+        single_score = calculate_hot_score(service)
+        batch_scores = calculate_hot_scores_batch([service])
+
+        assert batch_scores[service.id] == pytest.approx(single_score, rel=1e-5)

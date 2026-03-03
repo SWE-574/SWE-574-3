@@ -14,7 +14,7 @@ class IsNotEventBanned(BasePermission):
     """
     Deny access when the authenticated user has an active event participation ban.
 
-    Applied to: join_event, leave_event, checkin actions.
+    Applied to: join_event action.
     """
     message = 'You are currently banned from joining events.'
 
