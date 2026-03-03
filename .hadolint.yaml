@@ -5,7 +5,9 @@
 failure-threshold: warning
 
 ignored:
-  # apt-get: pinning versions is impractical in dev Dockerfiles; prod images are pinned
+  # apt-get: pinning versions is impractical for geospatial packages (gdal, geos, proj)
   - DL3008
+  # apk add: pinning Alpine package versions is equally impractical
+  - DL3018
   # pip install: --no-cache-dir is enforced in prod; dev Dockerfiles skip it intentionally
   - DL3042
