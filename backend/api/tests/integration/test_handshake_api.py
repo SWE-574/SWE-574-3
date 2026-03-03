@@ -200,3 +200,241 @@ class TestHandshakeViewSet:
         
         requester.refresh_from_db()
         assert requester.timebank_balance == Decimal('3.00')
+
+
+# ── New tests: capacity system + Agreed status ────────────────────────────────
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestPendingCapacityIntegration:
+    """Pending handshakes must never block new interest expressions."""
+
+    def test_multiple_users_can_express_interest_simultaneously(self):
+        """Three users can all express interest in a max_participants=1 One-Time service
+        because pending doesn't consume a slot."""
+        from api.utils import provision_timebank
+
+        provider = UserFactory(timebank_balance=Decimal('20'))
+        u1 = UserFactory(timebank_balance=Decimal('5'))
+        u2 = UserFactory(timebank_balance=Decimal('5'))
+        u3 = UserFactory(timebank_balance=Decimal('5'))
+        svc = ServiceFactory(
+            user=provider, type='Offer', schedule_type='One-Time',
+            max_participants=1, duration=Decimal('1'), status='Active',
+        )
+
+        client = AuthenticatedAPIClient()
+        for user in (u1, u2, u3):
+            client.authenticate_user(user)
+            resp = client.post(f'/api/services/{svc.id}/interest/')
+            assert resp.status_code == status.HTTP_201_CREATED, (
+                f"User {user.email} should be able to express interest: {resp.data}"
+            )
+
+        assert Handshake.objects.filter(service=svc, status='pending').count() == 3
+
+    def test_accepted_slot_blocks_new_interest(self):
+        """After one handshake is accepted, the slot is consumed and no further
+        interest can be expressed on a max_participants=1 One-Time service."""
+        from api.utils import provision_timebank
+
+        provider = UserFactory(timebank_balance=Decimal('20'))
+        u1 = UserFactory(timebank_balance=Decimal('5'))
+        u2 = UserFactory(timebank_balance=Decimal('5'))
+        svc = ServiceFactory(
+            user=provider, type='Offer', schedule_type='One-Time',
+            max_participants=1, duration=Decimal('1'), status='Active',
+        )
+        h1 = HandshakeFactory(service=svc, requester=u1,
+                               status='pending', provisioned_hours=Decimal('1'))
+        provision_timebank(h1)
+
+        # accept h1
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        client.post(f'/api/handshakes/{h1.id}/accept/')
+
+        # u2 tries to express interest — service is now Agreed (hidden) or full
+        # Backend returns 404 (service not in Active queryset) or 400 (capacity)
+        client.authenticate_user(u2)
+        resp = client.post(f'/api/services/{svc.id}/interest/')
+        assert resp.status_code in (
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_404_NOT_FOUND,
+        ), f"Expected 400 or 404, got {resp.status_code}"
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAcceptAutoDenyIntegration:
+    """Accepting a One-Time handshake auto-denies all other pending ones."""
+
+    def _setup_one_time(self, max_p=1):
+        from api.utils import provision_timebank
+
+        provider = UserFactory(timebank_balance=Decimal('20'))
+        svc = ServiceFactory(
+            user=provider, type='Offer', schedule_type='One-Time',
+            max_participants=max_p, duration=Decimal('1'), status='Active',
+        )
+        requesters = [UserFactory(timebank_balance=Decimal('5')) for _ in range(3)]
+        handshakes = []
+        for r in requesters:
+            h = HandshakeFactory(service=svc, requester=r,
+                                 status='pending', provisioned_hours=Decimal('1'))
+            provision_timebank(h)
+            handshakes.append(h)
+        return provider, svc, requesters, handshakes
+
+    def test_accept_last_slot_denies_remaining_pending(self):
+        """For max_p=1: accepting fills the only slot → other pending get denied."""
+        provider, svc, _, handshakes = self._setup_one_time(max_p=1)
+        h_accept = handshakes[0]
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        resp = client.post(f'/api/handshakes/{h_accept.id}/accept/')
+        assert resp.status_code == status.HTTP_200_OK
+
+        for h in handshakes[1:]:
+            h.refresh_from_db()
+            assert h.status == 'denied', f"Expected denied when capacity full, got {h.status}"
+
+    def test_denied_count_correct_when_capacity_full(self):
+        """max_p=1: accept 1 → remaining 2 denied."""
+        provider, svc, _, handshakes = self._setup_one_time(max_p=1)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        client.post(f'/api/handshakes/{handshakes[0].id}/accept/')
+
+        denied = Handshake.objects.filter(service=svc, status='denied').count()
+        assert denied == 2
+
+    def test_group_offer_pending_stays_until_all_slots_filled(self):
+        """Group offer with max_p=2: accepting the first should NOT deny the
+        second pending — one slot remains open for it."""
+        provider, svc, _, handshakes = self._setup_one_time(max_p=2)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        client.post(f'/api/handshakes/{handshakes[0].id}/accept/')
+
+        # handshakes[1] must remain pending (1 slot still open)
+        handshakes[1].refresh_from_db()
+        assert handshakes[1].status == 'pending', (
+            "Second pending must stay pending while a slot remains"
+        )
+        # handshakes[2] must also remain pending
+        handshakes[2].refresh_from_db()
+        assert handshakes[2].status == 'pending', (
+            "Third pending must stay pending while a slot remains"
+        )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAgreedStatusIntegration:
+    """Service status lifecycle: Active → Agreed → Active."""
+
+    def _accept(self, provider, handshake):
+        from api.utils import provision_timebank
+        provision_timebank(handshake)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        resp = client.post(f'/api/handshakes/{handshake.id}/accept/')
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+
+    def test_one_time_service_becomes_agreed_on_full_accept(self):
+        provider = UserFactory(timebank_balance=Decimal('20'))
+        requester = UserFactory(timebank_balance=Decimal('5'))
+        svc = ServiceFactory(
+            user=provider, type='Offer', schedule_type='One-Time',
+            max_participants=1, duration=Decimal('1'), status='Active',
+        )
+        h = HandshakeFactory(service=svc, requester=requester,
+                              status='pending', provisioned_hours=Decimal('1'))
+        self._accept(provider, h)
+
+        svc.refresh_from_db()
+        assert svc.status == 'Agreed'
+
+    def test_agreed_service_excluded_from_list(self):
+        provider = UserFactory(timebank_balance=Decimal('20'))
+        requester = UserFactory(timebank_balance=Decimal('5'))
+        svc = ServiceFactory(
+            user=provider, type='Offer', schedule_type='One-Time',
+            max_participants=1, duration=Decimal('1'), status='Active',
+        )
+        h = HandshakeFactory(service=svc, requester=requester,
+                              status='pending', provisioned_hours=Decimal('1'))
+        self._accept(provider, h)
+
+        viewer = UserFactory()
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(viewer)
+        resp = client.get('/api/services/')
+        assert resp.status_code == status.HTTP_200_OK
+        data = resp.data
+        results = data['results'] if isinstance(data, dict) and 'results' in data else data
+        ids = [str(s['id']) for s in results]
+        assert str(svc.id) not in ids
+
+    def test_cancel_agreed_reverts_to_active(self):
+        provider = UserFactory(timebank_balance=Decimal('20'))
+        requester = UserFactory(timebank_balance=Decimal('5'))
+        svc = ServiceFactory(
+            user=provider, type='Offer', schedule_type='One-Time',
+            max_participants=1, duration=Decimal('1'), status='Active',
+        )
+        h = HandshakeFactory(service=svc, requester=requester,
+                              status='pending', provisioned_hours=Decimal('1'))
+        self._accept(provider, h)
+        svc.refresh_from_db()
+        assert svc.status == 'Agreed'
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        resp = client.post(f'/api/handshakes/{h.id}/cancel/')
+        assert resp.status_code == status.HTTP_200_OK
+
+        svc.refresh_from_db()
+        assert svc.status == 'Active'
+
+    def test_cancel_agreed_service_reappears_in_list(self):
+        provider = UserFactory(timebank_balance=Decimal('20'))
+        requester = UserFactory(timebank_balance=Decimal('5'))
+        svc = ServiceFactory(
+            user=provider, type='Offer', schedule_type='One-Time',
+            max_participants=1, duration=Decimal('1'), status='Active',
+        )
+        h = HandshakeFactory(service=svc, requester=requester,
+                              status='pending', provisioned_hours=Decimal('1'))
+        self._accept(provider, h)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        client.post(f'/api/handshakes/{h.id}/cancel/')
+
+        viewer = UserFactory()
+        client.authenticate_user(viewer)
+        resp = client.get('/api/services/')
+        data = resp.data
+        results = data['results'] if isinstance(data, dict) and 'results' in data else data
+        ids = [str(s['id']) for s in results]
+        assert str(svc.id) in ids, "After cancel, Active service should reappear in listing"
+
+    def test_recurrent_service_stays_active_after_accept(self):
+        provider = UserFactory(timebank_balance=Decimal('20'))
+        requester = UserFactory(timebank_balance=Decimal('5'))
+        svc = ServiceFactory(
+            user=provider, type='Offer', schedule_type='Recurrent',
+            max_participants=1, duration=Decimal('1'), status='Active',
+        )
+        h = HandshakeFactory(service=svc, requester=requester,
+                              status='pending', provisioned_hours=Decimal('1'))
+        self._accept(provider, h)
+
+        svc.refresh_from_db()
+        assert svc.status == 'Active', (
+            f"Recurrent service must stay Active after accept, got {svc.status}"
+        )

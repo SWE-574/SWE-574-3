@@ -110,12 +110,13 @@ class HandshakeServiceTestCase(TestCase):
         self.assertIsNone(error)
     
     def test_can_express_interest_max_participants(self):
-        """Test cannot express interest when service is at max capacity."""
+        """Test cannot express interest when service is at max capacity (accepted slots only)."""
+        # Both slots accepted — capacity reached; pending does NOT count
         Handshake.objects.create(
             service=self.service_offer,
             requester=self.user2,
             provisioned_hours=Decimal('2.00'),
-            status='pending'
+            status='accepted'
         )
         Handshake.objects.create(
             service=self.service_offer,
@@ -123,10 +124,24 @@ class HandshakeServiceTestCase(TestCase):
             provisioned_hours=Decimal('2.00'),
             status='accepted'
         )
-        
+
         is_valid, error = HandshakeService.can_express_interest(self.service_offer, self.user4)
         self.assertFalse(is_valid)
         self.assertIn('maximum capacity', error)
+
+    def test_pending_does_not_count_toward_capacity_one_time(self):
+        """Pending handshakes must NOT block other users from expressing interest (One-Time)."""
+        # One slot is pending (user2) but capacity uses 'accepted' only → still open
+        Handshake.objects.create(
+            service=self.service_need,   # max_participants=1
+            requester=self.user2,
+            provisioned_hours=Decimal('1.50'),
+            status='pending'
+        )
+
+        is_valid, error = HandshakeService.can_express_interest(self.service_need, self.user3)
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
 
     def test_one_time_capacity_counts_completed(self):
         """One-Time services should count completed handshakes toward capacity."""
@@ -204,17 +219,18 @@ class HandshakeServiceTestCase(TestCase):
         self.assertIn('already expressed interest', str(context.exception))
     
     def test_express_interest_max_participants_raises_error(self):
-        """Test express_interest raises ValueError when at max capacity."""
+        """Test express_interest raises ValueError when at max capacity (accepted slot)."""
+        # Capacity is consumed by an ACCEPTED handshake, not pending
         Handshake.objects.create(
             service=self.service_need,
             requester=self.user2,
             provisioned_hours=Decimal('1.50'),
-            status='pending'
+            status='accepted'
         )
-        
+
         with self.assertRaises(ValueError) as context:
             HandshakeService.express_interest(self.service_need, self.user3)
-        
+
         self.assertIn('maximum capacity', str(context.exception))
     
     def test_express_interest_creates_chat_message(self):
