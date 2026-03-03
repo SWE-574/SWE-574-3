@@ -525,14 +525,7 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
   const onMouseEnterLayer = useCallback(() => setCursor('pointer'), [])
   const onMouseLeaveMap   = useCallback(() => { setCursor('grab'); setPopupInfo(null) }, [])
 
-  if (!TOKEN) {
-    if (import.meta.env.DEV) {
-      console.warn('[MapView] VITE_MAPBOX_TOKEN is not set — map disabled.')
-    }
-    return <TokenMissingFallback height={height} />
-  }
-
-  // User location GeoJSON (single point for the blue dot)
+  // User location GeoJSON — must be before early return to satisfy Rules of Hooks
   const userGeoJSON = useMemo<GeoJSON.FeatureCollection>(() => ({
     type: 'FeatureCollection',
     features: userLocation ? [{
@@ -541,6 +534,30 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
       properties: {},
     }] : [],
   }), [userLocation])
+
+  // For a single in-person service with no userLocation, center on its fuzzy marker
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const initialView = useMemo(() => {
+    if (userLocation) return { longitude: userLocation.lng, latitude: userLocation.lat, zoom: 11 }
+    const inPerson = services.filter((s) => s.location_type !== 'Online')
+    if (inPerson.length === 1) {
+      const s   = inPerson[0]
+      const lat = Number(s.location_lat ?? s.latitude)
+      const lng = Number(s.location_lng ?? s.longitude)
+      if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+        const fuzz = idFuzzyOffset(s.id)
+        return { longitude: lng + fuzz.dLng, latitude: lat + fuzz.dLat, zoom: 11 }
+      }
+    }
+    return ISTANBUL_CENTER
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!TOKEN) {
+    if (import.meta.env.DEV) {
+      console.warn('[MapView] VITE_MAPBOX_TOKEN is not set — map disabled.')
+    }
+    return <TokenMissingFallback height={height} />
+  }
 
   const userDotLayer: LayerProps = {
     id: 'user-location',
@@ -564,23 +581,6 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
       'circle-blur': 0.5,
     },
   }
-
-  // For a single in-person service with no userLocation, center on the fuzzy marker
-  const initialView = useMemo(() => {
-    if (userLocation) return { longitude: userLocation.lng, latitude: userLocation.lat, zoom: 11 }
-    const inPerson = services.filter((s) => s.location_type !== 'Online')
-    if (inPerson.length === 1) {
-      const s   = inPerson[0]
-      const lat = Number(s.location_lat ?? s.latitude)
-      const lng = Number(s.location_lng ?? s.longitude)
-      if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
-        const fuzz = idFuzzyOffset(s.id)
-        return { longitude: lng + fuzz.dLng, latitude: lat + fuzz.dLat, zoom: 11 }
-      }
-    }
-    return ISTANBUL_CENTER
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   return (
     <div style={{ position: 'relative', width: '100%', height }}>
