@@ -658,7 +658,7 @@ const DashboardPage = () => {
     } else {
       raw = await serviceAPI.list(undefined, signal)
     }
-    const active = raw.filter((s) => s.status?.toLowerCase() === 'active')
+    const active = raw.filter((s) => s.status === 'Active')
     const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
     let filtered = unique
     if (activeFilter === 'online')    filtered = filtered.filter((s) => s.location_type === 'Online')
