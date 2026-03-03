@@ -1,15 +1,15 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState } from 'react'
 import { useForm, Controller, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import {
   Box, Button, Field, Flex, Grid, Input, NativeSelect,
-  Spinner, Stack, Text, Textarea, Badge, CloseButton, Image,
+  Stack, Text, Textarea, Badge, CloseButton, Image,
 } from '@chakra-ui/react'
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
-import { tagAPI } from '@/services/tagAPI'
+import WikidataTagAutocomplete from '@/components/WikidataTagAutocomplete'
 import type { Tag } from '@/types'
 
 // ── Zod schema ────────────────────────────────────────────────────────────────
@@ -50,12 +50,6 @@ export default function ServiceForm({ type }: ServiceFormProps) {
 
   // Tags state
   const [selectedTags, setSelectedTags] = useState<Tag[]>([])
-  const [tagQuery, setTagQuery] = useState('')
-  const [tagSuggestions, setTagSuggestions] = useState<Tag[]>([])
-  const [tagLoading, setTagLoading] = useState(false)
-  const [showTagDropdown, setShowTagDropdown] = useState(false)
-  const tagAbortRef = useRef<AbortController | null>(null)
-  const tagInputRef = useRef<HTMLInputElement>(null)
 
   // Media state
   const [mediaFiles, setMediaFiles] = useState<File[]>([])
@@ -80,48 +74,11 @@ export default function ServiceForm({ type }: ServiceFormProps) {
 
   const locationType = watch('location_type')
 
-  // ── Tag autocomplete ────────────────────────────────────────────────────────
-  const searchTags = useCallback(async (q: string) => {
-    if (tagAbortRef.current) tagAbortRef.current.abort()
-    if (!q.trim()) {
-      setTagSuggestions([])
-      return
-    }
-    tagAbortRef.current = new AbortController()
-    setTagLoading(true)
-    try {
-      const results = await tagAPI.search(q, tagAbortRef.current.signal)
-      const alreadySelected = new Set(selectedTags.map((t) => t.id))
-      setTagSuggestions(results.filter((t) => !alreadySelected.has(t.id)))
-    } catch {
-      // ignore aborted requests
-    } finally {
-      setTagLoading(false)
-    }
-  }, [selectedTags])
-
-  useEffect(() => {
-    const timer = setTimeout(() => searchTags(tagQuery), 300)
-    return () => clearTimeout(timer)
-  }, [tagQuery, searchTags])
-
   const addTag = (tag: Tag) => {
-    setSelectedTags((prev) => [...prev, tag])
-    setTagQuery('')
-    setTagSuggestions([])
-    setShowTagDropdown(false)
-    tagInputRef.current?.focus()
-  }
-
-  const createAndAddTag = async () => {
-    const name = tagQuery.trim()
-    if (!name) return
-    try {
-      const newTag = await tagAPI.create(name)
-      addTag(newTag)
-    } catch {
-      toast.error('Failed to create tag')
-    }
+    setSelectedTags((prev) => {
+      const exists = prev.some((existingTag) => existingTag.id === tag.id)
+      return exists ? prev : [...prev, tag]
+    })
   }
 
   const removeTag = (id: string) => setSelectedTags((prev) => prev.filter((t) => t.id !== id))
@@ -153,21 +110,58 @@ export default function ServiceForm({ type }: ServiceFormProps) {
   const onSubmit = async (values: FormValues) => {
     setSubmitting(true)
     try {
-      const formData = new FormData()
-      formData.append('title', values.title)
-      formData.append('description', values.description)
-      formData.append('type', type)
-      formData.append('duration', String(values.duration))
-      formData.append('location_type', values.location_type)
-      if (values.location_area) formData.append('location_area', values.location_area)
-      formData.append('max_participants', String(values.max_participants))
-      formData.append('schedule_type', values.schedule_type)
-      if (values.schedule_details) formData.append('schedule_details', values.schedule_details)
+      const tagIds: string[] = []
+      const tagNames: string[] = []
 
-      selectedTags.forEach((tag) => formData.append('tags', tag.id))
-      mediaFiles.forEach((file) => formData.append('media', file))
+      selectedTags.forEach((tag) => {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tag.id)
+        const isWikidataQid = /^Q\d+$/i.test(tag.id)
 
-      const created = await serviceAPI.create(formData)
+        if (isUuid || isWikidataQid) {
+          tagIds.push(tag.id)
+          return
+        }
+
+        const cleanedName = tag.name.trim()
+        if (cleanedName) tagNames.push(cleanedName)
+      })
+
+      const payload = {
+        title: values.title,
+        description: values.description,
+        type,
+        duration: values.duration,
+        location_type: values.location_type,
+        location_area: values.location_area || undefined,
+        max_participants: values.max_participants,
+        schedule_type: values.schedule_type,
+        schedule_details: values.schedule_details || undefined,
+        tag_ids: tagIds.length > 0 ? tagIds : undefined,
+        tag_names: tagNames.length > 0 ? tagNames : undefined,
+      }
+
+      let created
+      if (mediaFiles.length === 0) {
+        created = await serviceAPI.create(payload)
+      } else {
+        const formData = new FormData()
+        formData.append('title', values.title)
+        formData.append('description', values.description)
+        formData.append('type', type)
+        formData.append('duration', String(values.duration))
+        formData.append('location_type', values.location_type)
+        if (values.location_area) formData.append('location_area', values.location_area)
+        formData.append('max_participants', String(values.max_participants))
+        formData.append('schedule_type', values.schedule_type)
+        if (values.schedule_details) formData.append('schedule_details', values.schedule_details)
+
+        tagIds.forEach((id) => formData.append('tag_ids', id))
+        tagNames.forEach((name) => formData.append('tag_names', name))
+        mediaFiles.forEach((file) => formData.append('media', file))
+
+        created = await serviceAPI.create(formData)
+      }
+
       toast.success(`${type} posted successfully!`)
       navigate(`/service-detail/${created.id}`)
     } catch (err: unknown) {
@@ -280,7 +274,7 @@ export default function ServiceForm({ type }: ServiceFormProps) {
         {/* Tags */}
         <Field.Root>
           <Field.Label>Tags</Field.Label>
-          <Box position="relative">
+          <Box>
             <Flex gap={2} wrap="wrap" mb={selectedTags.length > 0 ? 2 : 0}>
               {selectedTags.map((tag) => (
                 <Badge key={tag.id} colorPalette={accent} size="md" px={2} py={1} borderRadius="full">
@@ -294,71 +288,13 @@ export default function ServiceForm({ type }: ServiceFormProps) {
                 </Badge>
               ))}
             </Flex>
-            <Input
-              ref={tagInputRef}
-              value={tagQuery}
-              onChange={(e) => {
-                setTagQuery(e.target.value)
-                setShowTagDropdown(true)
-              }}
-              onFocus={() => setShowTagDropdown(true)}
-              onBlur={() => setTimeout(() => setShowTagDropdown(false), 150)}
-              placeholder="Search or create tags…"
+
+            <WikidataTagAutocomplete
+              selectedTags={selectedTags}
+              onAddTag={addTag}
               disabled={selectedTags.length >= 10}
+              accent={accent}
             />
-            {showTagDropdown && (tagQuery.trim() || tagSuggestions.length > 0) && (
-              <Box
-                position="absolute"
-                zIndex={10}
-                top="100%"
-                left={0}
-                right={0}
-                bg="white"
-                border="1px solid"
-                borderColor="gray.200"
-                borderRadius="md"
-                boxShadow="md"
-                maxH="200px"
-                overflowY="auto"
-                mt={1}
-              >
-                {tagLoading && (
-                  <Flex justify="center" p={3}>
-                    <Spinner size="sm" />
-                  </Flex>
-                )}
-                {!tagLoading && tagSuggestions.map((tag) => (
-                  <Box
-                    key={tag.id}
-                    px={3}
-                    py={2}
-                    cursor="pointer"
-                    _hover={{ bg: `${accent}.50` }}
-                    onMouseDown={() => addTag(tag)}
-                  >
-                    {tag.name}
-                  </Box>
-                ))}
-                {!tagLoading && tagQuery.trim() && (
-                  <Box
-                    px={3}
-                    py={2}
-                    cursor="pointer"
-                    color={`${accent}.600`}
-                    fontWeight="medium"
-                    _hover={{ bg: `${accent}.50` }}
-                    onMouseDown={createAndAddTag}
-                  >
-                    + Create &ldquo;{tagQuery.trim()}&rdquo;
-                  </Box>
-                )}
-                {!tagLoading && !tagQuery.trim() && tagSuggestions.length === 0 && (
-                  <Box px={3} py={2} color="gray.500" fontSize="sm">
-                    Type to search tags
-                  </Box>
-                )}
-              </Box>
-            )}
           </Box>
           <Field.HelperText>Add up to 10 tags to help others find your {type.toLowerCase()}</Field.HelperText>
         </Field.Root>

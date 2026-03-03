@@ -1,18 +1,26 @@
 import apiClient from './api'
 import type { Tag } from '@/types'
 
+interface WikidataItem {
+  id: string
+  label: string
+  description?: string
+}
+
 export const tagAPI = {
   search: async (query: string, signal?: AbortSignal): Promise<Tag[]> => {
-    const res = await apiClient.get<Tag[] | { results: Tag[] }>('/tags/', {
-      params: { search: query },
+    if (!query.trim()) return []
+
+    const res = await apiClient.get<WikidataItem[]>('/wikidata/search/', {
+      params: { q: query, limit: 10 },
       signal,
     })
-    const data = res.data
-    return Array.isArray(data) ? data : (data.results ?? [])
-  },
 
-  create: async (name: string): Promise<Tag> => {
-    const res = await apiClient.post<Tag>('/tags/', { name })
-    return res.data
+    return (res.data ?? [])
+      .filter((item) => item?.id && item?.label)
+      .map((item) => ({
+        id: item.id,
+        name: item.label,
+      }))
   },
 }

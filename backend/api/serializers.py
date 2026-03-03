@@ -14,6 +14,7 @@ from decimal import Decimal
 import bleach
 import re
 import logging
+import json
 from drf_spectacular.utils import extend_schema_field, extend_schema_serializer, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
@@ -266,6 +267,53 @@ class ServiceSerializer(serializers.ModelSerializer):
             'schedule_details', 'created_at', 'tags', 'tag_ids', 'tag_names', 'comment_count', 'hot_score', 'is_visible', 'media'
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible']
+
+    def to_internal_value(self, data):
+        """Normalize list-like fields from multipart/querydict edge cases before validation."""
+        mutable_data = data.copy() if hasattr(data, 'copy') else dict(data)
+
+        def _set_list(field_name, values):
+            if hasattr(mutable_data, 'setlist'):
+                mutable_data.setlist(field_name, values)
+            else:
+                mutable_data[field_name] = values
+
+        def _normalize_list_field(field_name):
+            # Preferred path for QueryDict/multipart where repeated keys are provided
+            if hasattr(data, 'getlist'):
+                values = data.getlist(field_name)
+                if values:
+                    _set_list(field_name, values)
+                    return
+
+            raw_value = data.get(field_name)
+            if raw_value is None:
+                return
+
+            # Handle indexed object payloads like {"0": "Q28865"}
+            if isinstance(raw_value, dict):
+                try:
+                    ordered_keys = sorted(raw_value.keys(), key=lambda key: int(str(key)))
+                except Exception:
+                    ordered_keys = list(raw_value.keys())
+                values = [raw_value[key] for key in ordered_keys]
+                _set_list(field_name, values)
+                return
+
+            # Handle JSON-encoded string arrays
+            if isinstance(raw_value, str):
+                parsed = None
+                try:
+                    parsed = json.loads(raw_value)
+                except (TypeError, ValueError):
+                    parsed = None
+                if isinstance(parsed, list):
+                    _set_list(field_name, parsed)
+
+        _normalize_list_field('tag_ids')
+        _normalize_list_field('tag_names')
+
+        return super().to_internal_value(mutable_data)
     
     @extend_schema_field(OpenApiTypes.INT)
     def get_comment_count(self, obj):
