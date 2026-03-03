@@ -36,7 +36,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
         },
         '/ws': {
-          target: backendOrigin.replace(/^http/, 'ws'),
+          target: backendOrigin,
           ws: true,
           changeOrigin: true,
         },
