@@ -135,15 +135,14 @@ export default function ForumTopicList() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
-  const load = useCallback(async (p: number) => {
+  const load = useCallback(async (p: number, signal: AbortSignal) => {
     if (!slug) return
     setLoading(true)
     setError(null)
-    const ctrl = new AbortController()
     try {
       const [cat, res] = await Promise.all([
-        forumAPI.getCategory(slug, ctrl.signal),
-        forumAPI.listTopics({ category: slug, page: p, page_size: PAGE_SIZE }, ctrl.signal),
+        forumAPI.getCategory(slug, signal),
+        forumAPI.listTopics({ category: slug, page: p, page_size: PAGE_SIZE }, signal),
       ])
       setCategory(cat)
       // pinned topics float to the top
@@ -151,14 +150,17 @@ export default function ForumTopicList() {
       setTopics(sorted)
       setTotal(res.count)
     } catch (e: unknown) {
-      if (!ctrl.signal.aborted) setError((e as Error).message ?? 'Failed to load')
+      if (!signal.aborted) setError((e as Error).message ?? 'Failed to load')
     } finally {
-      setLoading(false)
+      if (!signal.aborted) setLoading(false)
     }
-    return () => ctrl.abort()
   }, [slug])
 
-  useEffect(() => { load(page) }, [load, page])
+  useEffect(() => {
+    const ctrl = new AbortController()
+    load(page, ctrl.signal)
+    return () => ctrl.abort()
+  }, [load, page])
 
   const goPage = (p: number) => {
     window.scrollTo({ top: 0, behavior: 'smooth' })

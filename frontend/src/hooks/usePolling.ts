@@ -46,13 +46,11 @@ export function usePolling(
 
   // Survives re-renders and dep changes — spinner only on the very first fetch ever
   const hasLoadedOnce = useRef(false)
-  // Allows manual refresh trigger
-  const manualTick = useRef(0)
+  // useState counter so incrementing actually triggers the effect
+  const [manualTick, setManualTick] = useState(0)
 
   const refresh = useCallback(() => {
-    manualTick.current += 1
-    // Force re-run by triggering state update via the effect dependency below
-    setError(null)
+    setManualTick(t => t + 1)
   }, [])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -115,7 +113,7 @@ export function usePolling(
     }
   // deps intentionally spread — eslint-disable covers the dynamic array
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, interval, onVisibility, enabled, manualTick.current])
+  }, [...deps, interval, onVisibility, enabled, manualTick])
 
   return { isLoading, isRefreshing, error, refresh }
 }

@@ -255,7 +255,7 @@ def _fuzzy_coords(service_id: str, lat: float, lng: float):
         h = (h * 16777619) & 0xFFFFFFFF   # unsigned 32-bit, matches JS Math.imul + >>> 0
 
     angle = (h / 0xFFFFFFFF) * 2 * math.pi
-    R = 0.0045   # ~1 km
+    R = 0.0045   # ~0.5 km privacy offset radius
     return lat + R * math.sin(angle), lng + R * math.cos(angle)
 
 

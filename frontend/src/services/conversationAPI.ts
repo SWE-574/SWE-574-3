@@ -124,11 +124,10 @@ export const groupChatAPI = {
   },
 }
 
-// Dev  → direct to Daphne (Vite's WS proxy intercepts HMR and drops /ws upgrades)
-// Prod → same host (Nginx handles the upgrade)
-const wsBase = import.meta.env.DEV
-  ? 'ws://localhost:8000'
-  : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+// Both dev and prod connect to the current host; the WS upgrade is forwarded
+// by Vite's /ws proxy rule (dev) or Nginx (prod). This respects VITE_BACKEND_URL
+// without hard-coding a port and works in Docker / LAN setups.
+const wsBase = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
 export const buildChatWsUrl     = (id: string) => `${wsBase}/ws/chat/${id}/`
 export const buildGroupChatWsUrl = (id: string) => `${wsBase}/ws/group-chat/${id}/`

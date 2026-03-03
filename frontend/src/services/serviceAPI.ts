@@ -8,7 +8,7 @@ export interface ServiceListParams {
   search?: string
   type?: 'Offer' | 'Need'
   status?: string
-  tags?: string
+  tags?: string[]
   page?: number
   page_size?: number
 }
@@ -17,16 +17,18 @@ type ServiceListResponse = Service[] | { results: Service[]; count?: number }
 
 export const serviceAPI = {
   list: async (params?: ServiceListParams, signal?: AbortSignal): Promise<Service[]> => {
-    const queryParams: Record<string, string> = {}
-    if (params?.lat != null) queryParams.lat = String(params.lat)
-    if (params?.lng != null) queryParams.lng = String(params.lng)
-    if (params?.distance != null) queryParams.distance = String(params.distance)
-    if (params?.search) queryParams.search = params.search
-    if (params?.type) queryParams.type = params.type
-    if (params?.status) queryParams.status = params.status
-    if (params?.tags) queryParams.tags = params.tags
-    if (params?.page) queryParams.page = String(params.page)
-    if (params?.page_size) queryParams.page_size = String(params.page_size)
+    // URLSearchParams preserves repeated keys (?tags=a&tags=b) as expected by
+    // DRF's request.query_params.getlist('tags').
+    const queryParams = new URLSearchParams()
+    if (params?.lat != null) queryParams.set('lat', String(params.lat))
+    if (params?.lng != null) queryParams.set('lng', String(params.lng))
+    if (params?.distance != null) queryParams.set('distance', String(params.distance))
+    if (params?.search) queryParams.set('search', params.search)
+    if (params?.type) queryParams.set('type', params.type)
+    if (params?.status) queryParams.set('status', params.status)
+    if (params?.tags?.length) params.tags.forEach(t => queryParams.append('tags', t))
+    if (params?.page) queryParams.set('page', String(params.page))
+    if (params?.page_size) queryParams.set('page_size', String(params.page_size))
 
     const res = await apiClient.get<ServiceListResponse>('/services/', {
       params: queryParams,
