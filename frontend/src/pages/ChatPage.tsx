@@ -34,27 +34,14 @@ import { HandshakeDetailsModal } from '@/components/HandshakeDetailsModal'
 import { ProviderDetailsModal } from '@/components/ProviderDetailsModal'
 import { ServiceConfirmationModal } from '@/components/ServiceConfirmationModal'
 
-// ─── Design tokens (aligned with DashboardPage) ───────────────────────────────
-
-const GREEN    = '#2D5C4E'
-const GREEN_LT = '#F0FDF4'
-const GREEN_MD = '#D1FAE5'
-const AMBER    = '#D97706'
-const AMBER_LT = '#FFFBEB'
-const BLUE_LT  = '#EFF6FF'
-const BLUE     = '#1D4ED8'
-const RED      = '#DC2626'
-const RED_LT   = '#FEF2F2'
-const GRAY50   = '#F9FAFB'
-const GRAY100  = '#F3F4F6'
-const GRAY200  = '#E5E7EB'
-const GRAY300  = '#D1D5DB'
-const GRAY400  = '#9CA3AF'
-const GRAY500  = '#6B7280'
-const GRAY600  = '#4B5563'
-const GRAY700  = '#374151'
-const GRAY800  = '#1F2937'
-const WHITE    = '#FFFFFF'
+import {
+  GREEN, GREEN_LT, GREEN_MD,
+  AMBER, AMBER_LT,
+  BLUE, BLUE_LT,
+  RED, RED_LT,
+  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
+  WHITE,
+} from '@/theme/tokens'
 
 const CONV_POLL_MS = 15_000
 const MSG_POLL_MS  = 5_000
@@ -239,6 +226,7 @@ function ServiceGroup({
   const hasSelected = convs.some((c) => c.handshake_id === selectedId)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (hasSelected) setOpen(true)
   }, [hasSelected])
 

@@ -1,16 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { usePolling } from '@/hooks/usePolling'
 import { useNavigate } from 'react-router-dom'
+import type { User } from '@/types'
 import {
   Box,
   Flex,
   Text,
-  Button,
   Input,
   Grid,
   VStack,
   HStack,
-  Badge,
   Spinner,
 } from '@chakra-ui/react'
 import {
@@ -23,6 +22,17 @@ import {
   FiCalendar,
   FiLoader,
   FiRefreshCw,
+  FiPlus,
+  FiLayers,
+  FiChevronDown,
+  FiChevronUp,
+  FiZap,
+  FiAward,
+  FiTrendingUp,
+  FiGrid,
+  FiWifi,
+  FiMenu,
+  FiX,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
 import { serviceAPI } from '@/services/serviceAPI'
@@ -31,48 +41,34 @@ import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
 import type { Handshake } from '@/services/handshakeAPI'
 
-const YELLOW = '#F8C84A'
-const GREEN = '#2D5C4E'
-const ORANGE = '#f97316'
+import {
+  GREEN, GREEN_LT,
+  AMBER, AMBER_LT,
+  BLUE, BLUE_LT,
+  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
+  WHITE,
+} from '@/theme/tokens'
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const TRANSPARENT = 'transparent'
 
-function formatHours(h: number | string | undefined | null) {
-  const n = typeof h === 'string' ? parseFloat(h) : (h ?? 0)
-  if (isNaN(n)) return '?'
-  return Number.isInteger(n) ? String(n) : n.toFixed(1)
-}
+const SIDEBAR_W = '268px'
+const DEBOUNCE_SEARCH   = 400
+const DEBOUNCE_DISTANCE = 600
+const POLL_INTERVAL     = 30_000
+const GEO_TIMEOUT       = 10_000
 
-function userInitials(u?: { first_name?: string; last_name?: string; email?: string } | null) {
-  if (!u) return '?'
-  const f = u.first_name?.[0] ?? ''
-  const l = u.last_name?.[0] ?? ''
-  if (f || l) return `${f}${l}`.toUpperCase()
-  return (u.email?.[0] ?? '?').toUpperCase()
-}
+// ─── Filters ──────────────────────────────────────────────────────────────────
 
-function userName(u?: { first_name?: string; last_name?: string; email?: string } | null) {
-  if (!u) return 'User'
-  const name = `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim()
-  return name || u.email || 'User'
-}
-
-// ─── Filter tabs ──────────────────────────────────────────────────────────────
 const FILTERS = [
-  { id: 'all', label: 'All Services' },
-  { id: 'weekend', label: 'This Weekend' },
-  { id: 'online', label: 'Online Only' },
-  { id: 'recurrent', label: 'Recurrent' },
-  { id: 'newest', label: 'Newest' },
+  { id: 'all',       label: 'All',       icon: <FiGrid size={12} /> },
+  { id: 'newest',    label: 'New',        icon: <FiTrendingUp size={12} /> },
+  { id: 'online',    label: 'Online',     icon: <FiWifi size={12} /> },
+  { id: 'recurrent', label: 'Recurrent',  icon: <FiRefreshCw size={12} /> },
+  { id: 'weekend',   label: 'Weekend',    icon: <FiCalendar size={12} /> },
 ]
 
-const DEBOUNCE_SEARCH = 400
-const DEBOUNCE_DISTANCE = 600
-const POLL_INTERVAL = 30_000
-const GEO_TIMEOUT = 10_000
+// ─── Handshake badge ──────────────────────────────────────────────────────────
 
-// ─── Component ────────────────────────────────────────────────────────────────
-// ─── Handshake status badge config ───────────────────────────────────────────
 const HANDSHAKE_BADGE: Record<
   Handshake['status'],
   { label: string; bg: string; color: string }
@@ -86,149 +82,618 @@ const HANDSHAKE_BADGE: Record<
   paused:    { label: 'Paused',      bg: '#e0f2fe', color: '#0369a1' },
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmt(h: number | string | undefined | null) {
+  const n = typeof h === 'string' ? parseFloat(h) : (h ?? 0)
+  if (isNaN(n)) return '?'
+  return Number.isInteger(n) ? String(n) : n.toFixed(1)
+}
+
+function initials(u?: { first_name?: string; last_name?: string; email?: string } | null) {
+  if (!u) return '?'
+  const f = u.first_name?.[0] ?? ''
+  const l = u.last_name?.[0] ?? ''
+  return (f || l) ? `${f}${l}`.toUpperCase() : (u.email?.[0] ?? '?').toUpperCase()
+}
+
+function fullName(u?: { first_name?: string; last_name?: string; email?: string } | null) {
+  if (!u) return 'User'
+  const n = `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim()
+  return n || u.email || 'User'
+}
+
+function timeAgo(d: string) {
+  const m = Math.floor((Date.now() - new Date(d).getTime()) / 60_000)
+  if (m < 1)  return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const dy = Math.floor(h / 24)
+  return dy < 7 ? `${dy}d ago`
+    : new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+// ─── Tiny reusable bits ───────────────────────────────────────────────────────
+
+function Avatar({ u, size = 36 }: { u?: { first_name?: string; last_name?: string; email?: string; avatar_url?: string } | null; size?: number }) {
+  return (
+    <Box
+      w={`${size}px`} h={`${size}px`} borderRadius="full" flexShrink={0}
+      bg={GREEN} color={WHITE} overflow="hidden"
+      display="flex" alignItems="center" justifyContent="center"
+      fontSize={`${Math.round(size * 0.34)}px`} fontWeight={700}
+    >
+      {u?.avatar_url
+        ? <img src={u.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        : initials(u)
+      }
+    </Box>
+  )
+}
+
+function Pill({ label, bg, color }: { label: string; bg: string; color: string }) {
+  return (
+    <Box px="7px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700} bg={bg} color={color}>
+      {label}
+    </Box>
+  )
+}
+
+function MetaChip({ icon, label, maxW }: { icon: React.ReactNode; label: string; maxW?: string }) {
+  return (
+    <Flex align="center" gap="3px" px="7px" py="4px" borderRadius="7px" bg={GRAY100} flexShrink={0} maxW={maxW ?? 'none'} overflow="hidden">
+      <Box color={GRAY400} flexShrink={0}>{icon}</Box>
+      <Text fontSize="11px" color={GRAY600} fontWeight={500}
+        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+      >{label}</Text>
+    </Flex>
+  )
+}
+
+function StatPill({ label, value, bg, color }: { label: string; value: number; bg: string; color: string }) {
+  return (
+    <Flex direction="column" align="center" justify="center" px={3} py="10px" borderRadius="12px" bg={bg} flex={1} gap="2px">
+      <Text fontSize="18px" fontWeight={800} color={color} lineHeight={1}>{value}</Text>
+      <Text fontSize="10px" fontWeight={600} color={color} style={{ opacity: 0.7, letterSpacing: '0.03em' }}>{label}</Text>
+    </Flex>
+  )
+}
+
+// ─── Service Card ─────────────────────────────────────────────────────────────
+// Visual: coloured "poster" header, then info body — not a generic boring list row.
+
+const CARD_GRADIENTS: Record<string, [string, string]> = {
+  music:      ['#7C3AED', '#4F46E5'],
+  art:        ['#DB2777', '#BE185D'],
+  tech:       ['#0369A1', '#1D4ED8'],
+  cook:       ['#D97706', '#B45309'],
+  sport:      ['#16A34A', '#15803D'],
+  lang:       ['#DC2626', '#B91C1C'],
+  teach:      ['#2D5C4E', '#1a3d35'],
+  need:       ['#1D4ED8', '#1e3a8a'],
+  default_o:  ['#2D5C4E', '#1a4a3a'],
+}
+
+function pickGradient(service: Service): [string, string] {
+  if (service.type === 'Need') return CARD_GRADIENTS.need
+  const combined = (service.title + ' ' + service.tags?.map((t) => t.name).join(' ')).toLowerCase()
+  if (/music|guitar|piano|drum|sing/.test(combined))  return CARD_GRADIENTS.music
+  if (/art|paint|draw|design|photo/.test(combined))   return CARD_GRADIENTS.art
+  if (/tech|code|program|dev|web|soft/.test(combined)) return CARD_GRADIENTS.tech
+  if (/cook|food|bak|chef|recipe/.test(combined))     return CARD_GRADIENTS.cook
+  if (/sport|yoga|fitness|run|gym/.test(combined))    return CARD_GRADIENTS.sport
+  if (/lang|english|spanish|french|translate/.test(combined)) return CARD_GRADIENTS.lang
+  if (/teach|tutor|lesson|class|learn/.test(combined)) return CARD_GRADIENTS.teach
+  return CARD_GRADIENTS.default_o
+}
+
+function CardHeader({ service, gradient }: { service: Service; gradient: [string, string] }) {
+  const thumb = service.media?.[0]?.file_url ?? null
+  return (
+    <Box
+      h="90px" position="relative" overflow="hidden"
+      style={{ background: thumb ? undefined : `linear-gradient(135deg, ${gradient[0]} 0%, ${gradient[1]} 100%)` }}
+    >
+      {thumb && (
+        <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      )}
+      {/* Abstract decoration circles (only when no thumb) */}
+      {!thumb && (
+        <>
+          <Box style={{ position: 'absolute', top: '-24px', right: '-24px', width: '90px', height: '90px', borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
+          <Box style={{ position: 'absolute', bottom: '-30px', left: '30%', width: '70px', height: '70px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
+          <Box style={{ position: 'absolute', top: '10px', left: '-20px', width: '50px', height: '50px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
+        </>
+      )}
+      {/* Gradient overlay at bottom when there's an image */}
+      {thumb && (
+        <Box style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.65) 0%, transparent 50%)' }} />
+      )}
+      {/* Title text over the visual */}
+      <Box position="absolute" bottom={0} left={0} right={0} px={3} pb="10px">
+        <Text
+          fontSize="14px" fontWeight={800} color={WHITE} lineHeight="1.3"
+          style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textShadow: thumb ? '0 1px 4px rgba(0,0,0,0.5)' : 'none' }}
+        >
+          {service.title}
+        </Text>
+      </Box>
+    </Box>
+  )
+}
+
+function ServiceCard({
+  service, isOwn, handshake, incomingCount, pendingCount, onClick,
+}: {
+  service: Service
+  isOwn: boolean
+  handshake?: Handshake
+  incomingCount: number
+  pendingCount: number
+  onClick: () => void
+}) {
+  const owner     = service.user ?? service.provider
+  const isOffer   = service.type === 'Offer'
+  const isRecurr  = service.schedule_type === 'Recurrent'
+  const gradient  = pickGradient(service)
+
+  const showBadge = handshake && !(isRecurr && handshake.status === 'completed')
+  const hsCfg     = showBadge ? HANDSHAKE_BADGE[handshake!.status] : null
+  const isDimmed  = handshake?.status === 'denied' || handshake?.status === 'cancelled'
+
+  return (
+    <Box
+      as="button" onClick={onClick} w="full" textAlign="left"
+      bg={WHITE} borderRadius="16px"
+      border="1px solid" borderColor={isOwn ? '#FED7AA' : GRAY200}
+      overflow="hidden"
+      transition="all 0.18s ease"
+      _hover={{ boxShadow: '0 6px 24px rgba(0,0,0,0.10)', transform: 'translateY(-2px)', borderColor: isOwn ? '#f97316' : GRAY300 }}
+      cursor="pointer"
+      opacity={isDimmed ? 0.6 : 1}
+      display="flex"
+      flexDirection="column"
+    >
+      <CardHeader service={service} gradient={gradient} />
+
+      <Flex direction="column" flex={1} px={3} pt="10px" pb={3}>
+        {/* Provider row — left clips, right badges never wrap */}
+        <Flex align="center" gap="6px" mb="8px" minW={0}>
+          <Avatar u={owner} size={22} />
+          {/* name + dot + time — flex-shrink to give badges room */}
+          <Flex align="center" gap="4px" flex={1} minW={0} overflow="hidden">
+            <Text fontSize="11px" fontWeight={600} color={GRAY500}
+              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {fullName(owner)}
+            </Text>
+            <Text fontSize="10px" color={GRAY400} flexShrink={0}>·</Text>
+            <Text fontSize="10px" color={GRAY400} flexShrink={0} whiteSpace="nowrap">{timeAgo(service.created_at)}</Text>
+          </Flex>
+          {/* Badges — never shrink or wrap */}
+          <Flex gap="3px" align="center" flexShrink={0} flexWrap="nowrap">
+            <Pill
+              label={isOffer ? 'Offer' : 'Want'}
+              bg={isOffer ? GREEN_LT : BLUE_LT}
+              color={isOffer ? GREEN : BLUE}
+            />
+            {isOwn && <Pill label="Yours" bg={AMBER_LT} color={AMBER} />}
+            {!isOwn && hsCfg && <Pill label={hsCfg.label} bg={hsCfg.bg} color={hsCfg.color} />}
+            {isOwn && incomingCount > 0 && (
+              <Box
+                px="5px" py="2px" borderRadius="full" fontSize="10px" fontWeight={800}
+                bg={pendingCount > 0 ? '#f97316' : '#10B981'} color={WHITE} flexShrink={0}
+              >
+                {incomingCount}↗
+              </Box>
+            )}
+          </Flex>
+        </Flex>
+
+        {/* Description — fixed 2-line clamp */}
+        <Text
+          fontSize="12px" color={GRAY500} mb="8px" flex={1}
+          style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+        >
+          {service.description}
+        </Text>
+
+        {/* Meta chips — single row, chips truncate if too long */}
+        <Flex gap="5px" mb="8px" overflow="hidden" flexWrap="nowrap">
+          <MetaChip icon={<FiClock size={10} />} label={`${fmt(service.duration)}h`} />
+          <MetaChip
+            icon={service.location_type === 'Online' ? <FiMonitor size={10} /> : <FiMapPin size={10} />}
+            label={service.location_area ?? service.location_type}
+            maxW="110px"
+          />
+          {isRecurr && (
+            <Flex align="center" gap="3px" px="7px" py="4px" borderRadius="7px" bg="#F3E8FF" flexShrink={0}>
+              <FiRefreshCw size={9} color="#7C3AED" />
+              <Text fontSize="11px" color="#7C3AED" fontWeight={600} whiteSpace="nowrap">Recurring</Text>
+            </Flex>
+          )}
+          {service.schedule_details && !isRecurr && (
+            <MetaChip icon={<FiCalendar size={10} />} label={service.schedule_details} maxW="120px" />
+          )}
+        </Flex>
+
+        {/* Tags + participants — always at bottom */}
+        <Flex align="center" justify="space-between" mt="auto">
+          <Flex gap="4px" overflow="hidden" flex={1} minW={0}>
+            {service.tags?.slice(0, 3).map((t) => (
+              <Text key={t.id} fontSize="10px" px="6px" py="2px" borderRadius="5px"
+                bg={GRAY50} color={GRAY500} border={`1px solid ${GRAY200}`} fontWeight={500}
+                flexShrink={0}
+                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80px' }}
+              >
+                #{t.name}
+              </Text>
+            ))}
+            {(service.tags?.length ?? 0) > 3 && (
+              <Text fontSize="10px" color={GRAY400} flexShrink={0}>+{service.tags!.length - 3}</Text>
+            )}
+          </Flex>
+          <Flex align="center" gap="3px" flexShrink={0} ml={2}>
+            <FiUsers size={10} color={GRAY400} />
+            <Text fontSize="10px" color={GRAY400} whiteSpace="nowrap">
+              {service.max_participants > 1
+                ? `${service.participant_count ?? 0}/${service.max_participants}`
+                : `${service.max_participants}`}
+            </Text>
+          </Flex>
+        </Flex>
+      </Flex>
+    </Box>
+  )
+}
+
+// ─── Sidebar content ──────────────────────────────────────────────────────────
+
+function Sidebar({
+  user, isAuthenticated, balance, pendingHs, acceptedHs, completedHs,
+  totalIncomingPending, myServices, incomingMap,
+  locationEnabled, locationLoading, locationError, userLocation,
+  distanceKm, distanceLabel,
+  toggleLocation, setDistanceKm, navigate,
+}: {
+  user: User | null
+  isAuthenticated: boolean
+  balance: number | null
+  pendingHs: number
+  acceptedHs: number
+  completedHs: number
+  totalIncomingPending: number
+  myServices: Service[]
+  incomingMap: Map<string, Handshake[]>
+  locationEnabled: boolean
+  locationLoading: boolean
+  locationError: string | null
+  userLocation: { lat: number; lng: number } | null
+  distanceKm: number
+  distanceLabel: string
+  toggleLocation: () => void
+  setDistanceKm: (v: number) => void
+  navigate: ReturnType<typeof useNavigate>
+}) {
+  return (
+    <Box
+      w={SIDEBAR_W} minW={SIDEBAR_W}
+      bg={WHITE}
+      borderRight={`1px solid ${GRAY200}`}
+      display="flex" flexDirection="column"
+      h="100%" overflow="hidden"
+    >
+      {/* User card */}
+      <Box px={4} pt={5} pb={4} borderBottom={`1px solid ${GRAY100}`}>
+        {isAuthenticated && user ? (
+          <>
+            <Flex align="center" gap={3} mb={4}>
+              <Avatar u={user} size={44} />
+              <Box flex={1} minW={0}>
+                <Text fontSize="14px" fontWeight={700} color={GRAY800}
+                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {fullName(user)}
+                </Text>
+                <Text fontSize="11px" color={GRAY400}
+                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {user.email}
+                </Text>
+              </Box>
+            </Flex>
+
+            {/* Time bank widget */}
+            <Box
+              borderRadius="14px" p="14px" mb={3} position="relative" overflow="hidden"
+              style={{ background: `linear-gradient(135deg, ${GREEN} 0%, #1a3d35 100%)` }}
+            >
+              <Box style={{ position: 'absolute', top: '-20px', right: '-20px', width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
+              <Flex align="center" gap="5px" mb="5px">
+                <FiZap size={11} color="rgba(255,255,255,0.65)" />
+                <Text fontSize="10px" fontWeight={600} color="rgba(255,255,255,0.65)"
+                  style={{ letterSpacing: '0.07em', textTransform: 'uppercase' }}
+                >
+                  Time Bank
+                </Text>
+              </Flex>
+              <Flex align="baseline" gap="5px">
+                <Text fontSize="28px" fontWeight={800} color={WHITE} lineHeight={1}>
+                  {balance !== null ? balance : '—'}
+                </Text>
+                <Text fontSize="12px" color="rgba(255,255,255,0.55)" fontWeight={500}>hours</Text>
+              </Flex>
+              {user.karma_score !== undefined && user.karma_score > 0 && (
+                <Flex align="center" gap="4px" mt="7px">
+                  <FiAward size={10} color="rgba(255,255,255,0.55)" />
+                  <Text fontSize="10px" color="rgba(255,255,255,0.55)">{user.karma_score} karma</Text>
+                </Flex>
+              )}
+            </Box>
+
+            {/* Stats row */}
+            <Flex gap="5px">
+              <StatPill label="Pending"  value={pendingHs}   bg={AMBER_LT} color={AMBER} />
+              <StatPill label="Active"   value={acceptedHs}  bg={GREEN_LT} color={GREEN} />
+              <StatPill label="Done"     value={completedHs} bg={BLUE_LT}  color={BLUE}  />
+            </Flex>
+
+            {totalIncomingPending > 0 && (
+              <Box
+                mt={3} p="10px" borderRadius="10px" bg="#FFF7ED" border="1px solid #FED7AA"
+                cursor="pointer" onClick={() => navigate('/messages')}
+                _hover={{ bg: '#FFEDD5' }} transition="background 0.15s"
+              >
+                <Flex align="center" justify="space-between">
+                  <Text fontSize="12px" fontWeight={600} color="#C2410C">
+                    {totalIncomingPending} new request{totalIncomingPending > 1 ? 's' : ''}
+                  </Text>
+                  <Box w="18px" h="18px" borderRadius="full" bg="#f97316" color={WHITE}
+                    display="flex" alignItems="center" justifyContent="center" fontSize="10px" fontWeight={800}
+                  >
+                    {totalIncomingPending}
+                  </Box>
+                </Flex>
+              </Box>
+            )}
+          </>
+        ) : (
+          <>
+            <Text fontSize="15px" fontWeight={700} color={GRAY800} mb={1}>Welcome to Hive</Text>
+            <Text fontSize="12px" color={GRAY500} mb={4}>Sign in to track your exchanges and post services.</Text>
+            <Flex gap={2}>
+              <Box as="button" flex={1} py="9px" borderRadius="9px" bg={GREEN} color={WHITE}
+                fontSize="13px" fontWeight={700} textAlign="center"
+                onClick={() => navigate('/login')} _hover={{ opacity: 0.9 }} transition="opacity 0.15s"
+              >
+                Sign In
+              </Box>
+              <Box as="button" flex={1} py="9px" borderRadius="9px" bg={GRAY100} color={GRAY700}
+                fontSize="13px" fontWeight={600} textAlign="center"
+                onClick={() => navigate('/register')} _hover={{ bg: GRAY200 }} transition="background 0.15s"
+              >
+                Register
+              </Box>
+            </Flex>
+          </>
+        )}
+      </Box>
+
+      {/* Quick actions */}
+      {isAuthenticated && (
+        <Box px={4} py={4} borderBottom={`1px solid ${GRAY100}`}>
+          <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
+            style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
+          >
+            Post a Service
+          </Text>
+          <Flex gap={2}>
+            <Box as="button" flex={1} py="8px" borderRadius="9px" bg={GREEN} color={WHITE}
+              fontSize="12px" fontWeight={700}
+              display="flex" alignItems="center" justifyContent="center" gap="4px"
+              onClick={() => navigate('/post-offer')} _hover={{ opacity: 0.9 }} transition="opacity 0.15s"
+            >
+              <FiPlus size={12} /> Offer
+            </Box>
+            <Box as="button" flex={1} py="8px" borderRadius="9px" bg={BLUE_LT} color={BLUE}
+              fontSize="12px" fontWeight={700}
+              display="flex" alignItems="center" justifyContent="center" gap="4px"
+              border={`1px solid #BFDBFE`}
+              onClick={() => navigate('/post-need')} _hover={{ bg: '#DBEAFE' }} transition="background 0.15s"
+            >
+              <FiLayers size={12} /> Need
+            </Box>
+          </Flex>
+        </Box>
+      )}
+
+      {/* Location filter + my listings — scrollable */}
+      <Box flex={1} overflowY="auto" px={4} py={4}>
+        <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
+          style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
+        >
+          Location
+        </Text>
+        <Box
+          as="button" w="full" py="8px" px="11px" borderRadius="9px" mb={2}
+          bg={locationEnabled ? GREEN : GRAY100}
+          color={locationEnabled ? WHITE : GRAY700}
+          fontSize="12px" fontWeight={600}
+          display="flex" alignItems="center" gap="6px"
+          onClick={() => !locationLoading && toggleLocation()}
+          style={{ cursor: locationLoading ? 'not-allowed' : 'pointer', opacity: locationLoading ? 0.65 : 1 }}
+          transition="all 0.15s"
+        >
+          {locationLoading
+            ? <><FiLoader size={12} /> Getting location…</>
+            : locationEnabled
+              ? <><FiMapPin size={12} /> By distance — ON</>
+              : <><FiNavigation size={12} /> Enable location</>}
+        </Box>
+
+        {locationError && <Text fontSize="11px" color="red.500" mb={2}>{locationError}</Text>}
+
+        {locationEnabled && userLocation && (
+          <Box mb={4}>
+            <Flex justify="space-between" mb="6px">
+              <Text fontSize="11px" color={GRAY600} fontWeight={500}>{distanceKm} km</Text>
+              <Text fontSize="11px" color={GRAY400}>{distanceLabel}</Text>
+            </Flex>
+            <input
+              type="range" min={1} max={50} step={1} value={distanceKm}
+              onChange={(e) => setDistanceKm(Number(e.target.value))}
+              style={{ width: '100%', accentColor: GREEN, height: '4px', cursor: 'pointer' }}
+            />
+            <Flex justify="space-between" mt="4px">
+              <Text fontSize="9px" color={GRAY400}>1 km</Text>
+              <Text fontSize="9px" color={GRAY400}>50 km</Text>
+            </Flex>
+          </Box>
+        )}
+
+        {/* My listings */}
+        {isAuthenticated && myServices.length > 0 && (
+          <>
+            <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3} mt={2}
+              style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
+            >
+              My Listings ({myServices.length})
+            </Text>
+            <VStack gap={2} align="stretch">
+              {myServices.slice(0, 4).map((s) => {
+                const incoming = incomingMap.get(s.id) ?? []
+                const pc = incoming.filter((h) => h.status === 'pending').length
+                return (
+                  <Box
+                    key={s.id} as="button" w="full" textAlign="left"
+                    px={3} py="8px" borderRadius="9px" bg={GRAY50}
+                    border={`1px solid ${GRAY100}`}
+                    borderLeft={`3px solid ${s.type === 'Offer' ? GREEN : BLUE}`}
+                    onClick={() => navigate(`/service-detail/${s.id}`)}
+                    _hover={{ bg: GRAY100 }} transition="background 0.1s"
+                  >
+                    <Flex align="center" justify="space-between">
+                      <Text fontSize="12px" fontWeight={600} color={GRAY700}
+                        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '150px' }}
+                      >
+                        {s.title}
+                      </Text>
+                      {pc > 0 && (
+                        <Box w="16px" h="16px" borderRadius="full" bg="#f97316" color={WHITE}
+                          display="flex" alignItems="center" justifyContent="center" fontSize="9px" fontWeight={800} flexShrink={0}
+                        >
+                          {pc}
+                        </Box>
+                      )}
+                    </Flex>
+                  </Box>
+                )
+              })}
+              {myServices.length > 4 && (
+                <Text fontSize="11px" color={GRAY400} textAlign="center">
+                  +{myServices.length - 4} more
+                </Text>
+              )}
+            </VStack>
+          </>
+        )}
+      </Box>
+    </Box>
+  )
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 const DashboardPage = () => {
   const navigate = useNavigate()
   const { isAuthenticated, user } = useAuthStore()
 
-  const [activeFilter, setActiveFilter] = useState('all')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [services, setServices] = useState<Service[]>([])
+  const [activeFilter, setActiveFilter]             = useState('all')
+  const [searchQuery, setSearchQuery]               = useState('')
+  const [debouncedSearch, setDebouncedSearch]       = useState('')
+  const [services, setServices]                     = useState<Service[]>([])
+  const [mapOpen, setMapOpen]                       = useState(true)
+  const [sidebarOpen, setSidebarOpen]               = useState(false)
 
-  // Location state
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
-  const [distanceKm, setDistanceKm] = useState(10)
-  const [debouncedDistance, setDebouncedDistance] = useState(10)
-  const [locationEnabled, setLocationEnabled] = useState(() => localStorage.getItem('locationEnabled') === 'true')
-  const [locationLoading, setLocationLoading] = useState(false)
-  const [locationError, setLocationError] = useState<string | null>(null)
+  const [userLocation, setUserLocation]             = useState<{ lat: number; lng: number } | null>(null)
+  const [distanceKm, setDistanceKm]                 = useState(10)
+  const [debouncedDistance, setDebouncedDistance]   = useState(10)
+  const [locationEnabled, setLocationEnabled]       = useState(() => localStorage.getItem('locationEnabled') === 'true')
+  const [locationLoading, setLocationLoading]       = useState(false)
+  const [locationError, setLocationError]           = useState<string | null>(null)
 
-  // Outgoing: services I expressed interest in → serviceId → Handshake
-  const [handshakeMap, setHandshakeMap] = useState<Map<string, Handshake>>(new Map())
-  // Incoming: requests on MY services → serviceId → Handshake[]
-  const [incomingMap, setIncomingMap] = useState<Map<string, Handshake[]>>(new Map())
+  const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
+  const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
 
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Debounce search
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(() => setDebouncedSearch(searchQuery), DEBOUNCE_SEARCH)
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
   }, [searchQuery])
 
-  // Debounce distance
   useEffect(() => {
     if (distanceTimer.current) clearTimeout(distanceTimer.current)
     distanceTimer.current = setTimeout(() => setDebouncedDistance(distanceKm), DEBOUNCE_DISTANCE)
     return () => { if (distanceTimer.current) clearTimeout(distanceTimer.current) }
   }, [distanceKm])
 
-  // ── Services polling ──────────────────────────────────────────────────────
   const fetchServices = useCallback(async (signal: AbortSignal) => {
-    const params =
-      locationEnabled && userLocation
-        ? { lat: userLocation.lat, lng: userLocation.lng, distance: debouncedDistance }
-        : undefined
-
-    const data = await serviceAPI.list(params, signal)
-    // Backend already sends status='Active', but guard against stale cache or edge cases
+    const params = locationEnabled && userLocation
+      ? { lat: userLocation.lat, lng: userLocation.lng, distance: debouncedDistance }
+      : undefined
+    const data   = await serviceAPI.list(params, signal)
     const active = data.filter((s) => s.status?.toLowerCase() === 'active')
     const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
-
     let filtered = unique
-    if (activeFilter === 'online') {
-      filtered = filtered.filter((s) => s.location_type === 'Online')
-    } else if (activeFilter === 'recurrent') {
-      filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
-    } else if (activeFilter === 'newest') {
-      filtered = [...filtered].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      )
-    } else if (activeFilter === 'weekend') {
-      filtered = filtered.filter((s) => {
-        const details = s.schedule_details?.toLowerCase() ?? ''
-        return details.includes('saturday') || details.includes('sunday') || details.includes('weekend')
-      })
-    }
+    if (activeFilter === 'online')    filtered = filtered.filter((s) => s.location_type === 'Online')
+    if (activeFilter === 'recurrent') filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
+    if (activeFilter === 'newest')    filtered = [...filtered].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    if (activeFilter === 'weekend')   filtered = filtered.filter((s) => /saturday|sunday|weekend/i.test(s.schedule_details ?? ''))
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.toLowerCase()
-      filtered = filtered.filter(
-        (s) =>
-          s.title.toLowerCase().includes(q) ||
-          s.description.toLowerCase().includes(q) ||
-          s.tags?.some((t) => t.name.toLowerCase().includes(q)),
+      filtered = filtered.filter((s) =>
+        s.title.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q) ||
+        s.tags?.some((t) => t.name.toLowerCase().includes(q)),
       )
     }
     setServices(filtered)
   }, [activeFilter, debouncedSearch, locationEnabled, userLocation, debouncedDistance])
 
-  const { isLoading, error: fetchError } = usePolling(
-    fetchServices,
-    [fetchServices],
-    { interval: POLL_INTERVAL },
-  )
+  const { isLoading, error: fetchError } = usePolling(fetchServices, [fetchServices], { interval: POLL_INTERVAL })
 
-  // ── Handshakes polling (silent, no loading state needed) ──────────────────
   const fetchHandshakes = useCallback(async (signal: AbortSignal) => {
-    if (!isAuthenticated) {
-      setHandshakeMap(new Map())
-      setIncomingMap(new Map())
-      return
-    }
+    if (!isAuthenticated) { setHandshakeMap(new Map()); setIncomingMap(new Map()); return }
     const list = await handshakeAPI.list(signal)
-    const outgoing = new Map<string, Handshake>()
-    const incoming = new Map<string, Handshake[]>()
+    const out  = new Map<string, Handshake>()
+    const inc  = new Map<string, Handshake[]>()
     list.forEach((h) => {
-      const svcId =
-        typeof h.service === 'string'
-          ? h.service
-          : typeof h.service === 'object' && h.service && 'id' in h.service
-            ? (h.service as { id: string }).id
-            : undefined
+      const svcId = typeof h.service === 'string' ? h.service
+        : typeof h.service === 'object' && h.service && 'id' in h.service ? (h.service as { id: string }).id
+        : undefined
       if (!svcId) return
-      if (h.requester === user?.id) {
-        outgoing.set(svcId, h)
-      } else {
-        const arr = incoming.get(svcId) ?? []
-        arr.push(h)
-        incoming.set(svcId, arr)
-      }
+      if (h.requester === user?.id) { out.set(svcId, h) }
+      else { const arr = inc.get(svcId) ?? []; arr.push(h); inc.set(svcId, arr) }
     })
-    setHandshakeMap(outgoing)
-    setIncomingMap(incoming)
+    setHandshakeMap(out); setIncomingMap(inc)
   }, [isAuthenticated, user?.id])
 
-  usePolling(fetchHandshakes, [fetchHandshakes], {
-    interval: POLL_INTERVAL,
-    enabled: isAuthenticated,
-  })
+  usePolling(fetchHandshakes, [fetchHandshakes], { interval: POLL_INTERVAL, enabled: isAuthenticated })
 
-  // Request geolocation
   const requestLocation = useCallback(() => {
-    setLocationLoading(true)
-    setLocationError(null)
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation is not supported by your browser')
-      setLocationLoading(false)
-      return
-    }
+    setLocationLoading(true); setLocationError(null)
+    if (!navigator.geolocation) { setLocationError('Geolocation not supported'); setLocationLoading(false); return }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-        setLocationEnabled(true)
-        localStorage.setItem('locationEnabled', 'true')
-        setLocationLoading(false)
+        setLocationEnabled(true); localStorage.setItem('locationEnabled', 'true'); setLocationLoading(false)
       },
       (err) => {
-        const msgs: Record<number, string> = {
-          [err.PERMISSION_DENIED]: 'Location permission denied',
-          [err.POSITION_UNAVAILABLE]: 'Location information unavailable',
-          [err.TIMEOUT]: 'Location request timed out',
-        }
-        setLocationError(msgs[err.code] ?? 'Unable to get your location')
+        setLocationError(['Unknown error','Permission denied','Location unavailable','Timed out'][err.code] ?? 'Unable to get location')
         setLocationLoading(false)
       },
       { enableHighAccuracy: true, timeout: GEO_TIMEOUT, maximumAge: 300_000 },
@@ -236,445 +701,256 @@ const DashboardPage = () => {
   }, [])
 
   const toggleLocation = useCallback(() => {
-    if (locationEnabled) {
-      setLocationEnabled(false)
-      localStorage.setItem('locationEnabled', 'false')
-    } else if (userLocation) {
-      setLocationEnabled(true)
-      localStorage.setItem('locationEnabled', 'true')
-    } else {
-      requestLocation()
-    }
+    if (locationEnabled) { setLocationEnabled(false); localStorage.setItem('locationEnabled', 'false') }
+    else if (userLocation) { setLocationEnabled(true); localStorage.setItem('locationEnabled', 'true') }
+    else { requestLocation() }
   }, [locationEnabled, userLocation, requestLocation])
 
-  const distanceLabel =
-    distanceKm <= 5 ? 'Nearby' : distanceKm <= 15 ? 'Local Area' : distanceKm <= 30 ? 'Wider Area' : 'City-wide'
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const allHs              = Array.from(handshakeMap.values())
+  const myServices         = services.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id })
+  const pendingHs          = allHs.filter((h) => h.status === 'pending').length
+  const acceptedHs         = allHs.filter((h) => h.status === 'accepted').length
+  const completedHs        = allHs.filter((h) => h.status === 'completed').length
+  const totalIncomingPending = Array.from(incomingMap.values()).flat().filter((h) => h.status === 'pending').length
+  const distanceLabel      = distanceKm <= 5 ? 'Nearby' : distanceKm <= 15 ? 'Local' : distanceKm <= 30 ? 'Wider' : 'City-wide'
+  const balance            = user?.timebank_balance ?? null
+
+  const sidebarProps = {
+    user, isAuthenticated, balance, pendingHs, acceptedHs, completedHs,
+    totalIncomingPending, myServices, incomingMap,
+    locationEnabled, locationLoading, locationError, userLocation,
+    distanceKm, distanceLabel, toggleLocation, setDistanceKm, navigate,
+  }
 
   return (
-    <Box minH="100vh" bg="gray.50">
-      {/* ── Page header ── */}
-      <Box maxW="1440px" mx="auto" px={8} pt={8} pb={2}>
-        <Text as="h1" fontSize="2xl" fontWeight="800" color="gray.900" mb={1}>
-          Browse Services
-        </Text>
-        <Text color="gray.500" fontSize="sm">
-          Discover what your community has to offer and share
-        </Text>
-      </Box>
-
-      <Box maxW="1440px" mx="auto" px={8} pb={12}>
-        {/* ── Map ── */}
-        <Box bg="white" borderRadius="xl" border="1px solid" borderColor="gray.200" p={4} mb={8}>
-          <Flex align="center" justify="space-between" mb={3}>
-            <Text fontWeight="600" color="gray.900">
-              Map View
-            </Text>
-            <HStack gap={4} fontSize="sm">
-              <Flex align="center" gap={2}>
-                <Box w={3} h={3} borderRadius="full" bg="green.400" />
-                <Text color="gray.500">Offers</Text>
-              </Flex>
-              <Flex align="center" gap={2}>
-                <Box w={3} h={3} borderRadius="full" bg="blue.400" />
-                <Text color="gray.500">Wants</Text>
-              </Flex>
-            </HStack>
-          </Flex>
-          <MapView
-            services={services}
-            height="380px"
-            onServiceClick={(id) => navigate(`/service-detail/${id}`)}
-          />
+    /* ── ChatPage-style outer wrapper ────────────────────────────────────── */
+    <Box bg={GRAY50} minH="calc(100vh - 64px)" py={{ base: 0, md: '16px' }} px={{ base: 0, md: '16px' }}>
+      <Box
+        maxW="1400px" mx="auto"
+        h={{ base: 'calc(100vh - 64px)', md: 'calc(100vh - 96px)' }}
+        borderRadius={{ base: 0, md: '20px' }}
+        boxShadow={{ base: 'none', md: '0 4px 24px rgba(0,0,0,0.08)' }}
+        border={{ base: 'none', md: `1px solid ${GRAY200}` }}
+        display="flex"
+        overflow="hidden"
+        position="relative"
+      >
+        {/* ── Sidebar (desktop always visible; mobile: overlay) ───────────── */}
+        <Box
+          display={{ base: sidebarOpen ? 'flex' : 'none', lg: 'flex' }}
+          position={{ base: 'absolute', lg: 'relative' }}
+          zIndex={{ base: 20, lg: 'auto' }}
+          top={0} left={0} bottom={0}
+          flexShrink={0}
+        >
+          <Sidebar {...sidebarProps} />
         </Box>
 
-        {/* ── Controls ── */}
-        <VStack gap={4} mb={6} align="stretch">
-          {/* Search input */}
-          <Flex
-            align="center"
-            bg="white"
-            border="1px solid"
-            borderColor="gray.200"
-            borderRadius="lg"
-            overflow="hidden"
-            _focusWithin={{ borderColor: ORANGE, boxShadow: `0 0 0 2px ${ORANGE}22` }}
-          >
-            <Box px={3} color="gray.400">
-              <FiSearch size={17} />
-            </Box>
-            <Input
-              placeholder="Search services, skills, or tags…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              border="none"
-              outline="none"
-              _focus={{ boxShadow: 'none' }}
-              flex={1}
-            />
-          </Flex>
+        {/* Mobile sidebar backdrop */}
+        {sidebarOpen && (
+          <Box
+            display={{ base: 'block', lg: 'none' }}
+            position="absolute" inset={0} zIndex={10}
+            bg="rgba(0,0,0,0.4)"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
 
-          {/* Distance filter */}
-          <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" p={4}>
-            <Flex align="center" justify="space-between" mb={3}>
-              <Flex align="center" gap={2}>
-                <FiNavigation size={17} color={ORANGE} />
-                <Text fontWeight={500} color="gray.900" fontSize="sm">
-                  Search by Distance
-                </Text>
-              </Flex>
-              <Button
-                size="sm"
-                onClick={toggleLocation}
-                disabled={locationLoading}
-                style={{
-                  background: locationEnabled ? ORANGE : 'transparent',
-                  color: locationEnabled ? '#fff' : '#374151',
-                  border: locationEnabled ? 'none' : '1px solid #d1d5db',
-                  borderRadius: '9999px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
+        {/* ── Main panel ──────────────────────────────────────────────────── */}
+        <Flex direction="column" flex={1} h="100%" overflow="hidden" minW={0} bg={GRAY50}>
+
+          {/* Top bar */}
+          <Box px={{ base: 3, md: 5 }} py="12px" bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0}>
+            <Flex align="center" gap={2}>
+              {/* Mobile sidebar toggle */}
+              <Box
+                as="button" display={{ base: 'flex', lg: 'none' }}
+                alignItems="center" justifyContent="center"
+                w="34px" h="34px" borderRadius="9px" flexShrink={0}
+                bg={GRAY100} color={GRAY600}
+                onClick={() => setSidebarOpen((v) => !v)}
               >
-                {locationLoading ? (
-                  <>
-                    <FiLoader size={13} />
-                    Getting location…
-                  </>
-                ) : locationEnabled ? (
-                  <>
-                    <FiMapPin size={13} />
-                    By Distance
-                  </>
-                ) : (
-                  <>
-                    <FiNavigation size={13} />
-                    Enable Location
-                  </>
+                {sidebarOpen ? <FiX size={16} /> : <FiMenu size={16} />}
+              </Box>
+
+              {/* Search */}
+              <Flex
+                flex={1} align="center" gap={2}
+                bg={GRAY50} border={`1px solid ${GRAY200}`} borderRadius="10px"
+                px={3} overflow="hidden"
+                _focusWithin={{ borderColor: GREEN, boxShadow: `0 0 0 2px ${GREEN}18` }}
+                transition="all 0.15s"
+              >
+                <FiSearch size={14} color={GRAY400} />
+                <Input
+                  placeholder="Search services, skills, tags…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  border="none" outline="none"
+                  _focus={{ boxShadow: 'none' }}
+                  bg="transparent" fontSize="13px" color={GRAY800} py="7px" px={0}
+                />
+                {searchQuery && (
+                  <Box as="button" color={GRAY400} onClick={() => setSearchQuery('')}
+                    fontSize="11px" fontWeight={700} flexShrink={0} _hover={{ color: GRAY600 }}
+                  >
+                    ✕
+                  </Box>
                 )}
-              </Button>
+              </Flex>
+
+              {/* Filter pills — hidden on very small screens */}
+              <Flex
+                gap="3px" bg={GRAY100} p="3px" borderRadius="10px"
+                display={{ base: 'none', sm: 'flex' }}
+                flexShrink={0}
+              >
+                {FILTERS.map((f) => (
+                  <Box
+                    key={f.id} as="button"
+                    onClick={() => setActiveFilter(f.id)}
+                    px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
+                    fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
+                    bg={activeFilter === f.id ? WHITE : 'transparent'}
+                    color={activeFilter === f.id ? GRAY800 : GRAY500}
+                    boxShadow={activeFilter === f.id ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                    cursor="pointer" transition="all 0.12s"
+                    display="flex" alignItems="center" gap="4px"
+                  >
+                    <Box color={activeFilter === f.id ? GREEN : GRAY400}>{f.icon}</Box>
+                    <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
+                  </Box>
+                ))}
+              </Flex>
+
+              {/* Map toggle */}
+              <Box
+                as="button" flexShrink={0}
+                px="11px" py="7px" borderRadius="9px"
+                bg={mapOpen ? GREEN : GRAY100}
+                color={mapOpen ? WHITE : GRAY600}
+                fontSize="12px" fontWeight={600}
+                display="flex" alignItems="center" gap="5px"
+                onClick={() => setMapOpen((v) => !v)}
+                _hover={{ opacity: 0.9 }} transition="all 0.15s"
+              >
+                <FiMapPin size={12} />
+                <Box display={{ base: 'none', sm: 'block' }}>Map</Box>
+                {mapOpen ? <FiChevronUp size={11} /> : <FiChevronDown size={11} />}
+              </Box>
             </Flex>
 
-            {locationError && (
-              <Text fontSize="sm" color="red.500" mb={3}>
-                {locationError}
-              </Text>
-            )}
+            {/* Filter pills row on mobile (below search bar) */}
+            <Flex
+              display={{ base: 'flex', sm: 'none' }}
+              gap="5px" mt="8px" overflowX="auto"
+              style={{ scrollbarWidth: 'none' }}
+            >
+              {FILTERS.map((f) => (
+                <Box
+                  key={f.id} as="button" flexShrink={0}
+                  onClick={() => setActiveFilter(f.id)}
+                  px="10px" py="5px" borderRadius="20px"
+                  fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
+                  bg={activeFilter === f.id ? GREEN : WHITE}
+                  color={activeFilter === f.id ? WHITE : GRAY600}
+                  border={`1px solid ${activeFilter === f.id ? GREEN : GRAY200}`}
+                  cursor="pointer" transition="all 0.12s"
+                  display="flex" alignItems="center" gap="4px"
+                >
+                  <Box color={activeFilter === f.id ? WHITE : GRAY400}>{f.icon}</Box>
+                  {f.label}
+                </Box>
+              ))}
+            </Flex>
+          </Box>
 
-            {locationEnabled && userLocation ? (
-              <VStack gap={3} align="stretch">
-                <Flex justify="space-between">
-                  <Text fontSize="sm" color="gray.600">
-                    Distance: {distanceKm} km
-                  </Text>
-                  <Text fontSize="xs" color="gray.400">
-                    {distanceLabel}
-                  </Text>
-                </Flex>
-                <input
-                  type="range"
-                  min={1}
-                  max={50}
-                  step={1}
-                  value={distanceKm}
-                  onChange={(e) => setDistanceKm(Number(e.target.value))}
-                  style={{
-                    width: '100%',
-                    accentColor: ORANGE,
-                    height: '6px',
-                    cursor: 'pointer',
-                  }}
-                />
-                <Flex justify="space-between">
-                  <Text fontSize="xs" color="gray.400">1 km</Text>
-                  <Text fontSize="xs" color="gray.400">25 km</Text>
-                  <Text fontSize="xs" color="gray.400">50 km</Text>
-                </Flex>
-              </VStack>
+          {/* Map panel */}
+          {mapOpen && (
+            <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0}>
+              <Flex align="center" px={5} py="10px" gap={4}>
+                <Text fontSize="12px" fontWeight={600} color={GRAY700}>Map View</Text>
+                <HStack gap={3} fontSize="11px" color={GRAY500}>
+                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={GREEN} />Offers</Flex>
+                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={BLUE} />Wants</Flex>
+                </HStack>
+                {isLoading && services.length > 0 && (
+                  <Flex align="center" gap="5px" ml="auto">
+                    <Spinner size="xs" color="gray.400" />
+                    <Text fontSize="11px" color={GRAY400}>Refreshing</Text>
+                  </Flex>
+                )}
+              </Flex>
+              <MapView
+                services={services}
+                height="280px"
+                onServiceClick={(id) => navigate(`/service-detail/${id}`)}
+              />
+            </Box>
+          )}
+
+          {/* Results count */}
+          <Box px={5} pt={3} pb={1} flexShrink={0} bgColor={TRANSPARENT}>
+            <Text fontSize="12px" color={GRAY400}>
+              {isLoading && services.length === 0 ? 'Loading…' : `${services.length} service${services.length !== 1 ? 's' : ''}`}
+            </Text>
+          </Box>
+
+          {/* Grid */}
+          <Box flex={1} overflowY="auto" px={{ base: 3, md: 5 }} pt={2} pb={6}>
+            {isLoading && services.length === 0 ? (
+              <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
+            ) : fetchError && services.length === 0 ? (
+              <Flex direction="column" align="center" py={16} gap={3}>
+                <Text fontSize="2xl">⚡</Text>
+                <Text color="red.500" fontSize="13px">{fetchError}</Text>
+              </Flex>
+            ) : services.length === 0 ? (
+              <Flex direction="column" align="center" py={16} gap={3}>
+                <Text fontSize="3xl">🔍</Text>
+                <Text color={GRAY500} fontSize="13px">No services found. Be the first to post one!</Text>
+                {isAuthenticated && (
+                  <Box as="button" px={5} py="9px" borderRadius="9999px" bg={GREEN} color={WHITE}
+                    fontSize="13px" fontWeight={700} onClick={() => navigate('/post-offer')}
+                    _hover={{ opacity: 0.9 }} transition="opacity 0.15s"
+                  >
+                    Post a Service
+                  </Box>
+                )}
+              </Flex>
             ) : (
-              !locationLoading && (
-                <Text fontSize="sm" color="gray.500">
-                  Enable location to find services near you, sorted by distance.
-                </Text>
-              )
+              <Grid
+                templateColumns={{ base: '1fr', sm: 'repeat(2, 1fr)', xl: 'repeat(3, 1fr)' }}
+                gap={4}
+                alignItems="stretch"
+              >
+                {services.map((service) => {
+                  const owner    = service.user ?? service.provider
+                  const isOwn    = !!user && owner?.id === user.id
+                  const hs       = handshakeMap.get(service.id)
+                  const isRecurr = service.schedule_type === 'Recurrent'
+                  const showBadge = hs && !(isRecurr && hs.status === 'completed')
+                  const inList   = isOwn ? (incomingMap.get(service.id) ?? []) : []
+                  const pCount   = inList.filter((h) => h.status === 'pending').length
+                  const aCount   = inList.filter((h) => ['pending', 'accepted'].includes(h.status)).length
+
+                  return (
+                    <ServiceCard
+                      key={service.id}
+                      service={service}
+                      isOwn={isOwn}
+                      handshake={showBadge ? hs : undefined}
+                      incomingCount={aCount}
+                      pendingCount={pCount}
+                      onClick={() => navigate(`/service-detail/${service.id}`)}
+                    />
+                  )
+                })}
+              </Grid>
             )}
           </Box>
-        </VStack>
-
-        {/* ── Filter tabs ── */}
-        <Flex gap={2} mb={6} pb={6} borderBottom="1px solid" borderColor="gray.200" flexWrap="wrap">
-          {FILTERS.map((f) => (
-            <Box
-              key={f.id}
-              as="button"
-              onClick={() => setActiveFilter(f.id)}
-              px={4}
-              py={2}
-              borderRadius="lg"
-              fontSize="sm"
-              fontWeight={activeFilter === f.id ? 600 : 400}
-              bg={activeFilter === f.id ? ORANGE : 'white'}
-              color={activeFilter === f.id ? 'white' : 'gray.700'}
-              border="1px solid"
-              borderColor={activeFilter === f.id ? ORANGE : 'gray.200'}
-              cursor="pointer"
-              transition="all 0.15s"
-              _hover={{
-                bg: activeFilter === f.id ? ORANGE : 'gray.50',
-              }}
-            >
-              {f.label}
-            </Box>
-          ))}
         </Flex>
-
-        {/* ── Service cards ── */}
-        {/* Full spinner only on very first load (no data yet) */}
-        {isLoading && services.length === 0 ? (
-          <Flex justify="center" py={16}>
-            <Spinner size="lg" color="orange.400" />
-          </Flex>
-        ) : fetchError && services.length === 0 ? (
-          <Flex justify="center" py={16}>
-            <Text color="red.500">{fetchError}</Text>
-          </Flex>
-        ) : services.length === 0 ? (
-          <Flex direction="column" align="center" py={16} gap={3}>
-            <Text fontSize="4xl">🔍</Text>
-            <Text color="gray.500">No services found. Be the first to post one!</Text>
-            <Button
-              size="sm"
-              onClick={() => navigate('/post-offer')}
-              style={{ background: ORANGE, color: '#fff', borderRadius: '9999px' }}
-            >
-              Post a Service
-            </Button>
-          </Flex>
-        ) : (
-          <Grid templateColumns="repeat(2, 1fr)" gap={6}>
-            {services.map((service) => {
-              const owner = service.user ?? service.provider
-              const name = userName(owner)
-              const initials = userInitials(owner)
-              const avatarUrl = owner?.avatar_url
-              const isOffer = service.type === 'Offer'
-
-              // Ownership & handshake state
-              const isOwn = !!user && (owner?.id === user.id)
-              const handshake = handshakeMap.get(service.id)
-              // Recurrent services are ongoing — a completed handshake = one session done,
-              // not the service itself. Hide 'completed' badge for Recurrent.
-              const isRecurrent = service.schedule_type === 'Recurrent'
-              const showHandshakeBadge =
-                handshake &&
-                !(isRecurrent && handshake.status === 'completed')
-              const hsConfig = showHandshakeBadge ? HANDSHAKE_BADGE[handshake!.status] : null
-              const isDimmed = handshake?.status === 'denied' || handshake?.status === 'cancelled'
-
-              // Incoming requests on own services
-              const incomingList = isOwn ? (incomingMap.get(service.id) ?? []) : []
-              const pendingCount = incomingList.filter((h) => h.status === 'pending').length
-              const activeCount  = incomingList.filter((h) => ['pending', 'accepted'].includes(h.status)).length
-
-              return (
-                <Box
-                  key={service.id}
-                  as="button"
-                  onClick={() => navigate(`/service-detail/${service.id}`)}
-                  bg="white"
-                  borderRadius="xl"
-                  border="1px solid"
-                  borderColor={isOwn ? 'orange.200' : 'gray.200'}
-                  p={6}
-                  textAlign="left"
-                  w="full"
-                  transition="all 0.15s"
-                  _hover={{ borderColor: 'orange.300', boxShadow: 'md' }}
-                  cursor="pointer"
-                  opacity={isDimmed ? 0.65 : 1}
-                >
-                  {/* User + title row */}
-                  <Flex gap={3} mb={3} align="flex-start">
-                    <Box
-                      w="40px"
-                      h="40px"
-                      borderRadius="full"
-                      bg={YELLOW}
-                      display="flex"
-                      alignItems="center"
-                      justifyContent="center"
-                      fontWeight="700"
-                      fontSize="13px"
-                      color={GREEN}
-                      flexShrink={0}
-                      overflow="hidden"
-                    >
-                      {avatarUrl ? (
-                        <img
-                          src={avatarUrl}
-                          alt={name}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        initials
-                      )}
-                    </Box>
-                    <Box flex={1} minW={0}>
-                      <Flex align="center" justify="space-between" gap={2} mb={1}>
-                        <Flex align="center" gap={2} flex={1} minW={0} flexWrap="wrap">
-                        <Text fontWeight="700" color="gray.900" fontSize="sm" overflow="hidden" style={{ textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>
-                          {service.title}
-                        </Text>
-                        <Badge
-                          fontSize="xs"
-                          px={2}
-                          py={0.5}
-                          borderRadius="full"
-                          bg={isOffer ? 'green.100' : 'blue.100'}
-                          color={isOffer ? 'green.700' : 'blue.700'}
-                        >
-                          {service.type === 'Need' ? 'Want' : service.type}
-                        </Badge>
-                        {/* Ownership badge */}
-                        {isOwn && (
-                          <Badge
-                            fontSize="xs"
-                            px={2}
-                            py={0.5}
-                            borderRadius="full"
-                            bg="orange.50"
-                            color="orange.600"
-                            border="1px solid"
-                            borderColor="orange.200"
-                          >
-                            Your listing
-                          </Badge>
-                        )}
-                        {/* Handshake status badge */}
-                        {!isOwn && hsConfig && (
-                          <Badge
-                            fontSize="xs"
-                            px={2}
-                            py={0.5}
-                            borderRadius="full"
-                            style={{ background: hsConfig.bg, color: hsConfig.color }}
-                          >
-                            {hsConfig.label}
-                          </Badge>
-                        )}
-                        </Flex>
-                        {/* Incoming request count — inline, right side of title row */}
-                        {isOwn && activeCount > 0 && (
-                          <Box
-                            display="flex"
-                            alignItems="center"
-                            px={2}
-                            py={0.5}
-                            borderRadius="full"
-                            fontSize="11px"
-                            fontWeight={700}
-                            bg={pendingCount > 0 ? 'orange.500' : 'green.500'}
-                            color="white"
-                            flexShrink={0}
-                          >
-                            {activeCount} {activeCount === 1 ? 'request' : 'requests'}
-                          </Box>
-                        )}
-                      </Flex>
-                      <Text fontSize="xs" color="gray.400">
-                        {name}
-                      </Text>
-                    </Box>
-                  </Flex>
-
-                  {/* Description */}
-                  <Text fontSize="sm" color="gray.600" mb={3} style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                    {service.description}
-                  </Text>
-
-                  {/* Meta row */}
-                  <HStack gap={4} fontSize="sm" color="gray.500" mb={3} flexWrap="wrap">
-                    <Flex align="center" gap={1}>
-                      <FiClock size={13} />
-                      <Text>{formatHours(service.duration)}h</Text>
-                    </Flex>
-                    <Flex align="center" gap={1}>
-                      {service.location_type === 'Online' ? (
-                        <FiMonitor size={13} />
-                      ) : (
-                        <FiUsers size={13} />
-                      )}
-                      <Text>{service.location_type}</Text>
-                    </Flex>
-                    {service.location_area && (
-                      <Flex align="center" gap={1}>
-                        <FiMapPin size={13} />
-                        <Text>{service.location_area}</Text>
-                      </Flex>
-                    )}
-                  </HStack>
-
-                  {/* Schedule */}
-                  <Flex align="center" gap={3} mb={3} fontSize="xs" color="gray.400" flexWrap="wrap">
-                    {isRecurrent && (
-                      <Flex
-                        align="center"
-                        gap={1}
-                        px={2}
-                        py={0.5}
-                        borderRadius="full"
-                        bg="purple.50"
-                        color="purple.600"
-                        border="1px solid"
-                        borderColor="purple.100"
-                        fontWeight={600}
-                      >
-                        <FiRefreshCw size={10} />
-                        <Text>Recurrent</Text>
-                      </Flex>
-                    )}
-                    {service.schedule_details && (
-                      <Flex align="center" gap={1}>
-                        <FiCalendar size={12} />
-                        <Text>{service.schedule_details}</Text>
-                      </Flex>
-                    )}
-                  </Flex>
-
-                  {/* Tags + participants */}
-                  <Flex align="center" justify="space-between">
-                    <HStack gap={2} flexWrap="wrap">
-                      {service.tags?.slice(0, 3).map((tag) => (
-                        <Text
-                          key={tag.id}
-                          fontSize="xs"
-                          px={2}
-                          py={0.5}
-                          bg="gray.100"
-                          color="gray.600"
-                          borderRadius="md"
-                        >
-                          #{tag.name}
-                        </Text>
-                      ))}
-                    </HStack>
-                    <Flex align="center" gap={1} fontSize="xs" color="gray.400">
-                      <FiUsers size={11} />
-                      {service.max_participants > 1 ? (
-                        <Text>
-                          {service.participant_count ?? 0}/{service.max_participants}
-                          {' '}slots
-                        </Text>
-                      ) : (
-                        <Text>Max {service.max_participants}</Text>
-                      )}
-                    </Flex>
-                  </Flex>
-                </Box>
-              )
-            })}
-          </Grid>
-        )}
       </Box>
     </Box>
   )
