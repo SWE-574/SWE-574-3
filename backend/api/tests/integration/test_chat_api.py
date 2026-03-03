@@ -224,8 +224,8 @@ class TestGroupChatViewSet:
 
         response = client.get(f'/api/group-chat/{service.id}/')
         assert response.status_code == status.HTTP_200_OK
-        ids = [m['id'] for m in response.data['messages']]
-        assert ids == sorted(ids, key=lambda i: [m['created_at'] for m in response.data['messages']][ids.index(i)])
+        created_at_values = [m['created_at'] for m in response.data['messages']]
+        assert created_at_values == sorted(created_at_values)
 
     def test_unrelated_user_cannot_get_messages(self):
         """A user with no connection to the service is denied."""
