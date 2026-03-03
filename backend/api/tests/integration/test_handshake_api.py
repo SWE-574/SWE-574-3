@@ -202,6 +202,195 @@ class TestHandshakeViewSet:
         assert requester.timebank_balance == Decimal('3.00')
 
 
+# ── Tests: initiate/approve permission changes (service-owner-first model) ────
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestInitiateApproveServiceOwnerModel:
+    """
+    New rule: the SERVICE OWNER always initiates session details,
+    regardless of Offer/Need type. The person who expressed interest (requester)
+    then approves.
+    """
+
+    FUTURE = timezone.now() + timedelta(days=5)
+    INITIATE_PAYLOAD = {
+        'exact_location': 'Test Cafe, Beşiktaş',
+        'exact_duration': 1.5,
+        'scheduled_time': (timezone.now() + timedelta(days=5)).isoformat(),
+    }
+
+    # ── Offer service ─────────────────────────────────────────────────────────
+
+    def test_offer_owner_can_initiate(self):
+        """Offer service owner (provider) can still initiate — no regression."""
+        service_owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=service_owner, type='Offer')
+        handshake = HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(service_owner)
+        resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
+        assert resp.status_code == status.HTTP_200_OK
+        handshake.refresh_from_db()
+        assert handshake.provider_initiated is True
+
+    def test_offer_requester_cannot_initiate(self):
+        """Requester cannot initiate an Offer handshake — only service owner can."""
+        service_owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=service_owner, type='Offer')
+        handshake = HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+        resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_offer_requester_can_approve(self):
+        """Requester (interest expresser) can approve an Offer handshake."""
+        service_owner = UserFactory()
+        requester = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(user=service_owner, type='Offer', duration=Decimal('1.00'))
+        handshake = HandshakeFactory(
+            service=service, requester=requester, status='pending',
+            provider_initiated=True,
+            exact_location='Test Location',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_200_OK
+        handshake.refresh_from_db()
+        assert handshake.status == 'accepted'
+
+    def test_offer_service_owner_cannot_approve_own_handshake(self):
+        """Service owner cannot approve their own handshake."""
+        service_owner = UserFactory()
+        requester = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(user=service_owner, type='Offer', duration=Decimal('1.00'))
+        handshake = HandshakeFactory(
+            service=service, requester=requester, status='pending',
+            provider_initiated=True,
+            exact_location='Test Location',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(service_owner)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    # ── Need/Want service ─────────────────────────────────────────────────────
+
+    def test_need_service_owner_can_initiate(self):
+        """
+        Need/Want service owner can initiate session details.
+        Previously only the 'provider' (= requester for Need) could do this.
+        """
+        service_owner = UserFactory()
+        helper = UserFactory()  # person who expressed interest to fulfill the Need
+        service = ServiceFactory(user=service_owner, type='Need')
+        handshake = HandshakeFactory(service=service, requester=helper, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(service_owner)
+        resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
+        assert resp.status_code == status.HTTP_200_OK
+        handshake.refresh_from_db()
+        assert handshake.provider_initiated is True
+        assert handshake.exact_location == 'Test Cafe, Beşiktaş'
+
+    def test_need_helper_cannot_initiate(self):
+        """
+        The helper (who expressed interest) cannot initiate a Need handshake —
+        only the service owner can propose session details.
+        """
+        service_owner = UserFactory()
+        helper = UserFactory()
+        service = ServiceFactory(user=service_owner, type='Need')
+        handshake = HandshakeFactory(service=service, requester=helper, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_need_helper_can_approve(self):
+        """
+        The helper (requester) approves the session details set by the Need service owner.
+        This was previously only allowed for the 'receiver' role.
+        """
+        service_owner = UserFactory()
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(user=service_owner, type='Need', duration=Decimal('1.00'))
+        handshake = HandshakeFactory(
+            service=service, requester=helper, status='pending',
+            provider_initiated=True,
+            exact_location='Need Location',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_200_OK
+        handshake.refresh_from_db()
+        assert handshake.status == 'accepted'
+
+    def test_need_service_owner_cannot_approve_own_handshake(self):
+        """Need service owner cannot approve — they are the initiator, not the approver."""
+        service_owner = UserFactory()
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(user=service_owner, type='Need', duration=Decimal('1.00'))
+        handshake = HandshakeFactory(
+            service=service, requester=helper, status='pending',
+            provider_initiated=True,
+            exact_location='Need Location',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(service_owner)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_third_party_cannot_initiate_or_approve(self):
+        """
+        An unrelated user cannot initiate or approve any handshake.
+        Backend may return 403 (permission denied) or 404 (resource hidden) —
+        both are acceptable security responses that prevent access.
+        """
+        service_owner = UserFactory()
+        requester = UserFactory()
+        stranger = UserFactory()
+        service = ServiceFactory(user=service_owner, type='Offer')
+        handshake = HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(stranger)
+
+        resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
+        assert resp.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
+
+        handshake.provider_initiated = True
+        handshake.exact_location = 'Loc'
+        handshake.exact_duration = Decimal('1.00')
+        handshake.scheduled_time = timezone.now() + timedelta(days=3)
+        handshake.save()
+
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
+
+
 # ── New tests: capacity system + Agreed status ────────────────────────────────
 
 

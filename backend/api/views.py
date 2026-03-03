@@ -1364,19 +1364,17 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='initiate')
     def initiate_handshake(self, request, pk=None):
         """
-        Provider initiates handshake with details (location, duration, scheduled_time).
-        Only the service provider can initiate. After initiation, requester can approve.
+        Service owner initiates handshake with session details (location, duration, scheduled_time).
+        The service owner always initiates, regardless of Offer/Need type.
+        The other party (the one who expressed interest) then approves.
         """
         handshake = self.get_object()
         user = request.user
         
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-        
-        # Only provider can initiate
-        if provider != user:
+        # Service owner always initiates — works for both Offer and Need
+        if handshake.service.user != user:
             return create_error_response(
-                'Only the service provider can initiate the handshake',
+                'Only the service owner can initiate the handshake',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
@@ -1488,15 +1486,18 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         handshake.save()
         
         # Invalidate conversations cache for both users
-        invalidate_conversations(str(provider.id))
-        invalidate_conversations(str(receiver.id))
+        # service_owner = initiator (user), other party = handshake.requester
+        service_owner = handshake.service.user
+        other_party   = handshake.requester
+        invalidate_conversations(str(service_owner.id))
+        invalidate_conversations(str(other_party.id))
 
-        # Notify receiver that provider has initiated
+        # Notify the other party (requester) that session details are ready
         create_notification(
-            user=receiver,
+            user=other_party,
             notification_type='handshake_request',
             title='Service Details Provided',
-            message=f"{user.first_name} has provided service details for '{handshake.service.title}'. Please review and approve.",
+            message=f"{user.first_name} has provided session details for '{handshake.service.title}'. Please review and approve.",
             handshake=handshake,
             service=handshake.service
         )
@@ -1507,19 +1508,17 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='approve')
     def approve_handshake(self, request, pk=None):
         """
-        Receiver approves the handshake after provider has initiated with details.
-        Once approved, handshake is accepted and TimeBank is provisioned.
+        The requester (the one who expressed interest) approves the session details
+        that were set by the service owner via /initiate/.
+        Works for both Offer and Need service types.
         """
         handshake = self.get_object()
         user = request.user
         
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-        
-        # Only receiver can approve
-        if receiver != user:
+        # Only the requester (the one who expressed interest) can approve
+        if handshake.requester != user:
             return create_error_response(
-                'Only the service receiver can approve the handshake',
+                'Only the requester can approve the handshake',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
@@ -2199,7 +2198,9 @@ class ChatViewSet(viewsets.ViewSet):
             
             conversations.append({
                 'handshake_id': str(handshake.id),
+                'service_id': str(handshake.service.id),
                 'service_title': handshake.service.title,
+                'service_type': handshake.service.type,
                 'other_user': {
                     'id': str(other_user.id),
                     'name': f"{other_user.first_name} {other_user.last_name}".strip(),
