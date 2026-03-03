@@ -4,7 +4,7 @@ from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 import bleach
-from .models import Handshake, ChatMessage, ChatRoom, PublicChatMessage
+from .models import Handshake, ChatMessage, ChatRoom, PublicChatMessage, ServiceGroupChatMessage
 from .serializers import ChatMessageSerializer
 from .utils import create_notification
 
@@ -297,6 +297,109 @@ class PublicChatConsumer(AsyncWebsocketConsumer):
         return {
             'id': str(message.id),
             'room': str(message.room.id),
+            'sender_id': str(message.sender.id),
+            'sender_name': f"{message.sender.first_name} {message.sender.last_name}".strip(),
+            'sender_avatar_url': message.sender.avatar_url,
+            'body': message.body,
+            'created_at': message.created_at.isoformat(),
+        }
+
+
+class GroupChatConsumer(AsyncWebsocketConsumer):
+    """WebSocket consumer for private group chats (accepted participants only)."""
+
+    async def connect(self):
+        self.service_id = self.scope['url_route']['kwargs']['service_id']
+        self.room_group_name = f'group_chat_{self.service_id}'
+
+        query_string = self.scope.get('query_string', b'').decode()
+        token = None
+        if 'token=' in query_string:
+            token = query_string.split('token=')[-1].split('&')[0]
+
+        if not token:
+            await self.close(code=4001)
+            return
+
+        try:
+            user = await self._authenticate(token)
+            if not user:
+                await self.close(code=4003)
+                return
+
+            has_access = await self._check_access(user, self.service_id)
+            if not has_access:
+                await self.close(code=4003)
+                return
+
+            self.user = user
+        except Exception:
+            await self.close(code=4003)
+            return
+
+        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+            if data.get('type') == 'chat_message':
+                body = data.get('body', '').strip()
+                if body:
+                    message = await self._save_message(self.service_id, self.user.id, body)
+                    if message is None:
+                        await self.send(text_data=json.dumps({'type': 'error', 'message': 'Empty message'}))
+                        return
+                    await self.channel_layer.group_send(
+                        self.room_group_name,
+                        {'type': 'chat_message', 'message': await self._serialize(message)}
+                    )
+        except Exception:
+            await self.send(text_data=json.dumps({'type': 'error', 'message': 'An error occurred'}))
+
+    async def chat_message(self, event):
+        await self.send(text_data=json.dumps({'type': 'chat_message', 'message': event['message']}))
+
+    @database_sync_to_async
+    def _authenticate(self, token):
+        try:
+            from rest_framework_simplejwt.tokens import AccessToken
+            access_token = AccessToken(token)
+            return User.objects.get(id=access_token['user_id'], is_active=True)
+        except Exception:
+            return None
+
+    @database_sync_to_async
+    def _check_access(self, user, service_id):
+        try:
+            from .models import Service
+            service = Service.objects.select_related('user').get(id=service_id)
+            if service.schedule_type != 'One-Time' or service.max_participants <= 1:
+                return False
+            if service.user == user:
+                return True
+            return Handshake.objects.filter(service=service, requester=user, status='accepted').exists()
+        except Exception:
+            return False
+
+    @database_sync_to_async
+    def _save_message(self, service_id, user_id, body):
+        cleaned = bleach.clean(body, tags=[], strip=True).strip()[:5000]
+        if not cleaned:
+            return None
+        from .models import Service
+        service = Service.objects.get(id=service_id)
+        user = User.objects.get(id=user_id)
+        return ServiceGroupChatMessage.objects.create(service=service, sender=user, body=cleaned)
+
+    @database_sync_to_async
+    def _serialize(self, message):
+        return {
+            'id': str(message.id),
+            'service': str(message.service_id),
             'sender_id': str(message.sender.id),
             'sender_name': f"{message.sender.first_name} {message.sender.last_name}".strip(),
             'sender_avatar_url': message.sender.avatar_url,

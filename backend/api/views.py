@@ -9,6 +9,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.db import transaction, IntegrityError
+from django.shortcuts import get_object_or_404
 from django.db.utils import OperationalError
 from django.db.models import F
 from decimal import Decimal
@@ -31,7 +32,7 @@ from .exceptions import create_error_response, ErrorCodes
 from .models import (
     User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
-    ChatRoom, PublicChatMessage, Comment, NegativeRep,
+    ChatRoom, PublicChatMessage, ServiceGroupChatMessage, Comment, NegativeRep,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia
 )
 from .serializers import (
@@ -48,6 +49,7 @@ from .serializers import (
     TransactionHistorySerializer,
     ChatRoomSerializer,
     PublicChatMessageSerializer,
+    ServiceGroupChatMessageSerializer,
     CommentSerializer,
     NegativeRepSerializer,
     ForumCategorySerializer,
@@ -811,6 +813,34 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     def get_serializer_context(self):
         return {'request': self.request}
+
+    def retrieve(self, request, *args, **kwargs):
+        """Return a single service regardless of status so owners and participants
+        can view Agreed/Completed/Cancelled services from their history."""
+        user_badges_prefetch = Prefetch(
+            'user__badges',
+            queryset=UserBadge.objects.select_related('badge')
+        )
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+        queryset = (
+            Service.objects
+            .select_related('user')
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
+        )
+        instance = get_object_or_404(queryset, pk=kwargs['pk'])
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
         # REQ-TB-003: Check if user can post offer (balance > 10 hours blocks new offers)
@@ -2218,6 +2248,8 @@ class ChatViewSet(viewsets.ViewSet):
                 'scheduled_time': handshake.scheduled_time.isoformat() if handshake.scheduled_time else None,
                 'provisioned_hours': float(handshake.provisioned_hours) if handshake.provisioned_hours else None,
                 'user_has_reviewed': user_has_reviewed,
+                'max_participants': handshake.service.max_participants,
+                'schedule_type': handshake.service.schedule_type,
             })
 
         page = paginator.paginate_queryset(conversations, request)
@@ -3357,6 +3389,93 @@ class PublicChatViewSet(viewsets.ViewSet):
             logger.warning(f"Failed to broadcast public chat message: {e}")
 
         serializer = PublicChatMessageSerializer(message)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class GroupChatViewSet(viewsets.ViewSet):
+    """
+    Private group chat for one-time Offer/Need services with max_participants > 1.
+    Only users with an accepted handshake (or the service owner) may access.
+
+    Endpoints:
+    - GET  /api/group-chat/{service_id}/ — get last 50 messages
+    - POST /api/group-chat/{service_id}/ — send a message
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_service_or_403(self, request, pk):
+        """Return the service if eligible and the user has access; raise otherwise."""
+        try:
+            service = Service.objects.select_related('user').get(id=pk)
+        except Service.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound('Service not found')
+
+        if service.schedule_type != 'One-Time' or service.max_participants <= 1:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Group chat is only available for one-time group services')
+
+        user = request.user
+        is_owner = service.user == user
+        has_accepted = Handshake.objects.filter(
+            service=service, requester=user, status='accepted'
+        ).exists()
+
+        if not is_owner and not has_accepted:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('You must have an accepted handshake to join this group chat')
+
+        return service
+
+    @track_performance
+    def retrieve(self, request, pk=None):
+        """Get the last 50 messages for the group chat."""
+        service = self._get_service_or_403(request, pk)
+        msgs = (
+            ServiceGroupChatMessage.objects
+            .filter(service=service)
+            .select_related('sender')
+            .order_by('-created_at')[:50]
+        )
+        serializer = ServiceGroupChatMessageSerializer(list(reversed(list(msgs))), many=True)
+        return Response({'service_id': str(service.id), 'messages': serializer.data})
+
+    @track_performance
+    def create(self, request, pk=None):
+        """Send a message to the group chat."""
+        service = self._get_service_or_403(request, pk)
+
+        body = (request.data.get('body', '') or '').strip()
+        cleaned_body = bleach.clean(body, tags=[], strip=True).strip()[:5000]
+
+        if not cleaned_body:
+            return create_error_response(
+                'Message body is required',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        message = ServiceGroupChatMessage.objects.create(
+            service=service,
+            sender=request.user,
+            body=cleaned_body,
+        )
+
+        # Broadcast via WebSocket
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                serializer = ServiceGroupChatMessageSerializer(message)
+                async_to_sync(channel_layer.group_send)(
+                    f'group_chat_{str(service.id)}',
+                    {'type': 'chat_message', 'message': serializer.data}
+                )
+        except Exception as e:
+            logger.warning(f"Failed to broadcast group chat message: {e}")
+
+        serializer = ServiceGroupChatMessageSerializer(message)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 

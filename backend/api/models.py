@@ -489,6 +489,25 @@ class PublicChatMessage(models.Model):
         ordering = ['created_at']
 
 
+class ServiceGroupChatMessage(models.Model):
+    """Private group chat messages for a service — only accepted participants can read/write."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='group_chat_messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_chat_messages')
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"[Group:{self.service_id}] {self.sender.email}: {self.body[:50]}"
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['service', 'created_at']),
+            models.Index(fields=['sender']),
+        ]
+
+
 class Comment(models.Model):
     """Comments on services with single-level threading (top-level + replies)"""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

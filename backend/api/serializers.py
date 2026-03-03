@@ -1225,6 +1225,26 @@ class PublicChatMessageSerializer(serializers.ModelSerializer):
         return obj.sender.avatar_url
 
 
+class ServiceGroupChatMessageSerializer(serializers.ModelSerializer):
+    """Serializer for private group chat messages (accepted participants only)."""
+    sender_id = serializers.UUIDField(source='sender.id', read_only=True)
+    sender_name = serializers.SerializerMethodField()
+    sender_avatar_url = serializers.SerializerMethodField()
+    body = serializers.CharField(max_length=5000)
+
+    class Meta:
+        from .models import ServiceGroupChatMessage
+        model = ServiceGroupChatMessage
+        fields = ['id', 'service', 'sender_id', 'sender_name', 'sender_avatar_url', 'body', 'created_at']
+        read_only_fields = ['id', 'service', 'sender_id', 'created_at']
+
+    def get_sender_name(self, obj):
+        return f"{obj.sender.first_name} {obj.sender.last_name}".strip()
+
+    def get_sender_avatar_url(self, obj):
+        return obj.sender.avatar_url
+
+
 # Comment Serializers
 @extend_schema_serializer(
     examples=[
