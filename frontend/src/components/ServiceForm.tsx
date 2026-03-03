@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Box, Flex, Grid, Input, Spinner, Stack, Text, Textarea,
 } from '@chakra-ui/react'
-import { FiX, FiPlus, FiImage, FiClock, FiMapPin, FiCalendar, FiTag } from 'react-icons/fi'
+import { FiX, FiPlus, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCircle, FiNavigation } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
 import { tagAPI } from '@/services/tagAPI'
@@ -22,23 +22,49 @@ import {
 
 // ─── Zod schema ───────────────────────────────────────────────────────────────
 
-const schema = z
-  .object({
-    title:            z.string().min(3, 'Title must be at least 3 characters').max(200),
-    description:      z.string().min(10, 'Description must be at least 10 characters').max(5000),
-    duration:         z.coerce.number().positive('Duration must be greater than 0').max(999),
-    location_type:    z.enum(['In-Person', 'Online']),
-    location_area:    z.string().optional(),
-    max_participants: z.coerce.number().int().positive('Must be at least 1').max(100),
-    schedule_type:    z.enum(['One-Time', 'Recurrent']),
-    schedule_details: z.string().max(500).optional(),
-  })
-  .refine(
-    (d) => d.location_type !== 'In-Person' || (d.location_area && d.location_area.trim().length > 0),
-    { message: 'Location area is required for in-person services', path: ['location_area'] },
-  )
+const schema = z.object({
+  title:            z.string().min(3, 'Title must be at least 3 characters').max(200),
+  description:      z.string().min(10, 'Description must be at least 10 characters').max(5000),
+  duration:         z.coerce.number().positive('Duration must be greater than 0').max(999),
+  location_type:    z.enum(['In-Person', 'Online']),
+  max_participants: z.coerce.number().int().positive('Must be at least 1').max(100),
+  schedule_type:    z.enum(['One-Time', 'Recurrent']),
+  schedule_details: z.string().max(500).optional(),
+})
 
 type FormValues = z.infer<typeof schema>
+
+// ─── Mapbox geocoding types ───────────────────────────────────────────────────
+
+interface GeoContext {
+  id: string    // e.g. "place.12345", "district.678", "region.90"
+  text: string
+}
+
+interface GeoFeature {
+  id: string
+  text: string
+  place_name: string
+  place_type?: string[]
+  center: [number, number]  // [lng, lat]
+  context?: GeoContext[]
+}
+
+/**
+ * Extract the district (ilçe) name from a Mapbox geocoding feature.
+ * Mapbox Turkey hierarchy: neighborhood → locality → place (ilçe) → district (il) → region → country
+ */
+function extractDistrict(f: GeoFeature): string {
+  const ctx = f.context ?? []
+  const place    = ctx.find(c => c.id.startsWith('place.'))
+  if (place) return place.text
+  const locality = ctx.find(c => c.id.startsWith('locality.'))
+  if (locality) return locality.text
+  if (f.place_type?.includes('place')) return f.text
+  return f.text
+}
+
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined
 
 // ─── Section label ────────────────────────────────────────────────────────────
 
@@ -103,7 +129,6 @@ function SegmentedControl<T extends string>({
         <Box
           key={opt.value}
           as="button"
-          type="button"
           flex={1} py="8px"
           borderRadius="8px"
           fontSize="13px"
@@ -126,6 +151,216 @@ function SegmentedControl<T extends string>({
   )
 }
 
+// ─── "Use my location" button ────────────────────────────────────────────────
+
+function UseMyLocationButton({
+  accent,
+  onLocated,
+}: {
+  accent: string
+  onLocated: (v: LocationValue) => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [err, setErr]         = useState<string | null>(null)
+
+  const handleClick = () => {
+    if (!navigator.geolocation) { setErr('Geolocation not supported'); return }
+    if (!MAPBOX_TOKEN) { setErr('Mapbox token not set'); return }
+    setLoading(true); setErr(null)
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords
+        try {
+          const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&types=address,neighborhood,locality,place&language=tr&limit=1`
+          const res  = await fetch(url)
+          const data = await res.json() as { features?: GeoFeature[] }
+          const f    = data.features?.[0]
+          const label = f ? extractDistrict(f) : `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+          onLocated({ label, lat, lng })
+        } catch {
+          onLocated({ label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, lat, lng })
+        } finally { setLoading(false) }
+      },
+      () => { setErr('Could not get your location'); setLoading(false) },
+      { enableHighAccuracy: true, timeout: 8000 },
+    )
+  }
+
+  return (
+    <Box>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={loading}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '5px',
+          fontSize: '12px', fontWeight: 600, color: accent,
+          background: 'none', border: 'none', cursor: loading ? 'not-allowed' : 'pointer',
+          opacity: loading ? 0.65 : 1, padding: 0,
+        }}
+      >
+        {loading
+          ? <><span style={{ display: 'inline-block', width: 12, height: 12, border: `2px solid ${accent}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} /> Locating…</>
+          : <><FiNavigation size={12} /> Use my location</>
+        }
+      </button>
+      {err && <Text fontSize="11px" color={RED} mt="2px">{err}</Text>}
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    </Box>
+  )
+}
+
+// ─── Address search (Mapbox Geocoding) ───────────────────────────────────────
+
+interface LocationValue {
+  label: string
+  lat: number
+  lng: number
+}
+
+function LocationSearch({
+  accent,
+  value,
+  onChange,
+  error,
+}: {
+  accent: string
+  value: LocationValue | null
+  onChange: (v: LocationValue | null) => void
+  error?: string
+}) {
+  const [query, setQuery]       = useState(value?.label ?? '')
+  const [results, setResults]   = useState<GeoFeature[]>([])
+  const [loading, setLoading]   = useState(false)
+  const [showDrop, setShowDrop] = useState(false)
+  const abortRef                = useRef<AbortController | null>(null)
+
+  // Sync internal query when value is set from outside (e.g. "Use my location")
+  useEffect(() => {
+    if (value?.label && value.label !== query) {
+      setQuery(value.label)
+      setResults([])
+      setShowDrop(false)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value?.label])
+
+  const search = useCallback(async (q: string) => {
+    if (!q.trim() || q.length < 2) { setResults([]); return }
+    if (!MAPBOX_TOKEN) return
+    abortRef.current?.abort()
+    abortRef.current = new AbortController()
+    setLoading(true)
+    try {
+      const url = [
+        'https://api.mapbox.com/geocoding/v5/mapbox.places/',
+        encodeURIComponent(q),
+        '.json?access_token=', MAPBOX_TOKEN,
+        '&country=TR&types=address,neighborhood,locality,place,district',
+        '&proximity=28.9784,41.0082',  // bias toward Istanbul
+        '&language=tr&limit=6',
+      ].join('')
+      const res  = await fetch(url, { signal: abortRef.current.signal })
+      const data = await res.json() as { features?: GeoFeature[] }
+      setResults(data.features ?? [])
+    } catch { /* aborted */ }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    if (value?.label === query) return   // already confirmed selection
+    const t = setTimeout(() => search(query), 350)
+    return () => clearTimeout(t)
+  }, [query, search, value?.label])
+
+  const handleSelect = (f: GeoFeature) => {
+    const [lng, lat] = f.center
+    const label = extractDistrict(f)   // store & display only the district name
+    setQuery(label)
+    setShowDrop(false)
+    setResults([])
+    onChange({ label, lat, lng })
+  }
+
+  const handleClear = () => {
+    setQuery('')
+    setResults([])
+    onChange(null)
+  }
+
+  const confirmed = value !== null && value.label === query
+
+  return (
+    <Box>
+      <Box position="relative">
+        <Flex
+          align="center" gap={2}
+          bg={WHITE}
+          border={`1px solid ${error ? RED : confirmed ? accent : GRAY200}`}
+          borderRadius="10px" px={3} overflow="hidden"
+          style={{ transition: 'border-color 0.15s, box-shadow 0.15s' }}
+          _focusWithin={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
+        >
+          {loading
+            ? <Spinner size="xs" color="gray.400" flexShrink={0} />
+            : confirmed
+              ? <FiCheckCircle size={13} color={accent} style={{ flexShrink: 0 }} />
+              : <FiSearch size={13} color={GRAY400} style={{ flexShrink: 0 }} />
+          }
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setShowDrop(true); if (value) onChange(null) }}
+            onFocus={() => { if (results.length > 0) setShowDrop(true) }}
+            onBlur={() => setTimeout(() => setShowDrop(false), 160)}
+            placeholder="Search address — e.g. Bağdat Caddesi, Kadıköy"
+            style={{
+              flex: 1, border: 'none', outline: 'none', background: 'transparent',
+              fontSize: '14px', color: GRAY800, padding: '10px 0',
+            }}
+          />
+          {query && (
+            <Box
+              as="button"
+              onClick={handleClear}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: GRAY400 }}
+            >
+              <FiX size={13} />
+            </Box>
+          )}
+        </Flex>
+
+        {showDrop && (results.length > 0 || loading) && (
+          <Box
+            position="absolute" zIndex={30} top="calc(100% + 6px)" left={0} right={0}
+            bg={WHITE} border={`1px solid ${GRAY200}`} borderRadius="12px"
+            boxShadow="0 8px 24px rgba(0,0,0,0.12)" maxH="256px" overflowY="auto"
+          >
+            {loading && <Flex justify="center" p={3}><Spinner size="sm" /></Flex>}
+            {!loading && results.map((f) => (
+              <Box
+                key={f.id} px={4} py="10px"
+                cursor="pointer"
+                onMouseDown={() => handleSelect(f)}
+                _hover={{ bg: GRAY50 }}
+              >
+                <Text fontSize="13px" fontWeight={600} color={GRAY800}>{f.text}</Text>
+                <Text fontSize="11px" color={GRAY400} mt="1px">{f.place_name}</Text>
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Box>
+
+      {confirmed && (
+        <Text fontSize="11px" color={accent} mt="5px" fontWeight={500}>
+          ✓ Location set — exact address will be hidden on the map (2 km privacy zone)
+        </Text>
+      )}
+      {error && <Text fontSize="11px" color={RED} mt="4px">{error}</Text>}
+    </Box>
+  )
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
@@ -141,6 +376,10 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
   const [showTagDrop, setShowTagDrop]       = useState(false)
   const tagAbortRef = useRef<AbortController | null>(null)
   const tagInputRef = useRef<HTMLInputElement>(null)
+
+  // Location (set by Mapbox geocoding)
+  const [locationValue, setLocationValue]   = useState<LocationValue | null>(null)
+  const [locationError, setLocationError]   = useState<string | undefined>()
 
   // Media
   const [mediaFiles, setMediaFiles]         = useState<File[]>([])
@@ -210,6 +449,14 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
   // ── Submit ───────────────────────────────────────────────────────────────
 
   const onSubmit = async (values: FormValues) => {
+    // Validate location for In-Person
+    if (values.location_type === 'In-Person') {
+      if (!locationValue) {
+        setLocationError('Please search and select a location')
+        return
+      }
+    }
+    setLocationError(undefined)
     setSubmitting(true)
     try {
       const fd = new FormData()
@@ -218,7 +465,13 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
       fd.append('type', type)
       fd.append('duration', String(values.duration))
       fd.append('location_type', values.location_type)
-      if (values.location_area) fd.append('location_area', values.location_area)
+      if (values.location_type === 'In-Person' && locationValue) {
+        // Truncate label to 100 chars (backend max_length) to avoid DRF validation errors
+        fd.append('location_area', locationValue.label.slice(0, 100))
+        // Round to 6 decimal places — backend DecimalField(max_digits=9, decimal_places=6)
+        fd.append('location_lat',  locationValue.lat.toFixed(6))
+        fd.append('location_lng',  locationValue.lng.toFixed(6))
+      }
       fd.append('max_participants', String(values.max_participants))
       fd.append('schedule_type', values.schedule_type)
       if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
@@ -228,7 +481,19 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
       toast.success(`${type} posted successfully!`)
       navigate(`/service-detail/${created.id}`)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Failed to post. Please try again.'
+      const data = (err as { response?: { data?: unknown } })?.response?.data
+      let msg = 'Failed to post. Please try again.'
+      if (data && typeof data === 'object') {
+        if ('detail' in data && typeof (data as Record<string, unknown>).detail === 'string') {
+          msg = (data as Record<string, string>).detail
+        } else {
+          // DRF returns field-level errors as { field: [msg, ...], ... }
+          const firstError = Object.values(data as Record<string, unknown>)
+            .flatMap((v) => (Array.isArray(v) ? v : [v]))
+            .find((v) => typeof v === 'string')
+          if (firstError) msg = String(firstError)
+        }
+      }
       toast.error(msg)
     } finally { setSubmitting(false) }
   }
@@ -313,17 +578,19 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
 
             {locType === 'In-Person' && (
               <Box>
-                <Label required>
-                  <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
-                  Location area
-                </Label>
-                <Input
-                  placeholder="e.g. Kadıköy, Istanbul"
-                  {...register('location_area')}
-                  style={inputStyle}
-                  _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
+                <Flex align="center" justify="space-between" mb="6px">
+                  <Label required>
+                    <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
+                    Address
+                  </Label>
+                  <UseMyLocationButton accent={accent} onLocated={(v) => { setLocationValue(v); setLocationError(undefined) }} />
+                </Flex>
+                <LocationSearch
+                  accent={accent}
+                  value={locationValue}
+                  onChange={(v) => { setLocationValue(v); if (v) setLocationError(undefined) }}
+                  error={locationError}
                 />
-                <ErrTxt msg={errors.location_area?.message} />
               </Box>
             )}
 
@@ -391,7 +658,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
                   >
                     #{tag.name}
                     <Box
-                      as="button" type="button"
+                      as="button"
                       onClick={() => setSelectedTags((p) => p.filter((t) => t.id !== tag.id))}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: accent }}
                     >
@@ -484,7 +751,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
                     <img src={src} alt={`Preview ${i + 1}`}
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                     <Box
-                      as="button" type="button"
+                      as="button"
                       position="absolute" top="5px" right="5px"
                       w="20px" h="20px" borderRadius="full"
                       bg="rgba(0,0,0,0.55)" color={WHITE}
@@ -524,36 +791,39 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
 
         {/* ── Actions ────────────────────────────────────────────────────── */}
         <Flex justify="flex-end" gap={3} pt={2} borderTop={`1px solid ${GRAY100}`}>
-          <Box
-            as="button" type="button"
-            px="20px" py="10px" borderRadius="10px"
-            bg={GRAY100} color={GRAY700}
-            fontSize="14px" fontWeight={600}
+          <button
+            type="button"
             onClick={() => navigate(-1)}
-            disabled={submitting}
-            style={{ border: 'none', cursor: submitting ? 'not-allowed' : 'pointer' }}
-            _hover={{ bg: GRAY200 }} transition="background 0.15s"
+            style={{
+              padding: '10px 20px', borderRadius: '10px',
+              background: GRAY100, color: GRAY700,
+              fontSize: '14px', fontWeight: 600,
+              border: 'none', cursor: submitting ? 'not-allowed' : 'pointer',
+              opacity: submitting ? 0.65 : 1,
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => { if (!submitting) e.currentTarget.style.background = GRAY200 }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = GRAY100 }}
           >
             Cancel
-          </Box>
-          <Box
-            as="button" type="submit"
-            px="24px" py="10px" borderRadius="10px"
-            bg={accent} color={WHITE}
-            fontSize="14px" fontWeight={700}
+          </button>
+          <button
+            type="submit"
             style={{
-              border: 'none',
-              cursor: submitting ? 'not-allowed' : 'pointer',
+              padding: '10px 24px', borderRadius: '10px',
+              background: accent, color: WHITE,
+              fontSize: '14px', fontWeight: 700,
+              border: 'none', cursor: submitting ? 'not-allowed' : 'pointer',
               opacity: submitting ? 0.75 : 1,
               transition: 'opacity 0.15s',
               display: 'flex', alignItems: 'center', gap: '7px',
             }}
-            onMouseEnter={(e) => { if (!submitting) (e.currentTarget as HTMLButtonElement).style.opacity = '0.88' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = submitting ? '0.75' : '1' }}
+            onMouseEnter={(e) => { if (!submitting) e.currentTarget.style.opacity = '0.88' }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = submitting ? '0.75' : '1' }}
           >
             {submitting && <Spinner size="xs" color="white" />}
             {submitting ? 'Posting…' : `Post ${type}`}
-          </Box>
+          </button>
         </Flex>
 
       </Stack>

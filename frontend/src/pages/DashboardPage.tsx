@@ -534,16 +534,19 @@ function Sidebar({
 
         {locationError && <Text fontSize="11px" color="red.500" mb={2}>{locationError}</Text>}
 
-        {locationEnabled && userLocation && (
+        {/* Distance slider — always visible once location is available */}
+        {userLocation && (
           <Box mb={4}>
             <Flex justify="space-between" mb="6px">
-              <Text fontSize="11px" color={GRAY600} fontWeight={500}>{distanceKm} km</Text>
-              <Text fontSize="11px" color={GRAY400}>{distanceLabel}</Text>
+              <Text fontSize="11px" color={GRAY600} fontWeight={500}>
+                {locationEnabled ? `${distanceKm} km` : 'Disabled'}
+              </Text>
+              <Text fontSize="11px" color={GRAY400}>{locationEnabled ? distanceLabel : '—'}</Text>
             </Flex>
             <input
               type="range" min={1} max={50} step={1} value={distanceKm}
-              onChange={(e) => setDistanceKm(Number(e.target.value))}
-              style={{ width: '100%', accentColor: GREEN, height: '4px', cursor: 'pointer' }}
+              onChange={(e) => { setDistanceKm(Number(e.target.value)); if (!locationEnabled) toggleLocation() }}
+              style={{ width: '100%', accentColor: GREEN, height: '4px', cursor: 'pointer', opacity: locationEnabled ? 1 : 0.5 }}
             />
             <Flex justify="space-between" mt="4px">
               <Text fontSize="9px" color={GRAY400}>1 km</Text>
@@ -617,11 +620,12 @@ const DashboardPage = () => {
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
   const [userLocation, setUserLocation]             = useState<{ lat: number; lng: number } | null>(null)
-  const [distanceKm, setDistanceKm]                 = useState(10)
-  const [debouncedDistance, setDebouncedDistance]   = useState(10)
+  const [distanceKm, setDistanceKm]                 = useState(50)
+  const [debouncedDistance, setDebouncedDistance]   = useState(50)
   const [locationEnabled, setLocationEnabled]       = useState(() => localStorage.getItem('locationEnabled') === 'true')
   const [locationLoading, setLocationLoading]       = useState(false)
   const [locationError, setLocationError]           = useState<string | null>(null)
+  const locationAutoRequested                       = useRef(false)
 
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
@@ -683,6 +687,16 @@ const DashboardPage = () => {
   }, [isAuthenticated, user?.id])
 
   usePolling(fetchHandshakes, [fetchHandshakes], { interval: POLL_INTERVAL, enabled: isAuthenticated })
+
+  // Auto-request location on mount if user previously allowed it
+  useEffect(() => {
+    if (locationAutoRequested.current) return
+    if (locationEnabled && !userLocation) {
+      locationAutoRequested.current = true
+      requestLocation()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const requestLocation = useCallback(() => {
     setLocationLoading(true); setLocationError(null)
@@ -886,6 +900,7 @@ const DashboardPage = () => {
                 services={services}
                 height="280px"
                 onServiceClick={(id) => navigate(`/service-detail/${id}`)}
+                userLocation={userLocation}
               />
             </Box>
           )}

@@ -307,8 +307,8 @@ const Navbar = () => {
                 fontSize="14px" fontWeight={500} color={GRAY700}
                 onClick={() => navigate('/login')}
                 style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = GRAY100 }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                onMouseEnter={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.background = GRAY100 }}
+                onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.background = 'transparent' }}
               >
                 Log In
               </Box>
@@ -318,8 +318,8 @@ const Navbar = () => {
                 fontSize="14px" fontWeight={600} color={WHITE}
                 onClick={() => navigate('/register')}
                 style={{ background: GREEN, border: 'none', cursor: 'pointer' }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.88' }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+                onMouseEnter={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '0.88' }}
+                onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '1' }}
               >
                 Sign Up
               </Box>

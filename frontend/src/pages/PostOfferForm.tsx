@@ -17,8 +17,8 @@ export default function PostOfferForm() {
           display="flex" alignItems="center" gap="6px"
           fontSize="13px" fontWeight={600} color={GRAY500} mb={4}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#1F2937' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = GRAY500 }}
+          onMouseEnter={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.color = '#1F2937' }}
+          onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.color = GRAY500 }}
         >
           <FiArrowLeft size={15} /> Back
         </Box>

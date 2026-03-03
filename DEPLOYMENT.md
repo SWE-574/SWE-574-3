@@ -174,8 +174,31 @@ docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
 | `REDIS_HOST` | `localhost` | | `redis` inside Docker |
 | `DISABLE_THROTTLING` | `False` | | Dev convenience only |
 | `VITE_API_URL` | `/api` | | Frontend build-time var |
+| `VITE_MAPBOX_TOKEN` | — | ✓ | Mapbox public token — see below |
 | `DOMAIN` | `localhost` | ✓ | Nginx `server_name`; set to your public domain |
 | `LETSENCRYPT_DIR` | `./nginx/certs` | ✓ | Path to `fullchain.pem` / `privkey.pem` |
+
+---
+
+## Mapbox Token Setup
+
+The interactive map (Dashboard, Home page) requires a Mapbox GL JS public token.
+
+1. Create a free account at [mapbox.com](https://account.mapbox.com/).
+2. Go to **Access Tokens** and copy your default public token (starts with `pk.`).
+3. Add it to `frontend/.env` (copy from `frontend/.env.example`):
+
+```dotenv
+VITE_MAPBOX_TOKEN=pk.eyJ1IjoiWU9VUl...
+```
+
+4. **Production** — restrict the token to your domain in the Mapbox dashboard:
+   - Open the token → **URL restrictions** → add `https://yourdomain.com`
+   - This prevents the token from being used on other sites.
+
+> Free tier: **50,000 map loads/month** — sufficient for development and demo.
+> If your project exceeds this, upgrade to a paid plan or switch to a
+> `maplibre-gl`-backed fork of `MapView` (no billing required).
 
 ---
 

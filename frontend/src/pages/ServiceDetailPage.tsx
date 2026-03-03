@@ -11,6 +11,7 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
+import { MapView } from '@/components/MapView'
 import type { Service } from '@/types'
 import type { Comment } from '@/services/commentAPI'
 import type { Handshake } from '@/services/handshakeAPI'
@@ -226,8 +227,8 @@ function ReportModal({ onClose, onSubmit, loading }: {
           </Box>
           <Box as="button" flex={1} py="10px" borderRadius="10px"
             bg={GRAY100} color={GRAY700} fontSize="14px" fontWeight={600}
-            onClick={onClose} disabled={loading}
-            style={{ border: 'none', cursor: 'pointer' }}
+            onClick={onClose}
+            style={{ border: 'none', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.65 : 1 }}
           >
             Cancel
           </Box>
@@ -462,8 +463,8 @@ export default function ServiceDetailPage() {
           fontSize="13px" fontWeight={600} color={GRAY500}
           mb={4} pb={0}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = GRAY800 }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = GRAY500 }}
+          onMouseEnter={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.color = GRAY800 }}
+          onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.color = GRAY500 }}
         >
           <FiArrowLeft size={15} /> Back to Browse
         </Box>
@@ -649,6 +650,26 @@ export default function ServiceDetailPage() {
                   </Box>
                 )}
 
+                {/* Location map — In-Person only */}
+                {service.location_type === 'In-Person' && (service.location_lat || service.location_lng) && (
+                  <Box mb={6}>
+                    <Flex align="center" gap={2} mb={3}>
+                      <FiMapPin size={13} color={GRAY400} />
+                      <Text fontSize="12px" fontWeight={700} color={GRAY400}
+                        style={{ textTransform: 'uppercase', letterSpacing: '0.07em' }}
+                      >
+                        Approximate Location
+                      </Text>
+                    </Flex>
+                    <Box borderRadius="14px" overflow="hidden" border={`1px solid ${GRAY200}`}>
+                      <MapView services={[service]} height="220px" />
+                    </Box>
+                    <Text fontSize="11px" color={GRAY400} mt="6px">
+                      Exact address is hidden — shown within a 2 km privacy zone.
+                    </Text>
+                  </Box>
+                )}
+
                 {/* Tags */}
                 {service.tags && service.tags.length > 0 && (
                   <Box>
@@ -831,8 +852,8 @@ export default function ServiceDetailPage() {
                       display="flex" alignItems="center" justifyContent="center" gap="6px"
                       onClick={() => navigate(myHandshake ? `/messages/${myHandshake.id}` : '/messages')}
                       style={{ border: 'none', cursor: 'pointer' }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.88' }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+                      onMouseEnter={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '0.88' }}
+                      onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '1' }}
                     >
                       <FiMessageSquare size={15} />
                       {myHandshake?.status === 'accepted' ? 'Open Chat' : 'View Chat (Pending)'}
@@ -877,8 +898,8 @@ export default function ServiceDetailPage() {
                       border: 'none', cursor: interestLoading ? 'not-allowed' : 'pointer',
                       opacity: interestLoading ? 0.7 : 1, transition: 'opacity 0.15s',
                     }}
-                    onMouseEnter={(e) => { if (!interestLoading) (e.currentTarget as HTMLButtonElement).style.opacity = '0.88' }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = interestLoading ? '0.7' : '1' }}
+                    onMouseEnter={(e) => { if (!interestLoading) (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '0.88' }}
+                    onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = interestLoading ? '0.7' : '1' }}
                   >
                     {interestLoading ? 'Processing…' : (isOffer ? 'Request this Service' : 'Offer to Help')}
                   </Box>
@@ -908,8 +929,8 @@ export default function ServiceDetailPage() {
                     color={alreadyReported ? GRAY300 : GRAY400}
                     style={{ background: 'none', border: 'none', cursor: alreadyReported ? 'not-allowed' : 'pointer', transition: 'color 0.15s' }}
                     onClick={() => { if (!alreadyReported) setShowReport(true) }}
-                    onMouseEnter={(e) => { if (!alreadyReported) (e.currentTarget as HTMLButtonElement).style.color = RED }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = alreadyReported ? GRAY300 : GRAY400 }}
+                    onMouseEnter={(e) => { if (!alreadyReported) (e.currentTarget as unknown as HTMLButtonElement).style.color = RED }}
+                    onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.color = alreadyReported ? GRAY300 : GRAY400 }}
                   >
                     <FiFlag size={12} />
                     {alreadyReported ? 'Already Reported' : 'Report this listing'}
