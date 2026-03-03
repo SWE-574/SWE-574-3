@@ -81,6 +81,7 @@ services:
       dockerfile: Dockerfile.prod
       args:
         - VITE_API_URL=/api
+        - VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN}
     expose:
       - "80"
     restart: unless-stopped
