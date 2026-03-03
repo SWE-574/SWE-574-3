@@ -17,13 +17,10 @@ import {
 import { useAuthStore } from '@/store/useAuthStore'
 
 import {
-  YELLOW, GREEN, GREEN_LT,
+  YELLOW, GREEN, GREEN_LT, RED, RED_LT,
   GRAY50, GRAY100, GRAY200, GRAY500, GRAY600, GRAY700, GRAY800, GRAY900,
   WHITE,
 } from '@/theme/tokens'
-const RED      = '#DC2626'
-const RED_LT   = '#FEF2F2'
-
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 function initials(user: { first_name?: string; last_name?: string; email?: string } | null) {
