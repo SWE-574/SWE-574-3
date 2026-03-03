@@ -1752,36 +1752,39 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             handshake.status = 'accepted'
             handshake.save()
 
-            # For One-Time services: auto-deny all other pending handshakes on
-            # this service now that a slot is accepted (capacity is now consumed).
-            if service.schedule_type == 'One-Time':
-                other_pending = Handshake.objects.filter(
-                    service=service,
-                    status='pending',
-                ).exclude(pk=handshake.pk)
-
-                denied_requesters = list(other_pending.values_list('requester_id', flat=True))
-                other_pending.update(status='denied')
-
-                for requester_id in denied_requesters:
-                    create_notification(
-                        user=User.objects.get(pk=requester_id),
-                        notification_type='handshake_denied',
-                        title='Request Not Accepted',
-                        message=f"Another user was selected for '{service.title}'. The slot is now filled.",
-                        service=service
-                    )
-                    invalidate_conversations(str(requester_id))
-
-            # Mark One-Time service as Agreed once all slots are filled.
+            # For One-Time services: check whether all slots are now filled.
+            # Only when capacity is reached do we deny remaining pending handshakes
+            # and transition the service to Agreed.
             # Recurrent services stay Active so new participants can always join.
             if service.schedule_type == 'One-Time':
                 accepted_count = Handshake.objects.filter(
                     service=service,
                     status__in=['accepted', 'completed', 'reported', 'paused'],
                 ).count()
-                if accepted_count >= service.max_participants and service.status == 'Active':
-                    Service.objects.filter(pk=service.pk).update(status='Agreed')
+
+                if accepted_count >= service.max_participants:
+                    # Capacity is now full — deny all remaining pending handshakes.
+                    other_pending = Handshake.objects.filter(
+                        service=service,
+                        status='pending',
+                    ).exclude(pk=handshake.pk)
+
+                    denied_requesters = list(other_pending.values_list('requester_id', flat=True))
+                    other_pending.update(status='denied')
+
+                    for requester_id in denied_requesters:
+                        create_notification(
+                            user=User.objects.get(pk=requester_id),
+                            notification_type='handshake_denied',
+                            title='Request Not Accepted',
+                            message=f"All slots for '{service.title}' are now filled.",
+                            service=service
+                        )
+                        invalidate_conversations(str(requester_id))
+
+                    # Mark service as Agreed so it is hidden from the public listing.
+                    if service.status == 'Active':
+                        Service.objects.filter(pk=service.pk).update(status='Agreed')
 
         invalidate_conversations(str(handshake.requester.id))
         invalidate_conversations(str(handshake.service.user.id))

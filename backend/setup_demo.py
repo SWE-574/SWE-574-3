@@ -512,14 +512,20 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
         handshake.updated_at = created_at_time + timedelta(hours=4)
         handshake.save()
 
-        # Mirror accept_handshake view logic: only One-Time services become Agreed.
-        # Recurrent services stay Active so new participants can always join.
+        # Mirror accept_handshake view logic:
+        # Only when all slots are filled do we deny remaining pending handshakes
+        # and transition the service to Agreed. Recurrent stays Active.
         if service.schedule_type == 'One-Time':
             accepted_count = Handshake.objects.filter(
                 service=service,
                 status__in=['accepted', 'completed', 'reported', 'paused'],
             ).count()
             if accepted_count >= service.max_participants and service.status == 'Active':
+                other_pending = Handshake.objects.filter(
+                    service=service,
+                    status='pending',
+                ).exclude(pk=handshake.pk)
+                other_pending.update(status='denied')
                 Service.objects.filter(pk=service.pk).update(status='Agreed')
                 service.refresh_from_db(fields=['status'])
         
