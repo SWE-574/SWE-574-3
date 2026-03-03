@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm, Controller, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import {
-  Box, Button, Field, Flex, Grid, Heading, Input, NativeSelect,
+  Box, Button, Field, Flex, Grid, Input, NativeSelect,
   Spinner, Stack, Text, Textarea, Badge, CloseButton, Image,
-  createListCollection,
 } from '@chakra-ui/react'
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
@@ -19,13 +18,13 @@ const schema = z
     title: z.string().min(3, 'Title must be at least 3 characters').max(200),
     description: z.string().min(10, 'Description must be at least 10 characters').max(5000),
     duration: z.coerce
-      .number({ invalid_type_error: 'Enter a valid number' })
+      .number()
       .positive('Duration must be greater than 0')
       .max(999, 'Duration too large'),
     location_type: z.enum(['In-Person', 'Online']),
     location_area: z.string().optional(),
     max_participants: z.coerce
-      .number({ invalid_type_error: 'Enter a valid number' })
+      .number()
       .int()
       .positive('Must be at least 1')
       .max(100),
@@ -71,7 +70,7 @@ export default function ServiceForm({ type }: ServiceFormProps) {
     watch,
     formState: { errors },
   } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: {
       location_type: 'Online',
       schedule_type: 'One-Time',
@@ -183,7 +182,7 @@ export default function ServiceForm({ type }: ServiceFormProps) {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <Box as="form" onSubmit={handleSubmit(onSubmit)} noValidate>
+    <form onSubmit={handleSubmit(onSubmit)} noValidate>
       <Stack gap={6}>
 
         {/* Title */}
@@ -430,15 +429,7 @@ export default function ServiceForm({ type }: ServiceFormProps) {
         </Flex>
 
       </Stack>
-    </Box>
+    </form>
   )
 }
 
-// Export schema and collection helper for reuse
-export { schema }
-export const locationTypeCollection = createListCollection({
-  items: [
-    { label: 'Online', value: 'Online' },
-    { label: 'In-Person', value: 'In-Person' },
-  ],
-})
