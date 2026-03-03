@@ -31,9 +31,21 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Audit dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
       - name: Lint
         working-directory: frontend
         run: npm run lint
+
+      - name: TypeScript type check
+        working-directory: frontend
+        run: npx tsc --noEmit -p tsconfig.app.json
+
+      - name: Run unit tests
+        working-directory: frontend
+        run: npm run test -- --run
 
       - name: Type-check & build
         working-directory: frontend

@@ -13,9 +13,29 @@ on:
     branches: [dev]
 
 jobs:
+  # ── 0. Dockerfile linting ────────────────────────────────────────────────────
+  lint-dockerfiles:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install hadolint
+        run: |
+          wget -q -O /usr/local/bin/hadolint \
+            https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
+          chmod +x /usr/local/bin/hadolint
+
+      - name: Lint Dockerfiles
+        run: |
+          hadolint --config .hadolint.yaml backend/Dockerfile
+          hadolint --config .hadolint.yaml backend/Dockerfile.prod
+          hadolint --config .hadolint.yaml frontend/Dockerfile
+          hadolint --config .hadolint.yaml frontend/Dockerfile.prod
+
   # ── 1. Infra stack (docker-compose.infra.yml) ────────────────────────────────
   infra:
     runs-on: ubuntu-latest
+    needs: lint-dockerfiles
     steps:
       - uses: actions/checkout@v4
 

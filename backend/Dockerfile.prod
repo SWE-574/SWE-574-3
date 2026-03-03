@@ -5,7 +5,7 @@ FROM python:3.11-slim as builder
 WORKDIR /build
 
 # Install build dependencies including GDAL for PostGIS/GeoDjango
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     postgresql-client \
     libpq-dev \
@@ -33,7 +33,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Install runtime dependencies including GDAL for GeoDjango
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     libpq-dev \
     curl \
