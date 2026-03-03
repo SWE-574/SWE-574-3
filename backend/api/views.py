@@ -1733,8 +1733,31 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
-        handshake.status = 'accepted'
-        handshake.save()
+        service = handshake.service
+        with transaction.atomic():
+            handshake.status = 'accepted'
+            handshake.save()
+
+            # For One-Time services: auto-deny all other pending handshakes on
+            # this service now that a slot is accepted (capacity is now consumed).
+            if service.schedule_type == 'One-Time':
+                other_pending = Handshake.objects.filter(
+                    service=service,
+                    status='pending',
+                ).exclude(pk=handshake.pk)
+
+                denied_requesters = list(other_pending.values_list('requester_id', flat=True))
+                other_pending.update(status='denied')
+
+                for requester_id in denied_requesters:
+                    create_notification(
+                        user=User.objects.get(pk=requester_id),
+                        notification_type='handshake_denied',
+                        title='Request Not Accepted',
+                        message=f"Another user was selected for '{service.title}'. The slot is now filled.",
+                        service=service
+                    )
+                    invalidate_conversations(str(requester_id))
 
         invalidate_conversations(str(handshake.requester.id))
         invalidate_conversations(str(handshake.service.user.id))
@@ -1743,9 +1766,9 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             user=handshake.requester,
             notification_type='handshake_accepted',
             title='Handshake Accepted',
-            message=f"Your interest in '{handshake.service.title}' has been accepted!",
+            message=f"Your interest in '{service.title}' has been accepted!",
             handshake=handshake,
-            service=handshake.service
+            service=service
         )
 
         serializer = self.get_serializer(handshake)

@@ -14,10 +14,27 @@ class HandshakeService:
 
     @staticmethod
     def _capacity_statuses(service: Service) -> list[str]:
-        """Handshake statuses that count toward max_participants capacity."""
+        """Handshake statuses that count toward max_participants capacity.
+
+        For One-Time services, 'pending' is intentionally excluded:
+        multiple users may express interest simultaneously and chat with
+        the provider. Only one is accepted; the rest are auto-denied on
+        acceptance. A slot is consumed when a handshake is accepted.
+        """
         if service.schedule_type == 'One-Time':
-            # For one-time services, a participant slot remains consumed even after completion
-            # (and during disputes) until the service lifecycle ends.
+            return ['accepted', 'completed', 'reported', 'paused']
+        # Recurrent: pending + accepted count (1 active session at a time)
+        return ['pending', 'accepted']
+
+    @staticmethod
+    def _existing_interest_statuses(service: Service) -> list[str]:
+        """Statuses that prevent the SAME user from expressing interest again.
+
+        Separate from capacity: a user with an existing pending request should
+        not be allowed to create a second one, even though pending doesn't
+        consume a capacity slot for One-Time services.
+        """
+        if service.schedule_type == 'One-Time':
             return ['pending', 'accepted', 'completed', 'reported', 'paused']
         return ['pending', 'accepted']
     
@@ -37,16 +54,10 @@ class HandshakeService:
         if service.user == user:
             return False, 'Cannot express interest in your own service'
         
-        # Check for existing handshake
-        # - One-Time: user shouldn't participate twice (completed/reported/paused still count as participation)
-        # - Recurrent: allow re-participation after completion/cancellation
-        existing_statuses = (
-            HandshakeService._capacity_statuses(service)
-            if service.schedule_type == 'One-Time'
-            else ['pending', 'accepted']
-        )
+        # Check for existing handshake (per-user duplicate prevention)
+        existing_statuses = HandshakeService._existing_interest_statuses(service)
         existing = Handshake.objects.filter(service=service, requester=user, status__in=existing_statuses).first()
-        
+
         if existing:
             return False, 'You have already expressed interest'
         
@@ -185,13 +196,9 @@ class HandshakeService:
     @staticmethod
     def _check_existing_handshake(service: Service, user: User) -> None:
         """Checks for an existing handshake that should block re-interest."""
-        existing_statuses = (
-            HandshakeService._capacity_statuses(service)
-            if service.schedule_type == 'One-Time'
-            else ['pending', 'accepted']
-        )
+        existing_statuses = HandshakeService._existing_interest_statuses(service)
         existing = Handshake.objects.filter(service=service, requester=user, status__in=existing_statuses).first()
-        
+
         if existing:
             raise ValueError('You have already expressed interest')
     
