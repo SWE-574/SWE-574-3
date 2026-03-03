@@ -797,7 +797,7 @@ export default function ServiceDetailPage() {
                                 bg={GREEN} color="white"
                                 fontSize="11px" fontWeight={600}
                                 style={{ border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigate('/messages') }}
+                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigate(`/messages/${h.id}`) }}
                               >
                                 Chat
                               </Box>
@@ -817,7 +817,7 @@ export default function ServiceDetailPage() {
                     bg="green.500"
                     color="white"
                     _hover={{ bg: 'green.600' }}
-                    onClick={() => navigate('/messages')}
+                    onClick={() => navigate(existingHandshake ? `/messages/${existingHandshake.id}` : '/messages')}
                   >
                     {existingHandshake?.status === 'accepted' ? 'Open Chat' : 'View Chat (Pending)'}
                   </Button>
@@ -825,6 +825,15 @@ export default function ServiceDetailPage() {
                     {existingHandshake?.status === 'accepted'
                       ? 'Interest accepted — you can chat now.'
                       : 'Waiting for provider to respond.'}
+                  </Text>
+                </Stack>
+              ) : service.schedule_type === 'One-Time' && service.status !== 'Active' ? (
+                <Stack gap={2}>
+                  <Button w="full" disabled bg="gray.200" color="gray.500" size="lg" cursor="not-allowed">
+                    Service {service.status}
+                  </Button>
+                  <Text fontSize="12px" color="gray.400" textAlign="center">
+                    This service is no longer accepting new requests.
                   </Text>
                 </Stack>
               ) : isFull ? (
