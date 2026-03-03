@@ -84,25 +84,40 @@ jobs:
         with:
           node-version: "20"
 
-      # ── 8. Cache node_modules ─────────────────────────────────────────────
-      - name: Cache node_modules
+      # ── 8. Remove Docker-owned node_modules (created as root) ─────────────
+      # The docker compose build bind-mounts ./frontend and installs packages
+      # as root inside the container. Those root-owned files block npm ci
+      # on the non-root runner. Removing them lets npm ci start fresh.
+      - name: Remove Docker-owned node_modules
+        run: sudo rm -rf frontend/node_modules
+
+      # ── 9. Cache npm packages ─────────────────────────────────────────────
+      - name: Cache npm packages
         uses: actions/cache@v4
         with:
-          path: frontend/node_modules
-          key: node-e2e-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: node-e2e-
+          path: ~/.npm
+          key: npm-e2e-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: npm-e2e-
 
-      # ── 9. Install JS dependencies (includes @playwright/test) ────────────
+      # ── 10. Install JS dependencies (includes @playwright/test) ───────────
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
 
-      # ── 10. Install Playwright browsers ───────────────────────────────────
+      # ── 11. Cache Playwright browsers ─────────────────────────────────────
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: playwright-
+
+      # ── 12. Install Playwright browsers ───────────────────────────────────
       - name: Install Playwright browsers
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
-      # ── 11. Run E2E tests ─────────────────────────────────────────────────
+      # ── 13. Run E2E tests ─────────────────────────────────────────────────
       - name: Run Playwright tests
         working-directory: frontend
         env:
@@ -110,7 +125,7 @@ jobs:
           CI: "true"
         run: npm run test:e2e
 
-      # ── 12. Upload HTML report (always, so failures are inspectable) ───────
+      # ── 14. Upload HTML report (always, so failures are inspectable) ───────
       - name: Upload Playwright HTML report
         if: always()
         uses: actions/upload-artifact@v4
@@ -119,7 +134,7 @@ jobs:
           path: frontend/tests/reports/playwright/
           retention-days: 14
 
-      # ── 13. Upload JUnit XML (for CI summary) ─────────────────────────────
+      # ── 15. Upload JUnit XML (for CI summary) ─────────────────────────────
       - name: Upload JUnit report
         if: always()
         uses: actions/upload-artifact@v4
@@ -128,7 +143,7 @@ jobs:
           path: frontend/tests/reports/playwright-junit.xml
           retention-days: 14
 
-      # ── 14. Collect docker logs on failure ────────────────────────────────
+      # ── 16. Collect docker logs on failure ────────────────────────────────
       - name: Dump docker logs on failure
         if: failure()
         run: |
@@ -136,7 +151,7 @@ jobs:
           docker compose logs --no-color --tail=100 frontend 2>&1 | head -200
           docker compose logs --no-color --tail=100 nginx    2>&1 | head -200
 
-      # ── 15. Tear down ─────────────────────────────────────────────────────
+      # ── 17. Tear down ─────────────────────────────────────────────────────
       - name: Tear down stack
         if: always()
         run: docker compose down -v
