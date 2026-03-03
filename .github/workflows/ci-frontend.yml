@@ -27,10 +27,6 @@ jobs:
           key: node-${{ hashFiles('frontend/package-lock.json') }}
           restore-keys: node-
 
-      - name: Validate required env vars
-        run: |
-          : "${GITHUB_TOKEN:?GITHUB_TOKEN is not set}"
-
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
