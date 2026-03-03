@@ -10,7 +10,7 @@ from datetime import timedelta
 from api.models import (
     Service, Tag, Handshake, ChatMessage, ReputationRep,
     Comment, NegativeRep, TransactionHistory, Badge, UserBadge,
-    ForumCategory, ForumTopic, ForumPost, ServiceMedia
+    ForumCategory, ForumTopic, ForumPost, ServiceMedia, ServiceGroupChatMessage
 )
 
 User = get_user_model()
@@ -109,6 +109,20 @@ class ChatMessageFactory(factory.django.DjangoModelFactory):
         model = ChatMessage
     
     handshake = factory.SubFactory(HandshakeFactory)
+    sender = factory.SubFactory(UserFactory)
+    body = factory.Faker('sentence')
+
+
+class ServiceGroupChatMessageFactory(factory.django.DjangoModelFactory):
+    """Factory for creating ServiceGroupChatMessage instances"""
+    class Meta:
+        model = ServiceGroupChatMessage
+
+    service = factory.SubFactory(
+        ServiceFactory,
+        schedule_type='One-Time',
+        max_participants=3,
+    )
     sender = factory.SubFactory(UserFactory)
     body = factory.Faker('sentence')
 

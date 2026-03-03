@@ -5,10 +5,11 @@ import pytest
 from rest_framework import status
 
 from api.tests.helpers.factories import (
-    UserFactory, ServiceFactory, HandshakeFactory, ChatMessageFactory
+    UserFactory, ServiceFactory, HandshakeFactory, ChatMessageFactory,
+    ServiceGroupChatMessageFactory,
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import ChatMessage, ChatRoom, PublicChatMessage
+from api.models import ChatMessage, ChatRoom, PublicChatMessage, ServiceGroupChatMessage
 
 
 @pytest.mark.django_db
@@ -144,3 +145,263 @@ class TestPublicChatViewSet:
             room=service.chat_room,
             body='Public question about this service'
         ).exists()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _group_service(owner=None):
+    """Return a One-Time group service owned by *owner* (or a new user)."""
+    return ServiceFactory(
+        user=owner or UserFactory(),
+        schedule_type='One-Time',
+        max_participants=3,
+        status='Active',
+    )
+
+
+def _accepted_handshake(service, requester=None):
+    """Return an accepted Handshake for *service*."""
+    return HandshakeFactory(
+        service=service,
+        requester=requester or UserFactory(),
+        status='accepted',
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestGroupChatViewSet:
+    """Integration tests for the private group chat endpoint.
+
+    Rules under test:
+    - Only One-Time services with max_participants > 1 may have a group chat.
+    - Access is limited to the service owner and users with an accepted handshake.
+    - GET returns the last 50 messages (oldest first).
+    - POST creates a message and returns 201.
+    - Empty or blank bodies are rejected with 400.
+    - Unauthenticated requests are rejected with 401.
+    """
+
+    # ── GET: message retrieval ────────────────────────────────────────────────
+
+    def test_owner_can_get_messages(self):
+        """Service owner can read the group chat."""
+        owner = UserFactory()
+        service = _group_service(owner)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['service_id'] == str(service.id)
+        assert 'messages' in response.data
+
+    def test_accepted_participant_can_get_messages(self):
+        """A user with an accepted handshake can read the group chat."""
+        service = _group_service()
+        participant = UserFactory()
+        _accepted_handshake(service, participant)
+        ServiceGroupChatMessageFactory(service=service)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data['messages']) == 1
+
+    def test_get_returns_messages_oldest_first(self):
+        """Messages are returned in ascending (oldest-first) order."""
+        service = _group_service()
+        owner = service.user
+        msgs = ServiceGroupChatMessageFactory.create_batch(3, service=service)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        ids = [m['id'] for m in response.data['messages']]
+        assert ids == sorted(ids, key=lambda i: [m['created_at'] for m in response.data['messages']][ids.index(i)])
+
+    def test_unrelated_user_cannot_get_messages(self):
+        """A user with no connection to the service is denied."""
+        service = _group_service()
+        outsider = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(outsider)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_pending_handshake_user_cannot_get_messages(self):
+        """A user with only a *pending* handshake is denied (must be accepted)."""
+        service = _group_service()
+        requester = UserFactory()
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_unauthenticated_get_returns_401(self):
+        """Unauthenticated requests are rejected."""
+        from rest_framework.test import APIClient
+        service = _group_service()
+
+        response = APIClient().get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_get_nonexistent_service_returns_404(self):
+        """Unknown service UUID returns 404."""
+        import uuid
+        owner = UserFactory()
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.get(f'/api/group-chat/{uuid.uuid4()}/')
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    # ── GET: eligibility guards ───────────────────────────────────────────────
+
+    def test_recurrent_service_is_not_eligible(self):
+        """Recurrent services do not have a group chat."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_single_participant_service_is_not_eligible(self):
+        """One-Time services with max_participants=1 do not have a group chat."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='One-Time', max_participants=1
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    # ── POST: sending messages ────────────────────────────────────────────────
+
+    def test_owner_can_send_message(self):
+        """Service owner can post a message to the group chat."""
+        owner = UserFactory()
+        service = _group_service(owner)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.post(
+            f'/api/group-chat/{service.id}/',
+            {'body': 'Welcome everyone!'},
+            format='json',
+        )
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ServiceGroupChatMessage.objects.filter(
+            service=service, body='Welcome everyone!'
+        ).exists()
+
+    def test_accepted_participant_can_send_message(self):
+        """A participant with an accepted handshake can post a message."""
+        service = _group_service()
+        participant = UserFactory()
+        _accepted_handshake(service, participant)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.post(
+            f'/api/group-chat/{service.id}/',
+            {'body': 'Hello group!'},
+            format='json',
+        )
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ServiceGroupChatMessage.objects.filter(
+            service=service, sender=participant, body='Hello group!'
+        ).exists()
+
+    def test_send_message_response_contains_expected_fields(self):
+        """POST response contains id, body, sender_id, sender_name, created_at."""
+        owner = UserFactory()
+        service = _group_service(owner)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.post(
+            f'/api/group-chat/{service.id}/',
+            {'body': 'Test message'},
+            format='json',
+        )
+        assert response.status_code == status.HTTP_201_CREATED
+        for field in ('id', 'body', 'sender_id', 'sender_name', 'created_at'):
+            assert field in response.data, f"Missing field: {field}"
+
+    def test_empty_body_returns_400(self):
+        """Empty message body is rejected."""
+        owner = UserFactory()
+        service = _group_service(owner)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.post(
+            f'/api/group-chat/{service.id}/',
+            {'body': '   '},
+            format='json',
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_missing_body_returns_400(self):
+        """Request with no body field is rejected."""
+        owner = UserFactory()
+        service = _group_service(owner)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.post(f'/api/group-chat/{service.id}/', {}, format='json')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_unrelated_user_cannot_send_message(self):
+        """A user with no connection to the service cannot post."""
+        service = _group_service()
+        outsider = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(outsider)
+
+        response = client.post(
+            f'/api/group-chat/{service.id}/',
+            {'body': 'Sneaky message'},
+            format='json',
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert not ServiceGroupChatMessage.objects.filter(service=service).exists()
+
+    def test_unauthenticated_post_returns_401(self):
+        """Unauthenticated POST is rejected."""
+        from rest_framework.test import APIClient
+        service = _group_service()
+
+        response = APIClient().post(
+            f'/api/group-chat/{service.id}/',
+            {'body': 'No auth'},
+            format='json',
+        )
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
