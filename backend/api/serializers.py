@@ -289,7 +289,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             'location_type', 'location_area', 'location_lat', 'location_lng',
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
-            'schedule_details', 'created_at', 'tags', 'tag_ids', 'tag_names', 'comment_count', 'hot_score',
+            'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'comment_count', 'hot_score',
             'is_visible', 'media', 'participant_count',
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible']

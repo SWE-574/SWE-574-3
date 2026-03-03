@@ -78,6 +78,20 @@ def calculate_hot_score(service: Service) -> float:
         return 0.0
     
     score = numerator / denominator
+
+    # "Filling the Gap" multiplier for Events (FR-EV-RANK):
+    # Events between 75% and 99% full get a 1.5× boost to surface them
+    # to potential joiners before they sell out.
+    if service.type == 'Event' and service.max_participants > 0:
+        from .models import Handshake as _Handshake
+        accepted_count = _Handshake.objects.filter(
+            service=service,
+            status__in=['accepted', 'checked_in'],
+        ).count()
+        capacity_ratio = accepted_count / service.max_participants
+        if 0.75 <= capacity_ratio < 1.0:
+            score *= 1.5
+
     return round(score, 6)
 
 
@@ -133,6 +147,17 @@ def calculate_hot_scores_batch(services) -> dict:
     for stat in comment_stats:
         comment_counts[stat['service_id']] = stat['count']
     
+    # Batch query for Event capacity ratios ("Filling the Gap" multiplier)
+    event_service_ids = [s.id for s in services if s.type == 'Event' and s.max_participants > 0]
+    event_accepted_counts: dict = {}
+    if event_service_ids:
+        from .models import Handshake as _Handshake
+        accepted_stats = _Handshake.objects.filter(
+            service_id__in=event_service_ids,
+            status__in=['accepted', 'checked_in'],
+        ).values('service_id').annotate(count=Count('id'))
+        event_accepted_counts = {row['service_id']: row['count'] for row in accepted_stats}
+
     # Calculate scores
     now = timezone.now()
     scores = {}
@@ -151,8 +176,17 @@ def calculate_hot_scores_batch(services) -> dict:
         denominator = base ** 1.5
         
         if denominator == 0:
-            scores[service.id] = 0.0
+            score = 0.0
         else:
-            scores[service.id] = round(numerator / denominator, 6)
+            score = numerator / denominator
+
+        # "Filling the Gap" multiplier for Events
+        if service.type == 'Event' and service.max_participants > 0:
+            accepted_count = event_accepted_counts.get(service.id, 0)
+            capacity_ratio = accepted_count / service.max_participants
+            if 0.75 <= capacity_ratio < 1.0:
+                score *= 1.5
+
+        scores[service.id] = round(score, 6)
     
     return scores

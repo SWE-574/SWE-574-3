@@ -14,6 +14,7 @@ const DashboardPage          = lazy(() => import('@/pages/DashboardPage'))
 const ServiceDetailPage      = lazy(() => import('@/pages/ServiceDetailPage'))
 const PostOfferForm          = lazy(() => import('@/pages/PostOfferForm'))
 const PostNeedForm           = lazy(() => import('@/pages/PostNeedForm'))
+const PostEventForm          = lazy(() => import('@/pages/PostEventForm'))
 const ChatPage               = lazy(() => import('@/pages/ChatPage'))
 const UserProfile            = lazy(() => import('@/pages/UserProfile'))
 const PublicProfile          = lazy(() => import('@/pages/PublicProfile'))
@@ -96,6 +97,10 @@ function App() {
           <Route
             path="/post-need"
             element={<ProtectedRoute><PostNeedForm /></ProtectedRoute>}
+          />
+          <Route
+            path="/post-event"
+            element={<ProtectedRoute><PostEventForm /></ProtectedRoute>}
           />
           <Route
             path="/messages"

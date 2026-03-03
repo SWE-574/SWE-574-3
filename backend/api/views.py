@@ -62,7 +62,8 @@ from .utils import (
     can_user_post_offer, provision_timebank, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification
 )
-from .services import HandshakeService
+from .services import HandshakeService, EventHandshakeService
+from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
@@ -845,15 +846,51 @@ class ServiceViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         # REQ-TB-003: Check if user can post offer (balance > 10 hours blocks new offers)
         from .utils import can_user_post_offer
-        
-        if request.data.get('type') == 'Offer':
+
+        service_type = request.data.get('type')
+
+        # --- Event-specific pre-creation checks ---
+        if service_type == 'Event':
+            # Block organizer-banned users
+            perm = IsNotOrganizerBanned()
+            if not perm.has_permission(request, self):
+                return create_error_response(
+                    perm.message,
+                    code=ErrorCodes.PERMISSION_DENIED,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                )
+            # Require a future scheduled_time
+            raw_time = request.data.get('scheduled_time')
+            if not raw_time:
+                return create_error_response(
+                    'Events require a scheduled_time.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            from .timezone_utils import validate_and_normalize_datetime, validate_future_datetime
+            parsed_time, parse_error = validate_and_normalize_datetime(raw_time)
+            if parse_error:
+                return create_error_response(
+                    parse_error,
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            future_error = validate_future_datetime(parsed_time)
+            if future_error:
+                return create_error_response(
+                    future_error,
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if service_type == 'Offer':
             if not can_user_post_offer(request.user):
                 return create_error_response(
                     'Cannot post new offers: TimeBank balance exceeds 10 hours. Please receive services to reduce your balance.',
                     code=ErrorCodes.INSUFFICIENT_BALANCE,
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
-        
+
         response = super().create(request, *args, **kwargs)
         invalidate_service_lists()
         
@@ -871,6 +908,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
         service = serializer.instance
         if service.user != self.request.user and getattr(self.request.user, 'role', None) != 'admin':
             raise PermissionDenied('Attempting to modify another user\'s service')
+
+        # Block edits to Event details once inside the 24-hour lockdown window.
+        # Non-Event services are completely unaffected by this guard.
+        if service.type == 'Event' and service.is_in_lockdown_window:
+            raise PermissionDenied(
+                'Cannot edit event details within 24 hours of the scheduled start time.'
+            )
 
         super().perform_update(serializer)
         invalidate_service_lists()
@@ -948,6 +992,62 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'is_visible': service.is_visible,
             'message': f'Service has been {action_text}'
         })
+
+    # ------------------------------------------------------------------
+    # Event lifecycle actions (additive — do not touch Offer/Need paths)
+    # ------------------------------------------------------------------
+
+    @action(detail=True, methods=['post'], url_path='complete-event',
+            permission_classes=[permissions.IsAuthenticated])
+    def complete_event(self, request, pk=None):
+        """Mark an Event as Completed (organizer only).
+
+        Transitions all 'accepted' handshakes to 'no_show' and applies
+        no-show bans where applicable.
+
+        POST /api/services/{id}/complete-event/
+        """
+        service = self.get_object()
+        try:
+            EventHandshakeService.complete_event(service, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = self.get_serializer(service)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='cancel-event',
+            permission_classes=[permissions.IsAuthenticated])
+    def cancel_event(self, request, pk=None):
+        """Cancel an Event (organizer only).
+
+        If cancelled inside the 24-hour lockdown window with active
+        participants, the organizer receives a 30-day creation ban.
+
+        POST /api/services/{id}/cancel-event/
+        """
+        service = self.get_object()
+        try:
+            EventHandshakeService.cancel_event(service, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = self.get_serializer(service)
+        return Response(serializer.data)
 
     @action(
         detail=True,
@@ -2084,6 +2184,106 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             )
 
         return Response({'status': 'success', 'report_id': str(report.id)}, status=201)
+
+    # ------------------------------------------------------------------
+    # Event-specific handshake actions (additive — Offer/Need untouched)
+    # ------------------------------------------------------------------
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path=r'services/(?P<service_id>[^/.]+)/join-event',
+        permission_classes=[permissions.IsAuthenticated, IsNotEventBanned],
+    )
+    def join_event(self, request, service_id=None):
+        """RSVP to an Event immediately (no initiate→approve flow, no credits).
+
+        POST /api/handshakes/services/{service_id}/join-event/
+        """
+        try:
+            service = Service.objects.select_related('user').get(
+                id=service_id, type='Event', status='Active'
+            )
+        except Service.DoesNotExist:
+            return create_error_response(
+                'Event not found or not active.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            handshake = EventHandshakeService.join_event(service, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            msg = str(e)
+            if 'full' in msg:
+                code = ErrorCodes.INVALID_STATE
+            elif 'already joined' in msg:
+                code = ErrorCodes.ALREADY_EXISTS
+            else:
+                code = ErrorCodes.VALIDATION_ERROR
+            return create_error_response(msg, code=code,
+                                         status_code=status.HTTP_400_BAD_REQUEST)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='leave-event',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def leave_event(self, request, pk=None):
+        """Participant cancels their own Event RSVP (before lockdown window).
+
+        POST /api/handshakes/{id}/leave-event/
+        """
+        handshake = self.get_object()
+        try:
+            EventHandshakeService.leave_event(handshake, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='checkin',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def checkin(self, request, pk=None):
+        """Participant checks in to an Event during the lockdown window.
+
+        POST /api/handshakes/{id}/checkin/
+        """
+        handshake = self.get_object()
+        try:
+            EventHandshakeService.checkin(handshake, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
+
 
 class ChatViewSet(viewsets.ViewSet):
     """

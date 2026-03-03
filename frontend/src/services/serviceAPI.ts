@@ -6,7 +6,7 @@ export interface ServiceListParams {
   lng?: number
   distance?: number
   search?: string
-  type?: 'Offer' | 'Need'
+  type?: 'Offer' | 'Need' | 'Event'
   status?: string
   tags?: string[]
   page?: number
@@ -77,5 +77,15 @@ export const serviceAPI = {
       { issue_type: issueType, description },
       { signal },
     )
+  },
+
+  // ─── Event actions ────────────────────────────────────────────────────────
+
+  completeEvent: async (serviceId: string): Promise<void> => {
+    await apiClient.post(`/services/${serviceId}/complete-event/`, {})
+  },
+
+  cancelEvent: async (serviceId: string): Promise<void> => {
+    await apiClient.post(`/services/${serviceId}/cancel-event/`, {})
   },
 }

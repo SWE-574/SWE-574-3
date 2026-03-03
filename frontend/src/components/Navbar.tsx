@@ -216,6 +216,7 @@ const Navbar = () => {
                 >
                   <DropdownItem onClick={() => navigate('/post-offer')} icon={<FiPlusCircle size={14} />}>Offer a Service</DropdownItem>
                   <DropdownItem onClick={() => navigate('/post-need')} icon={<FiPlusCircle size={14} />}>Request a Service</DropdownItem>
+                  <DropdownItem onClick={() => navigate('/post-event')} icon={<FiPlusCircle size={14} />}>Create an Event</DropdownItem>
                 </Dropdown>
               </Box>
 
@@ -399,6 +400,15 @@ const Navbar = () => {
                 onClick={() => { navigate('/post-need'); setMobileOpen(false) }}
               >
                 <FiLayers size={15} /> Need
+              </Box>
+              <Box
+                as="button" flex={1} py="10px" borderRadius="10px"
+                style={{ background: '#FFFBEB', color: '#D97706', border: '1px solid #FDE68A' }}
+                fontSize="14px" fontWeight={700}
+                display="flex" alignItems="center" justifyContent="center" gap="6px"
+                onClick={() => { navigate('/post-event'); setMobileOpen(false) }}
+              >
+                <FiPlusCircle size={15} /> Event
               </Box>
             </Flex>
           </Box>

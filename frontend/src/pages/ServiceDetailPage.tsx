@@ -12,6 +12,11 @@ import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { MapView } from '@/components/MapView'
+import EventRosterModal from '@/components/EventRosterModal'
+import {
+  isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
+  spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
+} from '@/utils/eventUtils'
 import type { Service } from '@/types'
 import type { Comment } from '@/services/commentAPI'
 import type { Handshake } from '@/services/handshakeAPI'
@@ -28,13 +33,15 @@ import {
 // ─── Handshake badge config ───────────────────────────────────────────────────
 
 const HS_BADGE: Record<Handshake['status'], { label: string; bg: string; color: string }> = {
-  pending:   { label: 'Pending',   bg: '#fef9c3', color: '#854d0e' },
-  accepted:  { label: 'Accepted',  bg: '#dcfce7', color: '#166534' },
-  completed: { label: 'Completed', bg: '#d1fae5', color: '#065f46' },
-  denied:    { label: 'Declined',  bg: '#fee2e2', color: '#991b1b' },
-  cancelled: { label: 'Cancelled', bg: '#f3f4f6', color: '#6b7280' },
-  reported:  { label: 'Reported',  bg: '#fee2e2', color: '#991b1b' },
-  paused:    { label: 'Paused',    bg: '#e0f2fe', color: '#0369a1' },
+  pending:    { label: 'Pending',    bg: '#fef9c3', color: '#854d0e' },
+  accepted:   { label: 'Accepted',   bg: '#dcfce7', color: '#166534' },
+  completed:  { label: 'Completed',  bg: '#d1fae5', color: '#065f46' },
+  denied:     { label: 'Declined',   bg: '#fee2e2', color: '#991b1b' },
+  cancelled:  { label: 'Cancelled',  bg: '#f3f4f6', color: '#6b7280' },
+  reported:   { label: 'Reported',   bg: '#fee2e2', color: '#991b1b' },
+  paused:     { label: 'Paused',     bg: '#e0f2fe', color: '#0369a1' },
+  checked_in: { label: 'Checked In', bg: '#d1fae5', color: '#065f46' },
+  no_show:    { label: 'No-Show',    bg: '#fee2e2', color: '#991b1b' },
 }
 
 // ─── Report options ───────────────────────────────────────────────────────────
@@ -65,6 +72,7 @@ const CARD_GRADIENTS: Record<string, [string, string]> = {
 }
 
 function pickGradient(service: Service): [string, string] {
+  if (service.type === 'Event') return ['#D97706', '#B45309']
   if (service.type === 'Need') return CARD_GRADIENTS.need
   const txt = (service.title + ' ' + service.tags?.map((t) => t.name).join(' ')).toLowerCase()
   if (/music|guitar|piano|drum|sing/.test(txt))   return CARD_GRADIENTS.music
@@ -354,6 +362,14 @@ export default function ServiceDetailPage() {
   const [alreadyReported, setAlreadyReported] = useState(false)
   const [imgIdx, setImgIdx]             = useState(0)
 
+  // ─── Event-specific state ────────────────────────────────────────────────────────────
+  const [joinLoading, setJoinLoading]       = useState(false)
+  const [leaveLoading, setLeaveLoading]     = useState(false)
+  const [checkinLoading, setCheckinLoading] = useState(false)
+  const [cancelLoading, setCancelLoading]   = useState(false)
+  const [showRoster, setShowRoster]         = useState(false)
+  const [completing, setCompleting]         = useState(false)
+
   useEffect(() => {
     if (!id) return
     const ctrl = new AbortController()
@@ -397,6 +413,15 @@ export default function ServiceDetailPage() {
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
 
+  // Event-specific derived values
+  const myEventHandshake = isEvent
+    ? handshakes.find((h) =>
+        exId(h.service) === service?.id &&
+        exId(h.requester) === user?.id &&
+        ['accepted', 'checked_in', 'no_show'].includes(h.status)
+      )
+    : undefined
+
   const handleExpressInterest = async () => {
     if (!service) return
     if (!isAuthenticated) { navigate('/login'); return }
@@ -427,6 +452,82 @@ export default function ServiceDetailPage() {
     finally { setReportLoading(false) }
   }
 
+  // ─── Event Handlers ─────────────────────────────────────────────────────────────────
+
+  const handleJoinEvent = async () => {
+    if (!service || !isAuthenticated) { navigate('/login'); return }
+    setJoinLoading(true)
+    try {
+      await handshakeAPI.joinEvent(service.id)
+      toast.success('You\'ve joined the event!')
+      setHandshakes(await handshakeAPI.list())
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail ?? 'Could not join event.')
+    } finally { setJoinLoading(false) }
+  }
+
+  const handleLeaveEvent = async () => {
+    if (!myEventHandshake) return
+    setLeaveLoading(true)
+    try {
+      await handshakeAPI.leaveEvent(myEventHandshake.id)
+      toast.success('You have left the event.')
+      setHandshakes(await handshakeAPI.list())
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail ?? 'Could not leave event.')
+    } finally { setLeaveLoading(false) }
+  }
+
+  const handleCheckin = async () => {
+    if (!myEventHandshake) return
+    setCheckinLoading(true)
+    try {
+      await handshakeAPI.checkin(myEventHandshake.id)
+      toast.success('Checked in! See you there.')
+      setHandshakes(await handshakeAPI.list())
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail ?? 'Could not check in.')
+    } finally { setCheckinLoading(false) }
+  }
+
+  const handleCompleteEvent = async () => {
+    if (!service) return
+    setCompleting(true)
+    try {
+      await serviceAPI.completeEvent(service.id)
+      toast.success('Event marked complete!')
+      setShowRoster(false)
+      const updated = await serviceAPI.get(service.id)
+      setService(updated)
+      setHandshakes(await handshakeAPI.list())
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail ?? 'Could not complete event.')
+    } finally { setCompleting(false) }
+  }
+
+  const handleCancelEvent = async () => {
+    if (!service) return
+    const inLockdown = isWithinLockdownWindow(service.scheduled_time)
+    const hasParticipants = (service.participant_count ?? 0) > 0
+    const confirmMsg = inLockdown && hasParticipants
+      ? 'You are in the 24h lockdown window. Cancelling now will apply a 30-day event creation ban. Continue?'
+      : 'Are you sure you want to cancel this event? All participants will be notified.'
+    if (!window.confirm(confirmMsg)) return
+    setCancelLoading(true)
+    try {
+      await serviceAPI.cancelEvent(service.id)
+      toast.success('Event cancelled.')
+      navigate('/dashboard')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail ?? 'Could not cancel event.')
+    } finally { setCancelLoading(false) }
+  }
+
   if (loading) return <LoadingSkeleton />
 
   if (error || !service) {
@@ -448,6 +549,7 @@ export default function ServiceDetailPage() {
 
   const gradient      = pickGradient(service)
   const isOffer       = service.type === 'Offer'
+  const isEvent       = service.type === 'Event'
   const images        = service.media?.filter((m) => (m.media_type ?? 'image') === 'image') ?? []
   const fillPct       = service.max_participants > 1
     ? Math.min(100, ((service.participant_count ?? 0) / service.max_participants) * 100) : 0
@@ -506,9 +608,9 @@ export default function ServiceDetailPage() {
                       bg="rgba(255,255,255,0.2)" color={WHITE}
                       style={{ backdropFilter: 'blur(8px)' }}
                     >
-                      {isOffer ? 'Offer' : 'Want'}
+                      {isOffer ? 'Offer' : isEvent ? 'Event' : 'Want'}
                     </Box>
-                    {isRecurr && (
+                    {isRecurr && !isEvent && (
                       <Box px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
                         bg="rgba(255,255,255,0.15)" color={WHITE}
                         display="flex" alignItems="center" gap="4px"
@@ -571,12 +673,29 @@ export default function ServiceDetailPage() {
 
                 {/* Info tiles */}
                 <Grid templateColumns={{ base: '1fr 1fr', md: 'repeat(4, 1fr)' }} gap={3} mb={6}>
-                  <InfoTile icon={<FiClock size={15} />} label="Duration" value={fmtDuration(service.duration)} />
-                  <InfoTile
-                    icon={<FiCalendar size={15} />} label="Schedule"
-                    value={`${service.schedule_type}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`}
-                    accentBg={AMBER_LT} accentColor={AMBER}
-                  />
+                  {isEvent ? (
+                    <>
+                      <InfoTile
+                        icon={<FiCalendar size={15} />} label="Date & Time"
+                        value={formatEventDateTime(service.scheduled_time)}
+                        accentBg={AMBER_LT} accentColor={AMBER}
+                      />
+                      <InfoTile
+                        icon={<FiClock size={15} />} label="Time Until"
+                        value={isFutureEvent(service.scheduled_time) ? timeUntilEvent(service.scheduled_time) : 'Event started'}
+                        accentBg={AMBER_LT} accentColor={AMBER}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <InfoTile icon={<FiClock size={15} />} label="Duration" value={fmtDuration(service.duration)} />
+                      <InfoTile
+                        icon={<FiCalendar size={15} />} label="Schedule"
+                        value={`${service.schedule_type}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`}
+                        accentBg={AMBER_LT} accentColor={AMBER}
+                      />
+                    </>
+                  )}
                   <InfoTile
                     icon={service.location_type === 'Online' ? <FiMonitor size={15} /> : <FiMapPin size={15} />}
                     label="Location"
@@ -585,9 +704,11 @@ export default function ServiceDetailPage() {
                   />
                   <InfoTile
                     icon={<FiUsers size={15} />}
-                    label={service.max_participants > 1 ? 'Slots' : 'Participants'}
+                    label={isEvent ? 'Spots' : service.max_participants > 1 ? 'Slots' : 'Participants'}
                     value={service.max_participants > 1
-                      ? `${service.participant_count ?? 0}/${service.max_participants} filled`
+                      ? isEvent
+                        ? `${spotsLeft(service.max_participants, service.participant_count ?? 0)} left of ${service.max_participants}`
+                        : `${service.participant_count ?? 0}/${service.max_participants} filled`
                       : String(service.max_participants)
                     }
                     accentBg="#F3E8FF" accentColor="#7C3AED"
@@ -596,7 +717,14 @@ export default function ServiceDetailPage() {
 
                 {/* Slot progress bar */}
                 {service.max_participants > 1 && (
-                  <Box mb={6}>
+                  <Box mb={6} border={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? `1px solid ${AMBER}60` : 'none'}
+                    borderRadius={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? '12px' : 'none'}
+                    p={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? 3 : 0}
+                    bg={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? AMBER_LT : 'transparent'}
+                  >
+                    {isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) && (
+                      <Text fontSize="11px" fontWeight={700} color={AMBER} mb={2}>⚡ Last spots — hurry!</Text>
+                    )}
                     <Flex justify="space-between" mb={2}>
                       <Text fontSize="12px" color={GRAY500} fontWeight={500}>
                         {service.participant_count ?? 0} of {service.max_participants} slots filled
@@ -607,7 +735,7 @@ export default function ServiceDetailPage() {
                     </Flex>
                     <Box bg={GRAY100} borderRadius="full" h="7px" overflow="hidden">
                       <Box h="full" borderRadius="full"
-                        bg={fillPct >= 100 ? '#16A34A' : isOffer ? GREEN : BLUE}
+                        bg={fillPct >= 100 ? '#16A34A' : isEvent ? AMBER : isOffer ? GREEN : BLUE}
                         style={{ width: `${fillPct}%`, transition: 'width 0.4s ease' }}
                       />
                     </Box>
@@ -710,16 +838,16 @@ export default function ServiceDetailPage() {
               _hover={provId ? { borderColor: GRAY300, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' } : {}}
             >
               {/* Thin colored top strip */}
-              <Box h="4px" bg={isOffer ? GREEN : BLUE} />
+              <Box h="4px" bg={isEvent ? AMBER : isOffer ? GREEN : BLUE} />
               <Box p={5}>
                 <Flex justify="space-between" align="center" mb={4}>
                   <Text fontSize="12px" fontWeight={700} color={GRAY400}
                     style={{ textTransform: 'uppercase', letterSpacing: '0.07em' }}
                   >
-                    {isOffer ? 'Service Provider' : 'Posted by'}
+                    {isOffer ? 'Service Provider' : isEvent ? 'Event Organizer' : 'Posted by'}
                   </Text>
                   {provId && (
-                    <Text fontSize="12px" color={isOffer ? GREEN : BLUE} fontWeight={600}>
+                    <Text fontSize="12px" color={isEvent ? AMBER : isOffer ? GREEN : BLUE} fontWeight={600}>
                       View Profile →
                     </Text>
                   )}
@@ -767,175 +895,367 @@ export default function ServiceDetailPage() {
             <Box bg={WHITE} borderRadius="16px" border={`1px solid ${GRAY200}`} p={5}
               boxShadow="0 2px 8px rgba(0,0,0,0.04)"
             >
-              {isOwn ? (
-                <Stack gap={4}>
-                  <Flex align="center" justify="space-between">
-                    <Text fontSize="13px" fontWeight={700} color={GRAY800}>
-                      {service.max_participants > 1 ? 'Participants' : 'Incoming Requests'}
-                    </Text>
-                    {incoming.filter((h) => ['pending', 'accepted'].includes(h.status)).length > 0 && (
+              {isEvent ? (
+                /* ── EVENT ACTIONS ─────────────────────────────────────── */
+                isOwn ? (
+                  /* Organizer view */
+                  <Stack gap={4}>
+                    <Flex align="center" justify="space-between">
+                      <Text fontSize="13px" fontWeight={700} color={GRAY800}>Participants</Text>
                       <Box px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
-                        bg={incoming.some((h) => h.status === 'pending') ? '#f97316' : '#10B981'}
-                        color={WHITE}
+                        bg={AMBER_LT} color={AMBER}
                       >
-                        {incoming.filter((h) => ['pending', 'accepted'].includes(h.status)).length} active
+                        {service.participant_count ?? 0} / {service.max_participants}
                       </Box>
-                    )}
-                  </Flex>
+                    </Flex>
 
-                  {service.max_participants > 1 && (
-                    <Box>
-                      <Flex justify="space-between" mb={2}>
-                        <Text fontSize="11px" color={GRAY500}>{service.participant_count ?? 0}/{service.max_participants} slots</Text>
-                        {isRecurr && (
-                          <Flex align="center" gap={1} fontSize="11px" color="#7C3AED">
-                            <FiRefreshCw size={9} /><Text>Recurrent</Text>
-                          </Flex>
-                        )}
-                      </Flex>
+                    {service.max_participants > 1 && (
                       <Box bg={GRAY100} borderRadius="full" h="5px" overflow="hidden">
-                        <Box h="full" borderRadius="full" bg={fillPct >= 100 ? '#10B981' : '#f97316'}
+                        <Box h="full" borderRadius="full" bg={AMBER}
                           style={{ width: `${fillPct}%`, transition: 'width 0.3s' }} />
                       </Box>
-                    </Box>
-                  )}
+                    )}
 
-                  {incoming.length === 0 ? (
-                    <Text fontSize="13px" color={GRAY400} textAlign="center" py={3}>No requests yet.</Text>
-                  ) : (
-                    <Stack gap={2}>
-                      {incoming.map((h) => {
-                        const cfg    = HS_BADGE[h.status] ?? { label: h.status, bg: GRAY100, color: GRAY500 }
-                        const active = ['pending', 'accepted'].includes(h.status)
-                        return (
-                          <Flex key={h.id} align="center" justify="space-between"
-                            p={3} bg={GRAY50} borderRadius="10px" gap={2}
-                            opacity={active ? 1 : 0.6}
-                          >
-                            <Box flex={1} minW={0}>
+                    {incoming.length === 0 ? (
+                      <Text fontSize="13px" color={GRAY400} textAlign="center" py={3}>No participants yet.</Text>
+                    ) : (
+                      <Stack gap={2} maxH="200px" overflowY="auto">
+                        {incoming.map((h) => {
+                          const cfg = HS_BADGE[h.status] ?? { label: h.status, bg: GRAY100, color: GRAY500 }
+                          return (
+                            <Flex key={h.id} align="center" justify="space-between"
+                              p="10px" bg={GRAY50} borderRadius="9px" gap={2}
+                            >
                               <Text fontSize="13px" fontWeight={600} color={GRAY800}
-                                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                               >
                                 {h.requester_name}
                               </Text>
-                              <Text fontSize="11px" color={GRAY400}>
-                                {new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                              </Text>
-                            </Box>
-                            <Flex align="center" gap={2} flexShrink={0}>
                               <Box px="7px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700}
-                                style={{ background: cfg.bg, color: cfg.color }}
+                                style={{ background: cfg.bg, color: cfg.color, flexShrink: 0 }}
                               >
                                 {cfg.label}
                               </Box>
-                              {active && (
-                                <Box as="button" px="10px" py="5px" borderRadius="7px"
-                                  bg={GREEN} color={WHITE} fontSize="11px" fontWeight={700}
-                                  style={{ border: 'none', cursor: 'pointer' }}
-                                  onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigate(`/messages/${h.id}`) }}
-                                >
-                                  Chat
-                                </Box>
-                              )}
                             </Flex>
-                          </Flex>
-                        )
-                      })}
-                    </Stack>
-                  )}
-                </Stack>
-              ) : isAuthenticated ? (
-                hasInterest ? (
-                  <Stack gap={3}>
-                    <Box as="button" w="full" py="12px" borderRadius="11px"
+                          )
+                        })}
+                      </Stack>
+                    )}
+
+                    <Box as="button" w="full" py="11px" borderRadius="10px"
                       bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
-                      display="flex" alignItems="center" justifyContent="center" gap="6px"
-                      onClick={() => navigate(myHandshake ? `/messages/${myHandshake.id}` : '/messages')}
+                      display="flex" alignItems="center" justifyContent="center" gap="7px"
+                      onClick={() => setShowRoster(true)}
                       style={{ border: 'none', cursor: 'pointer' }}
-                      onMouseEnter={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '0.88' }}
-                      onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '1' }}
                     >
-                      <FiMessageSquare size={15} />
-                      {myHandshake?.status === 'accepted' ? 'Open Chat' : 'View Chat (Pending)'}
+                      <FiCheckCircle size={14} /> Complete Event
                     </Box>
-                    <Text fontSize="12px" color={GRAY500} textAlign="center">
-                      {myHandshake?.status === 'accepted'
-                        ? 'Interest accepted — you can chat now.'
-                        : 'Waiting for provider to respond.'}
-                    </Text>
-                  </Stack>
-                ) : (service.schedule_type === 'One-Time' && service.status !== 'Active') ? (
-                  <Stack gap={2}>
-                    <Box w="full" py="12px" borderRadius="11px"
-                      bg={GRAY100} color={GRAY400} fontSize="14px" fontWeight={700}
-                      textAlign="center"
+
+                    {isWithinLockdownWindow(service.scheduled_time) && (
+                      <Box bg={AMBER_LT} border={`1px solid ${AMBER}40`} borderRadius="10px" p={3}>
+                        <Text fontSize="12px" color="#92400E" fontWeight={600}>⚠ Lockdown window active</Text>
+                        <Text fontSize="11px" color="#92400E" mt="2px">
+                          Cancelling now will apply a 30-day event creation ban.
+                        </Text>
+                      </Box>
+                    )}
+
+                    <Box as="button" w="full" py="10px" borderRadius="10px"
+                      bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
+                      display="flex" alignItems="center" justifyContent="center" gap="6px"
+                      onClick={handleCancelEvent}
+                      style={{ border: `1px solid ${RED}30`, cursor: cancelLoading ? 'not-allowed' : 'pointer', opacity: cancelLoading ? 0.65 : 1 }}
                     >
-                      Service {service.status}
+                      {cancelLoading ? 'Cancelling…' : 'Cancel Event'}
                     </Box>
-                    <Text fontSize="12px" color={GRAY400} textAlign="center">No longer accepting new requests.</Text>
                   </Stack>
-                ) : isFull ? (
-                  <Stack gap={2}>
-                    <Box w="full" py="12px" borderRadius="11px"
-                      bg={GRAY100} color={GRAY400} fontSize="14px" fontWeight={700}
-                      textAlign="center"
+                ) : isAuthenticated ? (
+                  isEventBanned(user?.is_event_banned_until) ? (
+                    /* Banned participant */
+                    <Stack gap={3}>
+                      <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}>
+                        <Text fontSize="13px" fontWeight={700} color={RED}>Participation Suspended</Text>
+                        <Text fontSize="12px" color="#991B1B" mt="3px">
+                          You have 3 no-shows. You can join events again after{' '}
+                          <strong>{formatBanExpiry(user?.is_event_banned_until)}</strong>.
+                        </Text>
+                      </Box>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'checked_in' ? (
+                    /* Already checked in */
+                    <Stack gap={3}>
+                      <Box bg={GREEN_LT} borderRadius="12px" p={4} border={`1px solid ${GREEN}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiCheckCircle size={20} color={GREEN} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={GREEN}>You're checked in!</Text>
+                          <Text fontSize="12px" color="#166534" mt="2px">
+                            Attendance confirmed. See you at the event!
+                          </Text>
+                        </Box>
+                      </Box>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'accepted' ? (
+                    /* Joined — show leave or check-in based on lockdown */
+                    <Stack gap={3}>
+                      <Box bg={GRAY50} borderRadius="12px" p={4} border={`1px solid ${GRAY200}`}>
+                        <Text fontSize="13px" fontWeight={700} color={GRAY800}>You're registered ✓</Text>
+                        <Text fontSize="12px" color={GRAY500} mt="2px">
+                          {isWithinLockdownWindow(service.scheduled_time)
+                            ? 'Check-in is now open!'
+                            : 'Check-in opens 24 h before the event.'}
+                        </Text>
+                      </Box>
+                      {isWithinLockdownWindow(service.scheduled_time) ? (
+                        <Box as="button" w="full" py="12px" borderRadius="11px"
+                          bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="7px"
+                          onClick={handleCheckin}
+                          style={{ border: 'none', cursor: checkinLoading ? 'not-allowed' : 'pointer', opacity: checkinLoading ? 0.7 : 1, transition: 'opacity 0.15s' }}
+                        >
+                          <FiCheckCircle size={15} />
+                          {checkinLoading ? 'Checking in…' : 'Check In'}
+                        </Box>
+                      ) : (
+                        <Box as="button" w="full" py="12px" borderRadius="11px"
+                          bg={RED_LT} color={RED} fontSize="14px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="6px"
+                          onClick={handleLeaveEvent}
+                          style={{ border: `1px solid ${RED}30`, cursor: leaveLoading ? 'not-allowed' : 'pointer', opacity: leaveLoading ? 0.7 : 1, transition: 'opacity 0.15s' }}
+                        >
+                          {leaveLoading ? 'Leaving…' : 'Leave Event'}
+                        </Box>
+                      )}
+                    </Stack>
+                  ) : !isFutureEvent(service.scheduled_time) ? (
+                    /* Past event */
+                    <Stack gap={2}>
+                      <Box w="full" py="12px" borderRadius="11px"
+                        bg={GRAY100} color={GRAY400} fontSize="14px" fontWeight={700} textAlign="center"
+                      >
+                        Event Ended
+                      </Box>
+                      <Text fontSize="12px" color={GRAY400} textAlign="center">This event has already passed.</Text>
+                    </Stack>
+                  ) : isEventFull(service.max_participants, service.participant_count ?? 0) ? (
+                    /* Full event */
+                    <Stack gap={2}>
+                      <Box w="full" py="12px" borderRadius="11px"
+                        bg={GRAY100} color={GRAY400} fontSize="14px" fontWeight={700} textAlign="center"
+                      >
+                        Event Full
+                      </Box>
+                      <Text fontSize="12px" color={GRAY400} textAlign="center">
+                        All {service.max_participants} spots are taken.
+                      </Text>
+                    </Stack>
+                  ) : (
+                    /* Join button */
+                    <Box as="button" w="full" py="13px" borderRadius="11px"
+                      bg={AMBER} color={WHITE}
+                      fontSize="15px" fontWeight={700}
+                      display="flex" alignItems="center" justifyContent="center" gap="7px"
+                      onClick={handleJoinEvent}
+                      style={{
+                        border: 'none', cursor: joinLoading ? 'not-allowed' : 'pointer',
+                        opacity: joinLoading ? 0.7 : 1, transition: 'opacity 0.15s',
+                      }}
                     >
-                      {isRecurr ? 'All Slots Taken' : 'Service Full'}
+                      {joinLoading
+                        ? 'Joining…'
+                        : `Join Event — ${spotsLeft(service.max_participants, service.participant_count ?? 0)} spot${spotsLeft(service.max_participants, service.participant_count ?? 0) !== 1 ? 's' : ''} left`}
                     </Box>
-                    <Text fontSize="12px" color={GRAY400} textAlign="center">
-                      {isRecurr
-                        ? 'Check back once an active session ends.'
-                        : `Max ${service.max_participants} participant${service.max_participants !== 1 ? 's' : ''}.`}
-                    </Text>
-                  </Stack>
+                  )
                 ) : (
-                  <Box as="button" w="full" py="13px" borderRadius="11px"
-                    bg={isOffer ? GREEN : BLUE} color={WHITE}
-                    fontSize="15px" fontWeight={700}
-                    display="flex" alignItems="center" justifyContent="center" gap="7px"
-                    onClick={handleExpressInterest}
-                    style={{
-                      border: 'none', cursor: interestLoading ? 'not-allowed' : 'pointer',
-                      opacity: interestLoading ? 0.7 : 1, transition: 'opacity 0.15s',
-                    }}
-                    onMouseEnter={(e) => { if (!interestLoading) (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '0.88' }}
-                    onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = interestLoading ? '0.7' : '1' }}
-                  >
-                    {interestLoading ? 'Processing…' : (isOffer ? 'Request this Service' : 'Offer to Help')}
-                  </Box>
+                  /* Not authenticated */
+                  <Stack gap={3}>
+                    <Text fontSize="13px" color={GRAY600} textAlign="center">
+                      Log in to join this event.
+                    </Text>
+                    <Box as="button" w="full" py="11px" borderRadius="11px"
+                      bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                      style={{ border: 'none', cursor: 'pointer' }}
+                      onClick={() => navigate('/login')}
+                    >
+                      Log In to Join
+                    </Box>
+                  </Stack>
                 )
               ) : (
-                <Stack gap={3}>
-                  <Text fontSize="13px" color={GRAY600} textAlign="center">
-                    Log in to express interest in this service.
-                  </Text>
-                  <Box as="button" w="full" py="11px" borderRadius="11px"
-                    bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
-                    style={{ border: 'none', cursor: 'pointer' }}
-                    onClick={() => navigate('/login')}
-                  >
-                    Log In to Request
-                  </Box>
-                </Stack>
-              )}
+                /* ── OFFER / NEED ACTIONS (unchanged) ──────────────────── */
+                <>
+                  {isOwn ? (
+                    <Stack gap={4}>
+                      <Flex align="center" justify="space-between">
+                        <Text fontSize="13px" fontWeight={700} color={GRAY800}>
+                          {service.max_participants > 1 ? 'Participants' : 'Incoming Requests'}
+                        </Text>
+                        {incoming.filter((h) => ['pending', 'accepted'].includes(h.status)).length > 0 && (
+                          <Box px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
+                            bg={incoming.some((h) => h.status === 'pending') ? '#f97316' : '#10B981'}
+                            color={WHITE}
+                          >
+                            {incoming.filter((h) => ['pending', 'accepted'].includes(h.status)).length} active
+                          </Box>
+                        )}
+                      </Flex>
 
-              {/* Report */}
-              {isAuthenticated && !isOwn && (
-                <Box textAlign="center" mt={4} pt={4} borderTop={`1px solid ${GRAY100}`}>
-                  <Box
-                    as="button"
-                    display="inline-flex" alignItems="center" gap={2}
-                    fontSize="12px"
-                    color={alreadyReported ? GRAY300 : GRAY400}
-                    style={{ background: 'none', border: 'none', cursor: alreadyReported ? 'not-allowed' : 'pointer', transition: 'color 0.15s' }}
-                    onClick={() => { if (!alreadyReported) setShowReport(true) }}
-                    onMouseEnter={(e) => { if (!alreadyReported) (e.currentTarget as unknown as HTMLButtonElement).style.color = RED }}
-                    onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.color = alreadyReported ? GRAY300 : GRAY400 }}
-                  >
-                    <FiFlag size={12} />
-                    {alreadyReported ? 'Already Reported' : 'Report this listing'}
-                  </Box>
-                </Box>
+                      {service.max_participants > 1 && (
+                        <Box>
+                          <Flex justify="space-between" mb={2}>
+                            <Text fontSize="11px" color={GRAY500}>{service.participant_count ?? 0}/{service.max_participants} slots</Text>
+                            {isRecurr && (
+                              <Flex align="center" gap={1} fontSize="11px" color="#7C3AED">
+                                <FiRefreshCw size={9} /><Text>Recurrent</Text>
+                              </Flex>
+                            )}
+                          </Flex>
+                          <Box bg={GRAY100} borderRadius="full" h="5px" overflow="hidden">
+                            <Box h="full" borderRadius="full" bg={fillPct >= 100 ? '#10B981' : '#f97316'}
+                              style={{ width: `${fillPct}%`, transition: 'width 0.3s' }} />
+                          </Box>
+                        </Box>
+                      )}
+
+                      {incoming.length === 0 ? (
+                        <Text fontSize="13px" color={GRAY400} textAlign="center" py={3}>No requests yet.</Text>
+                      ) : (
+                        <Stack gap={2}>
+                          {incoming.map((h) => {
+                            const cfg    = HS_BADGE[h.status] ?? { label: h.status, bg: GRAY100, color: GRAY500 }
+                            const active = ['pending', 'accepted'].includes(h.status)
+                            return (
+                              <Flex key={h.id} align="center" justify="space-between"
+                                p={3} bg={GRAY50} borderRadius="10px" gap={2}
+                                opacity={active ? 1 : 0.6}
+                              >
+                                <Box flex={1} minW={0}>
+                                  <Text fontSize="13px" fontWeight={600} color={GRAY800}
+                                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                  >
+                                    {h.requester_name}
+                                  </Text>
+                                  <Text fontSize="11px" color={GRAY400}>
+                                    {new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                  </Text>
+                                </Box>
+                                <Flex align="center" gap={2} flexShrink={0}>
+                                  <Box px="7px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700}
+                                    style={{ background: cfg.bg, color: cfg.color }}
+                                  >
+                                    {cfg.label}
+                                  </Box>
+                                  {active && (
+                                    <Box as="button" px="10px" py="5px" borderRadius="7px"
+                                      bg={GREEN} color={WHITE} fontSize="11px" fontWeight={700}
+                                      style={{ border: 'none', cursor: 'pointer' }}
+                                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigate(`/messages/${h.id}`) }}
+                                    >
+                                      Chat
+                                    </Box>
+                                  )}
+                                </Flex>
+                              </Flex>
+                            )
+                          })}
+                        </Stack>
+                      )}
+                    </Stack>
+                  ) : isAuthenticated ? (
+                    hasInterest ? (
+                      <Stack gap={3}>
+                        <Box as="button" w="full" py="12px" borderRadius="11px"
+                          bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="6px"
+                          onClick={() => navigate(myHandshake ? `/messages/${myHandshake.id}` : '/messages')}
+                          style={{ border: 'none', cursor: 'pointer' }}
+                          onMouseEnter={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '0.88' }}
+                          onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '1' }}
+                        >
+                          <FiMessageSquare size={15} />
+                          {myHandshake?.status === 'accepted' ? 'Open Chat' : 'View Chat (Pending)'}
+                        </Box>
+                        <Text fontSize="12px" color={GRAY500} textAlign="center">
+                          {myHandshake?.status === 'accepted'
+                            ? 'Interest accepted — you can chat now.'
+                            : 'Waiting for provider to respond.'}
+                        </Text>
+                      </Stack>
+                    ) : (service.schedule_type === 'One-Time' && service.status !== 'Active') ? (
+                      <Stack gap={2}>
+                        <Box w="full" py="12px" borderRadius="11px"
+                          bg={GRAY100} color={GRAY400} fontSize="14px" fontWeight={700}
+                          textAlign="center"
+                        >
+                          Service {service.status}
+                        </Box>
+                        <Text fontSize="12px" color={GRAY400} textAlign="center">No longer accepting new requests.</Text>
+                      </Stack>
+                    ) : isFull ? (
+                      <Stack gap={2}>
+                        <Box w="full" py="12px" borderRadius="11px"
+                          bg={GRAY100} color={GRAY400} fontSize="14px" fontWeight={700}
+                          textAlign="center"
+                        >
+                          {isRecurr ? 'All Slots Taken' : 'Service Full'}
+                        </Box>
+                        <Text fontSize="12px" color={GRAY400} textAlign="center">
+                          {isRecurr
+                            ? 'Check back once an active session ends.'
+                            : `Max ${service.max_participants} participant${service.max_participants !== 1 ? 's' : ''}.`}
+                        </Text>
+                      </Stack>
+                    ) : (
+                      <Box as="button" w="full" py="13px" borderRadius="11px"
+                        bg={isOffer ? GREEN : BLUE} color={WHITE}
+                        fontSize="15px" fontWeight={700}
+                        display="flex" alignItems="center" justifyContent="center" gap="7px"
+                        onClick={handleExpressInterest}
+                        style={{
+                          border: 'none', cursor: interestLoading ? 'not-allowed' : 'pointer',
+                          opacity: interestLoading ? 0.7 : 1, transition: 'opacity 0.15s',
+                        }}
+                        onMouseEnter={(e) => { if (!interestLoading) (e.currentTarget as unknown as HTMLButtonElement).style.opacity = '0.88' }}
+                        onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.opacity = interestLoading ? '0.7' : '1' }}
+                      >
+                        {interestLoading ? 'Processing…' : (isOffer ? 'Request this Service' : 'Offer to Help')}
+                      </Box>
+                    )
+                  ) : (
+                    <Stack gap={3}>
+                      <Text fontSize="13px" color={GRAY600} textAlign="center">
+                        Log in to express interest in this service.
+                      </Text>
+                      <Box as="button" w="full" py="11px" borderRadius="11px"
+                        bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+                        style={{ border: 'none', cursor: 'pointer' }}
+                        onClick={() => navigate('/login')}
+                      >
+                        Log In to Request
+                      </Box>
+                    </Stack>
+                  )}
+
+                  {/* Report */}
+                  {isAuthenticated && !isOwn && (
+                    <Box textAlign="center" mt={4} pt={4} borderTop={`1px solid ${GRAY100}`}>
+                      <Box
+                        as="button"
+                        display="inline-flex" alignItems="center" gap={2}
+                        fontSize="12px"
+                        color={alreadyReported ? GRAY300 : GRAY400}
+                        style={{ background: 'none', border: 'none', cursor: alreadyReported ? 'not-allowed' : 'pointer', transition: 'color 0.15s' }}
+                        onClick={() => { if (!alreadyReported) setShowReport(true) }}
+                        onMouseEnter={(e) => { if (!alreadyReported) (e.currentTarget as unknown as HTMLButtonElement).style.color = RED }}
+                        onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.color = alreadyReported ? GRAY300 : GRAY400 }}
+                      >
+                        <FiFlag size={12} />
+                        {alreadyReported ? 'Already Reported' : 'Report this listing'}
+                      </Box>
+                    </Box>
+                  )}
+                </>
               )}
             </Box>
 
@@ -968,6 +1288,17 @@ export default function ServiceDetailPage() {
 
       {showReport && (
         <ReportModal onClose={() => setShowReport(false)} onSubmit={handleReport} loading={reportLoading} />
+      )}
+
+      {showRoster && service && (
+        <EventRosterModal
+          isOpen={showRoster}
+          onClose={() => setShowRoster(false)}
+          service={service}
+          handshakes={incoming}
+          onComplete={handleCompleteEvent}
+          completing={completing}
+        />
       )}
     </Box>
   )

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import timedelta
 from django.db import transaction
+from django.db import models as django_models
 from django.db.utils import OperationalError
+from django.utils import timezone
 
 from .models import Handshake, Service, User, ChatMessage
 from .utils import create_notification
@@ -270,3 +273,320 @@ class HandshakeService:
         invalidate_conversations(str(requester.id))
         invalidate_conversations(str(service_owner.id))
 
+
+# ---------------------------------------------------------------------------
+# Event-specific service layer — completely separate from HandshakeService.
+# None of the methods below call into or modify HandshakeService.
+# ---------------------------------------------------------------------------
+
+class EventHandshakeService:
+    """
+    Business logic for the Event participation lifecycle.
+
+    Events are credit-free: no TimeBank balance checks, no provisioning.
+    Handshakes for Events are created directly with status='accepted' and
+    provisioned_hours=0, bypassing the initiate→approve flow entirely.
+    """
+
+    # Statuses that consume a capacity slot for Events.
+    # 'no_show' still occupies the slot (event already happened).
+    EVENT_CAPACITY_STATUSES = ['accepted', 'checked_in', 'no_show']
+
+    # Statuses that block a user from joining the same Event again.
+    EVENT_BLOCK_STATUSES = ['accepted', 'checked_in', 'no_show']
+
+    @staticmethod
+    def join_event(service: Service, requester: User) -> Handshake:
+        """
+        Immediately RSVP a user to an Event.
+
+        Creates an 'accepted' Handshake with provisioned_hours=0.
+        Skips the initiate→approve flow used by Offer/Need.
+
+        Raises:
+            PermissionError: user is event-banned.
+            ValueError: own event, duplicate RSVP, capacity full, event in past,
+                        service is not an active Event.
+        """
+        with transaction.atomic():
+            service = Service.objects.select_for_update().get(pk=service.pk)
+            requester = User.objects.select_for_update().get(pk=requester.pk)
+
+            # --- guards ---
+            if service.type != 'Event':
+                raise ValueError('Service is not an event.')
+
+            if service.status != 'Active':
+                raise ValueError('Event is not active.')
+
+            if service.user_id == requester.pk:
+                raise ValueError('You cannot join your own event.')
+
+            # Ban check (re-read from locked row to be authoritative)
+            if requester.is_event_banned_until and requester.is_event_banned_until > timezone.now():
+                raise PermissionError(
+                    f'You are banned from joining events until '
+                    f'{requester.is_event_banned_until.strftime("%Y-%m-%d %H:%M UTC")}.'
+                )
+
+            # Event must have a future scheduled_time
+            if not service.scheduled_time:
+                raise ValueError('Event has no scheduled time configured.')
+            if service.scheduled_time <= timezone.now():
+                raise ValueError('Cannot join an event that has already started or passed.')
+
+            # Duplicate check
+            already_joined = Handshake.objects.filter(
+                service=service,
+                requester=requester,
+                status__in=EventHandshakeService.EVENT_BLOCK_STATUSES,
+            ).exists()
+            if already_joined:
+                raise ValueError('You have already joined this event.')
+
+            # Capacity check
+            current = Handshake.objects.filter(
+                service=service,
+                status__in=EventHandshakeService.EVENT_CAPACITY_STATUSES,
+            ).count()
+            if current >= service.max_participants:
+                raise ValueError(
+                    f'Event is full ({service.max_participants} participants max).'
+                )
+
+            # --- create ---
+            handshake = Handshake.objects.create(
+                service=service,
+                requester=requester,
+                status='accepted',
+                provisioned_hours=Decimal('0'),
+                scheduled_time=service.scheduled_time,
+            )
+
+            create_notification(
+                user=service.user,
+                notification_type='handshake_request',
+                title='New Event RSVP',
+                message=f"{requester.first_name} {requester.last_name} joined your event '{service.title}'.",
+                handshake=handshake,
+                service=service,
+            )
+
+        invalidate_conversations(str(requester.id))
+        invalidate_conversations(str(service.user_id))
+        return handshake
+
+    @staticmethod
+    def leave_event(handshake: Handshake, requester: User) -> Handshake:
+        """
+        Participant cancels their own Event RSVP before the lockdown window.
+
+        Raises:
+            PermissionError: caller is not the participant.
+            ValueError: wrong service type, wrong status, inside lockdown window.
+        """
+        if handshake.requester_id != requester.pk:
+            raise PermissionError('Only the participant can cancel their own RSVP.')
+
+        if handshake.service.type != 'Event':
+            raise ValueError('This action is only valid for Event handshakes.')
+
+        if handshake.status not in ('accepted',):
+            raise ValueError(
+                f'Cannot leave: handshake is already "{handshake.status}".'
+            )
+
+        if handshake.service.is_in_lockdown_window:
+            raise ValueError(
+                'Cannot cancel your RSVP within 24 hours of the event start.'
+            )
+
+        with transaction.atomic():
+            handshake.status = 'cancelled'
+            handshake.save(update_fields=['status', 'updated_at'])
+
+            create_notification(
+                user=handshake.service.user,
+                notification_type='handshake_cancelled',
+                title='RSVP Cancelled',
+                message=f"{requester.first_name} {requester.last_name} cancelled their RSVP "
+                        f"for '{handshake.service.title}'.",
+                handshake=handshake,
+                service=handshake.service,
+            )
+
+        invalidate_conversations(str(requester.id))
+        invalidate_conversations(str(handshake.service.user_id))
+        return handshake
+
+    @staticmethod
+    def checkin(handshake: Handshake, requester: User) -> Handshake:
+        """
+        Participant checks in to an Event during the lockdown window.
+
+        Validates that:
+        - Caller is the participant.
+        - Handshake is in 'accepted' status.
+        - Event is within the 24-hour lockdown window.
+
+        Raises:
+            PermissionError: caller is not the participant.
+            ValueError: wrong type/status, not in lockdown window.
+        """
+        if handshake.requester_id != requester.pk:
+            raise PermissionError('Only the participant can check in.')
+
+        if handshake.service.type != 'Event':
+            raise ValueError('Check-in is only valid for Event handshakes.')
+
+        if handshake.status != 'accepted':
+            raise ValueError(
+                f'Cannot check in: handshake is already "{handshake.status}".'
+            )
+
+        if not handshake.service.is_in_lockdown_window:
+            raise ValueError(
+                'Check-in is only available within 24 hours of the event start.'
+            )
+
+        with transaction.atomic():
+            handshake.status = 'checked_in'
+            handshake.save(update_fields=['status', 'updated_at'])
+
+            create_notification(
+                user=handshake.service.user,
+                notification_type='handshake_accepted',
+                title='Participant Checked In',
+                message=f"{requester.first_name} {requester.last_name} has checked in "
+                        f"for '{handshake.service.title}'.",
+                handshake=handshake,
+                service=handshake.service,
+            )
+
+        return handshake
+
+    @staticmethod
+    def complete_event(service: Service, organizer: User) -> None:
+        """
+        Organizer marks an Event as Completed.
+
+        All handshakes still in 'accepted' (not checked in) become 'no_show'.
+        Users reaching 3 no-shows receive a 14-day participation ban.
+
+        Raises:
+            PermissionError: caller is not the organizer.
+            ValueError: wrong type or wrong service status.
+        """
+        if service.type != 'Event':
+            raise ValueError('Service is not an event.')
+
+        if service.user_id != organizer.pk:
+            raise PermissionError('Only the event organizer can mark it as completed.')
+
+        if service.status not in ('Active', 'Agreed'):
+            raise ValueError(f'Cannot complete event with status "{service.status}".')
+
+        with transaction.atomic():
+            # Re-lock service and organizer rows
+            service = Service.objects.select_for_update().get(pk=service.pk)
+            organizer = User.objects.select_for_update().get(pk=organizer.pk)
+
+            # Bulk-mark unchecked participants as no-shows (single SQL UPDATE)
+            no_show_qs = Handshake.objects.filter(service=service, status='accepted')
+            no_show_requester_ids = list(no_show_qs.values_list('requester_id', flat=True))
+            no_show_qs.update(status='no_show')
+
+            # Process ban logic per affected user
+            BAN_THRESHOLD = 3
+            BAN_DURATION_DAYS = 14
+
+            for user_id in no_show_requester_ids:
+                # Atomic increment + read in a single locked update
+                User.objects.filter(pk=user_id).update(
+                    no_show_count=django_models.F('no_show_count') + 1
+                )
+                user = User.objects.select_for_update().get(pk=user_id)
+
+                if user.no_show_count >= BAN_THRESHOLD:
+                    user.is_event_banned_until = timezone.now() + timedelta(days=BAN_DURATION_DAYS)
+                    user.save(update_fields=['is_event_banned_until'])
+
+                handshake = Handshake.objects.filter(
+                    service=service, requester_id=user_id
+                ).first()
+                create_notification(
+                    user=user,
+                    notification_type='handshake_cancelled',
+                    title='Marked as No-Show',
+                    message=f"You were marked as a no-show for '{service.title}'."
+                    + (
+                        f" You have been banned from joining events for {BAN_DURATION_DAYS} days."
+                        if user.no_show_count >= BAN_THRESHOLD else ''
+                    ),
+                    handshake=handshake,
+                    service=service,
+                )
+
+            service.status = 'Completed'
+            service.save(update_fields=['status', 'updated_at'])
+
+    @staticmethod
+    def cancel_event(service: Service, organizer: User) -> None:
+        """
+        Organizer cancels an Event.
+
+        If inside the 24-hour lockdown window AND accepted participants exist,
+        the organizer receives a 30-day ban from creating events.
+        No TimeBank reversal is needed (provisioned_hours=0 for all participants).
+
+        Raises:
+            PermissionError: caller is not the organizer.
+            ValueError: wrong type or wrong service status.
+        """
+        if service.type != 'Event':
+            raise ValueError('Service is not an event.')
+
+        if service.user_id != organizer.pk:
+            raise PermissionError('Only the event organizer can cancel it.')
+
+        if service.status not in ('Active', 'Agreed'):
+            raise ValueError(f'Cannot cancel event with status "{service.status}".')
+
+        BAN_DURATION_DAYS = 30
+
+        with transaction.atomic():
+            service = Service.objects.select_for_update().get(pk=service.pk)
+            organizer = User.objects.select_for_update().get(pk=organizer.pk)
+
+            active_participants_qs = Handshake.objects.filter(
+                service=service, status__in=['accepted', 'checked_in']
+            )
+            has_participants = active_participants_qs.exists()
+
+            # Apply organizer ban if cancelling within lockdown with participants
+            if service.is_in_lockdown_window and has_participants:
+                organizer.is_organizer_banned_until = timezone.now() + timedelta(days=BAN_DURATION_DAYS)
+                organizer.save(update_fields=['is_organizer_banned_until'])
+
+            # Notify all active participants
+            participant_ids = list(
+                active_participants_qs.values_list('requester_id', flat=True)
+            )
+            active_participants_qs.update(status='cancelled')
+
+            for user_id in participant_ids:
+                participant = User.objects.get(pk=user_id)
+                handshake = Handshake.objects.filter(
+                    service=service, requester_id=user_id
+                ).first()
+                create_notification(
+                    user=participant,
+                    notification_type='handshake_cancelled',
+                    title='Event Cancelled',
+                    message=f"The event '{service.title}' has been cancelled by the organizer.",
+                    handshake=handshake,
+                    service=service,
+                )
+
+            service.status = 'Cancelled'
+            service.save(update_fields=['status', 'updated_at'])

@@ -176,6 +176,7 @@ const CARD_GRADIENTS: Record<string, [string, string]> = {
 }
 
 function pickGradient(service: Service): [string, string] {
+  if (service.type === 'Event') return ['#D97706', '#B45309']
   if (service.type === 'Need') return CARD_GRADIENTS.need
   const combined = (service.title + ' ' + service.tags?.map((t) => t.name).join(' ')).toLowerCase()
   if (/music|guitar|piano|drum|sing/.test(combined))  return CARD_GRADIENTS.music
@@ -274,9 +275,9 @@ function ServiceCard({
           {/* Badges — never shrink or wrap */}
           <Flex gap="3px" align="center" flexShrink={0} flexWrap="nowrap">
             <Pill
-              label={isOffer ? 'Offer' : 'Want'}
-              bg={isOffer ? GREEN_LT : BLUE_LT}
-              color={isOffer ? GREEN : BLUE}
+              label={isOffer ? 'Offer' : service.type === 'Event' ? 'Event' : 'Want'}
+              bg={isOffer ? GREEN_LT : service.type === 'Event' ? AMBER_LT : BLUE_LT}
+              color={isOffer ? GREEN : service.type === 'Event' ? AMBER : BLUE}
             />
             {isOwn && <Pill label="Yours" bg={AMBER_LT} color={AMBER} />}
             {!isOwn && hsCfg && <Pill label={hsCfg.label} bg={hsCfg.bg} color={hsCfg.color} />}
@@ -488,21 +489,29 @@ function Sidebar({
           >
             Post a Service
           </Text>
-          <Flex gap={2}>
-            <Box as="button" flex={1} py="8px" borderRadius="9px" bg={GREEN} color={WHITE}
+          <Flex gap={2} flexWrap="wrap">
+            <Box as="button" flex={1} minW="60px" py="8px" borderRadius="9px" bg={GREEN} color={WHITE}
               fontSize="12px" fontWeight={700}
               display="flex" alignItems="center" justifyContent="center" gap="4px"
               onClick={() => navigate('/post-offer')} _hover={{ opacity: 0.9 }} transition="opacity 0.15s"
             >
               <FiPlus size={12} /> Offer
             </Box>
-            <Box as="button" flex={1} py="8px" borderRadius="9px" bg={BLUE_LT} color={BLUE}
+            <Box as="button" flex={1} minW="60px" py="8px" borderRadius="9px" bg={BLUE_LT} color={BLUE}
               fontSize="12px" fontWeight={700}
               display="flex" alignItems="center" justifyContent="center" gap="4px"
               border={`1px solid #BFDBFE`}
               onClick={() => navigate('/post-need')} _hover={{ bg: '#DBEAFE' }} transition="background 0.15s"
             >
               <FiLayers size={12} /> Need
+            </Box>
+            <Box as="button" flex={1} minW="60px" py="8px" borderRadius="9px"
+              fontSize="12px" fontWeight={700}
+              display="flex" alignItems="center" justifyContent="center" gap="4px"
+              style={{ background: '#FFFBEB', color: '#D97706', border: '1px solid #FDE68A' }}
+              onClick={() => navigate('/post-event')} transition="background 0.15s"
+            >
+              <FiPlus size={12} /> Event
             </Box>
           </Flex>
         </Box>
@@ -572,7 +581,7 @@ function Sidebar({
                     key={s.id} as="button" w="full" textAlign="left"
                     px={3} py="8px" borderRadius="9px" bg={GRAY50}
                     border={`1px solid ${GRAY100}`}
-                    borderLeft={`3px solid ${s.type === 'Offer' ? GREEN : BLUE}`}
+                    borderLeft={`3px solid ${s.type === 'Offer' ? GREEN : s.type === 'Event' ? AMBER : BLUE}`}
                     onClick={() => navigate(`/service-detail/${s.id}`)}
                     _hover={{ bg: GRAY100 }} transition="background 0.1s"
                   >

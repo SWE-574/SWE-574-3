@@ -79,6 +79,10 @@ export interface User {
   is_banned?: boolean
   is_admin?: boolean
   warning_count?: number
+  // ─── Event System ───────────────────────────────────────────────────────────
+  is_event_banned_until?: string | null
+  is_organizer_banned_until?: string | null
+  no_show_count?: number
 }
 
 export interface UserProfile {
@@ -100,7 +104,7 @@ export interface UserProfile {
 export interface ServiceFormData {
   title: string
   description: string
-  type: 'Offer' | 'Need'
+  type: 'Offer' | 'Need' | 'Event'
   duration: number | string
   location_type: 'In-Person' | 'Online'
   location_area?: string
@@ -109,16 +113,18 @@ export interface ServiceFormData {
   schedule_details?: string
   tags?: string[]
   tag_names?: string[]
+  scheduled_time?: string | null
 }
 
 export interface Service {
   id: string
   title: string
   description: string
-  type: 'Offer' | 'Need'
+  type: 'Offer' | 'Need' | 'Event'
   duration: number | string
   status: 'Active' | 'Agreed' | 'Completed' | 'Cancelled'
   location_type: 'In-Person' | 'Online'
+  scheduled_time?: string | null
   location_area?: string
   // API returns location_lat/location_lng (backend field names)
   location_lat?: string | number | null
@@ -168,6 +174,8 @@ export type HandshakeStatus =
   | 'cancelled'
   | 'disputed'
   | 'paused'
+  | 'checked_in'
+  | 'no_show'
 
 export interface Handshake {
   id: string
