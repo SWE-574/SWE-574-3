@@ -743,11 +743,25 @@ class ServiceViewSet(viewsets.ModelViewSet):
             queryset=UserBadge.objects.select_related('badge')
         )
         
+        # Prefetch capacity-relevant handshakes to compute participant_count without N+1
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+
         # Base queryset with optimizations
         queryset = (
             Service.objects.filter(status='Active')
             .select_related('user')
-            .prefetch_related('tags', user_badges_prefetch, Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')))
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
         )
         
         # Filter by visibility - admins can see all, others only visible
@@ -1759,6 +1773,16 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                     )
                     invalidate_conversations(str(requester_id))
 
+            # Mark One-Time service as Agreed once all slots are filled.
+            # Recurrent services stay Active so new participants can always join.
+            if service.schedule_type == 'One-Time':
+                accepted_count = Handshake.objects.filter(
+                    service=service,
+                    status__in=['accepted', 'completed', 'reported', 'paused'],
+                ).count()
+                if accepted_count >= service.max_participants and service.status == 'Active':
+                    Service.objects.filter(pk=service.pk).update(status='Agreed')
+
         invalidate_conversations(str(handshake.requester.id))
         invalidate_conversations(str(handshake.service.user.id))
 
@@ -1825,16 +1849,21 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
+        svc = handshake.service
         with transaction.atomic():
             cancel_timebank_transfer(handshake)
+
+            # If the service was Agreed, reopen it now that the accepted slot is freed.
+            if svc.status == 'Agreed':
+                Service.objects.filter(pk=svc.pk).update(status='Active')
 
             create_notification(
                 user=handshake.requester,
                 notification_type='handshake_cancelled',
                 title='Service Cancelled',
-                message=f"The service '{handshake.service.title}' has been cancelled.",
+                message=f"The service '{svc.title}' has been cancelled.",
                 handshake=handshake,
-                service=handshake.service
+                service=svc
             )
 
         serializer = self.get_serializer(handshake)

@@ -132,6 +132,7 @@ class Service(models.Model):
     )
     STATUS_CHOICES = (
         ('Active', 'Active'),
+        ('Agreed', 'Agreed'),
         ('Completed', 'Completed'),
         ('Cancelled', 'Cancelled'),
     )

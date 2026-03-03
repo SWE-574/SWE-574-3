@@ -257,13 +257,15 @@ class ServiceSerializer(serializers.ModelSerializer):
     title = serializers.CharField(max_length=200)
     comment_count = serializers.SerializerMethodField()
     hot_score = serializers.FloatField(read_only=True)
+    participant_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
         fields = [
             'id', 'user', 'title', 'description', 'type', 'duration',
             'location_type', 'location_area', 'location_lat', 'location_lng', 'status', 'max_participants', 'schedule_type',
-            'schedule_details', 'created_at', 'tags', 'tag_ids', 'tag_names', 'comment_count', 'hot_score', 'is_visible', 'media'
+            'schedule_details', 'created_at', 'tags', 'tag_ids', 'tag_names', 'comment_count', 'hot_score',
+            'is_visible', 'media', 'participant_count',
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible']
     
@@ -274,7 +276,25 @@ class ServiceSerializer(serializers.ModelSerializer):
         if hasattr(obj, '_prefetched_objects_cache') and 'comments' in obj._prefetched_objects_cache:
             return len([c for c in obj.comments.all() if not c.is_deleted])
         return obj.comments.filter(is_deleted=False).count()
-    
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_participant_count(self, obj):
+        """Count handshakes consuming a capacity slot, using prefetched data when available.
+
+        Mirrors HandshakeService._capacity_statuses — pending never counts:
+          One-Time  → accepted, completed, reported, paused
+          Recurrent → accepted, reported, paused  (completed frees the slot)
+        """
+        one_time_statuses = {'accepted', 'completed', 'reported', 'paused'}
+        recurrent_statuses = {'accepted', 'reported', 'paused'}
+        capacity_statuses = one_time_statuses if obj.schedule_type == 'One-Time' else recurrent_statuses
+
+        # Use prefetched handshakes to avoid N+1 on list endpoints
+        if hasattr(obj, 'capacity_handshakes'):
+            return sum(1 for h in obj.capacity_handshakes if h.status in capacity_statuses)
+
+        return Handshake.objects.filter(service=obj, status__in=capacity_statuses).count()
+
     def validate_title(self, value):
         """Sanitize and validate title"""
         if not value or not value.strip():

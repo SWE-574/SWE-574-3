@@ -16,27 +16,35 @@ class HandshakeService:
     def _capacity_statuses(service: Service) -> list[str]:
         """Handshake statuses that count toward max_participants capacity.
 
-        For One-Time services, 'pending' is intentionally excluded:
-        multiple users may express interest simultaneously and chat with
-        the provider. Only one is accepted; the rest are auto-denied on
-        acceptance. A slot is consumed when a handshake is accepted.
+        Per SRS FR-E01f: slots are consumed when a handshake is ACCEPTED,
+        not while it is still pending. This applies to both schedule types:
+
+          One-Time  → accepted, completed, reported, paused
+                       (completed still occupies the slot for a one-time session)
+          Recurrent → accepted, reported, paused
+                       (completed frees the slot so another participant can join)
+
+        'pending' never counts toward capacity for either type: multiple users
+        may express interest simultaneously and chat with the provider; a slot
+        is only consumed once the provider accepts.
         """
         if service.schedule_type == 'One-Time':
             return ['accepted', 'completed', 'reported', 'paused']
-        # Recurrent: pending + accepted count (1 active session at a time)
-        return ['pending', 'accepted']
+        # Recurrent: completed sessions free the slot; only active accepted count
+        return ['accepted', 'reported', 'paused']
 
     @staticmethod
     def _existing_interest_statuses(service: Service) -> list[str]:
         """Statuses that prevent the SAME user from expressing interest again.
 
-        Separate from capacity: a user with an existing pending request should
-        not be allowed to create a second one, even though pending doesn't
-        consume a capacity slot for One-Time services.
+        Separate from capacity: a user with an existing pending/active request
+        should not be allowed to create a second one. For Recurrent services,
+        a completed handshake opens the slot for re-participation.
         """
         if service.schedule_type == 'One-Time':
             return ['pending', 'accepted', 'completed', 'reported', 'paused']
-        return ['pending', 'accepted']
+        # Recurrent: completed allows re-joining; pending/accepted/active block duplicate
+        return ['pending', 'accepted', 'reported', 'paused']
     
     @staticmethod
     def can_express_interest(service: Service, user: User) -> tuple[bool, str | None]:
