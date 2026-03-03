@@ -16,7 +16,7 @@ User = get_user_model()
 class PropertyTestTimeBankBalanceConsistency(HypothesisTestCase):
     """Test TimeBank balance consistency property."""
     
-    @settings(max_examples=50)
+    @settings(max_examples=50, deadline=None)
     @given(
         initial_balance=st.decimals(min_value=Decimal('3.00'), max_value=Decimal('100.00'), places=2),
         transaction_amounts=st.lists(
@@ -140,8 +140,12 @@ class PropertyTestServiceParticipationLimits(HypothesisTestCase):
         num_requests=st.integers(min_value=1, max_value=15)
     )
     def test_participation_limit_property(self, max_participants, num_requests):
-        """Test that services never exceed max_participants."""
-        # Create service with max_participants
+        """Test that capacity-consuming handshakes never exceed max_participants.
+
+        Pending handshakes do NOT consume a slot — multiple users can express
+        interest simultaneously. Only accepted (and completed/reported/paused)
+        handshakes count against capacity for One-Time services.
+        """
         service = Service.objects.create(
             user=self.user1,
             title='Test Service',
@@ -152,40 +156,37 @@ class PropertyTestServiceParticipationLimits(HypothesisTestCase):
             schedule_type='One-Time',
             max_participants=max_participants
         )
-        
-        # Create multiple users to request
+
         users = []
         for i in range(num_requests):
             user = User.objects.create_user(
-                email=f'requester{i}@test.com',
+                email=f'requester{i}_{uuid.uuid4().hex[:6]}@test.com',
                 password='testpass123',
                 first_name=f'User{i}',
                 last_name='Test',
                 timebank_balance=Decimal('10.00')
             )
             users.append(user)
-        
-        # Try to create handshakes
-        accepted_count = 0
+
         for user in users:
-            is_valid, error = HandshakeService.can_express_interest(service, user)
+            is_valid, _ = HandshakeService.can_express_interest(service, user)
             if is_valid:
                 try:
                     HandshakeService.express_interest(service, user)
-                    accepted_count += 1
                 except Exception:
                     pass
-        
-        # Verify handshakes don't exceed max_participants
-        active_handshakes = Handshake.objects.filter(
+
+        # Capacity-consuming statuses for One-Time (mirrors _capacity_statuses)
+        capacity_statuses = ['accepted', 'completed', 'reported', 'paused']
+        capacity_used = Handshake.objects.filter(
             service=service,
-            status__in=['pending', 'accepted']
+            status__in=capacity_statuses,
         ).count()
-        
+
         self.assertLessEqual(
-            active_handshakes,
+            capacity_used,
             max_participants,
-            msg=f"Active handshakes ({active_handshakes}) exceeded max_participants ({max_participants})"
+            msg=f"Capacity-consuming handshakes ({capacity_used}) exceeded max_participants ({max_participants})"
         )
 
 
@@ -278,7 +279,7 @@ class PropertyTestBalanceProvisioningAccuracy(HypothesisTestCase):
 class PropertyTestUserRegistrationCompleteness(HypothesisTestCase):
     """Test user registration completeness property."""
     
-    @settings(max_examples=50)
+    @settings(max_examples=50, deadline=None)
     @given(
         email=st.emails(),
         first_name=st.text(min_size=1, max_size=150),

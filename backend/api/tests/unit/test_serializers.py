@@ -207,3 +207,136 @@ class TestHandshakeSerializer:
         assert data['status'] == handshake.status
         assert 'service_title' in data
         assert 'requester_name' in data
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestParticipantCountField:
+    """Tests for the participant_count SerializerMethodField on ServiceSerializer.
+
+    participant_count must mirror HandshakeService._capacity_statuses:
+      One-Time  → accepted, completed, reported, paused  (pending never counts)
+      Recurrent → accepted, reported, paused             (completed frees slot)
+    """
+
+    def _serialize(self, service):
+        serializer = ServiceSerializer(service)
+        return serializer.data['participant_count']
+
+    def test_field_present_in_output(self):
+        svc = ServiceFactory(schedule_type='One-Time')
+        data = ServiceSerializer(svc).data
+        assert 'participant_count' in data
+
+    def test_zero_with_no_handshakes(self):
+        svc = ServiceFactory(schedule_type='One-Time', max_participants=5)
+        assert self._serialize(svc) == 0
+
+    # ── One-Time ──────────────────────────────────────────────────────────────
+
+    def test_one_time_pending_not_counted(self):
+        svc = ServiceFactory(schedule_type='One-Time', max_participants=5)
+        HandshakeFactory(service=svc, requester=UserFactory(), status='pending',
+                         provisioned_hours=svc.duration)
+        assert self._serialize(svc) == 0
+
+    def test_one_time_accepted_counted(self):
+        svc = ServiceFactory(schedule_type='One-Time', max_participants=5)
+        HandshakeFactory(service=svc, requester=UserFactory(), status='accepted',
+                         provisioned_hours=svc.duration)
+        assert self._serialize(svc) == 1
+
+    def test_one_time_completed_counted(self):
+        svc = ServiceFactory(schedule_type='One-Time', max_participants=5)
+        HandshakeFactory(service=svc, requester=UserFactory(), status='completed',
+                         provisioned_hours=svc.duration)
+        assert self._serialize(svc) == 1
+
+    def test_one_time_denied_and_cancelled_not_counted(self):
+        svc = ServiceFactory(schedule_type='One-Time', max_participants=5)
+        for st in ('denied', 'cancelled'):
+            HandshakeFactory(service=svc, requester=UserFactory(), status=st,
+                             provisioned_hours=svc.duration)
+        assert self._serialize(svc) == 0
+
+    def test_one_time_mixed_statuses(self):
+        """accepted=2, completed=1, pending=1 → count should be 3."""
+        svc = ServiceFactory(schedule_type='One-Time', max_participants=5)
+        for st in ('accepted', 'accepted', 'completed', 'pending'):
+            HandshakeFactory(service=svc, requester=UserFactory(), status=st,
+                             provisioned_hours=svc.duration)
+        assert self._serialize(svc) == 3
+
+    # ── Recurrent ─────────────────────────────────────────────────────────────
+
+    def test_recurrent_pending_not_counted(self):
+        svc = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        HandshakeFactory(service=svc, requester=UserFactory(), status='pending',
+                         provisioned_hours=svc.duration)
+        assert self._serialize(svc) == 0
+
+    def test_recurrent_completed_not_counted(self):
+        """Completed sessions free the slot for Recurrent services."""
+        svc = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        HandshakeFactory(service=svc, requester=UserFactory(), status='completed',
+                         provisioned_hours=svc.duration)
+        assert self._serialize(svc) == 0
+
+    def test_recurrent_accepted_counted(self):
+        svc = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        HandshakeFactory(service=svc, requester=UserFactory(), status='accepted',
+                         provisioned_hours=svc.duration)
+        assert self._serialize(svc) == 1
+
+    def test_recurrent_mixed_statuses(self):
+        """accepted=2, completed=2, pending=1 → count should be 2."""
+        svc = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        for st in ('accepted', 'accepted', 'completed', 'completed', 'pending'):
+            HandshakeFactory(service=svc, requester=UserFactory(), status=st,
+                             provisioned_hours=svc.duration)
+        assert self._serialize(svc) == 2
+
+    # ── Prefetch path ─────────────────────────────────────────────────────────
+
+    def test_uses_prefetched_capacity_handshakes_without_extra_query(self):
+        """When capacity_handshakes is prefetched, get_participant_count must
+        read from cache — no extra Handshake query should fire."""
+        from django.db.models import Prefetch
+
+        svc = ServiceFactory(schedule_type='One-Time', max_participants=3)
+        HandshakeFactory(service=svc, requester=UserFactory(), status='accepted',
+                         provisioned_hours=svc.duration)
+        HandshakeFactory(service=svc, requester=UserFactory(), status='completed',
+                         provisioned_hours=svc.duration)
+
+        svc_prefetched = Service.objects.prefetch_related(
+            Prefetch(
+                'handshakes',
+                queryset=Handshake.objects.filter(
+                    status__in=['accepted', 'completed', 'reported', 'paused', 'pending']
+                ).only('id', 'service_id', 'status'),
+                to_attr='capacity_handshakes',
+            )
+        ).get(pk=svc.pk)
+
+        assert hasattr(svc_prefetched, 'capacity_handshakes'), (
+            "Prefetch should attach capacity_handshakes"
+        )
+
+        # Call get_participant_count in isolation — must NOT issue a Handshake query
+        from api.serializers import ServiceSerializer
+        from django.test.utils import CaptureQueriesContext
+        from django.db import connection
+
+        serializer = ServiceSerializer()
+        with CaptureQueriesContext(connection) as ctx:
+            count = serializer.get_participant_count(svc_prefetched)
+
+        assert count == 2
+        handshake_queries = [
+            q for q in ctx.captured_queries
+            if 'handshake' in q['sql'].lower()
+        ]
+        assert len(handshake_queries) == 0, (
+            f"Expected no Handshake queries when prefetched, got {len(handshake_queries)}"
+        )

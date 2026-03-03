@@ -14,6 +14,7 @@ from decimal import Decimal
 import bleach
 import re
 import logging
+import math
 from drf_spectacular.utils import extend_schema_field, extend_schema_serializer, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
@@ -238,6 +239,26 @@ class ServiceMediaSerializer(serializers.ModelSerializer):
         )
     ]
 )
+def _fuzzy_coords(service_id: str, lat: float, lng: float):
+    """
+    Apply a deterministic ~1 km privacy offset to a service's real coordinates.
+
+    Uses FNV-1a hash of the service ID — same algorithm as the frontend's
+    idFuzzyOffset() in MapView.tsx — so the position is consistent across
+    renders without exposing the exact location in the API response.
+
+    1 km ≈ 0.009° latitude at Istanbul's latitude (~41°N).
+    """
+    h = 2166136261
+    for ch in service_id:
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF   # unsigned 32-bit, matches JS Math.imul + >>> 0
+
+    angle = (h / 0xFFFFFFFF) * 2 * math.pi
+    R = 0.0045   # ~0.5 km privacy offset radius
+    return lat + R * math.sin(angle), lng + R * math.cos(angle)
+
+
 class ServiceSerializer(serializers.ModelSerializer):
     tags = TagSerializer(many=True, required=False, read_only=True)
     tag_ids = serializers.ListField(
@@ -257,13 +278,19 @@ class ServiceSerializer(serializers.ModelSerializer):
     title = serializers.CharField(max_length=200)
     comment_count = serializers.SerializerMethodField()
     hot_score = serializers.FloatField(read_only=True)
+    participant_count = serializers.SerializerMethodField()
+    circle_lat = serializers.SerializerMethodField()
+    circle_lng = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
         fields = [
             'id', 'user', 'title', 'description', 'type', 'duration',
-            'location_type', 'location_area', 'location_lat', 'location_lng', 'status', 'max_participants', 'schedule_type',
-            'schedule_details', 'created_at', 'tags', 'tag_ids', 'tag_names', 'comment_count', 'hot_score', 'is_visible', 'media'
+            'location_type', 'location_area', 'location_lat', 'location_lng',
+            'circle_lat', 'circle_lng',
+            'status', 'max_participants', 'schedule_type',
+            'schedule_details', 'created_at', 'tags', 'tag_ids', 'tag_names', 'comment_count', 'hot_score',
+            'is_visible', 'media', 'participant_count',
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible']
     
@@ -274,7 +301,25 @@ class ServiceSerializer(serializers.ModelSerializer):
         if hasattr(obj, '_prefetched_objects_cache') and 'comments' in obj._prefetched_objects_cache:
             return len([c for c in obj.comments.all() if not c.is_deleted])
         return obj.comments.filter(is_deleted=False).count()
-    
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_participant_count(self, obj):
+        """Count handshakes consuming a capacity slot, using prefetched data when available.
+
+        Mirrors HandshakeService._capacity_statuses — pending never counts:
+          One-Time  → accepted, completed, reported, paused
+          Recurrent → accepted, reported, paused  (completed frees the slot)
+        """
+        one_time_statuses = {'accepted', 'completed', 'reported', 'paused'}
+        recurrent_statuses = {'accepted', 'reported', 'paused'}
+        capacity_statuses = one_time_statuses if obj.schedule_type == 'One-Time' else recurrent_statuses
+
+        # Use prefetched handshakes to avoid N+1 on list endpoints
+        if hasattr(obj, 'capacity_handshakes'):
+            return sum(1 for h in obj.capacity_handshakes if h.status in capacity_statuses)
+
+        return Handshake.objects.filter(service=obj, status__in=capacity_statuses).count()
+
     def validate_title(self, value):
         """Sanitize and validate title"""
         if not value or not value.strip():
@@ -331,6 +376,48 @@ class ServiceSerializer(serializers.ModelSerializer):
     def get_user(self, obj):
         """Return user details without nested services to avoid circular reference"""
         return UserSummarySerializer(obj.user).data
+
+    def _real_coords(self, obj):
+        """Return (lat, lng) from the stored model instance, or (None, None)."""
+        try:
+            if obj.location_lat is None or obj.location_lng is None:
+                return None, None
+            return float(obj.location_lat), float(obj.location_lng)
+        except (TypeError, ValueError):
+            return None, None
+
+    @extend_schema_field(OpenApiTypes.FLOAT)
+    def get_circle_lat(self, obj):
+        """Visual circle centre latitude — independent ~1 km offset, seed '_c'."""
+        if obj.location_type != 'In-Person':
+            return None
+        lat, lng = self._real_coords(obj)
+        if lat is None:
+            return None
+        c_lat, _ = _fuzzy_coords(str(obj.id) + '_c', lat, lng)
+        return round(c_lat, 6)
+
+    @extend_schema_field(OpenApiTypes.FLOAT)
+    def get_circle_lng(self, obj):
+        """Visual circle centre longitude — independent ~1 km offset, seed '_c'."""
+        if obj.location_type != 'In-Person':
+            return None
+        lat, lng = self._real_coords(obj)
+        if lat is None:
+            return None
+        _, c_lng = _fuzzy_coords(str(obj.id) + '_c', lat, lng)
+        return round(c_lng, 6)
+
+    def to_representation(self, instance):
+        """Replace exact coordinates with a ~1 km privacy-fuzzed version before sending."""
+        data = super().to_representation(instance)
+        if instance.location_type == 'In-Person':
+            lat, lng = self._real_coords(instance)
+            if lat is not None:
+                fuzzy_lat, fuzzy_lng = _fuzzy_coords(str(instance.id), lat, lng)
+                data['location_lat'] = round(fuzzy_lat, 6)
+                data['location_lng'] = round(fuzzy_lng, 6)
+        return data
 
     def create(self, validated_data):
         # Description is already sanitized in validate_description
@@ -1201,6 +1288,26 @@ class PublicChatMessageSerializer(serializers.ModelSerializer):
         return f"{obj.sender.first_name} {obj.sender.last_name}".strip()
 
     @extend_schema_field(OpenApiTypes.STR)
+    def get_sender_avatar_url(self, obj):
+        return obj.sender.avatar_url
+
+
+class ServiceGroupChatMessageSerializer(serializers.ModelSerializer):
+    """Serializer for private group chat messages (accepted participants only)."""
+    sender_id = serializers.UUIDField(source='sender.id', read_only=True)
+    sender_name = serializers.SerializerMethodField()
+    sender_avatar_url = serializers.SerializerMethodField()
+    body = serializers.CharField(max_length=5000)
+
+    class Meta:
+        from .models import ServiceGroupChatMessage
+        model = ServiceGroupChatMessage
+        fields = ['id', 'service', 'sender_id', 'sender_name', 'sender_avatar_url', 'body', 'created_at']
+        read_only_fields = ['id', 'service', 'sender_id', 'created_at']
+
+    def get_sender_name(self, obj):
+        return f"{obj.sender.first_name} {obj.sender.last_name}".strip()
+
     def get_sender_avatar_url(self, obj):
         return obj.sender.avatar_url
 

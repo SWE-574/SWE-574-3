@@ -83,7 +83,7 @@ class User(AbstractUser):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(timebank_balance__gte=-10.00),
+                condition=models.Q(timebank_balance__gte=-10.00),
                 name='timebank_balance_minimum',
             ),
         ]
@@ -132,6 +132,7 @@ class Service(models.Model):
     )
     STATUS_CHOICES = (
         ('Active', 'Active'),
+        ('Agreed', 'Agreed'),
         ('Completed', 'Completed'),
         ('Cancelled', 'Cancelled'),
     )
@@ -256,11 +257,11 @@ class Service(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(duration__gt=0),
+                condition=models.Q(duration__gt=0),
                 name='service_duration_positive',
             ),
             models.CheckConstraint(
-                check=models.Q(max_participants__gt=0),
+                condition=models.Q(max_participants__gt=0),
                 name='service_max_participants_positive',
             ),
         ]
@@ -302,7 +303,7 @@ class Handshake(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(provisioned_hours__gt=0),
+                condition=models.Q(provisioned_hours__gt=0),
                 name='handshake_provisioned_hours_positive',
             ),
         ]
@@ -486,6 +487,25 @@ class PublicChatMessage(models.Model):
             models.Index(fields=['sender']),
         ]
         ordering = ['created_at']
+
+
+class ServiceGroupChatMessage(models.Model):
+    """Private group chat messages for a service — only accepted participants can read/write."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='group_chat_messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_chat_messages')
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"[Group:{self.service_id}] {self.sender.email}: {self.body[:50]}"
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['service', 'created_at']),
+            models.Index(fields=['sender']),
+        ]
 
 
 class Comment(models.Model):

@@ -927,7 +927,7 @@ const DashboardPage = () => {
             ) : fetchError && services.length === 0 ? (
               <Flex direction="column" align="center" py={16} gap={3}>
                 <Text fontSize="2xl">⚡</Text>
-                <Text color="red.500" fontSize="13px">{fetchError.message}</Text>
+                <Text color="red.500" fontSize="13px">{fetchError}</Text>
               </Flex>
             ) : services.length === 0 ? (
               <Flex direction="column" align="center" py={16} gap={3}>

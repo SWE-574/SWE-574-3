@@ -1,66 +1,119 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 
 interface UsePollingOptions {
-  /** Milliseconds between each poll. */
-  interval: number
-  /** When false the polling is paused (default: true). */
+  /** Polling interval in ms. Default: 30 000 */
+  interval?: number
+  /** Re-fetch when the browser tab becomes visible again. Default: true */
+  onVisibility?: boolean
+  /** Start polling immediately on mount. Default: true */
   enabled?: boolean
 }
 
 interface UsePollingResult {
+  /** True only during the very first fetch — use to show a full-page skeleton */
   isLoading: boolean
-  error: Error | null
+  /** True during background refreshes — use to show a subtle indicator */
+  isRefreshing: boolean
+  /** Last error message, null when healthy */
+  error: string | null
+  /** Manually trigger a background refresh */
+  refresh: () => void
 }
 
 /**
- * Repeatedly calls `fn` on mount and every `interval` milliseconds.
- * Passes an AbortSignal so the function can cancel in-flight requests.
- * Re-subscribes whenever `deps` change.
+ * usePolling — generic polling hook with first-load vs background-refresh distinction.
+ *
+ * @param fn   Async function to call on every tick. Receives an AbortSignal.
+ * @param deps Dependency array; changing any dep restarts the polling cycle.
+ *             NOTE: wrap `fn` in useCallback to avoid infinite loops.
+ *
+ * @example
+ * const fetch = useCallback(async (signal) => {
+ *   const data = await myAPI.list({ signal })
+ *   setItems(data)
+ * }, [filter])
+ *
+ * const { isLoading, isRefreshing } = usePolling(fetch, [fetch])
  */
 export function usePolling(
   fn: (signal: AbortSignal) => Promise<void>,
-  deps: React.DependencyList,
-  { interval, enabled = true }: UsePollingOptions,
+  deps: unknown[],
+  { interval = 30_000, onVisibility = true, enabled = true }: UsePollingOptions = {},
 ): UsePollingResult {
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // Keep a stable ref to fn so the interval closure doesn't stale-close over it
-  const fnRef = useRef(fn)
-  useEffect(() => { fnRef.current = fn })
+  // Survives re-renders and dep changes — spinner only on the very first fetch ever
+  const hasLoadedOnce = useRef(false)
+  // useState counter so incrementing actually triggers the effect
+  const [manualTick, setManualTick] = useState(0)
+
+  const refresh = useCallback(() => {
+    setManualTick(t => t + 1)
+  }, [])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const run = useCallback(async (signal: AbortSignal) => {
-    if (signal.aborted) return
-    setIsLoading(true)
-    try {
-      await fnRef.current(signal)
-      if (!signal.aborted) setError(null)
-    } catch (e: unknown) {
-      if (!signal.aborted) {
-        setError(e instanceof Error ? e : new Error(String(e)))
-      }
-    } finally {
-      if (!signal.aborted) setIsLoading(false)
-    }
-  // deps are intentionally spread here so callers control re-subscription
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
-
   useEffect(() => {
     if (!enabled) return
 
-    const ctrl = new AbortController()
+    let mounted = true
+    const controller = new AbortController()
 
-    // Fire immediately, then on a timer
-    run(ctrl.signal)
-    const id = setInterval(() => run(ctrl.signal), interval)
+    const run = async () => {
+      if (!hasLoadedOnce.current) {
+        setIsLoading(true)
+      } else {
+        setIsRefreshing(true)
+      }
+      setError(null)
+
+      try {
+        await fn(controller.signal)
+        if (mounted) {
+          hasLoadedOnce.current = true
+          setIsLoading(false)
+          setIsRefreshing(false)
+        }
+      } catch (err: unknown) {
+        if (!mounted) return
+        const e = err as { name?: string; code?: string; message?: string }
+        if (
+          e?.name === 'AbortError' ||
+          e?.name === 'CanceledError' ||
+          e?.code === 'ERR_CANCELED'
+        ) {
+          setIsLoading(false)
+          setIsRefreshing(false)
+          return
+        }
+        setError(e?.message ?? 'Something went wrong')
+        setIsLoading(false)
+        setIsRefreshing(false)
+      }
+    }
+
+    run()
+    const timer = setInterval(run, interval)
+
+    const onVisibilityChange = () => {
+      if (onVisibility && !document.hidden && mounted) run()
+    }
+    if (onVisibility) {
+      document.addEventListener('visibilitychange', onVisibilityChange)
+    }
 
     return () => {
-      ctrl.abort()
-      clearInterval(id)
+      mounted = false
+      controller.abort()
+      clearInterval(timer)
+      if (onVisibility) {
+        document.removeEventListener('visibilitychange', onVisibilityChange)
+      }
     }
-  }, [run, interval, enabled])
+  // deps intentionally spread — eslint-disable covers the dynamic array
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, interval, onVisibility, enabled, manualTick])
 
-  return { isLoading, error }
+  return { isLoading, isRefreshing, error, refresh }
 }

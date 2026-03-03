@@ -84,7 +84,11 @@ export function useWebSocket({
         setIsConnected(false)
         onCloseRef.current?.()
 
-        if (event.code !== 1000 && enabled) {
+        // 4xxx = application-level rejection (auth failure, access denied, not found).
+        // These are permanent — never retry, it would cause an infinite reconnect loop.
+        // Only retry on normal network disruptions (1001–1015).
+        const isPermanentRejection = event.code >= 4000
+        if (event.code !== 1000 && !isPermanentRejection && enabled) {
           setReconnectAttempts((prev) => {
             if (prev < 5) {
               const delay = Math.min(1000 * Math.pow(2, prev), 30_000)

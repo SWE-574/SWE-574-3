@@ -144,7 +144,7 @@ def complete_timebank_transfer(handshake: Handshake) -> bool:
             completed_count_after = completed_excluding_current + 1
             active_count_after = active_excluding_current
 
-            if active_count_after == 0 and completed_count_after > 0 and service.status != 'Completed':
+            if active_count_after == 0 and completed_count_after > 0 and service.status not in ('Completed',):
                 service.status = 'Completed'
                 service.save(update_fields=['status'])
 
