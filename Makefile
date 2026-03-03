@@ -59,7 +59,7 @@ dev: ## Start local dev: infra + backend (8000) + frontend (5173) in parallel
 	@echo "\033[1;34m→ Starting backend (http://localhost:8000) and frontend (http://localhost:5173)...\033[0m"
 	@echo "  Press Ctrl+C to stop both.\n"
 	@trap 'kill 0; exit 0' INT TERM; \
-	(cd backend && $(PYEXEC) manage.py runserver 0.0.0.0:8000 2>&1 | sed 's/^/\033[0;36m[backend]\033[0m /') & \
+	(cd backend && $(PYEXEC) -m daphne -b 0.0.0.0 -p 8000 hive_project.asgi:application 2>&1 | sed 's/^/\033[0;36m[backend]\033[0m /') & \
 	(cd frontend && VITE_BACKEND_URL=http://localhost:8000 npm run dev 2>&1 | sed 's/^/\033[0;35m[frontend]\033[0m /') ; \
 	wait
 
