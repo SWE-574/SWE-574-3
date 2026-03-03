@@ -235,3 +235,97 @@ class TestServiceViewSet:
         assert created_report['status'] == 'pending'
         # DRF may surface UUIDs as UUID objects in `.data` for tests.
         assert str(created_report['reported_service']) == str(service.id)
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestServiceRetrieveStatusVisibility:
+    """Tests for the retrieve endpoint status-visibility rules.
+
+    One-Time services must be accessible regardless of status so that owners
+    and participants can revisit service history (Agreed, Completed, Cancelled).
+    Recurrent services stay Active permanently, so they are always reachable.
+    The list endpoint must never expose non-Active services.
+    """
+
+    # ── retrieve: One-Time non-Active statuses are visible ───────────────────
+
+    def test_retrieve_one_time_agreed_returns_200(self):
+        """Agreed One-Time service is visible on the detail endpoint."""
+        service = ServiceFactory(schedule_type='One-Time', status='Agreed')
+        response = APIClient().get(f'/api/services/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['status'] == 'Agreed'
+
+    def test_retrieve_one_time_completed_returns_200(self):
+        """Completed One-Time service is visible on the detail endpoint."""
+        service = ServiceFactory(schedule_type='One-Time', status='Completed')
+        response = APIClient().get(f'/api/services/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['status'] == 'Completed'
+
+    def test_retrieve_one_time_cancelled_returns_200(self):
+        """Cancelled One-Time service is visible on the detail endpoint."""
+        service = ServiceFactory(schedule_type='One-Time', status='Cancelled')
+        response = APIClient().get(f'/api/services/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['status'] == 'Cancelled'
+
+    def test_retrieve_one_time_active_returns_200(self):
+        """Active One-Time service is still reachable (regression guard)."""
+        service = ServiceFactory(schedule_type='One-Time', status='Active')
+        response = APIClient().get(f'/api/services/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+
+    # ── retrieve: Recurrent services are always Active ───────────────────────
+
+    def test_retrieve_recurrent_active_returns_200(self):
+        """Active Recurrent service is visible on the detail endpoint."""
+        service = ServiceFactory(schedule_type='Recurrent', status='Active')
+        response = APIClient().get(f'/api/services/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_retrieve_nonexistent_service_returns_404(self):
+        """Unknown UUID must still return 404."""
+        import uuid
+        response = APIClient().get(f'/api/services/{uuid.uuid4()}/')
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    # ── list: only Active services are exposed ────────────────────────────────
+
+    def test_list_excludes_agreed_services(self):
+        """Agreed services must not appear in the public list."""
+        ServiceFactory(schedule_type='One-Time', status='Agreed')
+        ServiceFactory(schedule_type='One-Time', status='Active')
+        response = APIClient().get('/api/services/')
+        assert response.status_code == status.HTTP_200_OK
+        statuses = [s['status'] for s in response.data['results']]
+        assert 'Agreed' not in statuses
+
+    def test_list_excludes_completed_services(self):
+        """Completed services must not appear in the public list."""
+        ServiceFactory(schedule_type='One-Time', status='Completed')
+        ServiceFactory(schedule_type='One-Time', status='Active')
+        response = APIClient().get('/api/services/')
+        assert response.status_code == status.HTTP_200_OK
+        statuses = [s['status'] for s in response.data['results']]
+        assert 'Completed' not in statuses
+
+    def test_list_excludes_cancelled_services(self):
+        """Cancelled services must not appear in the public list."""
+        ServiceFactory(schedule_type='One-Time', status='Cancelled')
+        ServiceFactory(schedule_type='One-Time', status='Active')
+        response = APIClient().get('/api/services/')
+        assert response.status_code == status.HTTP_200_OK
+        statuses = [s['status'] for s in response.data['results']]
+        assert 'Cancelled' not in statuses
+
+    def test_list_only_returns_active_services(self):
+        """All items returned by the list endpoint must have status Active."""
+        ServiceFactory.create_batch(3, status='Active')
+        ServiceFactory(status='Agreed')
+        ServiceFactory(status='Completed')
+        ServiceFactory(status='Cancelled')
+        response = APIClient().get('/api/services/')
+        assert response.status_code == status.HTTP_200_OK
+        assert all(s['status'] == 'Active' for s in response.data['results'])

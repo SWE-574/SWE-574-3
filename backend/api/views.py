@@ -9,6 +9,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.db import transaction, IntegrityError
+from django.shortcuts import get_object_or_404
 from django.db.utils import OperationalError
 from django.db.models import F
 from decimal import Decimal
@@ -31,7 +32,7 @@ from .exceptions import create_error_response, ErrorCodes
 from .models import (
     User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
-    ChatRoom, PublicChatMessage, Comment, NegativeRep,
+    ChatRoom, PublicChatMessage, ServiceGroupChatMessage, Comment, NegativeRep,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia
 )
 from .serializers import (
@@ -48,6 +49,7 @@ from .serializers import (
     TransactionHistorySerializer,
     ChatRoomSerializer,
     PublicChatMessageSerializer,
+    ServiceGroupChatMessageSerializer,
     CommentSerializer,
     NegativeRepSerializer,
     ForumCategorySerializer,
@@ -743,11 +745,25 @@ class ServiceViewSet(viewsets.ModelViewSet):
             queryset=UserBadge.objects.select_related('badge')
         )
         
+        # Prefetch capacity-relevant handshakes to compute participant_count without N+1
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+
         # Base queryset with optimizations
         queryset = (
             Service.objects.filter(status='Active')
             .select_related('user')
-            .prefetch_related('tags', user_badges_prefetch, Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')))
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
         )
         
         # Filter by visibility - admins can see all, others only visible
@@ -797,6 +813,34 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     def get_serializer_context(self):
         return {'request': self.request}
+
+    def retrieve(self, request, *args, **kwargs):
+        """Return a single service regardless of status so owners and participants
+        can view Agreed/Completed/Cancelled services from their history."""
+        user_badges_prefetch = Prefetch(
+            'user__badges',
+            queryset=UserBadge.objects.select_related('badge')
+        )
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+        queryset = (
+            Service.objects
+            .select_related('user')
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
+        )
+        instance = get_object_or_404(queryset, pk=kwargs['pk'])
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
         # REQ-TB-003: Check if user can post offer (balance > 10 hours blocks new offers)
@@ -1350,19 +1394,17 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='initiate')
     def initiate_handshake(self, request, pk=None):
         """
-        Provider initiates handshake with details (location, duration, scheduled_time).
-        Only the service provider can initiate. After initiation, requester can approve.
+        Service owner initiates handshake with session details (location, duration, scheduled_time).
+        The service owner always initiates, regardless of Offer/Need type.
+        The other party (the one who expressed interest) then approves.
         """
         handshake = self.get_object()
         user = request.user
         
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-        
-        # Only provider can initiate
-        if provider != user:
+        # Service owner always initiates — works for both Offer and Need
+        if handshake.service.user != user:
             return create_error_response(
-                'Only the service provider can initiate the handshake',
+                'Only the service owner can initiate the handshake',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
@@ -1474,15 +1516,18 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         handshake.save()
         
         # Invalidate conversations cache for both users
-        invalidate_conversations(str(provider.id))
-        invalidate_conversations(str(receiver.id))
+        # service_owner = initiator (user), other party = handshake.requester
+        service_owner = handshake.service.user
+        other_party   = handshake.requester
+        invalidate_conversations(str(service_owner.id))
+        invalidate_conversations(str(other_party.id))
 
-        # Notify receiver that provider has initiated
+        # Notify the other party (requester) that session details are ready
         create_notification(
-            user=receiver,
+            user=other_party,
             notification_type='handshake_request',
             title='Service Details Provided',
-            message=f"{user.first_name} has provided service details for '{handshake.service.title}'. Please review and approve.",
+            message=f"{user.first_name} has provided session details for '{handshake.service.title}'. Please review and approve.",
             handshake=handshake,
             service=handshake.service
         )
@@ -1493,19 +1538,17 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='approve')
     def approve_handshake(self, request, pk=None):
         """
-        Receiver approves the handshake after provider has initiated with details.
-        Once approved, handshake is accepted and TimeBank is provisioned.
+        The requester (the one who expressed interest) approves the session details
+        that were set by the service owner via /initiate/.
+        Works for both Offer and Need service types.
         """
         handshake = self.get_object()
         user = request.user
         
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-        
-        # Only receiver can approve
-        if receiver != user:
+        # Only the requester (the one who expressed interest) can approve
+        if handshake.requester != user:
             return create_error_response(
-                'Only the service receiver can approve the handshake',
+                'Only the requester can approve the handshake',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
@@ -1733,8 +1776,50 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
-        handshake.status = 'accepted'
-        handshake.save()
+        service = handshake.service
+        with transaction.atomic():
+            handshake.status = 'accepted'
+            handshake.save()
+
+            # For One-Time services: check whether all slots are now filled.
+            # Only when capacity is reached do we deny remaining pending handshakes
+            # and transition the service to Agreed.
+            # Recurrent services stay Active so new participants can always join.
+            if service.schedule_type == 'One-Time':
+                accepted_count = Handshake.objects.filter(
+                    service=service,
+                    status__in=['accepted', 'completed', 'reported', 'paused'],
+                ).count()
+
+                if accepted_count >= service.max_participants:
+                    # Capacity is now full — deny all remaining pending handshakes.
+                    other_pending = Handshake.objects.filter(
+                        service=service,
+                        status='pending',
+                    ).exclude(pk=handshake.pk)
+
+                    denied_requesters = list(other_pending.values_list('requester_id', flat=True))
+                    other_pending.update(status='denied')
+
+                    # Bulk-load all requester users to avoid N+1 queries.
+                    users_by_id = User.objects.in_bulk(denied_requesters)
+
+                    for requester_id in denied_requesters:
+                        user = users_by_id.get(requester_id)
+                        if user is None:
+                            continue
+                        create_notification(
+                            user=user,
+                            notification_type='handshake_denied',
+                            title='Request Not Accepted',
+                            message=f"All slots for '{service.title}' are now filled.",
+                            service=service
+                        )
+                        invalidate_conversations(str(requester_id))
+
+                    # Mark service as Agreed so it is hidden from the public listing.
+                    if service.status == 'Active':
+                        Service.objects.filter(pk=service.pk).update(status='Agreed')
 
         invalidate_conversations(str(handshake.requester.id))
         invalidate_conversations(str(handshake.service.user.id))
@@ -1743,9 +1828,9 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             user=handshake.requester,
             notification_type='handshake_accepted',
             title='Handshake Accepted',
-            message=f"Your interest in '{handshake.service.title}' has been accepted!",
+            message=f"Your interest in '{service.title}' has been accepted!",
             handshake=handshake,
-            service=handshake.service
+            service=service
         )
 
         serializer = self.get_serializer(handshake)
@@ -1802,16 +1887,21 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
+        svc = handshake.service
         with transaction.atomic():
             cancel_timebank_transfer(handshake)
+
+            # If the service was Agreed, reopen it now that the accepted slot is freed.
+            if svc.status == 'Agreed':
+                Service.objects.filter(pk=svc.pk).update(status='Active')
 
             create_notification(
                 user=handshake.requester,
                 notification_type='handshake_cancelled',
                 title='Service Cancelled',
-                message=f"The service '{handshake.service.title}' has been cancelled.",
+                message=f"The service '{svc.title}' has been cancelled.",
                 handshake=handshake,
-                service=handshake.service
+                service=svc
             )
 
         serializer = self.get_serializer(handshake)
@@ -2144,7 +2234,9 @@ class ChatViewSet(viewsets.ViewSet):
             
             conversations.append({
                 'handshake_id': str(handshake.id),
+                'service_id': str(handshake.service.id),
                 'service_title': handshake.service.title,
+                'service_type': handshake.service.type,
                 'other_user': {
                     'id': str(other_user.id),
                     'name': f"{other_user.first_name} {other_user.last_name}".strip(),
@@ -2162,6 +2254,8 @@ class ChatViewSet(viewsets.ViewSet):
                 'scheduled_time': handshake.scheduled_time.isoformat() if handshake.scheduled_time else None,
                 'provisioned_hours': float(handshake.provisioned_hours) if handshake.provisioned_hours else None,
                 'user_has_reviewed': user_has_reviewed,
+                'max_participants': handshake.service.max_participants,
+                'schedule_type': handshake.service.schedule_type,
             })
 
         page = paginator.paginate_queryset(conversations, request)
@@ -3301,6 +3395,93 @@ class PublicChatViewSet(viewsets.ViewSet):
             logger.warning(f"Failed to broadcast public chat message: {e}")
 
         serializer = PublicChatMessageSerializer(message)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class GroupChatViewSet(viewsets.ViewSet):
+    """
+    Private group chat for one-time Offer/Need services with max_participants > 1.
+    Only users with an accepted handshake (or the service owner) may access.
+
+    Endpoints:
+    - GET  /api/group-chat/{service_id}/ — get last 50 messages
+    - POST /api/group-chat/{service_id}/ — send a message
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_service_or_403(self, request, pk):
+        """Return the service if eligible and the user has access; raise otherwise."""
+        try:
+            service = Service.objects.select_related('user').get(id=pk)
+        except Service.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound('Service not found')
+
+        if service.schedule_type != 'One-Time' or service.max_participants <= 1:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Group chat is only available for one-time group services')
+
+        user = request.user
+        is_owner = service.user == user
+        has_accepted = Handshake.objects.filter(
+            service=service, requester=user, status='accepted'
+        ).exists()
+
+        if not is_owner and not has_accepted:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('You must have an accepted handshake to join this group chat')
+
+        return service
+
+    @track_performance
+    def retrieve(self, request, pk=None):
+        """Get the last 50 messages for the group chat."""
+        service = self._get_service_or_403(request, pk)
+        msgs = (
+            ServiceGroupChatMessage.objects
+            .filter(service=service)
+            .select_related('sender')
+            .order_by('-created_at')[:50]
+        )
+        serializer = ServiceGroupChatMessageSerializer(list(reversed(list(msgs))), many=True)
+        return Response({'service_id': str(service.id), 'messages': serializer.data})
+
+    @track_performance
+    def create(self, request, pk=None):
+        """Send a message to the group chat."""
+        service = self._get_service_or_403(request, pk)
+
+        body = (request.data.get('body', '') or '').strip()
+        cleaned_body = bleach.clean(body, tags=[], strip=True).strip()[:5000]
+
+        if not cleaned_body:
+            return create_error_response(
+                'Message body is required',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        message = ServiceGroupChatMessage.objects.create(
+            service=service,
+            sender=request.user,
+            body=cleaned_body,
+        )
+
+        # Broadcast via WebSocket
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                serializer = ServiceGroupChatMessageSerializer(message)
+                async_to_sync(channel_layer.group_send)(
+                    f'group_chat_{str(service.id)}',
+                    {'type': 'chat_message', 'message': serializer.data}
+                )
+        except Exception as e:
+            logger.warning(f"Failed to broadcast group chat message: {e}")
+
+        serializer = ServiceGroupChatMessageSerializer(message)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 

@@ -511,6 +511,23 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
         handshake.requester_initiated = True
         handshake.updated_at = created_at_time + timedelta(hours=4)
         handshake.save()
+
+        # Mirror accept_handshake view logic:
+        # Only when all slots are filled do we deny remaining pending handshakes
+        # and transition the service to Agreed. Recurrent stays Active.
+        if service.schedule_type == 'One-Time':
+            accepted_count = Handshake.objects.filter(
+                service=service,
+                status__in=['accepted', 'completed', 'reported', 'paused'],
+            ).count()
+            if accepted_count >= service.max_participants and service.status == 'Active':
+                other_pending = Handshake.objects.filter(
+                    service=service,
+                    status='pending',
+                ).exclude(pk=handshake.pk)
+                other_pending.update(status='denied')
+                Service.objects.filter(pk=service.pk).update(status='Agreed')
+                service.refresh_from_db(fields=['status'])
         
         # Replace the default initial message (created by HandshakeService) with a more natural, two-sided conversation.
         ChatMessage.objects.filter(handshake=handshake).delete()
@@ -551,14 +568,31 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
             with transaction.atomic():
                 handshake.provider_confirmed_complete = True
                 handshake.receiver_confirmed_complete = True
-                handshake.status = 'completed'
                 handshake.updated_at = completion_time
+                # Don't set status='completed' before complete_timebank_transfer —
+                # the function exits early (idempotency guard) if status is already
+                # 'completed', skipping the service-status update logic.
                 handshake.save()
                 complete_timebank_transfer(handshake)
-            
+
+                # After transfer, manually back-date the timestamps
+                Handshake.objects.filter(pk=handshake.pk).update(updated_at=completion_time)
+
+                # Sync service status: One-Time services should become 'Completed'
+                # when no active handshakes remain (mirrors utils.py logic).
+                svc = Service.objects.get(pk=service.pk)
+                if svc.schedule_type == 'One-Time':
+                    active_count = Handshake.objects.filter(
+                        service=svc,
+                        status__in=['pending', 'accepted', 'reported', 'paused'],
+                    ).count()
+                    if active_count == 0 and svc.status != 'Completed':
+                        svc.status = 'Completed'
+                        svc.save(update_fields=['status'])
+
             check_and_assign_badges(provider)
             check_and_assign_badges(receiver)
-            
+
             return handshake, True
         
         return handshake, False

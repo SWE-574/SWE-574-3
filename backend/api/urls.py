@@ -26,6 +26,7 @@ from .views import (
     TransactionHistoryViewSet,
     WikidataSearchView,
     PublicChatViewSet,
+    GroupChatViewSet,
     CommentViewSet,
     NegativeRepViewSet,
     ForumCategoryViewSet,
@@ -168,6 +169,12 @@ public_chat_viewset = PublicChatViewSet.as_view({
     'post': 'create'
 })
 
+# Create viewset instance for private group chat
+group_chat_viewset = GroupChatViewSet.as_view({
+    'get': 'retrieve',
+    'post': 'create'
+})
+
 # Create viewset instances for comments
 comment_list_create = CommentViewSet.as_view({
     'get': 'list',
@@ -258,6 +265,7 @@ urlpatterns = [
          comment_reviewable, 
          name='service-comments-reviewable'),
     path('public-chat/<uuid:pk>/', public_chat_viewset, name='public-chat'),
+    path('group-chat/<uuid:pk>/', group_chat_viewset, name='group-chat'),
     # Negative reputation endpoint
     path('reputation/negative/', negative_rep_create, name='negative-reputation'),
     path('wikidata/search/', WikidataSearchView.as_view(), name='wikidata-search'),

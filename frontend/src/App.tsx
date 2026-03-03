@@ -102,6 +102,10 @@ function App() {
             element={<ProtectedRoute><ChatPage /></ProtectedRoute>}
           />
           <Route
+            path="/messages/:handshakeId"
+            element={<ProtectedRoute><ChatPage /></ProtectedRoute>}
+          />
+          <Route
             path="/profile"
             element={<ProtectedRoute><UserProfile /></ProtectedRoute>}
           />

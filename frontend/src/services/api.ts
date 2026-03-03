@@ -2,10 +2,9 @@ import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axio
 
 const API_TIMEOUT = 10000
 
-const DEFAULT_API_URL =
-  import.meta.env.MODE === 'test' ? '/api' : 'http://localhost:8000/api'
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL ?? DEFAULT_API_URL
+// Always use relative /api so requests go through the Vite proxy in dev
+// and through Nginx in production. VITE_API_URL can override for special cases.
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,

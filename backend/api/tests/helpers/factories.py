@@ -10,7 +10,7 @@ from datetime import timedelta
 from api.models import (
     Service, Tag, Handshake, ChatMessage, ReputationRep,
     Comment, NegativeRep, TransactionHistory, Badge, UserBadge,
-    ForumCategory, ForumTopic, ForumPost, ServiceMedia
+    ForumCategory, ForumTopic, ForumPost, ServiceMedia, ServiceGroupChatMessage
 )
 
 User = get_user_model()
@@ -20,11 +20,11 @@ class UserFactory(factory.django.DjangoModelFactory):
     """Factory for creating User instances"""
     class Meta:
         model = User
-    
+        skip_postgeneration_save = True
+
     email = factory.Sequence(lambda n: f'user{n}@test.com')
     first_name = factory.Faker('first_name')
     last_name = factory.Faker('last_name')
-    password = factory.PostGenerationMethodCall('set_password', 'testpass123')
     timebank_balance = Decimal('3.00')
     karma_score = 0
     role = 'member'
@@ -40,6 +40,13 @@ class UserFactory(factory.django.DjangoModelFactory):
             model_class.objects.filter(pk=user.pk).update(date_joined=date_joined)
             user.refresh_from_db(fields=['date_joined'])
         return user
+
+    @factory.post_generation
+    def password(obj, create, extracted, **kwargs):  # noqa: N805
+        raw = extracted or 'testpass123'
+        obj.set_password(raw)
+        if create:
+            obj.save(update_fields=['password'])
 
 
 class AdminUserFactory(UserFactory):
@@ -102,6 +109,20 @@ class ChatMessageFactory(factory.django.DjangoModelFactory):
         model = ChatMessage
     
     handshake = factory.SubFactory(HandshakeFactory)
+    sender = factory.SubFactory(UserFactory)
+    body = factory.Faker('sentence')
+
+
+class ServiceGroupChatMessageFactory(factory.django.DjangoModelFactory):
+    """Factory for creating ServiceGroupChatMessage instances"""
+    class Meta:
+        model = ServiceGroupChatMessage
+
+    service = factory.SubFactory(
+        ServiceFactory,
+        schedule_type='One-Time',
+        max_participants=3,
+    )
     sender = factory.SubFactory(UserFactory)
     body = factory.Faker('sentence')
 

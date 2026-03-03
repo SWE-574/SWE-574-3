@@ -8,6 +8,7 @@ VENV     = backend/.venv
 PIP      = "$(CURDIR)/$(VENV)/bin/pip"
 PYEXEC   = "$(CURDIR)/$(VENV)/bin/python"
 
+
 help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
@@ -28,10 +29,10 @@ dev-setup: ## One-time local setup: venv, deps, infra, migrate, demo data
 		cp .env.example backend/.env; \
 		sed -i '' 's|DB_HOST=localhost|DB_HOST=127.0.0.1|g' backend/.env; \
 		$(PYEXEC) -c " \
-import pathlib, sys; \
+import pathlib; \
 from django.core.management.utils import get_random_secret_key; \
 p = pathlib.Path('backend/.env'); \
-lines = ['SECRET_KEY=' + get_random_secret_key() if l.startswith('SECRET_KEY=') else l for l in p.read_text().splitlines()]; \
+lines = [\"SECRET_KEY='\" + get_random_secret_key() + \"'\" if l.startswith('SECRET_KEY=') else l for l in p.read_text().splitlines()]; \
 p.write_text('\n'.join(lines) + '\n') \
 "; \
 		echo "  Created backend/.env"; \
@@ -58,8 +59,8 @@ dev: ## Start local dev: infra + backend (8000) + frontend (5173) in parallel
 	@echo "\033[1;34m→ Starting backend (http://localhost:8000) and frontend (http://localhost:5173)...\033[0m"
 	@echo "  Press Ctrl+C to stop both.\n"
 	@trap 'kill 0; exit 0' INT TERM; \
-	(cd backend && $(PYEXEC) manage.py runserver 0.0.0.0:8000 2>&1 | sed 's/^/\033[0;36m[backend]\033[0m /') & \
-	(cd frontend && npm run dev 2>&1 | sed 's/^/\033[0;35m[frontend]\033[0m /') ; \
+	(cd backend && $(PYEXEC) -m daphne -b 0.0.0.0 -p 8000 hive_project.asgi:application 2>&1 | sed 's/^/\033[0;36m[backend]\033[0m /') & \
+	(cd frontend && VITE_BACKEND_URL=http://localhost:8000 npm run dev 2>&1 | sed 's/^/\033[0;35m[frontend]\033[0m /') ; \
 	wait
 
 dev-stop: ## Stop local infra (PostGIS + Redis containers)
