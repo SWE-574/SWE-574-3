@@ -129,7 +129,6 @@ function SegmentedControl<T extends string>({
         <Box
           key={opt.value}
           as="button"
-          type="button"
           flex={1} py="8px"
           borderRadius="8px"
           fontSize="13px"
@@ -139,7 +138,7 @@ function SegmentedControl<T extends string>({
           boxShadow={value === opt.value ? '0 1px 4px rgba(0,0,0,0.08)' : 'none'}
           cursor="pointer"
           transition="all 0.12s"
-          onClick={() => onChange(opt.value)}
+          onClick={(e) => { e.preventDefault(); onChange(opt.value) }}
           style={{
             border: 'none',
             outline: value === opt.value ? `2px solid ${accent}20` : 'none',
@@ -322,8 +321,7 @@ function LocationSearch({
           {query && (
             <Box
               as="button"
-              type="button"
-              onClick={handleClear}
+              onClick={(e) => { e.preventDefault(); handleClear() }}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: GRAY400 }}
             >
               <FiX size={13} />
@@ -661,8 +659,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
                     #{tag.name}
                     <Box
                       as="button"
-                      type="button"
-                      onClick={() => setSelectedTags((p) => p.filter((t) => t.id !== tag.id))}
+                      onClick={(e) => { e.preventDefault(); setSelectedTags((p) => p.filter((t) => t.id !== tag.id)) }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: accent }}
                     >
                       <FiX size={11} />
@@ -755,12 +752,11 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                     <Box
                       as="button"
-                      type="button"
                       position="absolute" top="5px" right="5px"
                       w="20px" h="20px" borderRadius="full"
                       bg="rgba(0,0,0,0.55)" color={WHITE}
                       display="flex" alignItems="center" justifyContent="center"
-                      onClick={() => removeMedia(i)}
+                      onClick={(e) => { e.preventDefault(); removeMedia(i) }}
                       style={{ border: 'none', cursor: 'pointer' }}
                     >
                       <FiX size={10} />
