@@ -83,7 +83,7 @@ class User(AbstractUser):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(timebank_balance__gte=-10.00),
+                condition=models.Q(timebank_balance__gte=-10.00),
                 name='timebank_balance_minimum',
             ),
         ]
@@ -257,11 +257,11 @@ class Service(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(duration__gt=0),
+                condition=models.Q(duration__gt=0),
                 name='service_duration_positive',
             ),
             models.CheckConstraint(
-                check=models.Q(max_participants__gt=0),
+                condition=models.Q(max_participants__gt=0),
                 name='service_max_participants_positive',
             ),
         ]
@@ -303,7 +303,7 @@ class Handshake(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(provisioned_hours__gt=0),
+                condition=models.Q(provisioned_hours__gt=0),
                 name='handshake_provisioned_hours_positive',
             ),
         ]
