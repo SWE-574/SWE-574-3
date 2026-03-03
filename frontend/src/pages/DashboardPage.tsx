@@ -78,8 +78,10 @@ const HANDSHAKE_BADGE: Record<
   completed: { label: 'Completed',   bg: '#d1fae5', color: '#065f46' },
   denied:    { label: 'Declined',    bg: '#fee2e2', color: '#991b1b' },
   cancelled: { label: 'Cancelled',   bg: '#f3f4f6', color: '#6b7280' },
-  reported:  { label: 'Reported',    bg: '#fee2e2', color: '#991b1b' },
-  paused:    { label: 'Paused',      bg: '#e0f2fe', color: '#0369a1' },
+  reported:   { label: 'Reported',    bg: '#fee2e2', color: '#991b1b' },
+  paused:     { label: 'Paused',      bg: '#e0f2fe', color: '#0369a1' },
+  checked_in: { label: 'Checked In',  bg: '#d1fae5', color: '#065f46' },
+  no_show:    { label: 'No-Show',     bg: '#fee2e2', color: '#991b1b' },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

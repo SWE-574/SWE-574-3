@@ -413,15 +413,6 @@ export default function ServiceDetailPage() {
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
 
-  // Event-specific derived values
-  const myEventHandshake = isEvent
-    ? handshakes.find((h) =>
-        exId(h.service) === service?.id &&
-        exId(h.requester) === user?.id &&
-        ['accepted', 'checked_in', 'no_show'].includes(h.status)
-      )
-    : undefined
-
   const handleExpressInterest = async () => {
     if (!service) return
     if (!isAuthenticated) { navigate('/login'); return }
@@ -550,6 +541,16 @@ export default function ServiceDetailPage() {
   const gradient      = pickGradient(service)
   const isOffer       = service.type === 'Offer'
   const isEvent       = service.type === 'Event'
+
+  // Event-specific derived values (must come after isEvent)
+  const myEventHandshake = isEvent
+    ? handshakes.find((h) =>
+        exId(h.service) === service?.id &&
+        exId(h.requester) === user?.id &&
+        ['accepted', 'checked_in', 'no_show'].includes(h.status)
+      )
+    : undefined
+
   const images        = service.media?.filter((m) => (m.media_type ?? 'image') === 'image') ?? []
   const fillPct       = service.max_participants > 1
     ? Math.min(100, ((service.participant_count ?? 0) / service.max_participants) * 100) : 0
