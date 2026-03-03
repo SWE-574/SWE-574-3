@@ -29,6 +29,8 @@ export interface MapServiceItem {
   location_area?: string
   location_lat?: string | number | null
   location_lng?: string | number | null
+  circle_lat?: string | number | null   // visual circle centre (backend-fuzzed, independent offset)
+  circle_lng?: string | number | null
   latitude?: number
   longitude?: number
   user?: { first_name?: string; last_name?: string; email?: string }
@@ -47,30 +49,19 @@ const ISTANBUL_CENTER = { longitude: 28.9784, latitude: 41.0082, zoom: 11 }
 // ─── Privacy helpers ──────────────────────────────────────────────────────────
 
 /**
- * Deterministic 1 km fuzzy offset based on service ID.
- * Marker is placed within ~1 km of the real location.
- * A 2 km visual privacy circle is drawn around the marker.
- * 1 km ≈ 0.009° latitude at Istanbul's latitude.
+ * Coordinates received from the API are already privacy-fuzzed by the backend
+ * (~1 km deterministic offset applied in ServiceSerializer.to_representation).
+ * The frontend only adds a tiny visual jitter when two services share the same
+ * fuzzy position so their markers don't stack exactly on top of each other.
  */
-function idFuzzyOffset(id: string): { dLat: number; dLng: number } {
-  let h = 2166136261
-  for (let i = 0; i < id.length; i++) {
-    h ^= id.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  const angle = ((h >>> 0) / 0xFFFFFFFF) * 2 * Math.PI
-  const R = 0.009                                   // ~1 km radius
-  return { dLat: R * Math.sin(angle), dLng: R * Math.cos(angle) }
-}
 
 /**
- * Extra spiral jitter for services that still share the same fuzzy position
- * after idFuzzyOffset (very unlikely but possible for identical IDs / test data).
+ * Tiny spiral jitter so co-located fuzzy markers don't perfectly overlap.
  */
 function stackJitter(rank: number): { dLat: number; dLng: number } {
   if (rank === 0) return { dLat: 0, dLng: 0 }
   const angle = (rank * 137.5 * Math.PI) / 180
-  const r = 0.001 * Math.sqrt(rank)                // ~100 m max extra spread
+  const r = 0.0005 * Math.sqrt(rank)               // ~55 m max extra spread
   return { dLat: r * Math.sin(angle), dLng: r * Math.cos(angle) }
 }
 
@@ -105,38 +96,45 @@ interface ServiceFeatureProps {
 }
 
 function buildGeoJSON(services: MapServiceItem[]): FeatureCollection<Point, ServiceFeatureProps> {
-  // Track rounded coords to detect stack collisions after fuzzy offset
+  // Coordinates from the API are already ~1 km fuzzed by the backend.
+  // We only add a tiny visual jitter when two markers share the same position.
   const coordRank: Record<string, number> = {}
 
   const features: Feature<Point, ServiceFeatureProps>[] = services
     .filter((s) => s.location_type !== 'Online')
     .map((s, i) => {
-      const base   = resolveCoords(s, i)
-      const fuzzy  = idFuzzyOffset(s.id)
-      const fLat   = base.lat + fuzzy.dLat
-      const fLng   = base.lng + fuzzy.dLng
+      const { lat, lng } = resolveCoords(s, i)
 
-      // Detect overlap after fuzzy (round to ~50 m grid)
-      const key    = `${(fLat * 200).toFixed(0)}-${(fLng * 200).toFixed(0)}`
-      const rank   = coordRank[key] ?? 0
+      const key  = `${(lat * 100).toFixed(0)}-${(lng * 100).toFixed(0)}`
+      const rank = coordRank[key] ?? 0
       coordRank[key] = rank + 1
-      const extra  = stackJitter(rank)
+      const extra = stackJitter(rank)
 
-      const f: Feature<Point, ServiceFeatureProps> = {
-        type: 'Feature',
-        geometry: {
-          type: 'Point',
-          coordinates: [fLng + extra.dLng, fLat + extra.dLat],
-        },
-        properties: {
-          serviceId: s.id,
-          title:     s.title,
-          type:      s.type ?? 'Offer',
-          ownerName: ownerName(s),
-          area:      s.location_area ?? '',
-        },
+      return {
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [lng + extra.dLng, lat + extra.dLat] },
+        properties: { serviceId: s.id, title: s.title, type: s.type ?? 'Offer', ownerName: ownerName(s), area: s.location_area ?? '' },
       }
-      return f
+    })
+  return { type: 'FeatureCollection', features }
+}
+
+/** Circle-centre GeoJSON — uses backend-supplied circle_lat/lng (independent ~1 km offset). */
+function buildCircleGeoJSON(services: MapServiceItem[]): FeatureCollection<Point, ServiceFeatureProps> {
+  const features: Feature<Point, ServiceFeatureProps>[] = services
+    .filter((s) => s.location_type !== 'Online')
+    .map((s, i) => {
+      // Prefer backend circle_lat/lng; fall back to interaction coords if missing
+      const cLat = s.circle_lat != null ? Number(s.circle_lat) : null
+      const cLng = s.circle_lng != null ? Number(s.circle_lng) : null
+      const { lat, lng } = resolveCoords(s, i)
+      const finalLat = (cLat != null && !isNaN(cLat)) ? cLat : lat
+      const finalLng = (cLng != null && !isNaN(cLng)) ? cLng : lng
+      return {
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [finalLng, finalLat] },
+        properties: { serviceId: s.id, title: s.title, type: s.type ?? 'Offer', ownerName: ownerName(s), area: '' },
+      }
     })
   return { type: 'FeatureCollection', features }
 }
@@ -149,7 +147,7 @@ function buildGeoJSON(services: MapServiceItem[]): FeatureCollection<Point, Serv
 const outerCircleLayer: LayerProps = {
   id: 'service-outer',
   type: 'circle',
-  filter: ['!', ['has', 'point_count']],
+  // No cluster filter needed — this source never clusters
   paint: {
     'circle-radius': ['interpolate', ['exponential', 2], ['zoom'],
       8,  4,
@@ -172,10 +170,10 @@ const outerCircleLayer: LayerProps = {
     'circle-stroke-color': [
       'match', ['get', 'type'],
       'Offer', GREEN,
-      'Need',  BLUE,
+      'Need',  '#6366F1',  // indigo instead of blue — won't clash with user location dot
       AMBER,
     ],
-    'circle-stroke-opacity': 0.45,
+    'circle-stroke-opacity': 0.5,
   },
 }
 
@@ -199,30 +197,11 @@ const clusterCircleLayer: LayerProps = {
   type: 'circle',
   filter: ['has', 'point_count'],
   paint: {
-    'circle-radius': ['interpolate', ['linear'], ['get', 'point_count'], 2, 22, 10, 34, 30, 46],
-    'circle-color': AMBER,
-    'circle-opacity': 0.80,
-    'circle-stroke-width': 2,
-    'circle-stroke-color': WHITE,
-    'circle-stroke-opacity': 0.9,
+    'circle-radius': 0,
+    'circle-opacity': 0,
   },
 }
 
-// Cluster count label
-const clusterLabelLayer: LayerProps = {
-  id: 'cluster-label',
-  type: 'symbol',
-  filter: ['has', 'point_count'],
-  layout: {
-    'text-field': '{point_count_abbreviated}',
-    'text-size': 13,
-    'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
-    'text-allow-overlap': true,
-  },
-  paint: {
-    'text-color': WHITE,
-  },
-}
 
 // ─── Missing token fallback ───────────────────────────────────────────────────
 
@@ -433,15 +412,18 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
   const mapRef = useRef<MapRef>(null)
   const [popupInfo, setPopupInfo] = useState<PopupInfo | null>(null)
 
-  const geojsonData = useMemo(() => buildGeoJSON(services), [services])
+  const geojsonData   = useMemo(() => buildGeoJSON(services),       [services])
+  const circleData    = useMemo(() => buildCircleGeoJSON(services),  [services])
 
-  // Fly to user location on first load if available
+  // Fly to user location only on the FIRST time it becomes available
+  const didFlyToUser = useRef(false)
   useEffect(() => {
-    if (!userLocation || !mapRef.current) return
+    if (!userLocation || !mapRef.current || didFlyToUser.current) return
+    didFlyToUser.current = true
     mapRef.current.flyTo({
       center: [userLocation.lng, userLocation.lat],
       zoom: 10,
-      duration: 800,
+      duration: 1200,  // slower = less jarring
     })
   }, [userLocation])
 
@@ -545,8 +527,8 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
       const lat = Number(s.location_lat ?? s.latitude)
       const lng = Number(s.location_lng ?? s.longitude)
       if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
-        const fuzz = idFuzzyOffset(s.id)
-        return { longitude: lng + fuzz.dLng, latitude: lat + fuzz.dLat, zoom: 11 }
+        // Coordinates are already fuzzed by the backend — center directly on them
+        return { longitude: lng, latitude: lat, zoom: 11 }
       }
     }
     return ISTANBUL_CENTER
@@ -592,13 +574,18 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
         mapStyle="mapbox://styles/mapbox/light-v11"
         scrollZoom={false}
         cursor={cursor}
-        interactiveLayerIds={['service-outer', 'service-inner', 'cluster-circle', 'cluster-label']}
+        interactiveLayerIds={['service-outer', 'service-inner', 'cluster-circle']}
         onMouseMove={onMouseMove}
         onMouseLeave={onMouseLeaveMap}
         onClick={onClick}
         onMouseEnter={onMouseEnterLayer}
       >
         <NavigationControl position="top-right" showCompass={false} />
+
+        {/* Circle-centre source — offset by ~500 m from hover point so centre ≠ real location */}
+        <Source id="service-circles" type="geojson" data={circleData}>
+          <Layer {...outerCircleLayer} />
+        </Source>
 
         <Source
           id="services"
@@ -608,11 +595,9 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
           clusterMaxZoom={13}
           clusterRadius={55}
         >
-          {/* Render order: outer glow → inner ring → cluster circle → cluster label */}
-          <Layer {...outerCircleLayer} />
+          {/* Hidden interaction layer + cluster layers */}
           <Layer {...innerCircleLayer} />
           <Layer {...clusterCircleLayer} />
-          <Layer {...clusterLabelLayer} />
         </Source>
 
         {/* User position dot */}

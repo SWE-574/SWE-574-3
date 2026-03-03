@@ -14,6 +14,7 @@ from decimal import Decimal
 import bleach
 import re
 import logging
+import math
 from drf_spectacular.utils import extend_schema_field, extend_schema_serializer, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
@@ -238,6 +239,26 @@ class ServiceMediaSerializer(serializers.ModelSerializer):
         )
     ]
 )
+def _fuzzy_coords(service_id: str, lat: float, lng: float):
+    """
+    Apply a deterministic ~1 km privacy offset to a service's real coordinates.
+
+    Uses FNV-1a hash of the service ID — same algorithm as the frontend's
+    idFuzzyOffset() in MapView.tsx — so the position is consistent across
+    renders without exposing the exact location in the API response.
+
+    1 km ≈ 0.009° latitude at Istanbul's latitude (~41°N).
+    """
+    h = 2166136261
+    for ch in service_id:
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF   # unsigned 32-bit, matches JS Math.imul + >>> 0
+
+    angle = (h / 0xFFFFFFFF) * 2 * math.pi
+    R = 0.0045   # ~1 km
+    return lat + R * math.sin(angle), lng + R * math.cos(angle)
+
+
 class ServiceSerializer(serializers.ModelSerializer):
     tags = TagSerializer(many=True, required=False, read_only=True)
     tag_ids = serializers.ListField(
@@ -258,12 +279,16 @@ class ServiceSerializer(serializers.ModelSerializer):
     comment_count = serializers.SerializerMethodField()
     hot_score = serializers.FloatField(read_only=True)
     participant_count = serializers.SerializerMethodField()
+    circle_lat = serializers.SerializerMethodField()
+    circle_lng = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
         fields = [
             'id', 'user', 'title', 'description', 'type', 'duration',
-            'location_type', 'location_area', 'location_lat', 'location_lng', 'status', 'max_participants', 'schedule_type',
+            'location_type', 'location_area', 'location_lat', 'location_lng',
+            'circle_lat', 'circle_lng',
+            'status', 'max_participants', 'schedule_type',
             'schedule_details', 'created_at', 'tags', 'tag_ids', 'tag_names', 'comment_count', 'hot_score',
             'is_visible', 'media', 'participant_count',
         ]
@@ -351,6 +376,48 @@ class ServiceSerializer(serializers.ModelSerializer):
     def get_user(self, obj):
         """Return user details without nested services to avoid circular reference"""
         return UserSummarySerializer(obj.user).data
+
+    def _real_coords(self, obj):
+        """Return (lat, lng) from the stored model instance, or (None, None)."""
+        try:
+            if obj.location_lat is None or obj.location_lng is None:
+                return None, None
+            return float(obj.location_lat), float(obj.location_lng)
+        except (TypeError, ValueError):
+            return None, None
+
+    @extend_schema_field(OpenApiTypes.FLOAT)
+    def get_circle_lat(self, obj):
+        """Visual circle centre latitude — independent ~1 km offset, seed '_c'."""
+        if obj.location_type != 'In-Person':
+            return None
+        lat, lng = self._real_coords(obj)
+        if lat is None:
+            return None
+        c_lat, _ = _fuzzy_coords(str(obj.id) + '_c', lat, lng)
+        return round(c_lat, 6)
+
+    @extend_schema_field(OpenApiTypes.FLOAT)
+    def get_circle_lng(self, obj):
+        """Visual circle centre longitude — independent ~1 km offset, seed '_c'."""
+        if obj.location_type != 'In-Person':
+            return None
+        lat, lng = self._real_coords(obj)
+        if lat is None:
+            return None
+        _, c_lng = _fuzzy_coords(str(obj.id) + '_c', lat, lng)
+        return round(c_lng, 6)
+
+    def to_representation(self, instance):
+        """Replace exact coordinates with a ~1 km privacy-fuzzed version before sending."""
+        data = super().to_representation(instance)
+        if instance.location_type == 'In-Person':
+            lat, lng = self._real_coords(instance)
+            if lat is not None:
+                fuzzy_lat, fuzzy_lng = _fuzzy_coords(str(instance.id), lat, lng)
+                data['location_lat'] = round(fuzzy_lat, 6)
+                data['location_lng'] = round(fuzzy_lng, 6)
+        return data
 
     def create(self, validated_data):
         # Description is already sanitized in validate_description

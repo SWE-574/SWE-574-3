@@ -646,11 +646,19 @@ const DashboardPage = () => {
   }, [distanceKm])
 
   const fetchServices = useCallback(async (signal: AbortSignal) => {
-    const params = locationEnabled && userLocation
-      ? { lat: userLocation.lat, lng: userLocation.lng, distance: debouncedDistance }
-      : undefined
-    const data   = await serviceAPI.list(params, signal)
-    const active = data.filter((s) => s.status?.toLowerCase() === 'active')
+    let raw: typeof services
+    if (locationEnabled && userLocation) {
+      // Distance filter only affects In-Person — fetch Online separately and merge
+      const [nearby, online] = await Promise.all([
+        serviceAPI.list({ lat: userLocation.lat, lng: userLocation.lng, distance: debouncedDistance }, signal),
+        serviceAPI.list({ search: debouncedSearch || undefined }, signal),
+      ])
+      const onlineOnly = online.filter((s) => s.location_type === 'Online')
+      raw = [...nearby, ...onlineOnly]
+    } else {
+      raw = await serviceAPI.list(undefined, signal)
+    }
+    const active = raw.filter((s) => s.status?.toLowerCase() === 'active')
     const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
     let filtered = unique
     if (activeFilter === 'online')    filtered = filtered.filter((s) => s.location_type === 'Online')
