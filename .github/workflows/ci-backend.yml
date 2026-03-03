@@ -71,6 +71,18 @@ jobs:
             echo "DJANGO_SETTINGS_MODULE=hive_project.settings"
           } >> "$GITHUB_ENV"
 
+      - name: Validate required env vars
+        run: |
+          missing=0
+          for var in DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT REDIS_HOST REDIS_PORT SECRET_KEY DJANGO_SETTINGS_MODULE; do
+            val=$(printenv "$var" || true)
+            if [ -z "$val" ]; then
+              echo "::error::Required env var $var is not set"
+              missing=$((missing + 1))
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -95,10 +107,23 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install pip-audit
+
+      - name: Audit Python dependencies
+        working-directory: backend
+        run: .venv/bin/pip-audit --skip-editable
 
       - name: Run migrations
         working-directory: backend
         run: .venv/bin/python manage.py migrate --no-input
+
+      - name: Check no missing migration files
+        working-directory: backend
+        run: .venv/bin/python manage.py makemigrations --check --dry-run
+
+      - name: Check all migrations applied
+        working-directory: backend
+        run: .venv/bin/python manage.py migrate --check
 
       - name: Run tests
         working-directory: backend

@@ -1,0 +1,11 @@
+---
+# hadolint configuration — suppress rules that conflict with this project's patterns
+# Full rule reference: https://github.com/hadolint/hadolint#rules
+
+failure-threshold: warning
+
+ignore:
+  # apt-get: pinning versions is impractical in dev Dockerfiles; prod images are pinned
+  - DL3008
+  # pip install: --no-cache-dir is enforced in prod; dev Dockerfiles skip it intentionally
+  - DL3042

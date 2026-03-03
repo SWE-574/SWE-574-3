@@ -30,6 +30,16 @@ const needIcon = new L.Icon({
   shadowSize: [41, 41],
 })
 
+const userIcon = new L.Icon({
+  iconUrl:
+    'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+})
+
 // Istanbul default center
 const ISTANBUL_CENTER: [number, number] = [41.0082, 28.9784]
 
@@ -50,6 +60,8 @@ interface MapViewProps {
   services: MapServiceItem[]
   height?: string
   onServiceClick?: (id: string) => void
+  /** Optional user coordinates — renders a distinct "you are here" marker. */
+  userLocation?: { lat: number; lng: number } | null
 }
 
 function getCoords(
@@ -73,12 +85,15 @@ function MapResizer() {
   return null
 }
 
-export function MapView({ services, height = '400px', onServiceClick }: MapViewProps) {
+export function MapView({ services, height = '400px', onServiceClick, userLocation }: MapViewProps) {
   const locatedServices = services.filter((s) => getCoords(s) !== null)
+  const center: [number, number] = userLocation
+    ? [userLocation.lat, userLocation.lng]
+    : ISTANBUL_CENTER
 
   return (
     <MapContainer
-      center={ISTANBUL_CENTER}
+      center={center}
       zoom={11}
       style={{ height, width: '100%', borderRadius: '12px' }}
       scrollWheelZoom={false}
@@ -88,6 +103,13 @@ export function MapView({ services, height = '400px', onServiceClick }: MapViewP
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      {userLocation && (
+        <Marker position={[userLocation.lat, userLocation.lng]} icon={userIcon}>
+          <Popup>
+            <div style={{ fontSize: '12px', fontWeight: 600 }}>Your location</div>
+          </Popup>
+        </Marker>
+      )}
       {locatedServices.map((service) => {
         const coords = getCoords(service)!
         const icon = service.type === 'Offer' ? offerIcon : needIcon
