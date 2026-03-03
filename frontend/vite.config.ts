@@ -4,7 +4,9 @@ import path from 'path'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const apiUrl = env.VITE_API_URL || 'http://localhost:8000/api'
+  // Backend origin for the Vite proxy — always localhost:8000 in local dev.
+  // Override with VITE_BACKEND_URL if you run the backend on a different port.
+  const backendOrigin = env.VITE_BACKEND_URL || 'http://localhost:8000'
 
   return {
     plugins: [react()],
@@ -28,18 +30,17 @@ export default defineConfig(({ mode }) => {
       hmr: {
         overlay: true,
       },
-      proxy: apiUrl !== '/api' ? {
+      proxy: {
         '/api': {
-          target: apiUrl.replace('/api', ''),
+          target: backendOrigin,
           changeOrigin: true,
-          rewrite: (path) => path,
         },
         '/ws': {
-          target: apiUrl.replace('/api', '').replace('http', 'ws'),
+          target: backendOrigin.replace(/^http/, 'ws'),
           ws: true,
           changeOrigin: true,
         },
-      } : undefined,
+      },
       watch: {
         usePolling: false,
       },
