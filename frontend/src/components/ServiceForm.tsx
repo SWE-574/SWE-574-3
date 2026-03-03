@@ -129,6 +129,7 @@ function SegmentedControl<T extends string>({
         <Box
           key={opt.value}
           as="button"
+          type="button"
           flex={1} py="8px"
           borderRadius="8px"
           fontSize="13px"
@@ -321,6 +322,7 @@ function LocationSearch({
           {query && (
             <Box
               as="button"
+              type="button"
               onClick={handleClear}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: GRAY400 }}
             >
@@ -659,6 +661,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
                     #{tag.name}
                     <Box
                       as="button"
+                      type="button"
                       onClick={() => setSelectedTags((p) => p.filter((t) => t.id !== tag.id))}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: accent }}
                     >
@@ -752,6 +755,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                     <Box
                       as="button"
+                      type="button"
                       position="absolute" top="5px" right="5px"
                       w="20px" h="20px" borderRadius="full"
                       bg="rgba(0,0,0,0.55)" color={WHITE}
