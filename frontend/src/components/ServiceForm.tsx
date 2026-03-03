@@ -6,10 +6,10 @@ import { useNavigate } from 'react-router-dom'
 import {
   Box, Flex, Grid, Input, Spinner, Stack, Text, Textarea,
 } from '@chakra-ui/react'
-import { FiX, FiPlus, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCircle, FiNavigation } from 'react-icons/fi'
+import { FiX, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCircle, FiNavigation } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
-import { tagAPI } from '@/services/tagAPI'
+import WikidataTagAutocomplete from './WikidataTagAutocomplete'
 import type { Tag } from '@/types'
 
 import {
@@ -370,12 +370,6 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
 
   // Tags
   const [selectedTags, setSelectedTags]     = useState<Tag[]>([])
-  const [tagQuery, setTagQuery]             = useState('')
-  const [tagSuggestions, setTagSuggestions] = useState<Tag[]>([])
-  const [tagLoading, setTagLoading]         = useState(false)
-  const [showTagDrop, setShowTagDrop]       = useState(false)
-  const tagAbortRef = useRef<AbortController | null>(null)
-  const tagInputRef = useRef<HTMLInputElement>(null)
 
   // Location (set by Mapbox geocoding)
   const [locationValue, setLocationValue]   = useState<LocationValue | null>(null)
@@ -394,37 +388,11 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
   const locType   = watch('location_type')
   const schedType = watch('schedule_type')
 
-  // ── Tag autocomplete ────────────────────────────────────────────────────────
-
-  const searchTags = useCallback(async (q: string) => {
-    if (tagAbortRef.current) tagAbortRef.current.abort()
-    if (!q.trim()) { setTagSuggestions([]); return }
-    tagAbortRef.current = new AbortController()
-    setTagLoading(true)
-    try {
-      const res = await tagAPI.search(q, tagAbortRef.current.signal)
-      const sel = new Set(selectedTags.map((t) => t.id))
-      setTagSuggestions(res.filter((t) => !sel.has(t.id)))
-    } catch { /* aborted */ }
-    finally { setTagLoading(false) }
-  }, [selectedTags])
-
-  useEffect(() => {
-    const t = setTimeout(() => searchTags(tagQuery), 300)
-    return () => clearTimeout(t)
-  }, [tagQuery, searchTags])
-
   const addTag = (tag: Tag) => {
-    setSelectedTags((p) => [...p, tag])
-    setTagQuery(''); setTagSuggestions([]); setShowTagDrop(false)
-    tagInputRef.current?.focus()
-  }
-
-  const createTag = async () => {
-    const name = tagQuery.trim()
-    if (!name) return
-    try { addTag(await tagAPI.create(name)) }
-    catch { toast.error('Failed to create tag') }
+    setSelectedTags((prev) => {
+      const exists = prev.some((existingTag) => existingTag.id === tag.id)
+      return exists ? prev : [...prev, tag]
+    })
   }
 
   // ── Media ────────────────────────────────────────────────────────────────
@@ -459,6 +427,22 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
     setLocationError(undefined)
     setSubmitting(true)
     try {
+      const tagIds: string[] = []
+      const tagNames: string[] = []
+
+      selectedTags.forEach((tag) => {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tag.id)
+        const isWikidataQid = /^Q\d+$/i.test(tag.id)
+
+        if (isUuid || isWikidataQid) {
+          tagIds.push(tag.id)
+          return
+        }
+
+        const cleanedName = tag.name.trim()
+        if (cleanedName) tagNames.push(cleanedName)
+      })
+
       const fd = new FormData()
       fd.append('title', values.title)
       fd.append('description', values.description)
@@ -475,7 +459,8 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
       fd.append('max_participants', String(values.max_participants))
       fd.append('schedule_type', values.schedule_type)
       if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
-      selectedTags.forEach((t) => fd.append('tags', t.id))
+      tagIds.forEach((id) => fd.append('tag_ids', id))
+      tagNames.forEach((name) => fd.append('tag_names', name))
       mediaFiles.forEach((f) => fd.append('media', f))
       const created = await serviceAPI.create(fd)
       toast.success(`${type} posted successfully!`)
@@ -669,68 +654,12 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
               </Flex>
             )}
 
-            {/* Tag input */}
-            <Box position="relative">
-              <Flex
-                align="center" gap={2}
-                bg={WHITE} border={`1px solid ${GRAY200}`} borderRadius="10px"
-                px={3} overflow="hidden"
-                style={{ transition: 'border-color 0.15s, box-shadow 0.15s' }}
-                _focusWithin={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
-              >
-                <Spinner size="xs" display={tagLoading ? 'block' : 'none'} color="gray.400" />
-                <FiTag size={13} color={GRAY400} style={{ flexShrink: 0, display: tagLoading ? 'none' : 'block' }} />
-                <input
-                  ref={tagInputRef}
-                  value={tagQuery}
-                  onChange={(e) => { setTagQuery(e.target.value); setShowTagDrop(true) }}
-                  onFocus={() => setShowTagDrop(true)}
-                  onBlur={() => setTimeout(() => setShowTagDrop(false), 150)}
-                  placeholder={selectedTags.length >= 10 ? 'Max 10 tags reached' : 'Search or create tags…'}
-                  disabled={selectedTags.length >= 10}
-                  style={{
-                    flex: 1, border: 'none', outline: 'none', background: 'transparent',
-                    fontSize: '13px', color: GRAY800, padding: '9px 0',
-                  }}
-                />
-              </Flex>
-
-              {/* Dropdown */}
-              {showTagDrop && (tagQuery.trim() || tagSuggestions.length > 0) && (
-                <Box
-                  position="absolute" zIndex={20} top="calc(100% + 6px)" left={0} right={0}
-                  bg={WHITE} border={`1px solid ${GRAY200}`} borderRadius="12px"
-                  boxShadow="0 8px 24px rgba(0,0,0,0.1)"
-                  maxH="200px" overflowY="auto"
-                >
-                  {tagLoading && <Flex justify="center" p={3}><Spinner size="sm" /></Flex>}
-                  {!tagLoading && tagSuggestions.map((tag) => (
-                    <Box
-                      key={tag.id} px={4} py="10px"
-                      cursor="pointer" fontSize="13px" color={GRAY700}
-                      onMouseDown={() => addTag(tag)}
-                      _hover={{ bg: GRAY50 }}
-                    >
-                      #{tag.name}
-                    </Box>
-                  ))}
-                  {!tagLoading && tagQuery.trim() && (
-                    <Box
-                      px={4} py="10px" cursor="pointer" fontSize="13px" fontWeight={600}
-                      color={accent} display="flex" alignItems="center" gap="6px"
-                      onMouseDown={createTag}
-                      _hover={{ bg: accentLt }}
-                    >
-                      <FiPlus size={13} />
-                      Create "{tagQuery.trim()}"
-                    </Box>
-                  )}
-                  {!tagLoading && !tagQuery.trim() && tagSuggestions.length === 0 && (
-                    <Box px={4} py="10px" color={GRAY400} fontSize="13px">Type to search tags</Box>
-                  )}
-                </Box>
-              )}
-            </Box>
+            <WikidataTagAutocomplete
+              selectedTags={selectedTags}
+              onAddTag={addTag}
+              disabled={selectedTags.length >= 10}
+              accent={accent}
+            />
             <Text fontSize="11px" color={GRAY400} mt="6px">
               Add up to 10 tags to help others find your {type.toLowerCase()}
             </Text>
