@@ -1216,7 +1216,8 @@ export default function ChatPage() {
       const first = data.find((c) => ACTIVE_STATUSES.has(c.status)) ?? data[0]
       setSelectedId(first.handshake_id)
     }
-  }, [convRefreshTick]) // selectedId intentionally excluded — use ref instead
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convRefreshTick]) // convRefreshTick is a manual refresh trigger; selectedId intentionally excluded — use ref instead
 
   const { isLoading: convLoading } = usePolling(fetchConversations, [fetchConversations], { interval: CONV_POLL_MS })
 

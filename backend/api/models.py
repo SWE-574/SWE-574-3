@@ -503,8 +503,8 @@ class ServiceGroupChatMessage(models.Model):
     class Meta:
         ordering = ['created_at']
         indexes = [
-            models.Index(fields=['service', 'created_at']),
-            models.Index(fields=['sender']),
+            models.Index(fields=['service', 'created_at'], name='api_sgcm_service_created_idx'),
+            models.Index(fields=['sender'], name='api_sgcm_sender_idx'),
         ]
 
 

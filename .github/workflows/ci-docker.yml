@@ -27,10 +27,10 @@ jobs:
 
       - name: Lint Dockerfiles
         run: |
-          hadolint backend/Dockerfile
-          hadolint backend/Dockerfile.prod
-          hadolint frontend/Dockerfile
-          hadolint frontend/Dockerfile.prod
+          hadolint --config .hadolint.yaml backend/Dockerfile
+          hadolint --config .hadolint.yaml backend/Dockerfile.prod
+          hadolint --config .hadolint.yaml frontend/Dockerfile
+          hadolint --config .hadolint.yaml frontend/Dockerfile.prod
 
   # ── 1. Infra stack (docker-compose.infra.yml) ────────────────────────────────
   infra:
