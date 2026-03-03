@@ -1,0 +1,142 @@
+name: CI — E2E (Playwright)
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - "docker-compose.yml"
+      - "nginx/**"
+      - ".github/workflows/ci-e2e.yml"
+  pull_request:
+    branches: [dev]
+
+# Cancel in-progress E2E runs for the same branch to save minutes
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+
+      # ── 2. Write environment file ──────────────────────────────────────────
+      - name: Write .env
+        run: |
+          cp .env.example .env
+          # Ensure DB and Redis point at the docker-compose service names
+          sed -i 's|DB_HOST=.*|DB_HOST=db|'         .env || true
+          sed -i 's|REDIS_HOST=.*|REDIS_HOST=redis|' .env || true
+          cat >> .env <<'EOF'
+          SECRET_KEY=ci-e2e-secret-key-not-used-in-production
+          DEBUG=True
+          ALLOWED_HOSTS=localhost,127.0.0.1
+          DJANGO_E2E=1
+          DISABLE_THROTTLING=1
+          EOF
+
+      # ── 3. Build & start the full dev stack in E2E mode ───────────────────
+      - name: Build & start stack (E2E mode)
+        run: |
+          DJANGO_E2E=1 VITE_E2E=1 docker compose up -d --build
+
+      # ── 4. Wait until every container reports "healthy" ───────────────────
+      - name: Wait for containers to be healthy
+        run: |
+          for i in $(seq 1 24); do
+            UNHEALTHY=$(docker compose ps --format json \
+              | python3 -c "
+          import sys, json
+          rows = [json.loads(l) for l in sys.stdin if l.strip()]
+          bad = [r['Name'] for r in rows if r.get('Health','') not in ('healthy','')]
+          print('\n'.join(bad))
+              ")
+            if [ -z "$UNHEALTHY" ]; then
+              echo "All containers healthy."
+              break
+            fi
+            echo "Still waiting: $UNHEALTHY  ($i/24)"
+            sleep 5
+          done
+
+      # ── 5. Smoke-test — ensure nginx is reachable ─────────────────────────
+      - name: Smoke-test API health
+        run: |
+          curl --fail --retry 10 --retry-delay 3 --retry-connrefused \
+            http://localhost/api/health/
+
+      # ── 6. Seed demo data ─────────────────────────────────────────────────
+      - name: Seed demo data
+        run: |
+          DJANGO_E2E=1 docker compose exec -T backend \
+            bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python setup_demo.py"
+
+      # ── 7. Set up Node.js ─────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # ── 8. Cache node_modules ─────────────────────────────────────────────
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: node-e2e-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: node-e2e-
+
+      # ── 9. Install JS dependencies (includes @playwright/test) ────────────
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # ── 10. Install Playwright browsers ───────────────────────────────────
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # ── 11. Run E2E tests ─────────────────────────────────────────────────
+      - name: Run Playwright tests
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost
+          CI: "true"
+        run: npm run test:e2e
+
+      # ── 12. Upload HTML report (always, so failures are inspectable) ───────
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/tests/reports/playwright/
+          retention-days: 14
+
+      # ── 13. Upload JUnit XML (for CI summary) ─────────────────────────────
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-junit
+          path: frontend/tests/reports/playwright-junit.xml
+          retention-days: 14
+
+      # ── 14. Collect docker logs on failure ────────────────────────────────
+      - name: Dump docker logs on failure
+        if: failure()
+        run: |
+          docker compose logs --no-color --tail=200 backend  2>&1 | head -400
+          docker compose logs --no-color --tail=100 frontend 2>&1 | head -200
+          docker compose logs --no-color --tail=100 nginx    2>&1 | head -200
+
+      # ── 15. Tear down ─────────────────────────────────────────────────────
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
