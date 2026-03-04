@@ -31,7 +31,13 @@ from .views import (
     NegativeRepViewSet,
     ForumCategoryViewSet,
     ForumTopicViewSet,
-    ForumPostViewSet
+    ForumPostViewSet,
+    LogoutView,
+    ForgotPasswordView,
+    ResetPasswordView,
+    VerifyEmailView,
+    SendVerificationEmailView,
+    ResendVerificationView,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .views import CustomTokenObtainPairView
@@ -246,6 +252,12 @@ urlpatterns = [
     path('auth/register/', UserRegistrationView.as_view(), name='register'),
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
+    path('auth/logout/', LogoutView.as_view(), name='logout'),
+    path('auth/forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
+    path('auth/reset-password/', ResetPasswordView.as_view(), name='reset-password'),
+    path('auth/verify-email/', VerifyEmailView.as_view(), name='verify-email'),
+    path('auth/send-verification/', SendVerificationEmailView.as_view(), name='send-verification'),
+    path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
     path('users/<uuid:id>/', UserProfileView.as_view(), name='user-detail'),
     path('users/<uuid:id>/history/', UserHistoryView.as_view(), name='user-history'),
