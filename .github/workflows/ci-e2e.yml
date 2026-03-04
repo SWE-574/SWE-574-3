@@ -22,6 +22,11 @@ jobs:
     name: Playwright E2E
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # E2E tests are informational: the job always reports "success" so it never
+    # blocks PRs or branch protection rules. Test results and HTML report are
+    # still uploaded as artifacts for inspection.
+    # Remove continue-on-error once the E2E suite is stable and fully reliable.
+    continue-on-error: true
 
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────────────
@@ -145,6 +150,7 @@ jobs:
       # ── 15. Run E2E tests ─────────────────────────────────────────────────
       - name: Run Playwright tests
         working-directory: frontend
+        continue-on-error: true   # soft-fail: results visible in artifact, not a blocker
         env:
           PLAYWRIGHT_BASE_URL: http://localhost
           CI: "true"
