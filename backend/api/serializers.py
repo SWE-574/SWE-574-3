@@ -15,6 +15,7 @@ import bleach
 import re
 import logging
 import math
+import json
 from drf_spectacular.utils import extend_schema_field, extend_schema_serializer, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
@@ -126,6 +127,17 @@ class TagSerializer(serializers.ModelSerializer):
             except Exception:
                 return None
         return None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        wikidata_info = data.get('wikidata_info')
+        if (
+            data.get('name') == data.get('id')
+            and isinstance(wikidata_info, dict)
+            and wikidata_info.get('label')
+        ):
+            data['name'] = wikidata_info['label']
+        return data
 
 class ServiceMediaSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()
@@ -260,17 +272,30 @@ def _fuzzy_coords(service_id: str, lat: float, lng: float):
 
 
 class ServiceSerializer(serializers.ModelSerializer):
+    class ListOrSingleValueField(serializers.ListField):
+        """Accept either a list value or a single scalar value."""
+
+        def to_internal_value(self, data):
+            if data is None:
+                return super().to_internal_value(data)
+
+            if not isinstance(data, list):
+                data = [data]
+
+            return super().to_internal_value(data)
+
     tags = TagSerializer(many=True, required=False, read_only=True)
-    tag_ids = serializers.ListField(
+    tag_ids = ListOrSingleValueField(
         child=serializers.CharField(),
         write_only=True,
         required=False
     )
-    tag_names = serializers.ListField(
+    tag_names = ListOrSingleValueField(
         child=serializers.CharField(),
         write_only=True,
         required=False
     )
+    wikidata_labels_json = serializers.CharField(write_only=True, required=False, allow_blank=True)
     media = ServiceMediaSerializer(many=True, required=False, read_only=True)
     
     user = serializers.SerializerMethodField()
@@ -289,7 +314,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             'location_type', 'location_area', 'location_lat', 'location_lng',
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
-            'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'comment_count', 'hot_score',
+            'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'comment_count', 'hot_score',
             'is_visible', 'media', 'participant_count',
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible']
@@ -434,6 +459,20 @@ class ServiceSerializer(serializers.ModelSerializer):
         # Extract tag_ids and tag_names if provided
         tag_ids = validated_data.pop('tag_ids', [])
         tag_names = validated_data.pop('tag_names', [])
+        wikidata_labels_json = validated_data.pop('wikidata_labels_json', '')
+
+        wikidata_labels = {}
+        if wikidata_labels_json:
+            try:
+                decoded = json.loads(wikidata_labels_json)
+                if isinstance(decoded, dict):
+                    for raw_qid, raw_label in decoded.items():
+                        qid = str(raw_qid).strip().upper()
+                        label = str(raw_label).strip()[:100]
+                        if re.match(r'^Q\d+$', qid, re.IGNORECASE) and label:
+                            wikidata_labels[qid] = label
+            except (TypeError, ValueError, json.JSONDecodeError):
+                wikidata_labels = {}
         
         # Extract media payload if provided.
         # Backward-compatible:
@@ -495,9 +534,35 @@ class ServiceSerializer(serializers.ModelSerializer):
             # First, get all existing tags
             existing_tags = {tag.id: tag for tag in Tag.objects.filter(id__in=tag_ids)}
             tags_to_add.extend(existing_tags.values())
+
+            # If a previously auto-created Wikidata tag still has fallback name=QID,
+            # try to backfill a human-readable label.
+            wikidata_qid_pattern = re.compile(r'^Q\d+$', re.IGNORECASE)
+            stale_qid_tags = [
+                tag for tid, tag in existing_tags.items()
+                if wikidata_qid_pattern.match(tid)
+                and (tag.name or '').strip().upper() == tid.upper()
+            ]
+            if stale_qid_tags:
+                from .wikidata import fetch_wikidata_item
+
+                for stale_tag in stale_qid_tags:
+                    label = wikidata_labels.get(stale_tag.id.upper())
+                    if not label:
+                        wikidata_info = fetch_wikidata_item(stale_tag.id.upper())
+                        label = (wikidata_info or {}).get('label')
+                    if not label:
+                        continue
+                    label = label.strip()[:100]
+                    if not label:
+                        continue
+                    duplicate_name_exists = Tag.objects.filter(name__iexact=label).exclude(id=stale_tag.id).exists()
+                    if duplicate_name_exists:
+                        continue
+                    stale_tag.name = label
+                    stale_tag.save(update_fields=['name'])
             
             # Find Wikidata QIDs that don't exist in database
-            wikidata_qid_pattern = re.compile(r'^Q\d+$', re.IGNORECASE)
             missing_qids = [
                 tid for tid in tag_ids 
                 if tid not in existing_tags and wikidata_qid_pattern.match(tid)
@@ -514,16 +579,19 @@ class ServiceSerializer(serializers.ModelSerializer):
                     # Check if normalized version exists (in case of case mismatch)
                     if normalized_qid in existing_tags:
                         continue
-                    
-                    # Fetch label from Wikidata
-                    wikidata_info = fetch_wikidata_item(normalized_qid)
-                    
-                    if wikidata_info and wikidata_info.get('label'):
-                        tag_name = wikidata_info['label']
+
+                    # Prefer frontend-provided label, then fetch from Wikidata
+                    label_from_form = wikidata_labels.get(normalized_qid)
+                    if label_from_form:
+                        tag_name = label_from_form
                     else:
+                        wikidata_info = fetch_wikidata_item(normalized_qid)
+                        if wikidata_info and wikidata_info.get('label'):
+                            tag_name = wikidata_info['label']
+                        else:
                         # Fallback: use the QID as name if Wikidata fetch fails
-                        tag_name = normalized_qid
-                        logger.warning(f"Could not fetch Wikidata info for {normalized_qid}, using QID as name")
+                            tag_name = normalized_qid
+                            logger.warning(f"Could not fetch Wikidata info for {normalized_qid}, using QID as name")
                     
                     # Create the tag (use get_or_create to handle race conditions)
                     tag, created = Tag.objects.get_or_create(

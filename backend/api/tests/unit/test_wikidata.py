@@ -151,6 +151,28 @@ class WikidataUtilityTests(TestCase):
         self.assertEqual(result['label'], 'Python')
         self.assertEqual(result['description'], 'high-level programming language')
 
+    @patch('api.wikidata.requests.get')
+    def test_fetch_wikidata_item_normalizes_lowercase_qid(self, mock_get):
+        """Test lowercase qid input is normalized and fetched correctly."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            'entities': {
+                'Q17195715': {
+                    'labels': {'en': {'value': 'Yoga'}},
+                    'descriptions': {'en': {'value': 'group of physical, mental, and spiritual practices'}},
+                    'aliases': {'en': []}
+                }
+            }
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = fetch_wikidata_item('q17195715')
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result['id'], 'Q17195715')
+        self.assertEqual(result['label'], 'Yoga')
+
     def test_fetch_wikidata_item_invalid_id(self):
         """Test fetch_wikidata_item returns None for invalid ID"""
         result = fetch_wikidata_item('invalid')
@@ -213,6 +235,23 @@ class TagWithWikidataTests(APITestCase):
         self.assertIn('wikidata_info', serializer.data)
         self.assertEqual(serializer.data['wikidata_info']['label'], 'Python')
         mock_fetch.assert_called_once_with('Q28865')
+
+    @patch('api.wikidata.fetch_wikidata_item')
+    def test_tag_serializer_uses_wikidata_label_when_name_is_qid(self, mock_fetch):
+        """Display label instead of QID when tag name was saved as fallback."""
+        mock_fetch.return_value = {
+            'id': 'Q17195715',
+            'label': 'Yoga',
+            'description': 'group of physical, mental, and spiritual practices',
+            'aliases': []
+        }
+
+        tag = Tag.objects.create(id='Q17195715', name='Q17195715')
+        serializer = TagSerializer(tag)
+
+        self.assertEqual(serializer.data['name'], 'Yoga')
+        self.assertEqual(serializer.data['wikidata_info']['label'], 'Yoga')
+        mock_fetch.assert_called_once_with('Q17195715')
 
     def test_tag_serializer_no_enrichment_for_non_qid(self):
         """Test that TagSerializer does not enrich non-QID tags"""

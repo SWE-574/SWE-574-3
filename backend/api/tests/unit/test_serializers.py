@@ -3,6 +3,7 @@ Unit tests for serializers
 """
 import pytest
 from decimal import Decimal
+from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError
 
@@ -106,6 +107,53 @@ class TestServiceSerializer:
         service = serializer.save(user=user)
         assert service.title == 'New Service'
         assert service.user == user
+
+    def test_service_creation_accepts_single_tag_id_string(self):
+        """Test service creation accepts scalar tag_ids payload."""
+        user = UserFactory()
+        tag = TagFactory()
+        serializer = ServiceSerializer(data={
+            'title': 'Single Tag Service',
+            'description': 'A service with one scalar tag id',
+            'type': 'Offer',
+            'duration': 1.0,
+            'location_type': 'In-Person',
+            'location_area': 'Kadıköy',
+            'location_lat': 41.0082,
+            'location_lng': 28.9784,
+            'max_participants': 1,
+            'schedule_type': 'One-Time',
+            'status': 'Active',
+            'tag_ids': tag.id,
+        })
+        assert serializer.is_valid(), serializer.errors
+        service = serializer.save(user=user)
+        assert service.tags.filter(id=tag.id).exists()
+
+    @patch('api.wikidata.fetch_wikidata_item', return_value=None)
+    def test_service_creation_uses_wikidata_labels_json(self, _mock_fetch):
+        """Test QID tags use provided label map when external lookup is unavailable."""
+        user = UserFactory()
+        serializer = ServiceSerializer(data={
+            'title': 'Yoga Session',
+            'description': 'Community yoga practice in the park',
+            'type': 'Event',
+            'duration': 1.0,
+            'location_type': 'In-Person',
+            'location_area': 'Kadıköy',
+            'location_lat': 41.0082,
+            'location_lng': 28.9784,
+            'max_participants': 10,
+            'schedule_type': 'One-Time',
+            'status': 'Active',
+            'tag_ids': ['Q17195715'],
+            'wikidata_labels_json': '{"Q17195715": "Yoga"}',
+        })
+
+        assert serializer.is_valid(), serializer.errors
+        service = serializer.save(user=user)
+        tag = service.tags.get(id='Q17195715')
+        assert tag.name == 'Yoga'
 
 
 @pytest.mark.django_db
