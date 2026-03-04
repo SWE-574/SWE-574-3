@@ -53,7 +53,6 @@ export function usePolling(
     setManualTick(t => t + 1)
   }, [])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!enabled) return
 
