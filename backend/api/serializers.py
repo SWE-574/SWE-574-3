@@ -854,12 +854,13 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'banner_url', 'timebank_balance', 'karma_score', 'role', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file', 'video_intro_file_url',
-            'portfolio_images', 'show_history', 'featured_achievement_id'
+            'portfolio_images', 'show_history', 'featured_achievement_id',
+            'is_onboarded', 'is_verified',
         ]
         read_only_fields = [
             'id', 'email', 'timebank_balance', 'karma_score', 'role', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
-            'video_intro_file_url', 'featured_achievement_id'
+            'video_intro_file_url', 'featured_achievement_id', 'is_verified',
         ]
         extra_kwargs = {
             'video_intro_file': {'write_only': True, 'required': False}
