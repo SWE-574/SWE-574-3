@@ -632,7 +632,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
                 </Flex>
                 {eventDateTimeError && <ErrTxt msg={eventDateTimeError} />}
                 <Text fontSize="11px" color={GRAY400} mt="5px">
-                  Participants can join until 24 h before the event (lockdown window).
+                  Participants can join up until the event starts. 24 hours before the event, check-in opens and self-cancellation is disabled.
                 </Text>
               </Box>
             ) : (
