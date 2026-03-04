@@ -323,7 +323,9 @@ class ServiceSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.INT)
     def get_comment_count(self, obj):
         """Return the count of non-deleted comments on this service"""
-        # Use prefetched data if available to avoid N+1 queries
+        # Use annotated value from list queryset to avoid N+1
+        if hasattr(obj, 'comment_count'):
+            return obj.comment_count
         if hasattr(obj, '_prefetched_objects_cache') and 'comments' in obj._prefetched_objects_cache:
             return len([c for c in obj.comments.all() if not c.is_deleted])
         return obj.comments.filter(is_deleted=False).count()
@@ -854,12 +856,13 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'banner_url', 'timebank_balance', 'karma_score', 'role', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file', 'video_intro_file_url',
-            'portfolio_images', 'show_history', 'featured_achievement_id'
+            'portfolio_images', 'show_history', 'featured_achievement_id',
+            'is_onboarded', 'is_verified',
         ]
         read_only_fields = [
             'id', 'email', 'timebank_balance', 'karma_score', 'role', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
-            'video_intro_file_url', 'featured_achievement_id'
+            'video_intro_file_url', 'featured_achievement_id', 'is_verified',
         ]
         extra_kwargs = {
             'video_intro_file': {'write_only': True, 'required': False}

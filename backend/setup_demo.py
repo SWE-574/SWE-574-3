@@ -103,6 +103,8 @@ def create_or_update_user(email, first_name, last_name, bio, balance, karma, dat
             'timebank_balance': balance,
             'karma_score': karma,
             'role': 'member',
+            'is_verified': True,
+            'is_onboarded': True,
             'date_joined': timezone.now() - timedelta(days=date_joined_offset_days),
         }
     )
@@ -112,6 +114,8 @@ def create_or_update_user(email, first_name, last_name, bio, balance, karma, dat
         user.first_name = first_name
         user.last_name = last_name
         user.bio = bio
+        user.is_verified = True
+        user.is_onboarded = True
         user.set_password('demo123')
         if date_joined_offset_days > 0:
             user.date_joined = timezone.now() - timedelta(days=date_joined_offset_days)
@@ -896,7 +900,9 @@ admin_user = User.objects.create_superuser(
     karma_score=100,
     role='admin',
     is_staff=True,
-    is_superuser=True
+    is_superuser=True,
+    is_verified=True,
+    is_onboarded=True,
 )
 print(f"  Created: {admin_email} (Admin account)")
 

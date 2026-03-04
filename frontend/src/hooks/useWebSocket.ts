@@ -9,7 +9,8 @@ interface WebSocketMessage {
 
 interface UseWebSocketOptions {
   url: string
-  token: string | null
+  /** Optional: when omitted/null, backend uses Cookie (same-origin). Pass for query-string auth (e.g. mobile). */
+  token?: string | null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onMessage?: (message: any) => void
   onError?: (error: Event) => void
@@ -31,6 +32,8 @@ export function useWebSocket({
   const [reconnectAttempts, setReconnectAttempts] = useState(0)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const openedAtRef = useRef<number>(0)
+  const connectedUrlRef = useRef<string | null>(null)
   const onMessageRef = useRef(onMessage)
   const onErrorRef = useRef(onError)
   const onOpenRef = useRef(onOpen)
@@ -44,20 +47,27 @@ export function useWebSocket({
   }, [onMessage, onError, onOpen, onClose])
 
   const connect = useCallback(() => {
-    if (!enabled || !token || !url) return
+    if (!enabled || !url) return
 
     if (wsRef.current) {
       wsRef.current.close()
       wsRef.current = null
     }
 
-    const wsUrl = url.includes('?') ? `${url}&token=${token}` : `${url}?token=${token}`
+    connectedUrlRef.current = url
+    const wsUrl =
+      token != null && token !== ''
+        ? url.includes('?')
+          ? `${url}&token=${encodeURIComponent(token)}`
+          : `${url}?token=${encodeURIComponent(token)}`
+        : url
 
     try {
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
 
       ws.onopen = () => {
+        openedAtRef.current = Date.now()
         setIsConnected(true)
         setReconnectAttempts(0)
         onOpenRef.current?.()
@@ -82,24 +92,26 @@ export function useWebSocket({
 
       ws.onclose = (event) => {
         setIsConnected(false)
+        connectedUrlRef.current = null
         onCloseRef.current?.()
 
-        // 4xxx = application-level rejection (auth failure, access denied, not found).
-        // These are permanent — never retry, it would cause an infinite reconnect loop.
-        // Only retry on normal network disruptions (1001–1015).
+        // 4xxx = application-level rejection — never retry.
         const isPermanentRejection = event.code >= 4000
-        if (event.code !== 1000 && !isPermanentRejection && enabled) {
-          setReconnectAttempts((prev) => {
-            if (prev < 5) {
-              const delay = Math.min(1000 * Math.pow(2, prev), 30_000)
-              reconnectTimeoutRef.current = setTimeout(() => {
-                connect()
-              }, delay)
-              return prev + 1
-            }
-            return prev
-          })
-        }
+        if (event.code === 1000 || isPermanentRejection || !enabled) return
+
+        // If connection was open for less than 2s, server/proxy likely closed it — use longer backoff to avoid reconnect storm.
+        const openDuration = Date.now() - openedAtRef.current
+        setReconnectAttempts((prev) => {
+          if (prev >= 5) return prev
+          const delay =
+            openDuration < 2000
+              ? 8000
+              : Math.min(1000 * Math.pow(2, prev), 30_000)
+          reconnectTimeoutRef.current = setTimeout(() => {
+            connect()
+          }, delay)
+          return prev + 1
+        })
       }
     } catch (error) {
       onErrorRef.current?.(error as Event)
@@ -115,6 +127,7 @@ export function useWebSocket({
       wsRef.current.close(1000)
       wsRef.current = null
     }
+    connectedUrlRef.current = null
     setIsConnected(false)
     setReconnectAttempts(0)
   }, [])
@@ -129,11 +142,15 @@ export function useWebSocket({
   }, [])
 
   useEffect(() => {
-    if (enabled && token && url) {
-      connect()
-    } else {
+    if (!enabled || !url) {
       disconnect()
+      return
     }
+    // Avoid opening a new connection if we're already (connecting or) connected to this url.
+    if (connectedUrlRef.current === url && wsRef.current) {
+      return
+    }
+    connect()
     return () => { disconnect() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, token, url])

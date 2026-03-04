@@ -15,15 +15,40 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
+# BASE_DIR = SWE-574-3/backend/
+# BASE_DIR.parent = SWE-574-3/  ← single .env lives here
 BASE_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = BASE_DIR.parent
 
-load_dotenv(BASE_DIR / '.env')
+load_dotenv(ROOT_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
+IS_PRODUCTION = not DEBUG
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+
+# Resend email service
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+
+def _resend_from_email() -> str:
+    """
+    If RESEND_CUSTOM_DOMAIN=true AND FRONTEND_URL points to a real public domain,
+    derive the from-address automatically:
+      e.g. https://hive.selmangunes.com -> noreply@hive.selmangunes.com
+    Falls back to RESEND_FROM_EMAIL in all other cases (localhost, 127.0.0.1, etc.).
+    """
+    _local_domains = {'localhost', '127.0.0.1', '0.0.0.0', ''}
+    if os.environ.get('RESEND_CUSTOM_DOMAIN', 'false').strip().lower() in ('1', 'true', 'yes'):
+        from urllib.parse import urlparse
+        domain = (urlparse(os.environ.get('FRONTEND_URL', '')).hostname or '').lower()
+        if domain and domain not in _local_domains and not domain.startswith('192.168.') and not domain.startswith('10.'):
+            return f'noreply@{domain}'
+    return os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
+
+RESEND_FROM_EMAIL = _resend_from_email()
 
 
 def _is_truthy_env(name: str) -> bool:
@@ -199,6 +224,7 @@ else:
     ]
 
 CORS_ALLOW_ALL_ORIGINS = False  # Never allow all
+CORS_ALLOW_CREDENTIALS = True
 if DEBUG:
     # Allow localhost in development
     if not CORS_ALLOWED_ORIGINS_STR:
@@ -266,6 +292,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
+        'api.authentication.CookieJWTAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
@@ -383,11 +410,21 @@ CHANNEL_LAYERS = {
 # API Documentation (OpenAPI/Swagger)
 SPECTACULAR_SETTINGS = {
     'TITLE': 'The Hive API',
-    'DESCRIPTION': 'TimeBank economy platform API documentation',
+    'DESCRIPTION': (
+        'TimeBank economy platform API.\n\n'
+        '## Authentication\n'
+        'All protected endpoints require a valid JWT. '
+        'Tokens are issued as cookies by `POST /api/auth/login/` and `POST /api/auth/register/`:\n'
+        '- **`access_token`** — short-lived (5 min), non-HttpOnly, sent automatically by the browser.\n'
+        '- **`refresh_token`** — long-lived (7 days), HttpOnly, used by `POST /api/auth/refresh/`.\n\n'
+        'The Swagger UI "Authorize" button accepts the raw Bearer token for manual testing.'
+    ),
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,
     'SCHEMA_PATH_PREFIX': '/api/',
+    # Register the cookie auth scheme alongside the default Bearer scheme
+    'SECURITY': [{'cookieAuth': []}, {'jwtAuth': []}],
 }
 
 # Logging Configuration
@@ -435,6 +472,11 @@ LOGGING = {
         'api': {
             'handlers': ['console', 'file'],
             'level': 'INFO',
+            'propagate': False,
+        },
+        'api.consumers': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
             'propagate': False,
         },
         'django.request': {

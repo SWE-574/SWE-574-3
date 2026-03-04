@@ -1,5 +1,5 @@
 .PHONY: help install test test-backend test-frontend test-e2e test-all coverage coverage-backend coverage-frontend coverage-report clean demo build \
-        dev dev-setup dev-stop
+        dev dev-setup dev-stop dev-clean
 
 # ── Local dev config ──────────────────────────────────────────────────────────
 PYTHON  ?= python3
@@ -20,34 +20,20 @@ help: ## Show this help message
 # ─────────────────────────────────────────────────────────────────────────────
 
 dev-setup: ## One-time local setup: venv, deps, infra, migrate, demo data
-	@echo "\033[1;34m[1/7] Python virtual environment...\033[0m"
+	@echo "\033[1;34m[1/6] Python virtual environment...\033[0m"
 	@test -d $(VENV) || $(PYTHON) -m venv $(VENV)
-	@echo "\033[1;34m[2/7] Installing backend dependencies...\033[0m"
+	@echo "\033[1;34m[2/6] Installing backend dependencies...\033[0m"
 	@$(PIP) install -q -r backend/requirements.txt
-	@echo "\033[1;34m[3/7] Backend .env file...\033[0m"
-	@if [ ! -f backend/.env ]; then \
-		cp .env.example backend/.env; \
-		sed -i '' 's|DB_HOST=localhost|DB_HOST=127.0.0.1|g' backend/.env; \
-		$(PYEXEC) -c " \
-import pathlib; \
-from django.core.management.utils import get_random_secret_key; \
-p = pathlib.Path('backend/.env'); \
-lines = [\"SECRET_KEY='\" + get_random_secret_key() + \"'\" if l.startswith('SECRET_KEY=') else l for l in p.read_text().splitlines()]; \
-p.write_text('\n'.join(lines) + '\n') \
-"; \
-		echo "  Created backend/.env"; \
-	else \
-		echo "  backend/.env already exists, skipping."; \
-	fi
-	@echo "\033[1;34m[4/7] Starting infra (PostGIS + Redis)...\033[0m"
-	@docker compose -f docker-compose.infra.yml --env-file backend/.env up -d
+	@echo "\033[1;34m[3/6] Starting infra (PostGIS + Redis)...\033[0m"
+	@if [ ! -f .env ]; then cp .env.example .env; echo "  Created .env from .env.example"; fi
+	@docker compose -f docker-compose.infra.yml --env-file .env up -d
 	@echo "  Waiting for database to accept connections (15s)..."
 	@sleep 15
-	@echo "\033[1;34m[5/7] Running Django migrations...\033[0m"
+	@echo "\033[1;34m[4/6] Running Django migrations...\033[0m"
 	@cd backend && $(PYEXEC) manage.py migrate
-	@echo "\033[1;34m[6/7] Installing frontend dependencies...\033[0m"
+	@echo "\033[1;34m[5/6] Installing frontend dependencies...\033[0m"
 	@cd frontend && npm install --silent
-	@echo "\033[1;34m[7/7] Seeding demo data...\033[0m"
+	@echo "\033[1;34m[6/6] Seeding demo data...\033[0m"
 	@cd backend && DJANGO_SETTINGS_MODULE=hive_project.settings $(PYEXEC) setup_demo.py
 	@echo ""
 	@echo "\033[1;32m✓ Setup complete! Run  make dev  to start.\033[0m"
@@ -55,7 +41,7 @@ p.write_text('\n'.join(lines) + '\n') \
 
 dev: ## Start local dev: infra + backend (8000) + frontend (5173) in parallel
 	@echo "\033[1;34m→ Starting infra...\033[0m"
-	@docker compose -f docker-compose.infra.yml --env-file backend/.env up -d
+	@docker compose -f docker-compose.infra.yml --env-file .env up -d
 	@echo "\033[1;34m→ Starting backend (http://localhost:8000) and frontend (http://localhost:5173)...\033[0m"
 	@echo "  Press Ctrl+C to stop both.\n"
 	@trap 'kill 0; exit 0' INT TERM; \
@@ -65,8 +51,16 @@ dev: ## Start local dev: infra + backend (8000) + frontend (5173) in parallel
 
 dev-stop: ## Stop local infra (PostGIS + Redis containers)
 	@echo "\033[1;34m→ Stopping infra...\033[0m"
-	@docker compose -f docker-compose.infra.yml --env-file backend/.env down
+	@docker compose -f docker-compose.infra.yml --env-file .env down
 	@echo "\033[1;32m✓ Infra stopped.\033[0m"
+
+dev-clean: ## Stop infra AND delete all Postgres + Redis data volumes (full reset)
+	@echo "\033[1;33m⚠  This will permanently delete all local database and cache data.\033[0m"
+	@printf "Continue? [y/N] " && read ans && [ "$${ans:-N}" = "y" ] || (echo "Aborted."; exit 1)
+	@echo "\033[1;34m→ Stopping infra and removing volumes...\033[0m"
+	@docker compose -f docker-compose.infra.yml --env-file .env down -v --remove-orphans
+	@echo "\033[1;32m✓ Infra stopped and volumes deleted.\033[0m"
+	@echo "  Run  make dev-setup  to reinitialise."
 
 # ─────────────────────────────────────────────────────────────────────────────
 

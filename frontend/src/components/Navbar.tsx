@@ -21,6 +21,7 @@ import {
   GRAY50, GRAY100, GRAY200, GRAY500, GRAY600, GRAY700, GRAY800, GRAY900,
   WHITE,
 } from '@/theme/tokens'
+import { Logo } from '@/components/Logo'
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 function initials(user: { first_name?: string; last_name?: string; email?: string } | null) {
@@ -138,7 +139,7 @@ const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false)
   const mobileRef = useRef<HTMLDivElement>(null)
 
-  const handleLogout = () => { logout(); navigate('/login') }
+  const handleLogout = () => { logout(); navigate('/') }
 
   // Close mobile menu on route change
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -151,7 +152,7 @@ const Navbar = () => {
     return () => document.removeEventListener('mousedown', h)
   }, [mobileOpen])
 
-  const balance = user?.timebank_balance ?? 0
+  const balance = Number(user?.timebank_balance ?? 0)
   const p       = location.pathname
 
   return (
@@ -170,15 +171,8 @@ const Navbar = () => {
 
         {/* Logo */}
         <Link to="/" style={{ textDecoration: 'none', flexShrink: 0 }}>
-          <Flex align="center" gap={2}>
-            <Box
-              w="32px" h="32px" borderRadius="9px" flexShrink={0}
-              display="flex" alignItems="center" justifyContent="center"
-              fontWeight="black" fontSize="16px" color={GREEN}
-              style={{ background: `linear-gradient(135deg, ${YELLOW} 0%, #f5b800 100%)`, boxShadow: '0 2px 6px rgba(248,200,74,0.4)' }}
-            >
-              H
-            </Box>
+          <Flex align="center" gap={3}>
+            <Logo size={32} />
             <Text fontWeight="800" fontSize="17px" color={GRAY900} letterSpacing="-0.3px">
               The Hive
             </Text>

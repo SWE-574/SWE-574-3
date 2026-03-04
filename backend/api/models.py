@@ -69,6 +69,16 @@ class User(AbstractUser):
         help_text='Whether to show transaction history publicly'
     )
 
+    # Auth state fields
+    is_verified = models.BooleanField(
+        default=False,
+        help_text='Whether the user has verified their email address'
+    )
+    is_onboarded = models.BooleanField(
+        default=False,
+        help_text='Whether the user has completed the onboarding flow'
+    )
+
     objects = CustomUserManager()
 
     USERNAME_FIELD = 'email'
@@ -93,6 +103,40 @@ class User(AbstractUser):
                 name='timebank_balance_minimum',
             ),
         ]
+
+class EmailVerificationToken(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='email_verification_tokens')
+    token = models.CharField(max_length=256, unique=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
+
+    def __str__(self):
+        return f"EmailVerificationToken({self.user.email})"
+
+
+class PasswordResetToken(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='password_reset_tokens')
+    token = models.CharField(max_length=256, unique=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
+
+    def __str__(self):
+        return f"PasswordResetToken({self.user.email})"
+
 
 class Tag(models.Model):
     id = models.CharField(primary_key=True, max_length=200)
@@ -276,6 +320,8 @@ class Service(models.Model):
             models.Index(fields=['status', 'type', 'created_at']),
             models.Index(fields=['location_type', 'location_area']),
             models.Index(fields=['status', '-hot_score']),  # For hot sorting
+            # List view: GET /api/services/ filter status + is_visible, order -created_at
+            models.Index(fields=['status', 'is_visible', '-created_at'], name='api_svc_list_idx'),
         ]
         constraints = [
             models.CheckConstraint(

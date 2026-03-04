@@ -8,12 +8,16 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse, inline_serializer
+from rest_framework import serializers as drf_serializers
 from django.db import transaction, IntegrityError
 from django.shortcuts import get_object_or_404
 from django.db.utils import OperationalError
 from django.db.models import F
 from django.conf import settings
 from django.utils import timezone
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from decimal import Decimal
 from datetime import timedelta
 import logging
@@ -36,7 +40,8 @@ from .models import (
     User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
     ChatRoom, PublicChatMessage, ServiceGroupChatMessage, Comment, NegativeRep,
-    ForumCategory, ForumTopic, ForumPost, ServiceMedia
+    ForumCategory, ForumTopic, ForumPost, ServiceMedia,
+    EmailVerificationToken, PasswordResetToken,
 )
 from .serializers import (
     UserRegistrationSerializer, 
@@ -81,6 +86,244 @@ from .cache_utils import (
 )
 
 from django.contrib.auth import authenticate
+import secrets
+import threading
+import resend as resend_sdk
+
+# ─── Cookie helpers ───────────────────────────────────────────────────────────
+
+def get_cookie_settings(httponly: bool = True) -> dict:
+    """Returns cookie settings that match the environment (dev vs prod)."""
+    is_prod = getattr(settings, 'IS_PRODUCTION', False)
+    return {
+        'httponly': httponly,
+        'secure': is_prod,
+        'samesite': 'Strict' if is_prod else 'Lax',
+        'path': '/',
+        'max_age': 60 * 60 * 24 * 7,  # 7 days
+    }
+
+
+def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
+    """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS."""
+    response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=True))
+    response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
+
+
+def _send_email_async(to_email: str, subject: str, html: str) -> None:
+    """Fire-and-forget email via Resend in a background thread."""
+    def _send():
+        api_key = getattr(settings, 'RESEND_API_KEY', '')
+        if not api_key:
+            logger.warning('RESEND_API_KEY not set — skipping email to %s', to_email)
+            return
+        resend_sdk.api_key = api_key
+        from_email = getattr(settings, 'RESEND_FROM_EMAIL', 'onboarding@resend.dev')
+        try:
+            resend_sdk.Emails.send({'from': from_email, 'to': to_email, 'subject': subject, 'html': html})
+        except Exception as exc:
+            logger.error('Resend email failed to %s: %s', to_email, exc)
+
+    t = threading.Thread(target=_send, daemon=True)
+    t.start()
+
+
+def _send_verification_email(user) -> None:
+    from .models import EmailVerificationToken
+    EmailVerificationToken.objects.filter(user=user, is_used=False).update(is_used=True)
+    token = secrets.token_urlsafe(32)
+    EmailVerificationToken.objects.create(
+        user=user,
+        token=token,
+        expires_at=timezone.now() + timedelta(hours=24),
+    )
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173')
+    verify_url = f'{frontend_url}/verify-email?token={token}'
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#F9FAFB;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" style="max-width:560px;background:#FFFFFF;border-radius:16px;border:1px solid #E5E7EB;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:#2D5C4E;padding:28px 40px;text-align:center;">
+            <table cellpadding="0" cellspacing="0" style="display:inline-table;">
+              <tr>
+                <td style="padding-right:10px;vertical-align:middle;">
+                  <svg width="36" height="36" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 2L35.5885 11V29L20 38L4.41154 29V11L20 2Z" fill="#FFFFFF" stroke="#2D5C4E" stroke-width="2.5" stroke-linejoin="round"/>
+                    <path d="M20 9L29.5263 14.5V25.5L20 31L10.4737 25.5V14.5L20 9Z" fill="#2D5C4E"/>
+                    <path d="M20 15L24.3301 17.5V22.5L20 25L15.6699 22.5V17.5L20 15Z" fill="#F8C84A"/>
+                  </svg>
+                </td>
+                <td style="vertical-align:middle;">
+                  <span style="font-size:20px;font-weight:700;color:#FFFFFF;letter-spacing:-0.3px;">The Hive</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:36px 40px 28px;">
+            <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#1F2937;">Verify your email address</p>
+            <p style="margin:0 0 24px;font-size:14px;color:#6B7280;line-height:1.6;">
+              Hi {user.first_name}, welcome to The Hive! Please confirm your email to activate your account and start exchanging skills with your community.
+            </p>
+
+            <!-- CTA Button -->
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+              <tr>
+                <td style="border-radius:8px;background:#2D5C4E;">
+                  <a href="{verify_url}"
+                     style="display:inline-block;padding:14px 36px;font-size:15px;font-weight:600;color:#FFFFFF;text-decoration:none;border-radius:8px;letter-spacing:0.1px;">
+                    Verify Email
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Info box -->
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:#F0FDF4;border:1px solid #D1FAE5;border-radius:8px;padding:14px 16px;">
+                  <p style="margin:0;font-size:13px;color:#374151;line-height:1.5;">
+                    ⏱&nbsp; You start with <strong style="color:#2D5C4E;">3 hours</strong> in your time bank — ready to use once your email is confirmed.
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Fallback link -->
+        <tr>
+          <td style="padding:0 40px 16px;">
+            <p style="margin:0;font-size:12px;color:#9CA3AF;line-height:1.6;">
+              Button not working? Copy and paste this link into your browser:<br>
+              <a href="{verify_url}" style="color:#2D5C4E;word-break:break-all;">{verify_url}</a>
+            </p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#F9FAFB;border-top:1px solid #E5E7EB;padding:20px 40px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9CA3AF;">
+              This link expires in <strong>24 hours</strong>. If you didn't create a Hive account, you can safely ignore this email.
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+    _send_email_async(user.email, 'Verify your email — The Hive', html)
+
+
+def _send_password_reset_email(user) -> None:
+    from .models import PasswordResetToken
+    PasswordResetToken.objects.filter(user=user, is_used=False).update(is_used=True)
+    token = secrets.token_urlsafe(32)
+    PasswordResetToken.objects.create(
+        user=user,
+        token=token,
+        expires_at=timezone.now() + timedelta(hours=1),
+    )
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173')
+    reset_url = f'{frontend_url}/reset-password?token={token}'
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#F9FAFB;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F9FAFB;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" style="max-width:560px;background:#FFFFFF;border-radius:16px;border:1px solid #E5E7EB;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:#2D5C4E;padding:28px 40px;text-align:center;">
+            <table cellpadding="0" cellspacing="0" style="display:inline-table;">
+              <tr>
+                <td style="padding-right:10px;vertical-align:middle;">
+                  <svg width="36" height="36" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 2L35.5885 11V29L20 38L4.41154 29V11L20 2Z" fill="#FFFFFF" stroke="#2D5C4E" stroke-width="2.5" stroke-linejoin="round"/>
+                    <path d="M20 9L29.5263 14.5V25.5L20 31L10.4737 25.5V14.5L20 9Z" fill="#2D5C4E"/>
+                    <path d="M20 15L24.3301 17.5V22.5L20 25L15.6699 22.5V17.5L20 15Z" fill="#F8C84A"/>
+                  </svg>
+                </td>
+                <td style="vertical-align:middle;">
+                  <span style="font-size:20px;font-weight:700;color:#FFFFFF;letter-spacing:-0.3px;">The Hive</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:36px 40px 28px;">
+            <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#1F2937;">Reset your password</p>
+            <p style="margin:0 0 24px;font-size:14px;color:#6B7280;line-height:1.6;">
+              Hi {user.first_name}, we received a request to reset the password for your Hive account. Click the button below to choose a new password.
+            </p>
+
+            <!-- CTA Button -->
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+              <tr>
+                <td style="border-radius:8px;background:#2D5C4E;">
+                  <a href="{reset_url}"
+                     style="display:inline-block;padding:14px 36px;font-size:15px;font-weight:600;color:#FFFFFF;text-decoration:none;border-radius:8px;letter-spacing:0.1px;">
+                    Reset Password
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Warning box -->
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:14px 16px;">
+                  <p style="margin:0;font-size:13px;color:#374151;line-height:1.5;">
+                    🔒&nbsp; If you didn't request a password reset, <strong>ignore this email</strong> — your account remains secure.
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Fallback link -->
+        <tr>
+          <td style="padding:0 40px 16px;">
+            <p style="margin:0;font-size:12px;color:#9CA3AF;line-height:1.6;">
+              Button not working? Copy and paste this link into your browser:<br>
+              <a href="{reset_url}" style="color:#2D5C4E;word-break:break-all;">{reset_url}</a>
+            </p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#F9FAFB;border-top:1px solid #E5E7EB;padding:20px 40px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9CA3AF;">
+              This link expires in <strong>1 hour</strong>. Never share this link with anyone.
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+    _send_email_async(user.email, 'Reset your password — The Hive', html)
 
 
 class StandardResultsSetPagination(PageNumberPagination):
@@ -112,39 +355,50 @@ def _validate_event_feedback_window(service: Service) -> tuple[bool, str | None]
     return True, None
 
 class CustomTokenRefreshView(TokenRefreshView):
-    """Custom token refresh view that handles deleted users gracefully"""
-    
+    """Custom token refresh: reads refresh token from cookie (or body), sets new cookies."""
+
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        
+        # Prefer cookie over body for cookie-based auth flow
+        refresh_token_val = request.COOKIES.get('refresh_token') or request.data.get('refresh')
+        if not refresh_token_val:
+            return Response(
+                {'detail': 'Refresh token not provided.', 'code': 'token_not_valid'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # Mutate request.data so the parent serializer sees the value
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        data['refresh'] = refresh_token_val
+
+        from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+        serializer = TokenRefreshSerializer(data=data)
         try:
             serializer.is_valid(raise_exception=True)
-        except (TokenError, InvalidToken) as e:
-            # Token is invalid - return 401
+        except (TokenError, InvalidToken):
             return Response(
                 {'detail': 'Invalid refresh token.', 'code': 'token_not_valid'},
-                status=status.HTTP_401_UNAUTHORIZED
+                status=status.HTTP_401_UNAUTHORIZED,
             )
         except Exception as e:
-            # Check if it's a DoesNotExist error (user was deleted)
-            # This happens when the token references a user that no longer exists
             error_str = str(e)
             error_type = type(e).__name__
-            
-            if ('DoesNotExist' in error_type or 
-                'matching query does not exist' in error_str or
-                'User matching query does not exist' in error_str):
+            if ('DoesNotExist' in error_type or
+                    'matching query does not exist' in error_str or
+                    'User matching query does not exist' in error_str):
                 return Response(
                     {'detail': 'User account no longer exists.', 'code': 'user_not_found'},
-                    status=status.HTTP_401_UNAUTHORIZED
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
-            # Re-raise other exceptions to see what they are
-            import traceback
-            logger.error(f"Unexpected error in token refresh: {error_type}: {error_str}", exc_info=True)
+            logger.error('Unexpected error in token refresh: %s: %s', error_type, error_str, exc_info=True)
             raise
-        
-        # If we get here, token is valid
-        return Response(serializer.validated_data, status=status.HTTP_200_OK)
+
+        validated = serializer.validated_data
+        new_access = validated.get('access', '')
+        new_refresh = validated.get('refresh', refresh_token_val)
+
+        response = Response({'access': new_access, 'refresh': new_refresh}, status=status.HTTP_200_OK)
+        _set_auth_cookies(response, new_access, new_refresh)
+        return response
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     MAX_FAILED_ATTEMPTS = 5
@@ -238,8 +492,296 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         }
         
         response_data['user'] = user_data
-        
-        return Response(response_data, status=status.HTTP_200_OK)
+
+        response = Response(response_data, status=status.HTTP_200_OK)
+        _set_auth_cookies(
+            response,
+            str(response_data.get('access', '')),
+            str(response_data.get('refresh', '')),
+        )
+        return response
+
+
+class LogoutView(APIView):
+    """Clear auth cookies and blacklist the refresh token."""
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(
+        summary='Logout',
+        description=(
+            'Clears the `access_token` and `refresh_token` cookies and blacklists '
+            'the refresh token so it cannot be used again.'
+        ),
+        request=None,
+        responses={
+            200: inline_serializer('LogoutResponse', {'detail': drf_serializers.CharField()}),
+        },
+        tags=['Auth'],
+    )
+    def post(self, request, *args, **kwargs):
+        refresh_token_val = request.COOKIES.get('refresh_token')
+        if refresh_token_val:
+            try:
+                token = RefreshToken(refresh_token_val)
+                token.blacklist()
+            except Exception:
+                pass
+
+        response = Response({'detail': 'Logged out successfully.'}, status=status.HTTP_200_OK)
+        is_prod = getattr(settings, 'IS_PRODUCTION', False)
+        samesite = 'Strict' if is_prod else 'Lax'
+        response.delete_cookie('access_token', path='/', samesite=samesite)
+        response.delete_cookie('refresh_token', path='/', samesite=samesite)
+        return response
+
+
+class WsTokenView(APIView):
+    """Return a short-lived access token for WebSocket auth (query string). Use when cookie is not forwarded by proxy (e.g. Vite dev)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary='Get WebSocket token',
+        description='Returns the current access token for use in WebSocket URL (e.g. ?token=). Cookie is preferred; use this when the proxy does not forward cookies.',
+        responses={200: inline_serializer('WsTokenResponse', {'token': drf_serializers.CharField()})},
+        tags=['Auth'],
+    )
+    def get(self, request, *args, **kwargs):
+        refresh = RefreshToken.for_user(request.user)
+        return Response({'token': str(refresh.access_token)}, status=status.HTTP_200_OK)
+
+
+class ForgotPasswordView(APIView):
+    """Send a password-reset email via Resend."""
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [SensitiveOperationThrottle]
+
+    @extend_schema(
+        summary='Forgot password — request reset link',
+        description=(
+            'Sends a password-reset email to the given address if an account exists. '
+            'Always returns 200 to avoid user-enumeration attacks.'
+        ),
+        request=inline_serializer('ForgotPasswordRequest', {'email': drf_serializers.EmailField()}),
+        responses={
+            200: inline_serializer('ForgotPasswordResponse', {'detail': drf_serializers.CharField()}),
+        },
+        examples=[
+            OpenApiExample('Request', value={'email': 'user@example.com'}, request_only=True),
+            OpenApiExample('Response', value={'detail': 'If that email exists, a password reset link has been sent.'}, response_only=True),
+        ],
+        tags=['Auth'],
+    )
+    def post(self, request, *args, **kwargs):
+        email = request.data.get('email', '').strip().lower()
+        if not email:
+            return Response({'detail': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            user = User.objects.get(email=email)
+            _send_password_reset_email(user)
+        except User.DoesNotExist:
+            pass  # Don't reveal if user exists
+        return Response(
+            {'detail': 'If that email exists, a password reset link has been sent.'},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ResetPasswordView(APIView):
+    """Verify the reset token and set a new password."""
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [SensitiveOperationThrottle]
+
+    @extend_schema(
+        summary='Reset password',
+        description=(
+            'Validates the one-time reset `token` (from the email link) and sets a new password. '
+            'The token is invalidated after first use and expires after 1 hour.'
+        ),
+        request=inline_serializer('ResetPasswordRequest', {
+            'token': drf_serializers.CharField(),
+            'password': drf_serializers.CharField(min_length=8),
+        }),
+        responses={
+            200: inline_serializer('ResetPasswordResponse', {'detail': drf_serializers.CharField()}),
+            400: OpenApiResponse(description='Invalid/expired token or password too short'),
+        },
+        examples=[
+            OpenApiExample('Request', value={'token': '<uuid-token>', 'password': 'NewPass123'}, request_only=True),
+            OpenApiExample('Success', value={'detail': 'Password reset successfully.'}, response_only=True),
+        ],
+        tags=['Auth'],
+    )
+    def post(self, request, *args, **kwargs):
+        token_str = request.data.get('token', '').strip()
+        new_password = request.data.get('password', '')
+        if not token_str or not new_password:
+            return Response(
+                {'detail': 'Token and password are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(new_password) < 8:
+            return Response(
+                {'detail': 'Password must be at least 8 characters.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            reset_token = PasswordResetToken.objects.select_related('user').get(
+                token=token_str, is_used=False
+            )
+        except PasswordResetToken.DoesNotExist:
+            return Response(
+                {'detail': 'Invalid or expired reset link.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if reset_token.is_expired:
+            return Response(
+                {'detail': 'This reset link has expired.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = reset_token.user
+        try:
+            validate_password(new_password, user)
+        except DjangoValidationError as e:
+            return Response(
+                {'detail': ' '.join(e.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+        reset_token.is_used = True
+        reset_token.save(update_fields=['is_used'])
+        return Response({'detail': 'Password reset successfully.'}, status=status.HTTP_200_OK)
+
+
+class VerifyEmailView(APIView):
+    """Verify email with the token sent via Resend."""
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(
+        summary='Verify email address',
+        description=(
+            'Validates the email verification `token` from the link sent on registration. '
+            'Marks the user\'s `is_verified` flag as `true`. Token is single-use and expires in 24 hours.'
+        ),
+        request=inline_serializer('VerifyEmailRequest', {'token': drf_serializers.CharField()}),
+        responses={
+            200: inline_serializer('VerifyEmailResponse', {
+                'detail': drf_serializers.CharField(),
+                'access': drf_serializers.CharField(),
+                'user': drf_serializers.DictField(),
+            }),
+            400: OpenApiResponse(description='Invalid/expired token'),
+        },
+        examples=[
+            OpenApiExample('Request', value={'token': '<uuid-token>'}, request_only=True),
+            OpenApiExample('Success', value={
+                'detail': 'Email verified successfully.',
+                'access': '<jwt-access-token>',
+                'user': {'id': '...', 'email': '...', 'is_verified': True},
+            }, response_only=True),
+        ],
+        tags=['Auth'],
+    )
+    def post(self, request, *args, **kwargs):
+        token_str = request.data.get('token', '').strip()
+        if not token_str:
+            return Response({'detail': 'Token is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ev_token = EmailVerificationToken.objects.select_related('user').get(
+                token=token_str, is_used=False
+            )
+        except EmailVerificationToken.DoesNotExist:
+            return Response(
+                {'detail': 'Invalid or expired verification link.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if ev_token.is_expired:
+            return Response(
+                {'detail': 'This verification link has expired.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = ev_token.user
+        user.is_verified = True
+        user.save(update_fields=['is_verified'])
+        ev_token.is_used = True
+        ev_token.save(update_fields=['is_used'])
+
+        # Auto-login: generate fresh tokens so the user is authenticated after
+        # clicking the link, even from a different browser / device.
+        refresh = RefreshToken.for_user(user)
+        access_token = str(refresh.access_token)
+        refresh_token = str(refresh)
+
+        response = Response({
+            'detail': 'Email verified successfully.',
+            'access': access_token,
+            'user': UserProfileSerializer(user).data,
+        }, status=status.HTTP_200_OK)
+        _set_auth_cookies(response, access_token, refresh_token)
+        return response
+
+
+class SendVerificationEmailView(APIView):
+    """(Re-)send verification email to the authenticated user."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary='Resend verification email (authenticated)',
+        description=(
+            'Sends a fresh verification email to the currently authenticated user. '
+            'Returns 400 if the email is already verified.'
+        ),
+        request=None,
+        responses={
+            200: inline_serializer('SendVerificationResponse', {'detail': drf_serializers.CharField()}),
+            400: OpenApiResponse(description='Email already verified'),
+        },
+        tags=['Auth'],
+    )
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        if user.is_verified:
+            return Response({'detail': 'Email is already verified.'}, status=status.HTTP_400_BAD_REQUEST)
+        _send_verification_email(user)
+        return Response({'detail': 'Verification email sent.'}, status=status.HTTP_200_OK)
+
+
+class ResendVerificationView(APIView):
+    """Public endpoint: resend verification email given an email address."""
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [SensitiveOperationThrottle]
+
+    @extend_schema(
+        summary='Resend verification email (public)',
+        description=(
+            'Sends a fresh verification email to the given address if the account exists '
+            'and is not yet verified. Always returns 200 to prevent user enumeration.'
+        ),
+        request=inline_serializer('ResendVerificationRequest', {'email': drf_serializers.EmailField()}),
+        responses={
+            200: inline_serializer('ResendVerificationResponse', {'detail': drf_serializers.CharField()}),
+        },
+        examples=[
+            OpenApiExample('Request', value={'email': 'user@example.com'}, request_only=True),
+            OpenApiExample('Response', value={'detail': 'If that email exists and is unverified, a new link has been sent.'}, response_only=True),
+        ],
+        tags=['Auth'],
+    )
+    def post(self, request, *args, **kwargs):
+        email = request.data.get('email', '').strip().lower()
+        if not email:
+            return Response({'detail': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            user = User.objects.get(email=email)
+            if not user.is_verified:
+                _send_verification_email(user)
+        except User.DoesNotExist:
+            pass  # Don't reveal if user exists
+        return Response(
+            {'detail': 'If that email exists and is unverified, a new link has been sent.'},
+            status=status.HTTP_200_OK,
+        )
+
 
 class UserRegistrationView(generics.CreateAPIView):
     """
@@ -292,18 +834,25 @@ class UserRegistrationView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        
+
         refresh = RefreshToken.for_user(user)
-        
-        return Response({
+        access_token = str(refresh.access_token)
+        refresh_token = str(refresh)
+
+        # Send email verification (non-blocking)
+        _send_verification_email(user)
+
+        response = Response({
             'user_id': str(user.id),
             'name': f"{user.first_name} {user.last_name}".strip() or user.email,
             'balance': float(user.timebank_balance),
-            'token': str(refresh.access_token),
-            'access': str(refresh.access_token),
-            'refresh': str(refresh),
-            'user': UserProfileSerializer(user).data
+            'token': access_token,
+            'access': access_token,
+            'refresh': refresh_token,
+            'user': UserProfileSerializer(user).data,
         }, status=201)
+        _set_auth_cookies(response, access_token, refresh_token)
+        return response
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
     """
@@ -777,9 +1326,10 @@ class ServiceViewSet(viewsets.ModelViewSet):
             to_attr='capacity_handshakes',
         )
 
-        # Base queryset with optimizations
+        # Base queryset with optimizations (annotate comment_count to avoid N+1 in list)
         queryset = (
             Service.objects.filter(status='Active')
+            .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
             .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
                 'tags',

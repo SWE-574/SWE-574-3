@@ -1,40 +1,19 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import {
-  Box,
-  Flex,
-  Text,
-  Button,
-  Input,
-  VStack,
-} from '@chakra-ui/react'
+import { useNavigate, Link, Navigate } from 'react-router-dom'
+import { Box, Flex, Text, Button, Input, VStack } from '@chakra-ui/react'
 import { FiArrowLeft, FiMail, FiLock } from 'react-icons/fi'
 import { useAuthStore } from '@/store/useAuthStore'
 import { getErrorMessage } from '@/services/api'
-
-const YELLOW = '#F8C84A'
-const GREEN = '#2D5C4E'
-const ORANGE = '#f97316'
-
-function HexLogo({ size = 28 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-      <polygon
-        points="16,2 28,9 28,23 16,30 4,23 4,9"
-        fill={YELLOW}
-        stroke={GREEN}
-        strokeWidth="1.5"
-      />
-      <text x="16" y="21" textAnchor="middle" fontSize="13" fontWeight="bold" fill={GREEN}>
-        H
-      </text>
-    </svg>
-  )
-}
+import {
+  GREEN,
+  GRAY50, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
+  WHITE, RED, RED_LT,
+} from '@/theme/tokens'
+import { Logo } from '@/components/Logo'
 
 const LoginPage = () => {
   const navigate = useNavigate()
-  const { login, isLoading } = useAuthStore()
+  const { login, isLoading, isAuthenticated } = useAuthStore()
 
   const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState<string>(() => {
@@ -46,118 +25,114 @@ const LoginPage = () => {
     return ''
   })
 
+  // Guard after all hooks to satisfy Rules of Hooks
+  if (isAuthenticated) return <Navigate to="/dashboard" replace />
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-
     if (!form.email.trim()) { setError('Email is required.'); return }
     if (!form.password.trim()) { setError('Password is required.'); return }
-
     try {
       await login(form.email, form.password)
-      navigate('/dashboard')
+      // No navigate() here — the isAuthenticated guard above handles redirect
+      // after the store state is updated, avoiding a double-navigation race.
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Login failed. Please check your credentials.'))
     }
   }
 
   return (
-    <Box minH="100vh" bg="linear-gradient(to bottom, #fffbeb, #ffffff)">
+    <Box minH="100vh" bg={GRAY50}>
       {/* ── Header ── */}
       <Box
         as="header"
-        borderBottom="1px solid"
-        borderColor="orange.100"
-        bg="rgba(255,255,255,0.85)"
-        backdropFilter="blur(10px)"
+        bg={WHITE}
+        borderBottom={`1px solid ${GRAY200}`}
+        boxShadow="0 1px 4px rgba(0,0,0,0.06)"
       >
-        <Flex maxW="1440px" mx="auto" px={8} py={4} align="center" justify="space-between">
+        <Flex maxW="1440px" mx="auto" px={6} h="64px" align="center" justify="space-between">
           <Link to="/" style={{ textDecoration: 'none' }}>
             <Flex align="center" gap={2}>
-              <HexLogo />
-              <Text fontWeight="700" fontSize="lg" color="gray.900">
-                The Hive
-              </Text>
+              <Logo />
+              <Text fontWeight="700" fontSize="md" color={GRAY800}>The Hive</Text>
             </Flex>
           </Link>
-          <Button
-            variant="ghost"
-            size="sm"
+          <Box
+            as="button"
             onClick={() => navigate('/')}
-            style={{ color: '#374151', display: 'flex', alignItems: 'center', gap: '6px' }}
+            display="flex"
+            alignItems="center"
+            gap="6px"
+            fontSize="sm"
+            color={GRAY600}
+            fontWeight={500}
+            px={3}
+            py={2}
+            borderRadius="8px"
+            _hover={{ bg: GRAY50, color: GRAY800 }}
+            transition="all 0.15s"
           >
-            <FiArrowLeft size={15} />
+            <FiArrowLeft size={14} />
             Back to Home
-          </Button>
+          </Box>
         </Flex>
       </Box>
 
       {/* ── Form ── */}
-      <Flex maxW="1440px" mx="auto" px={8} py={16} justify="center">
+      <Flex justify="center" px={4} py={12}>
         <Box
           w="full"
           maxW="420px"
-          bg="white"
-          borderRadius="2xl"
-          border="1px solid"
-          borderColor="gray.200"
+          bg={WHITE}
+          borderRadius="16px"
+          border={`1px solid ${GRAY200}`}
+          boxShadow="0 4px 24px rgba(0,0,0,0.08)"
           p={8}
-          boxShadow="lg"
         >
-          <VStack gap={2} mb={8} textAlign="center">
-            <Text as="h1" fontSize="2xl" fontWeight="800" color="gray.900">
-              Welcome Back
-            </Text>
-            <Text color="gray.500" fontSize="sm">
-              Log in to your Hive account
-            </Text>
+          {/* Logo + heading */}
+          <VStack gap={1} mb={7} textAlign="center">
+            <Box mb={2}><Logo size={40} /></Box>
+            <Text fontSize="xl" fontWeight="700" color={GRAY800}>Welcome back</Text>
+            <Text fontSize="sm" color={GRAY500}>Log in to your Hive account</Text>
           </VStack>
 
-          {/* Error alert */}
+          {/* Error */}
           {error && (
-            <Box
-              mb={6}
-              p={4}
-              bg="red.50"
-              border="1px solid"
-              borderColor="red.200"
-              borderRadius="lg"
-            >
-              <Text fontSize="sm" color="red.700">
-                {error}
-              </Text>
+            <Box mb={5} p={3} bg={RED_LT} border={`1px solid ${RED}33`} borderRadius="8px">
+              <Text fontSize="sm" color={RED}>{error}</Text>
             </Box>
           )}
 
           <form onSubmit={handleSubmit} noValidate>
-            <VStack gap={5}>
+            <VStack gap={4}>
               {/* Email */}
               <Box w="full">
-                <label htmlFor="email" style={{ fontSize: '14px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px' }}>
-                  Email Address <span style={{ color: '#ef4444' }}>*</span>
+                <label htmlFor="email" style={{ fontSize: '13px', fontWeight: 500, color: GRAY700, display: 'block', marginBottom: '6px' }}>
+                  Email address
                 </label>
                 <Flex
                   align="center"
-                  border="1px solid"
-                  borderColor="gray.300"
-                  borderRadius="lg"
+                  border={`1px solid ${GRAY300}`}
+                  borderRadius="8px"
                   overflow="hidden"
-                  _focusWithin={{ borderColor: ORANGE, boxShadow: `0 0 0 2px ${ORANGE}33` }}
+                  bg={WHITE}
+                  _focusWithin={{ borderColor: GREEN, boxShadow: `0 0 0 3px ${GREEN}22` }}
+                  transition="border-color 0.15s, box-shadow 0.15s"
                 >
-                  <Box px={3} color="gray.400">
-                    <FiMail size={16} />
-                  </Box>
+                  <Box px={3} color={GRAY400}><FiMail size={15} /></Box>
                   <Input
                     id="email"
                     type="email"
-                    placeholder="your.email@example.com"
+                    placeholder="you@example.com"
                     value={form.email}
                     onChange={(e) => setForm({ ...form, email: e.target.value })}
                     disabled={isLoading}
                     autoComplete="email"
                     border="none"
-                    outline="none"
-                    _focus={{ boxShadow: 'none', borderColor: 'transparent' }}
+                    bg="transparent"
+                    _focus={{ boxShadow: 'none' }}
+                    fontSize="sm"
                     flex={1}
                   />
                 </Flex>
@@ -165,20 +140,24 @@ const LoginPage = () => {
 
               {/* Password */}
               <Box w="full">
-                <label htmlFor="password" style={{ fontSize: '14px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px' }}>
-                  Password <span style={{ color: '#ef4444' }}>*</span>
-                </label>
+                <Flex justify="space-between" mb="6px">
+                  <label htmlFor="password" style={{ fontSize: '13px', fontWeight: 500, color: GRAY700 }}>
+                    Password
+                  </label>
+                  <Link to="/forgot-password" style={{ fontSize: '12px', color: GREEN, fontWeight: 500 }}>
+                    Forgot password?
+                  </Link>
+                </Flex>
                 <Flex
                   align="center"
-                  border="1px solid"
-                  borderColor="gray.300"
-                  borderRadius="lg"
+                  border={`1px solid ${GRAY300}`}
+                  borderRadius="8px"
                   overflow="hidden"
-                  _focusWithin={{ borderColor: ORANGE, boxShadow: `0 0 0 2px ${ORANGE}33` }}
+                  bg={WHITE}
+                  _focusWithin={{ borderColor: GREEN, boxShadow: `0 0 0 3px ${GREEN}22` }}
+                  transition="border-color 0.15s, box-shadow 0.15s"
                 >
-                  <Box px={3} color="gray.400">
-                    <FiLock size={16} />
-                  </Box>
+                  <Box px={3} color={GRAY400}><FiLock size={15} /></Box>
                   <Input
                     id="password"
                     type="password"
@@ -188,8 +167,9 @@ const LoginPage = () => {
                     disabled={isLoading}
                     autoComplete="current-password"
                     border="none"
-                    outline="none"
-                    _focus={{ boxShadow: 'none', borderColor: 'transparent' }}
+                    bg="transparent"
+                    _focus={{ boxShadow: 'none' }}
+                    fontSize="sm"
                     flex={1}
                   />
                 </Flex>
@@ -199,30 +179,37 @@ const LoginPage = () => {
               <Button
                 type="submit"
                 w="full"
-                size="lg"
+                size="md"
                 loading={isLoading}
-                loadingText="Logging in…"
+                loadingText="Signing in…"
                 disabled={isLoading}
+                mt={1}
                 style={{
-                  background: ORANGE,
-                  color: '#fff',
-                  borderRadius: '9999px',
+                  background: GREEN,
+                  color: WHITE,
+                  borderRadius: '8px',
                   fontWeight: 600,
+                  fontSize: '14px',
+                  height: '42px',
                 }}
+                _hover={{ opacity: 0.9 }}
               >
-                Log In
+                Sign in
               </Button>
             </VStack>
           </form>
 
-          {/* Register link */}
-          <Text mt={6} textAlign="center" fontSize="sm" color="gray.600">
+          {/* Divider */}
+          <Flex align="center" my={5} gap={3}>
+            <Box flex={1} h="1px" bg={GRAY200} />
+            <Text fontSize="xs" color={GRAY400}>or</Text>
+            <Box flex={1} h="1px" bg={GRAY200} />
+          </Flex>
+
+          <Text textAlign="center" fontSize="sm" color={GRAY500}>
             Don't have an account?{' '}
-            <Link
-              to="/register"
-              style={{ color: ORANGE, fontWeight: 600 }}
-            >
-              Sign up
+            <Link to="/register" style={{ color: GREEN, fontWeight: 600 }}>
+              Create one
             </Link>
           </Text>
         </Box>

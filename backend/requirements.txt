@@ -1,5 +1,6 @@
 django>=4.2,<6.0
 python-dotenv
+resend>=2.0.0
 djangorestframework
 djangorestframework-simplejwt
 psycopg2-binary
