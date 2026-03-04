@@ -178,14 +178,16 @@ export default function EventRosterModal({
                         color={WHITE}
                         fontSize="11px"
                         fontWeight={700}
-                        onClick={() => onMarkAttended(h.id)}
+                        onClick={() => {
+                          if (markingHandshakeId !== h.id) onMarkAttended(h.id)
+                        }}
+                        aria-disabled={markingHandshakeId === h.id}
                         style={{
                           border: 'none',
                           cursor: markingHandshakeId === h.id ? 'not-allowed' : 'pointer',
                           opacity: markingHandshakeId === h.id ? 0.7 : 1,
                           flexShrink: 0,
                         }}
-                        disabled={markingHandshakeId === h.id}
                       >
                         {markingHandshakeId === h.id ? 'Marking…' : 'Mark Attended'}
                       </Box>
