@@ -323,7 +323,9 @@ class ServiceSerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.INT)
     def get_comment_count(self, obj):
         """Return the count of non-deleted comments on this service"""
-        # Use prefetched data if available to avoid N+1 queries
+        # Use annotated value from list queryset to avoid N+1
+        if hasattr(obj, 'comment_count'):
+            return obj.comment_count
         if hasattr(obj, '_prefetched_objects_cache') and 'comments' in obj._prefetched_objects_cache:
             return len([c for c in obj.comments.all() if not c.is_deleted])
         return obj.comments.filter(is_deleted=False).count()

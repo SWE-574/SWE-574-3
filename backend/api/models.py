@@ -320,6 +320,8 @@ class Service(models.Model):
             models.Index(fields=['status', 'type', 'created_at']),
             models.Index(fields=['location_type', 'location_area']),
             models.Index(fields=['status', '-hot_score']),  # For hot sorting
+            # List view: GET /api/services/ filter status + is_visible, order -created_at
+            models.Index(fields=['status', 'is_visible', '-created_at'], name='api_svc_list_idx'),
         ]
         constraints = [
             models.CheckConstraint(

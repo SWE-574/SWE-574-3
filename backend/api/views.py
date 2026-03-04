@@ -1326,9 +1326,10 @@ class ServiceViewSet(viewsets.ModelViewSet):
             to_attr='capacity_handshakes',
         )
 
-        # Base queryset with optimizations
+        # Base queryset with optimizations (annotate comment_count to avoid N+1 in list)
         queryset = (
             Service.objects.filter(status='Active')
+            .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
             .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
                 'tags',
