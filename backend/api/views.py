@@ -12,7 +12,10 @@ from django.db import transaction, IntegrityError
 from django.shortcuts import get_object_or_404
 from django.db.utils import OperationalError
 from django.db.models import F
+from django.conf import settings
+from django.utils import timezone
 from decimal import Decimal
+from datetime import timedelta
 import logging
 import bleach
 
@@ -62,7 +65,8 @@ from .utils import (
     can_user_post_offer, provision_timebank, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification
 )
-from .services import HandshakeService
+from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService
+from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
@@ -87,6 +91,25 @@ class StandardResultsSetPagination(PageNumberPagination):
 class RegistrationThrottle(AnonRateThrottle):
     """Lenient throttle for registration - 20 requests per hour per IP"""
     rate = '20/hour'
+
+
+def _validate_event_feedback_window(service: Service) -> tuple[bool, str | None]:
+    """Validate fixed feedback window after event completion."""
+    if service.type != 'Event':
+        return True, None
+
+    if service.status != 'Completed':
+        return False, 'Event evaluations are available only after the organizer marks the event as completed.'
+
+    completed_at = service.event_completed_at or service.updated_at
+    if completed_at is None:
+        return False, 'Event completion time is unavailable; evaluations are currently closed.'
+
+    deadline = completed_at + timedelta(hours=settings.EVENT_FEEDBACK_WINDOW_HOURS)
+    if timezone.now() > deadline:
+        return False, 'The event evaluation window has closed.'
+
+    return True, None
 
 class CustomTokenRefreshView(TokenRefreshView):
     """Custom token refresh view that handles deleted users gracefully"""
@@ -749,7 +772,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         capacity_handshakes_prefetch = Prefetch(
             'handshakes',
             queryset=Handshake.objects.filter(
-                status__in=['pending', 'accepted', 'completed', 'reported', 'paused']
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused', 'checked_in', 'attended', 'no_show']
             ).only('id', 'service_id', 'status'),
             to_attr='capacity_handshakes',
         )
@@ -757,7 +780,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         # Base queryset with optimizations
         queryset = (
             Service.objects.filter(status='Active')
-            .select_related('user')
+            .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
                 'tags',
                 user_badges_prefetch,
@@ -824,13 +847,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
         capacity_handshakes_prefetch = Prefetch(
             'handshakes',
             queryset=Handshake.objects.filter(
-                status__in=['pending', 'accepted', 'completed', 'reported', 'paused']
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused', 'checked_in', 'attended', 'no_show']
             ).only('id', 'service_id', 'status'),
             to_attr='capacity_handshakes',
         )
         queryset = (
             Service.objects
-            .select_related('user')
+            .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
                 'tags',
                 user_badges_prefetch,
@@ -845,15 +868,51 @@ class ServiceViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         # REQ-TB-003: Check if user can post offer (balance > 10 hours blocks new offers)
         from .utils import can_user_post_offer
-        
-        if request.data.get('type') == 'Offer':
+
+        service_type = request.data.get('type')
+
+        # --- Event-specific pre-creation checks ---
+        if service_type == 'Event':
+            # Block organizer-banned users
+            perm = IsNotOrganizerBanned()
+            if not perm.has_permission(request, self):
+                return create_error_response(
+                    perm.message,
+                    code=ErrorCodes.PERMISSION_DENIED,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                )
+            # Require a future scheduled_time
+            raw_time = request.data.get('scheduled_time')
+            if not raw_time:
+                return create_error_response(
+                    'Events require a scheduled_time.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            from .timezone_utils import validate_and_normalize_datetime, validate_future_datetime
+            parsed_time, parse_error = validate_and_normalize_datetime(raw_time)
+            if parse_error:
+                return create_error_response(
+                    parse_error,
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            future_error = validate_future_datetime(parsed_time)
+            if future_error:
+                return create_error_response(
+                    future_error,
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if service_type == 'Offer':
             if not can_user_post_offer(request.user):
                 return create_error_response(
                     'Cannot post new offers: TimeBank balance exceeds 10 hours. Please receive services to reduce your balance.',
                     code=ErrorCodes.INSUFFICIENT_BALANCE,
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
-        
+
         response = super().create(request, *args, **kwargs)
         invalidate_service_lists()
         
@@ -871,6 +930,15 @@ class ServiceViewSet(viewsets.ModelViewSet):
         service = serializer.instance
         if service.user != self.request.user and getattr(self.request.user, 'role', None) != 'admin':
             raise PermissionDenied('Attempting to modify another user\'s service')
+
+        # Block edits to Event details once inside the 24-hour lockdown window.
+        # Non-Event services are completely unaffected by this guard.
+        # Admins are exempt so they can still toggle visibility or moderate.
+        is_admin = getattr(self.request.user, 'role', None) == 'admin'
+        if service.type == 'Event' and service.is_in_lockdown_window and not is_admin:
+            raise PermissionDenied(
+                'Cannot edit event details within 24 hours of the scheduled start time.'
+            )
 
         super().perform_update(serializer)
         invalidate_service_lists()
@@ -948,6 +1016,62 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'is_visible': service.is_visible,
             'message': f'Service has been {action_text}'
         })
+
+    # ------------------------------------------------------------------
+    # Event lifecycle actions (additive — do not touch Offer/Need paths)
+    # ------------------------------------------------------------------
+
+    @action(detail=True, methods=['post'], url_path='complete-event',
+            permission_classes=[permissions.IsAuthenticated])
+    def complete_event(self, request, pk=None):
+        """Mark an Event as Completed (organizer only).
+
+        Transitions all 'accepted' and 'checked_in' handshakes to 'no_show' and applies
+        no-show bans where applicable.
+
+        POST /api/services/{id}/complete-event/
+        """
+        service = self.get_object()
+        try:
+            EventHandshakeService.complete_event(service, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = self.get_serializer(service)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='cancel-event',
+            permission_classes=[permissions.IsAuthenticated])
+    def cancel_event(self, request, pk=None):
+        """Cancel an Event (organizer only).
+
+        If cancelled inside the 24-hour lockdown window with active
+        participants, the organizer receives a 30-day creation ban.
+
+        POST /api/services/{id}/cancel-event/
+        """
+        service = self.get_object()
+        try:
+            EventHandshakeService.cancel_event(service, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = self.get_serializer(service)
+        return Response(serializer.data)
 
     @action(
         detail=True,
@@ -2085,6 +2209,175 @@ class HandshakeViewSet(viewsets.ModelViewSet):
 
         return Response({'status': 'success', 'report_id': str(report.id)}, status=201)
 
+    # ------------------------------------------------------------------
+    # Event-specific handshake actions (additive — Offer/Need untouched)
+    # ------------------------------------------------------------------
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path=r'services/(?P<service_id>[^/.]+)/join-event',
+        permission_classes=[permissions.IsAuthenticated, IsNotEventBanned],
+    )
+    def join_event(self, request, service_id=None):
+        """RSVP to an Event immediately (no initiate→approve flow, no credits).
+
+        POST /api/handshakes/services/{service_id}/join-event/
+        """
+        try:
+            service = Service.objects.select_related('user').get(
+                id=service_id, type='Event', status='Active'
+            )
+        except Service.DoesNotExist:
+            return create_error_response(
+                'Event not found or not active.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            handshake = EventHandshakeService.join_event(service, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            msg = str(e)
+            if 'full' in msg:
+                code = ErrorCodes.INVALID_STATE
+            elif 'already joined' in msg:
+                code = ErrorCodes.ALREADY_EXISTS
+            else:
+                code = ErrorCodes.VALIDATION_ERROR
+            return create_error_response(msg, code=code,
+                                         status_code=status.HTTP_400_BAD_REQUEST)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='leave-event',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def leave_event(self, request, pk=None):
+        """Participant cancels their own Event RSVP (before lockdown window).
+
+        POST /api/handshakes/{id}/leave-event/
+        """
+        handshake = self.get_object()
+        try:
+            EventHandshakeService.leave_event(handshake, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='checkin',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def checkin(self, request, pk=None):
+        """Participant checks in to an Event during the lockdown window.
+
+        POST /api/handshakes/{id}/checkin/
+        """
+        handshake = self.get_object()
+        try:
+            EventHandshakeService.checkin(handshake, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='mark-attended',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def mark_attended(self, request, pk=None):
+        """Organizer marks a checked-in participant as attended.
+
+        POST /api/handshakes/{id}/mark-attended/
+        """
+        handshake = self.get_object()
+        try:
+            EventHandshakeService.mark_attended(handshake, request.user)
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='appeal-no-show',
+        permission_classes=[permissions.IsAuthenticated],
+        throttle_classes=[ConfirmationThrottle],
+    )
+    def appeal_no_show(self, request, pk=None):
+        """Participant appeals an event no-show status.
+
+        POST /api/handshakes/{id}/appeal-no-show/
+        """
+        handshake = self.get_object()
+        raw_description = (request.data.get('description') or '').strip()
+        cleaned_description = bleach.clean(raw_description, tags=[], strip=True)[:2000]
+
+        try:
+            report = EventNoShowAppealService.submit_appeal(
+                handshake=handshake,
+                attendee=request.user,
+                description=cleaned_description,
+            )
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+        except ValueError as e:
+            message = str(e)
+            error_code = (
+                ErrorCodes.ALREADY_EXISTS
+                if 'pending no-show appeal' in message.lower()
+                else ErrorCodes.INVALID_STATE
+            )
+            return create_error_response(
+                message,
+                code=error_code,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response({'status': 'success', 'report_id': str(report.id)}, status=status.HTTP_201_CREATED)
+
+
 class ChatViewSet(viewsets.ViewSet):
     """
     Chat and Messaging
@@ -2514,13 +2807,30 @@ class ReputationViewSet(viewsets.ModelViewSet):
         try:
             handshake = Handshake.objects.select_related(
                 'service', 'service__user', 'requester'
-            ).get(id=handshake_id, status='completed')
+            ).get(id=handshake_id)
         except Handshake.DoesNotExist:
             return create_error_response(
-                'Handshake not found or not completed',
+                'Handshake not found',
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        required_status = 'attended' if handshake.service.type == 'Event' else 'completed'
+        if handshake.status != required_status:
+            return create_error_response(
+                'Handshake not found or not eligible for evaluation',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        if handshake.service.type == 'Event':
+            in_window, window_error = _validate_event_feedback_window(handshake.service)
+            if not in_window:
+                return create_error_response(
+                    window_error,
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
 
         user = request.user
         
@@ -2536,7 +2846,23 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_403_FORBIDDEN
             )
 
-        target_user = receiver if user == provider else provider
+        is_event_evaluation = handshake.service.type == 'Event'
+        if is_event_evaluation:
+            if handshake.requester_id != user.id:
+                return create_error_response(
+                    'Only verified attendees can evaluate the organizer for events',
+                    code=ErrorCodes.PERMISSION_DENIED,
+                    status_code=status.HTTP_403_FORBIDDEN
+                )
+            target_user = handshake.service.user
+            is_punctual = request.data.get('well_organized', request.data.get('punctual', False))
+            is_helpful = request.data.get('engaging', request.data.get('helpful', False))
+            is_kind = request.data.get('welcoming', request.data.get('kindness', False))
+        else:
+            target_user = receiver if user == provider else provider
+            is_punctual = request.data.get('punctual', False)
+            is_helpful = request.data.get('helpful', False)
+            is_kind = request.data.get('kindness', False)
 
         # Check if rep already given
         existing = ReputationRep.objects.filter(handshake=handshake, giver=user).first()
@@ -2558,9 +2884,9 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 handshake=handshake,
                 giver=user,
                 receiver=target_user,  # Reputation goes to the other party
-                is_punctual=request.data.get('punctual', False),
-                is_helpful=request.data.get('helpful', False),
-                is_kind=request.data.get('kindness', False),
+                is_punctual=is_punctual,
+                is_helpful=is_helpful,
+                is_kind=is_kind,
                 comment=cleaned_comment
             )
         except IntegrityError:
@@ -2619,6 +2945,9 @@ class ReputationViewSet(viewsets.ModelViewSet):
         # Invalidate conversations cache so UI updates to show reputation was submitted
         invalidate_conversations(str(provider.id))
         invalidate_conversations(str(receiver.id))
+
+        if handshake.service.type == 'Event':
+            EventEvaluationService.refresh_summary(handshake.service)
 
         serializer = self.get_serializer(rep)
         return Response(serializer.data, status=201)
@@ -2715,6 +3044,30 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         report = self.get_object()
         action_type = request.data.get('action')  # 'confirm_no_show', 'dismiss'
         admin_notes = request.data.get('admin_notes', '')
+
+        if action_type in {'uphold_no_show', 'overturn_no_show'}:
+            try:
+                resolved_report = EventNoShowAppealService.resolve_appeal(
+                    report=report,
+                    admin_user=request.user,
+                    action_type=action_type,
+                    admin_notes=admin_notes,
+                )
+            except PermissionError as e:
+                return create_error_response(
+                    str(e),
+                    code=ErrorCodes.PERMISSION_DENIED,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                )
+            except ValueError as e:
+                return create_error_response(
+                    str(e),
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+            serializer = self.get_serializer(resolved_report)
+            return Response(serializer.data)
         
         from .utils import get_provider_and_receiver
         from django.utils import timezone
@@ -3707,13 +4060,30 @@ class NegativeRepViewSet(viewsets.ViewSet):
         try:
             handshake = Handshake.objects.select_related(
                 'service', 'service__user', 'requester'
-            ).get(id=handshake_id, status='completed')
+            ).get(id=handshake_id)
         except Handshake.DoesNotExist:
             return create_error_response(
-                'Handshake not found or not completed',
+                'Handshake not found',
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        required_status = 'attended' if handshake.service.type == 'Event' else 'completed'
+        if handshake.status != required_status:
+            return create_error_response(
+                'Handshake not found or not eligible for evaluation',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        if handshake.service.type == 'Event':
+            in_window, window_error = _validate_event_feedback_window(handshake.service)
+            if not in_window:
+                return create_error_response(
+                    window_error,
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
 
         user = request.user
         
@@ -3729,8 +4099,23 @@ class NegativeRepViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_403_FORBIDDEN
             )
 
-        # Determine who receives the negative rep (the other party)
-        target_user = receiver if user == provider else provider
+        is_event_evaluation = handshake.service.type == 'Event'
+        if is_event_evaluation:
+            if handshake.requester_id != user.id:
+                return create_error_response(
+                    'Only verified attendees can evaluate the organizer for events',
+                    code=ErrorCodes.PERMISSION_DENIED,
+                    status_code=status.HTTP_403_FORBIDDEN
+                )
+            target_user = handshake.service.user
+            is_late = request.data.get('disorganized', request.data.get('is_late', False))
+            is_unhelpful = request.data.get('boring', request.data.get('is_unhelpful', False))
+            is_rude = request.data.get('unwelcoming', request.data.get('is_rude', False))
+        else:
+            target_user = receiver if user == provider else provider
+            is_late = request.data.get('is_late', False)
+            is_unhelpful = request.data.get('is_unhelpful', False)
+            is_rude = request.data.get('is_rude', False)
 
         # Check if negative rep already given
         existing = NegativeRep.objects.filter(handshake=handshake, giver=user).first()
@@ -3740,11 +4125,6 @@ class NegativeRepViewSet(viewsets.ViewSet):
                 code=ErrorCodes.ALREADY_EXISTS,
                 status_code=status.HTTP_400_BAD_REQUEST
             )
-
-        # Validate that at least one negative trait is selected
-        is_late = request.data.get('is_late', False)
-        is_unhelpful = request.data.get('is_unhelpful', False)
-        is_rude = request.data.get('is_rude', False)
 
         if not any([is_late, is_unhelpful, is_rude]):
             return create_error_response(
@@ -3794,6 +4174,9 @@ class NegativeRepViewSet(viewsets.ViewSet):
             handshake=handshake,
             service=handshake.service
         )
+
+        if handshake.service.type == 'Event':
+            EventEvaluationService.refresh_summary(handshake.service)
 
         serializer = NegativeRepSerializer(negative_rep)
         return Response(serializer.data, status=status.HTTP_201_CREATED)

@@ -17,24 +17,32 @@ def fetch_wikidata_item(wikidata_id: str) -> Optional[Dict]:
     Returns:
         Dictionary with label, description, and aliases, or None if not found
     """
-    if not wikidata_id or not wikidata_id.startswith('Q'):
+    if not wikidata_id:
+        return None
+
+    normalized_id = str(wikidata_id).strip().upper()
+    if not normalized_id.startswith('Q'):
         return None
     
     try:
         params = {
             'action': 'wbgetentities',
-            'ids': wikidata_id,
+            'ids': normalized_id,
             'props': 'labels|descriptions|aliases',
             'languages': 'en',
             'format': 'json'
         }
-        
-        response = requests.get(WIKIDATA_API_URL, params=params, timeout=5)
+
+        headers = {
+            'User-Agent': 'TheHive/0.9 (https://github.com/yusufizzetmuratSWE-573)'
+        }
+
+        response = requests.get(WIKIDATA_API_URL, params=params, timeout=5, headers=headers)
         response.raise_for_status()
         
         data = response.json()
         entities = data.get('entities', {})
-        entity = entities.get(wikidata_id)
+        entity = entities.get(normalized_id)
         
         if not entity:
             return None
@@ -44,7 +52,7 @@ def fetch_wikidata_item(wikidata_id: str) -> Optional[Dict]:
         aliases = entity.get('aliases', {})
         
         return {
-            'id': wikidata_id,
+            'id': normalized_id,
             'label': labels.get('en', {}).get('value') if labels.get('en') else None,
             'description': descriptions.get('en', {}).get('value') if descriptions.get('en') else None,
             'aliases': [alias.get('value') for alias in aliases.get('en', [])] if aliases.get('en') else []

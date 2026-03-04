@@ -40,6 +40,12 @@ class User(AbstractUser):
     date_joined = models.DateTimeField(auto_now_add=True)
     failed_login_attempts = models.IntegerField(default=0, help_text='Number of consecutive failed login attempts')
     locked_until = models.DateTimeField(null=True, blank=True, help_text='Account locked until this time (null if not locked)')
+
+    # Event system fields
+    is_event_banned_until = models.DateTimeField(null=True, blank=True, help_text='User cannot join events until this time (set after 3 no-shows)')
+    is_organizer_banned_until = models.DateTimeField(null=True, blank=True, help_text='User cannot create events until this time (set after late cancellation with participants)')
+    no_show_count = models.IntegerField(default=0, help_text='Cumulative number of event no-shows')
+    event_hot_score = models.FloatField(default=0.0, help_text='Organizer-level hot score based only on event evaluations from verified attendees')
     
     # Profile trust enhancement fields
     video_intro_url = models.TextField(
@@ -125,6 +131,7 @@ class Service(models.Model):
     TYPE_CHOICES = (
         ('Offer', 'Offer'),
         ('Need', 'Need'),
+        ('Event', 'Event'),
     )
     LOCATION_CHOICES = (
         ('In-Person', 'In-Person'),
@@ -156,11 +163,26 @@ class Service(models.Model):
     max_participants = models.IntegerField(default=1)
     schedule_type = models.CharField(max_length=10, choices=SCHEDULE_CHOICES)
     schedule_details = models.TextField(blank=True, null=True)
+    scheduled_time = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Event start time (required for Events)')
+    event_completed_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Timestamp when organizer marked an event as completed')
     tags = models.ManyToManyField(Tag, blank=True)
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
     is_visible = models.BooleanField(default=True, help_text='Admin can hide inappropriate services')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def is_in_lockdown_window(self) -> bool:
+        """True when an Event is within 24 hours of its scheduled_time.
+
+        Always False for non-Event services or Events without a scheduled_time.
+        Lockdown blocks: organizer edits, participant self-cancellation.
+        """
+        if self.type != 'Event' or not self.scheduled_time:
+            return False
+        from django.utils import timezone
+        from datetime import timedelta
+        return timezone.now() >= self.scheduled_time - timedelta(hours=24)
 
     def save(self, *args, **kwargs):
         """
@@ -266,7 +288,7 @@ class Service(models.Model):
             ),
         ]
 
-class Handshake(models.Model):
+class Handshake(models.Model):  # noqa: E302
     STATUS_CHOICES = (
         ('pending', 'Pending'),
         ('accepted', 'Accepted'),
@@ -274,13 +296,16 @@ class Handshake(models.Model):
         ('cancelled', 'Cancelled'),
         ('completed', 'Completed'),
         ('reported', 'Reported'),
-        ('paused', 'Paused'),  # Interim state during dispute investigation
+        ('paused', 'Paused'),      # Interim state during dispute investigation
+        ('checked_in', 'Checked In'),  # Event: participant confirmed arrival
+        ('attended', 'Attended'),      # Event: organizer manually confirmed attendance
+        ('no_show', 'No Show'),        # Event: participant did not attend
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='handshakes')
     requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name='requested_handshakes')
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='pending')
     provisioned_hours = models.DecimalField(max_digits=5, decimal_places=2)
     provider_confirmed_complete = models.BooleanField(default=False)
     receiver_confirmed_complete = models.BooleanField(default=False)
@@ -302,9 +327,12 @@ class Handshake(models.Model):
             models.Index(fields=['status', 'scheduled_time']),
         ]
         constraints = [
+            # >=0 instead of >0: Event handshakes are credit-free (provisioned_hours=0).
+            # Offer/Need handshakes structurally cannot reach 0 because service.duration
+            # has its own >0 constraint and is the source of provisioned_hours.
             models.CheckConstraint(
-                condition=models.Q(provisioned_hours__gt=0),
-                name='handshake_provisioned_hours_positive',
+                condition=models.Q(provisioned_hours__gte=0),
+                name='handshake_provisioned_hours_non_negative',
             ),
         ]
 
@@ -587,6 +615,38 @@ class NegativeRep(models.Model):
                 fields=['handshake', 'giver'],
                 name='unique_negative_rep_per_handshake_giver',
             ),
+        ]
+
+
+class EventEvaluationSummary(models.Model):
+    """Aggregated evaluation metrics for a single Event service."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.OneToOneField(
+        Service,
+        on_delete=models.CASCADE,
+        related_name='event_evaluation_summary',
+    )
+    total_attended = models.IntegerField(default=0)
+    positive_feedback_count = models.IntegerField(default=0)
+    negative_feedback_count = models.IntegerField(default=0)
+    unique_evaluator_count = models.IntegerField(default=0)
+    punctual_count = models.IntegerField(default=0)
+    helpful_count = models.IntegerField(default=0)
+    kind_count = models.IntegerField(default=0)
+    late_count = models.IntegerField(default=0)
+    unhelpful_count = models.IntegerField(default=0)
+    rude_count = models.IntegerField(default=0)
+    positive_score_total = models.IntegerField(default=0, help_text='Sum of positive trait ticks across all positive evaluations')
+    negative_score_total = models.IntegerField(default=0, help_text='Sum of negative trait ticks across all negative evaluations')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"EventEvaluationSummary<{self.service_id}>"
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['service']),
+            models.Index(fields=['updated_at']),
         ]
 
 

@@ -8,14 +8,17 @@ import {
   Flex,
 } from '@chakra-ui/react'
 import type { InitiatePayload } from '@/services/handshakeAPI'
+import { formatEventDateTime } from '@/utils/eventUtils'
 
 interface Props {
   isOpen: boolean
   onClose: () => void
   onSubmit: (data: InitiatePayload) => Promise<void>
+  serviceType?: string
+  scheduledTime?: string | null
 }
 
-export function HandshakeDetailsModal({ isOpen, onClose, onSubmit }: Props) {
+export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, scheduledTime }: Props) {
   const [location, setLocation] = useState('')
   const [duration, setDuration] = useState<number>(1)
   const [date, setDate] = useState('')
@@ -24,6 +27,37 @@ export function HandshakeDetailsModal({ isOpen, onClose, onSubmit }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   if (!isOpen) return null
+
+  // Event handshakes don't use the initiation flow — show info only
+  if (serviceType === 'Event') {
+    return (
+      <Box
+        position="fixed" inset={0} zIndex={1000}
+        style={{ background: 'rgba(0,0,0,0.5)' }}
+        display="flex" alignItems="center" justifyContent="center"
+        onClick={onClose}
+      >
+        <Box
+          bg="white" borderRadius="16px" p={6} w="100%" maxW="400px" mx={4}
+          boxShadow="xl" onClick={(e) => e.stopPropagation()}
+        >
+          <Text fontSize="17px" fontWeight={700} color="gray.800" mb={1}>Event Registration</Text>
+          {scheduledTime && (
+            <Text fontSize="13px" color="gray.500" mb={4}>
+              📅 {formatEventDateTime(scheduledTime)}
+            </Text>
+          )}
+          <Text fontSize="13px" color="gray.600" mb={5} lineHeight={1.6}>
+            You have joined this event. Check-in opens 24 hours before the event starts.
+            Make sure to check in to confirm your attendance!
+          </Text>
+          <Flex justify="flex-end">
+            <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
+          </Flex>
+        </Box>
+      </Box>
+    )
+  }
 
   const minDate = new Date().toISOString().slice(0, 10)
 

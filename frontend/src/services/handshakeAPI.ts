@@ -7,7 +7,7 @@ export interface Handshake {
   requester: string
   requester_name: string
   provider_name: string
-  status: 'pending' | 'accepted' | 'denied' | 'cancelled' | 'completed' | 'reported' | 'paused'
+  status: 'pending' | 'accepted' | 'denied' | 'cancelled' | 'completed' | 'reported' | 'paused' | 'checked_in' | 'attended' | 'no_show'
   provisioned_hours: number
   provider_confirmed_complete: boolean
   receiver_confirmed_complete: boolean
@@ -78,6 +78,40 @@ export const handshakeAPI = {
    */
   confirm: async (id: string): Promise<Handshake> => {
     const res = await apiClient.post<Handshake>(`/handshakes/${id}/confirm/`, {})
+    return res.data
+  },
+
+  // ─── Event actions ────────────────────────────────────────────────────────
+
+  /**
+   * Join an event — creates a Handshake directly in 'accepted' state (no approval flow).
+   */
+  joinEvent: async (serviceId: string): Promise<Handshake> => {
+    const res = await apiClient.post<Handshake>(`/handshakes/services/${serviceId}/join-event/`, {})
+    return res.data
+  },
+
+  /**
+   * Participant self-cancels before lockdown window.
+   */
+  leaveEvent: async (id: string): Promise<Handshake> => {
+    const res = await apiClient.post<Handshake>(`/handshakes/${id}/leave-event/`, {})
+    return res.data
+  },
+
+  /**
+   * Participant checks in during the 24-hour lockdown window.
+   */
+  checkin: async (id: string): Promise<Handshake> => {
+    const res = await apiClient.post<Handshake>(`/handshakes/${id}/checkin/`, {})
+    return res.data
+  },
+
+  /**
+   * Organizer manually confirms a checked-in participant as attended.
+   */
+  markAttended: async (id: string): Promise<Handshake> => {
+    const res = await apiClient.post<Handshake>(`/handshakes/${id}/mark-attended/`, {})
     return res.data
   },
 }

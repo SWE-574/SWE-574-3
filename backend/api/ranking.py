@@ -33,7 +33,10 @@ def calculate_hot_score(service: Service) -> float:
     user = service.user
     
     # P: Positive reputation count (sum of all positive traits)
-    positive_stats = ReputationRep.objects.filter(receiver=user).aggregate(
+    positive_stats = ReputationRep.objects.filter(
+        receiver=user,
+        handshake__service__type__in=['Offer', 'Need'],
+    ).aggregate(
         punctual=Coalesce(Count('id', filter=Q(is_punctual=True)), 0),
         helpful=Coalesce(Count('id', filter=Q(is_helpful=True)), 0),
         kind=Coalesce(Count('id', filter=Q(is_kind=True)), 0),
@@ -45,7 +48,10 @@ def calculate_hot_score(service: Service) -> float:
     )
     
     # N: Negative reputation count (sum of all negative traits)
-    negative_stats = NegativeRep.objects.filter(receiver=user).aggregate(
+    negative_stats = NegativeRep.objects.filter(
+        receiver=user,
+        handshake__service__type__in=['Offer', 'Need'],
+    ).aggregate(
         late=Coalesce(Count('id', filter=Q(is_late=True)), 0),
         unhelpful=Coalesce(Count('id', filter=Q(is_unhelpful=True)), 0),
         rude=Coalesce(Count('id', filter=Q(is_rude=True)), 0),
@@ -78,6 +84,20 @@ def calculate_hot_score(service: Service) -> float:
         return 0.0
     
     score = numerator / denominator
+
+    # "Filling the Gap" multiplier for Events (FR-EV-RANK):
+    # Events between 75% and 99% full get a 1.5× boost to surface them
+    # to potential joiners before they sell out.
+    if service.type == 'Event' and service.max_participants > 0:
+        from .models import Handshake as _Handshake
+        accepted_count = _Handshake.objects.filter(
+            service=service,
+            status__in=['accepted', 'checked_in'],
+        ).count()
+        capacity_ratio = accepted_count / service.max_participants
+        if 0.75 <= capacity_ratio < 1.0:
+            score *= 1.5
+
     return round(score, 6)
 
 
@@ -98,7 +118,8 @@ def calculate_hot_scores_batch(services) -> dict:
     # Batch query for positive reputation counts per user
     positive_by_user = {}
     positive_stats = ReputationRep.objects.filter(
-        receiver_id__in=user_ids
+        receiver_id__in=user_ids,
+        handshake__service__type__in=['Offer', 'Need'],
     ).values('receiver_id').annotate(
         punctual=Count('id', filter=Q(is_punctual=True)),
         helpful=Count('id', filter=Q(is_helpful=True)),
@@ -112,7 +133,8 @@ def calculate_hot_scores_batch(services) -> dict:
     # Batch query for negative reputation counts per user
     negative_by_user = {}
     negative_stats = NegativeRep.objects.filter(
-        receiver_id__in=user_ids
+        receiver_id__in=user_ids,
+        handshake__service__type__in=['Offer', 'Need'],
     ).values('receiver_id').annotate(
         late=Count('id', filter=Q(is_late=True)),
         unhelpful=Count('id', filter=Q(is_unhelpful=True)),
@@ -133,6 +155,17 @@ def calculate_hot_scores_batch(services) -> dict:
     for stat in comment_stats:
         comment_counts[stat['service_id']] = stat['count']
     
+    # Batch query for Event capacity ratios ("Filling the Gap" multiplier)
+    event_service_ids = [s.id for s in services if s.type == 'Event' and s.max_participants > 0]
+    event_accepted_counts: dict = {}
+    if event_service_ids:
+        from .models import Handshake as _Handshake
+        accepted_stats = _Handshake.objects.filter(
+            service_id__in=event_service_ids,
+            status__in=['accepted', 'checked_in'],
+        ).values('service_id').annotate(count=Count('id'))
+        event_accepted_counts = {row['service_id']: row['count'] for row in accepted_stats}
+
     # Calculate scores
     now = timezone.now()
     scores = {}
@@ -151,8 +184,17 @@ def calculate_hot_scores_batch(services) -> dict:
         denominator = base ** 1.5
         
         if denominator == 0:
-            scores[service.id] = 0.0
+            score = 0.0
         else:
-            scores[service.id] = round(numerator / denominator, 6)
+            score = numerator / denominator
+
+        # "Filling the Gap" multiplier for Events
+        if service.type == 'Event' and service.max_participants > 0:
+            accepted_count = event_accepted_counts.get(service.id, 0)
+            capacity_ratio = accepted_count / service.max_participants
+            if 0.75 <= capacity_ratio < 1.0:
+                score *= 1.5
+
+        scores[service.id] = round(score, 6)
     
     return scores

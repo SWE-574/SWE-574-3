@@ -129,9 +129,12 @@ class TestHandshakeModel:
         assert handshake.requester is not None
     
     def test_handshake_provisioned_hours_constraint(self):
-        """Test provisioned_hours must be positive"""
+        """Test provisioned_hours must be non-negative"""
         handshake = HandshakeFactory()
         handshake.provisioned_hours = Decimal('0.00')
+        handshake.save()
+
+        handshake.provisioned_hours = Decimal('-0.01')
         with pytest.raises(IntegrityError):
             handshake.save()
     

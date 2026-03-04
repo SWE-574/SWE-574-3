@@ -15,6 +15,7 @@ import type { Tag } from '@/types'
 import {
   GREEN, GREEN_LT,
   BLUE, BLUE_LT,
+  AMBER, AMBER_LT,
   RED,
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY700, GRAY800,
   WHITE,
@@ -363,10 +364,10 @@ function LocationSearch({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
+export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event' }) {
   const navigate = useNavigate()
-  const accent   = type === 'Offer' ? GREEN : BLUE
-  const accentLt = type === 'Offer' ? GREEN_LT : BLUE_LT
+  const accent   = type === 'Event' ? AMBER : type === 'Offer' ? GREEN : BLUE
+  const accentLt = type === 'Event' ? AMBER_LT : type === 'Offer' ? GREEN_LT : BLUE_LT
 
   // Tags
   const [selectedTags, setSelectedTags]     = useState<Tag[]>([])
@@ -379,6 +380,11 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
   const [mediaFiles, setMediaFiles]         = useState<File[]>([])
   const [mediaPreviews, setMediaPreviews]   = useState<string[]>([])
   const [submitting, setSubmitting]         = useState(false)
+
+  // Event-specific date/time
+  const [eventDate, setEventDate]           = useState('')
+  const [eventTime, setEventTime]           = useState('')
+  const [eventDateTimeError, setEventDateTimeError] = useState<string | undefined>()
 
   const { register, handleSubmit, control, watch, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
@@ -425,10 +431,26 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
       }
     }
     setLocationError(undefined)
+
+    // Validate scheduled_time for Events
+    if (type === 'Event') {
+      if (!eventDate || !eventTime) {
+        setEventDateTimeError('Please select both a date and time for the event')
+        return
+      }
+      const scheduledMs = new Date(`${eventDate}T${eventTime}:00`).getTime()
+      if (scheduledMs <= Date.now()) {
+        setEventDateTimeError('Event date/time must be in the future')
+        return
+      }
+      setEventDateTimeError(undefined)
+    }
+
     setSubmitting(true)
     try {
       const tagIds: string[] = []
       const tagNames: string[] = []
+      const wikidataLabelMap: Record<string, string> = {}
 
       selectedTags.forEach((tag) => {
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tag.id)
@@ -436,6 +458,12 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
 
         if (isUuid || isWikidataQid) {
           tagIds.push(tag.id)
+          if (isWikidataQid) {
+            const cleanedName = tag.name.trim()
+            if (cleanedName && cleanedName.toUpperCase() !== tag.id.toUpperCase()) {
+              wikidataLabelMap[tag.id.toUpperCase()] = cleanedName
+            }
+          }
           return
         }
 
@@ -457,10 +485,18 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
         fd.append('location_lng',  locationValue.lng.toFixed(6))
       }
       fd.append('max_participants', String(values.max_participants))
-      fd.append('schedule_type', values.schedule_type)
+      fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
       if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
+      if (type === 'Event' && eventDate && eventTime) {
+        // Send as UTC ISO string so the backend stores the correct absolute time
+        // regardless of the server's TIME_ZONE setting.
+        fd.append('scheduled_time', new Date(`${eventDate}T${eventTime}:00`).toISOString())
+      }
       tagIds.forEach((id) => fd.append('tag_ids', id))
       tagNames.forEach((name) => fd.append('tag_names', name))
+      if (Object.keys(wikidataLabelMap).length > 0) {
+        fd.append('wikidata_labels_json', JSON.stringify(wikidataLabelMap))
+      }
       mediaFiles.forEach((f) => fd.append('media', f))
       const created = await serviceAPI.create(fd)
       toast.success(`${type} posted successfully!`)
@@ -579,48 +615,82 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
               </Box>
             )}
 
-            <Box>
-              <Label required>
-                <FiCalendar size={12} style={{ display: 'inline', marginRight: 5 }} />
-                Schedule
-              </Label>
-              <Controller
-                name="schedule_type"
-                control={control}
-                render={({ field }) => (
-                  <SegmentedControl
-                    value={field.value}
-                    onChange={field.onChange}
-                    options={[{ value: 'One-Time', label: 'One-Time' }, { value: 'Recurrent', label: 'Recurring' }]}
-                    accent={accent}
+            {type === 'Event' ? (
+              <Box>
+                <Label required>
+                  <FiCalendar size={12} style={{ display: 'inline', marginRight: 5 }} />
+                  Event Date & Time
+                </Label>
+                <Flex gap={3}>
+                  <Box flex={1}>
+                    <input
+                      type="date"
+                      value={eventDate}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={(e) => { setEventDate(e.target.value); setEventDateTimeError(undefined) }}
+                      style={{ ...inputStyle, width: '100%', padding: '10px 12px' }}
+                    />
+                  </Box>
+                  <Box flex={1}>
+                    <input
+                      type="time"
+                      value={eventTime}
+                      onChange={(e) => { setEventTime(e.target.value); setEventDateTimeError(undefined) }}
+                      style={{ ...inputStyle, width: '100%', padding: '10px 12px' }}
+                    />
+                  </Box>
+                </Flex>
+                {eventDateTimeError && <ErrTxt msg={eventDateTimeError} />}
+                <Text fontSize="11px" color={GRAY400} mt="5px">
+                  Participants can join up until the event starts. 24 hours before the event, check-in opens and self-cancellation is disabled.
+                </Text>
+              </Box>
+            ) : (
+              <>
+                <Box>
+                  <Label required>
+                    <FiCalendar size={12} style={{ display: 'inline', marginRight: 5 }} />
+                    Schedule
+                  </Label>
+                  <Controller
+                    name="schedule_type"
+                    control={control}
+                    render={({ field }) => (
+                      <SegmentedControl
+                        value={field.value}
+                        onChange={field.onChange}
+                        options={[{ value: 'One-Time', label: 'One-Time' }, { value: 'Recurrent', label: 'Recurring' }]}
+                        accent={accent}
+                      />
+                    )}
                   />
+                </Box>
+
+                {schedType === 'Recurrent' && (
+                  <Box>
+                    <Label>Schedule details</Label>
+                    <Input
+                      placeholder="e.g. Every Saturday 10–11 AM"
+                      {...register('schedule_details')}
+                      style={inputStyle}
+                      _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
+                    />
+                    <ErrTxt msg={errors.schedule_details?.message} />
+                  </Box>
                 )}
-              />
-            </Box>
 
-            {schedType === 'Recurrent' && (
-              <Box>
-                <Label>Schedule details</Label>
-                <Input
-                  placeholder="e.g. Every Saturday 10–11 AM"
-                  {...register('schedule_details')}
-                  style={inputStyle}
-                  _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
-                />
-                <ErrTxt msg={errors.schedule_details?.message} />
-              </Box>
-            )}
-
-            {schedType === 'One-Time' && (
-              <Box>
-                <Label>Schedule details <Text as="span" fontSize="11px" color={GRAY400} fontWeight={400}>(optional)</Text></Label>
-                <Input
-                  placeholder="e.g. This weekend, flexible timing"
-                  {...register('schedule_details')}
-                  style={inputStyle}
-                  _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
-                />
-              </Box>
+                {schedType === 'One-Time' && (
+                  <Box>
+                    <Label>Schedule details <Text as="span" fontSize="11px" color={GRAY400} fontWeight={400}>(optional)</Text></Label>
+                    <Input
+                      placeholder="e.g. This weekend, flexible timing"
+                      {...register('schedule_details')}
+                      style={inputStyle}
+                      _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
+                    />
+                  </Box>
+                )}
+              </>
             )}
           </Stack>
         </Section>
@@ -751,7 +821,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' }) {
             onMouseLeave={(e) => { e.currentTarget.style.opacity = submitting ? '0.75' : '1' }}
           >
             {submitting && <Spinner size="xs" color="white" />}
-            {submitting ? 'Posting…' : `Post ${type}`}
+            {submitting ? 'Posting…' : type === 'Event' ? 'Post Event' : `Post ${type}`}
           </button>
         </Flex>
 
