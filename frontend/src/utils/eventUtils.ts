@@ -5,7 +5,7 @@ export function isWithinLockdownWindow(scheduledTime: string | null | undefined)
   if (!scheduledTime) return false
   const eventMs = new Date(scheduledTime).getTime()
   const nowMs = Date.now()
-  return nowMs >= eventMs - 24 * 60 * 60 * 1000
+  return nowMs >= eventMs - 24 * 60 * 60 * 1000 && nowMs < eventMs
 }
 
 /** Returns true if the event is in the future (not yet started) */
