@@ -41,6 +41,10 @@ services:
       - DJANGO_E2E=${DJANGO_E2E:-0}
       - E2E=${E2E:-0}
       - DISABLE_THROTTLING=${DISABLE_THROTTLING:-1}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - RESEND_CUSTOM_DOMAIN=${RESEND_CUSTOM_DOMAIN:-false}
+      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-onboarding@resend.dev}
 
   frontend:
     build:

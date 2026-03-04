@@ -55,6 +55,10 @@ services:
       - REDIS_PORT=6379
       - THROTTLE_RELAXED=${THROTTLE_RELAXED:-1}
       - DISABLE_THROTTLING=${DISABLE_THROTTLING:-1}
+      - FRONTEND_URL=${FRONTEND_URL:-https://localhost}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - RESEND_CUSTOM_DOMAIN=${RESEND_CUSTOM_DOMAIN:-false}
+      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-onboarding@resend.dev}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
