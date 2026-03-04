@@ -385,39 +385,47 @@ class EventHandshakeService:
             PermissionError: caller is not the participant.
             ValueError: wrong service type, wrong status, inside lockdown window.
         """
-        if handshake.requester_id != requester.pk:
-            raise PermissionError('Only the participant can cancel their own RSVP.')
-
-        if handshake.service.type != 'Event':
-            raise ValueError('This action is only valid for Event handshakes.')
-
-        if handshake.status not in ('accepted',):
-            raise ValueError(
-                f'Cannot leave: handshake is already "{handshake.status}".'
-            )
-
-        if handshake.service.is_in_lockdown_window:
-            raise ValueError(
-                'Cannot cancel your RSVP within 24 hours of the event start.'
-            )
-
         with transaction.atomic():
-            handshake.status = 'cancelled'
-            handshake.save(update_fields=['status', 'updated_at'])
+            # Reload and lock the handshake row to avoid TOCTOU issues.
+            locked_handshake = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service')
+                .get(pk=handshake.pk)
+            )
+
+            if locked_handshake.requester_id != requester.pk:
+                raise PermissionError('Only the participant can cancel their own RSVP.')
+
+            if locked_handshake.service.type != 'Event':
+                raise ValueError('This action is only valid for Event handshakes.')
+
+            if locked_handshake.status not in ('accepted',):
+                raise ValueError(
+                    f'Cannot leave: handshake is already "{locked_handshake.status}".'
+                )
+
+            if locked_handshake.service.is_in_lockdown_window:
+                raise ValueError(
+                    'Cannot cancel your RSVP within 24 hours of the event start.'
+                )
+
+            locked_handshake.status = 'cancelled'
+            locked_handshake.save(update_fields=['status', 'updated_at'])
 
             create_notification(
-                user=handshake.service.user,
+                user=locked_handshake.service.user,
                 notification_type='handshake_cancelled',
                 title='RSVP Cancelled',
                 message=f"{requester.first_name} {requester.last_name} cancelled their RSVP "
-                        f"for '{handshake.service.title}'.",
-                handshake=handshake,
-                service=handshake.service,
+                        f"for '{locked_handshake.service.title}'.",
+                handshake=locked_handshake,
+                service=locked_handshake.service,
             )
 
         invalidate_conversations(str(requester.id))
-        invalidate_conversations(str(handshake.service.user_id))
-        return handshake
+        invalidate_conversations(str(locked_handshake.service.user_id))
+        return locked_handshake
 
     @staticmethod
     def checkin(handshake: Handshake, requester: User) -> Handshake:
