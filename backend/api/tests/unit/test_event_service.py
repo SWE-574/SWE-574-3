@@ -26,7 +26,7 @@ def _event_service(organizer=None, *, max_participants=10, hours_until_start=48)
         max_participants=max_participants,
         schedule_type='One-Time',
         scheduled_time=timezone.now() + timedelta(hours=hours_until_start),
-        duration=Decimal('0.00'),
+        duration=Decimal('1.00'),
     )
 
 
