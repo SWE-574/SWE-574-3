@@ -81,6 +81,7 @@ const HANDSHAKE_BADGE: Record<
   reported:   { label: 'Reported',    bg: '#fee2e2', color: '#991b1b' },
   paused:     { label: 'Paused',      bg: '#e0f2fe', color: '#0369a1' },
   checked_in: { label: 'Checked In',  bg: '#d1fae5', color: '#065f46' },
+  attended:   { label: 'Attended',    bg: '#d1fae5', color: '#065f46' },
   no_show:    { label: 'No-Show',     bg: '#fee2e2', color: '#991b1b' },
 }
 

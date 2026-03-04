@@ -444,3 +444,7 @@ LOGGING = {
         },
     },
 }
+
+# Event feedback window (FR-F02f): attendees can evaluate organizers only within this
+# fixed number of hours after event completion.
+EVENT_FEEDBACK_WINDOW_HOURS = int(os.environ.get('EVENT_FEEDBACK_WINDOW_HOURS', '168'))

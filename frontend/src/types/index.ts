@@ -175,6 +175,7 @@ export type HandshakeStatus =
   | 'disputed'
   | 'paused'
   | 'checked_in'
+  | 'attended'
   | 'no_show'
 
 export interface Handshake {

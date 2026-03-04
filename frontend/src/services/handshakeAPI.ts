@@ -7,7 +7,7 @@ export interface Handshake {
   requester: string
   requester_name: string
   provider_name: string
-  status: 'pending' | 'accepted' | 'denied' | 'cancelled' | 'completed' | 'reported' | 'paused' | 'checked_in' | 'no_show'
+  status: 'pending' | 'accepted' | 'denied' | 'cancelled' | 'completed' | 'reported' | 'paused' | 'checked_in' | 'attended' | 'no_show'
   provisioned_hours: number
   provider_confirmed_complete: boolean
   receiver_confirmed_complete: boolean
@@ -104,6 +104,14 @@ export const handshakeAPI = {
    */
   checkin: async (id: string): Promise<Handshake> => {
     const res = await apiClient.post<Handshake>(`/handshakes/${id}/checkin/`, {})
+    return res.data
+  },
+
+  /**
+   * Organizer manually confirms a checked-in participant as attended.
+   */
+  markAttended: async (id: string): Promise<Handshake> => {
+    const res = await apiClient.post<Handshake>(`/handshakes/${id}/mark-attended/`, {})
     return res.data
   },
 }

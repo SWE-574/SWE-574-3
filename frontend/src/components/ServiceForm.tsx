@@ -450,6 +450,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
     try {
       const tagIds: string[] = []
       const tagNames: string[] = []
+      const wikidataLabelMap: Record<string, string> = {}
 
       selectedTags.forEach((tag) => {
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tag.id)
@@ -457,6 +458,12 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
 
         if (isUuid || isWikidataQid) {
           tagIds.push(tag.id)
+          if (isWikidataQid) {
+            const cleanedName = tag.name.trim()
+            if (cleanedName && cleanedName.toUpperCase() !== tag.id.toUpperCase()) {
+              wikidataLabelMap[tag.id.toUpperCase()] = cleanedName
+            }
+          }
           return
         }
 
@@ -487,6 +494,9 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
       }
       tagIds.forEach((id) => fd.append('tag_ids', id))
       tagNames.forEach((name) => fd.append('tag_names', name))
+      if (Object.keys(wikidataLabelMap).length > 0) {
+        fd.append('wikidata_labels_json', JSON.stringify(wikidataLabelMap))
+      }
       mediaFiles.forEach((f) => fd.append('media', f))
       const created = await serviceAPI.create(fd)
       toast.success(`${type} posted successfully!`)

@@ -45,6 +45,7 @@ class User(AbstractUser):
     is_event_banned_until = models.DateTimeField(null=True, blank=True, help_text='User cannot join events until this time (set after 3 no-shows)')
     is_organizer_banned_until = models.DateTimeField(null=True, blank=True, help_text='User cannot create events until this time (set after late cancellation with participants)')
     no_show_count = models.IntegerField(default=0, help_text='Cumulative number of event no-shows')
+    event_hot_score = models.FloatField(default=0.0, help_text='Organizer-level hot score based only on event evaluations from verified attendees')
     
     # Profile trust enhancement fields
     video_intro_url = models.TextField(
@@ -163,6 +164,7 @@ class Service(models.Model):
     schedule_type = models.CharField(max_length=10, choices=SCHEDULE_CHOICES)
     schedule_details = models.TextField(blank=True, null=True)
     scheduled_time = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Event start time (required for Events)')
+    event_completed_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Timestamp when organizer marked an event as completed')
     tags = models.ManyToManyField(Tag, blank=True)
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
     is_visible = models.BooleanField(default=True, help_text='Admin can hide inappropriate services')
@@ -296,6 +298,7 @@ class Handshake(models.Model):  # noqa: E302
         ('reported', 'Reported'),
         ('paused', 'Paused'),      # Interim state during dispute investigation
         ('checked_in', 'Checked In'),  # Event: participant confirmed arrival
+        ('attended', 'Attended'),      # Event: organizer manually confirmed attendance
         ('no_show', 'No Show'),        # Event: participant did not attend
     )
 
@@ -612,6 +615,38 @@ class NegativeRep(models.Model):
                 fields=['handshake', 'giver'],
                 name='unique_negative_rep_per_handshake_giver',
             ),
+        ]
+
+
+class EventEvaluationSummary(models.Model):
+    """Aggregated evaluation metrics for a single Event service."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.OneToOneField(
+        Service,
+        on_delete=models.CASCADE,
+        related_name='event_evaluation_summary',
+    )
+    total_attended = models.IntegerField(default=0)
+    positive_feedback_count = models.IntegerField(default=0)
+    negative_feedback_count = models.IntegerField(default=0)
+    unique_evaluator_count = models.IntegerField(default=0)
+    punctual_count = models.IntegerField(default=0)
+    helpful_count = models.IntegerField(default=0)
+    kind_count = models.IntegerField(default=0)
+    late_count = models.IntegerField(default=0)
+    unhelpful_count = models.IntegerField(default=0)
+    rude_count = models.IntegerField(default=0)
+    positive_score_total = models.IntegerField(default=0, help_text='Sum of positive trait ticks across all positive evaluations')
+    negative_score_total = models.IntegerField(default=0, help_text='Sum of negative trait ticks across all negative evaluations')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"EventEvaluationSummary<{self.service_id}>"
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['service']),
+            models.Index(fields=['updated_at']),
         ]
 
 

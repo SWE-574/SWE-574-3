@@ -41,6 +41,7 @@ const HS_BADGE: Record<Handshake['status'], { label: string; bg: string; color: 
   reported:   { label: 'Reported',   bg: '#fee2e2', color: '#991b1b' },
   paused:     { label: 'Paused',     bg: '#e0f2fe', color: '#0369a1' },
   checked_in: { label: 'Checked In', bg: '#d1fae5', color: '#065f46' },
+  attended:   { label: 'Attended',   bg: '#d1fae5', color: '#065f46' },
   no_show:    { label: 'No-Show',    bg: '#fee2e2', color: '#991b1b' },
 }
 
@@ -369,6 +370,7 @@ export default function ServiceDetailPage() {
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [showRoster, setShowRoster]         = useState(false)
   const [completing, setCompleting]         = useState(false)
+  const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -420,7 +422,7 @@ export default function ServiceDetailPage() {
     ? handshakes.find((h) =>
         exId(h.service) === service?.id &&
         exId(h.requester) === user?.id &&
-        ['accepted', 'checked_in', 'no_show'].includes(h.status)
+        ['accepted', 'checked_in', 'attended', 'no_show'].includes(h.status)
       )
     : undefined
 
@@ -509,6 +511,20 @@ export default function ServiceDetailPage() {
       const err = e as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail ?? 'Could not complete event.')
     } finally { setCompleting(false) }
+  }
+
+  const handleMarkAttended = async (handshakeId: string) => {
+    setMarkingAttendedId(handshakeId)
+    try {
+      await handshakeAPI.markAttended(handshakeId)
+      toast.success('Attendance marked.')
+      setHandshakes(await handshakeAPI.list())
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail ?? 'Could not mark attendance.')
+    } finally {
+      setMarkingAttendedId(null)
+    }
   }
 
   const handleCancelEvent = async () => {
@@ -997,6 +1013,20 @@ export default function ServiceDetailPage() {
                         </Box>
                       </Box>
                     </Stack>
+                  ) : myEventHandshake?.status === 'attended' ? (
+                    <Stack gap={3}>
+                      <Box bg={GREEN_LT} borderRadius="12px" p={4} border={`1px solid ${GREEN}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiCheckCircle size={20} color={GREEN} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={GREEN}>Attendance confirmed!</Text>
+                          <Text fontSize="12px" color="#166534" mt="2px">
+                            The organizer marked you as attended.
+                          </Text>
+                        </Box>
+                      </Box>
+                    </Stack>
                   ) : myEventHandshake?.status === 'accepted' && isFutureEvent(service.scheduled_time) ? (
                     /* Joined — show leave or check-in based on lockdown */
                     <Stack gap={3}>
@@ -1298,6 +1328,8 @@ export default function ServiceDetailPage() {
           service={service}
           handshakes={incoming}
           onComplete={handleCompleteEvent}
+          onMarkAttended={handleMarkAttended}
+          markingHandshakeId={markingAttendedId}
           completing={completing}
         />
       )}

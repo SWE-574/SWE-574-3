@@ -33,7 +33,10 @@ def calculate_hot_score(service: Service) -> float:
     user = service.user
     
     # P: Positive reputation count (sum of all positive traits)
-    positive_stats = ReputationRep.objects.filter(receiver=user).aggregate(
+    positive_stats = ReputationRep.objects.filter(
+        receiver=user,
+        handshake__service__type__in=['Offer', 'Need'],
+    ).aggregate(
         punctual=Coalesce(Count('id', filter=Q(is_punctual=True)), 0),
         helpful=Coalesce(Count('id', filter=Q(is_helpful=True)), 0),
         kind=Coalesce(Count('id', filter=Q(is_kind=True)), 0),
@@ -45,7 +48,10 @@ def calculate_hot_score(service: Service) -> float:
     )
     
     # N: Negative reputation count (sum of all negative traits)
-    negative_stats = NegativeRep.objects.filter(receiver=user).aggregate(
+    negative_stats = NegativeRep.objects.filter(
+        receiver=user,
+        handshake__service__type__in=['Offer', 'Need'],
+    ).aggregate(
         late=Coalesce(Count('id', filter=Q(is_late=True)), 0),
         unhelpful=Coalesce(Count('id', filter=Q(is_unhelpful=True)), 0),
         rude=Coalesce(Count('id', filter=Q(is_rude=True)), 0),
@@ -112,7 +118,8 @@ def calculate_hot_scores_batch(services) -> dict:
     # Batch query for positive reputation counts per user
     positive_by_user = {}
     positive_stats = ReputationRep.objects.filter(
-        receiver_id__in=user_ids
+        receiver_id__in=user_ids,
+        handshake__service__type__in=['Offer', 'Need'],
     ).values('receiver_id').annotate(
         punctual=Count('id', filter=Q(is_punctual=True)),
         helpful=Count('id', filter=Q(is_helpful=True)),
@@ -126,7 +133,8 @@ def calculate_hot_scores_batch(services) -> dict:
     # Batch query for negative reputation counts per user
     negative_by_user = {}
     negative_stats = NegativeRep.objects.filter(
-        receiver_id__in=user_ids
+        receiver_id__in=user_ids,
+        handshake__service__type__in=['Offer', 'Need'],
     ).values('receiver_id').annotate(
         late=Count('id', filter=Q(is_late=True)),
         unhelpful=Count('id', filter=Q(is_unhelpful=True)),

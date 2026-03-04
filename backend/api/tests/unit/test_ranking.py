@@ -137,6 +137,31 @@ class TestCalculateHotScore:
         score = calculate_hot_score(service)
         assert score == pytest.approx(base_score, rel=1e-5)
 
+    def test_event_evaluations_do_not_affect_standard_service_hot_score(self):
+        organizer = UserFactory()
+        offer = ServiceFactory(user=organizer, type='Offer', status='Active')
+        base_score = calculate_hot_score(offer)
+
+        event = ServiceFactory(user=organizer, type='Event', status='Active')
+        attendee = UserFactory()
+        event_hs = HandshakeFactory(
+            service=event,
+            requester=attendee,
+            status='attended',
+            provisioned_hours=0,
+        )
+        ReputationRepFactory(
+            handshake=event_hs,
+            giver=attendee,
+            receiver=organizer,
+            is_punctual=True,
+            is_helpful=True,
+            is_kind=True,
+        )
+
+        updated_score = calculate_hot_score(offer)
+        assert updated_score == pytest.approx(base_score, rel=1e-5)
+
 
 @pytest.mark.django_db
 @pytest.mark.unit

@@ -17,6 +17,7 @@ import {
 const STATUS_BADGE: Record<string, { label: string; bg: string; color: string; icon?: ReactNode }> = {
   accepted:   { label: 'Registered',  bg: GRAY100,   color: GRAY500  },
   checked_in: { label: 'Checked In',  bg: GREEN_LT,  color: GREEN    },
+  attended:   { label: 'Attended',    bg: GREEN_LT,  color: GREEN    },
   no_show:    { label: 'No-Show',     bg: RED_LT,    color: RED      },
   cancelled:  { label: 'Cancelled',   bg: GRAY100,   color: GRAY500  },
 }
@@ -29,6 +30,8 @@ interface Props {
   service: Service
   handshakes: Handshake[]
   onComplete: () => void
+  onMarkAttended: (handshakeId: string) => void
+  markingHandshakeId?: string | null
   completing: boolean
 }
 
@@ -48,13 +51,23 @@ function Avatar({ name }: { name: string }) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function EventRosterModal({ isOpen, onClose, service, handshakes, onComplete, completing }: Props) {
+export default function EventRosterModal({
+  isOpen,
+  onClose,
+  service,
+  handshakes,
+  onComplete,
+  onMarkAttended,
+  markingHandshakeId,
+  completing,
+}: Props) {
   if (!isOpen) return null
 
-  const active = handshakes.filter(h => ['accepted', 'checked_in', 'no_show'].includes(h.status))
+  const active = handshakes.filter(h => ['accepted', 'checked_in', 'attended', 'no_show'].includes(h.status))
   const checkedIn = active.filter(h => h.status === 'checked_in').length
+  const attended = active.filter(h => h.status === 'attended').length
   const registered = active.filter(h => h.status === 'accepted').length
-  const willBeNoShow = registered  // accepted → no_show on complete
+  const willBeNoShow = registered + checkedIn  // accepted + checked_in → no_show on complete
 
   return (
     <Box
@@ -103,13 +116,13 @@ export default function EventRosterModal({ isOpen, onClose, service, handshakes,
             py={2} borderRadius="10px" bg={GREEN_LT} border={`1px solid ${GREEN}30`}
           >
             <FiCheckCircle size={13} color={GREEN} />
-            <Text fontSize="13px" fontWeight={700} color={GREEN}>{checkedIn}</Text>
-            <Text fontSize="11px" color={GREEN}>checked in</Text>
+            <Text fontSize="13px" fontWeight={700} color={GREEN}>{attended}</Text>
+            <Text fontSize="11px" color={GREEN}>attended</Text>
           </Flex>
           <Flex align="center" gap="6px" flex={1} justify="center"
             py={2} borderRadius="10px" bg={AMBER_LT} border={`1px solid ${AMBER}30`}
           >
-            <Text fontSize="11px" color={AMBER} fontWeight={700}>{registered} pending</Text>
+            <Text fontSize="11px" color={AMBER} fontWeight={700}>{checkedIn} checked in</Text>
           </Flex>
         </Flex>
 
@@ -155,6 +168,28 @@ export default function EventRosterModal({ isOpen, onClose, service, handshakes,
                     >
                       {cfg.label}
                     </Box>
+                    {h.status === 'checked_in' && (
+                      <Box
+                        as="button"
+                        px="10px"
+                        py="6px"
+                        borderRadius="8px"
+                        bg={GREEN}
+                        color={WHITE}
+                        fontSize="11px"
+                        fontWeight={700}
+                        onClick={() => onMarkAttended(h.id)}
+                        style={{
+                          border: 'none',
+                          cursor: markingHandshakeId === h.id ? 'not-allowed' : 'pointer',
+                          opacity: markingHandshakeId === h.id ? 0.7 : 1,
+                          flexShrink: 0,
+                        }}
+                        disabled={markingHandshakeId === h.id}
+                      >
+                        {markingHandshakeId === h.id ? 'Marking…' : 'Mark Attended'}
+                      </Box>
+                    )}
                   </Flex>
                 )
               })}

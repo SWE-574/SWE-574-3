@@ -142,6 +142,42 @@ class TestCheckin:
             EventHandshakeService.checkin(hs, UserFactory())
 
 
+# ─── mark_attended ────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestMarkAttended:
+
+    def test_organizer_can_mark_checked_in_as_attended(self):
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+        EventHandshakeService.checkin(hs, participant)
+
+        result = EventHandshakeService.mark_attended(hs, organizer)
+        assert result.status == 'attended'
+
+    def test_non_organizer_cannot_mark_attended(self):
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+        EventHandshakeService.checkin(hs, participant)
+
+        with pytest.raises(PermissionError, match='organizer'):
+            EventHandshakeService.mark_attended(hs, UserFactory())
+
+    def test_only_checked_in_can_be_marked_attended(self):
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        with pytest.raises(ValueError, match='Cannot mark attended'):
+            EventHandshakeService.mark_attended(hs, organizer)
+
+
 # ─── complete_event ────────────────────────────────────────────────────────────
 
 @pytest.mark.django_db
@@ -165,7 +201,7 @@ class TestCompleteEvent:
         hs.refresh_from_db()
         assert hs.status == 'no_show'
 
-    def test_checked_in_participants_remain(self):
+    def test_checked_in_participants_become_no_show(self):
         organizer = UserFactory()
         service = _event_service(organizer=organizer, hours_until_start=12)
         user = UserFactory()
@@ -174,7 +210,19 @@ class TestCompleteEvent:
 
         EventHandshakeService.complete_event(service, organizer)
         hs.refresh_from_db()
-        assert hs.status == 'checked_in'
+        assert hs.status == 'no_show'
+
+    def test_attended_participants_remain_attended(self):
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        user = UserFactory()
+        hs = EventHandshakeService.join_event(service, user)
+        EventHandshakeService.checkin(hs, user)
+        EventHandshakeService.mark_attended(hs, organizer)
+
+        EventHandshakeService.complete_event(service, organizer)
+        hs.refresh_from_db()
+        assert hs.status == 'attended'
 
     def test_three_no_shows_triggers_ban(self):
         """After 3 cumulative no-shows the user gets a 14-day event ban."""

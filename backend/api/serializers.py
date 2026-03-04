@@ -304,6 +304,7 @@ class ServiceSerializer(serializers.ModelSerializer):
     comment_count = serializers.SerializerMethodField()
     hot_score = serializers.FloatField(read_only=True)
     participant_count = serializers.SerializerMethodField()
+    event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
 
@@ -315,7 +316,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'comment_count', 'hot_score',
-            'is_visible', 'media', 'participant_count',
+            'is_visible', 'media', 'participant_count', 'event_evaluation_summary',
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible']
     
@@ -334,9 +335,9 @@ class ServiceSerializer(serializers.ModelSerializer):
         Mirrors HandshakeService._capacity_statuses — pending never counts:
           One-Time  → accepted, completed, reported, paused
           Recurrent → accepted, reported, paused  (completed frees the slot)
-          Event     → accepted, checked_in, no_show  (credit-free lifecycle)
+          Event     → accepted, checked_in, attended, no_show  (credit-free lifecycle)
         """
-        event_statuses = {'accepted', 'checked_in', 'no_show'}
+        event_statuses = {'accepted', 'checked_in', 'attended', 'no_show'}
         one_time_statuses = {'accepted', 'completed', 'reported', 'paused'}
         recurrent_statuses = {'accepted', 'reported', 'paused'}
 
@@ -409,6 +410,53 @@ class ServiceSerializer(serializers.ModelSerializer):
     def get_user(self, obj):
         """Return user details without nested services to avoid circular reference"""
         return UserSummarySerializer(obj.user).data
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_event_evaluation_summary(self, obj):
+        if obj.type != 'Event':
+            return None
+        summary = getattr(obj, 'event_evaluation_summary', None)
+        if summary is None:
+            return None
+        total_feedback = summary.positive_feedback_count + summary.negative_feedback_count
+        if total_feedback > 0:
+            avg_well_organized = summary.punctual_count / total_feedback
+            avg_engaging = summary.helpful_count / total_feedback
+            avg_welcoming = summary.kind_count / total_feedback
+            avg_disorganized = summary.late_count / total_feedback
+            avg_boring = summary.unhelpful_count / total_feedback
+            avg_unwelcoming = summary.rude_count / total_feedback
+        else:
+            avg_well_organized = 0.0
+            avg_engaging = 0.0
+            avg_welcoming = 0.0
+            avg_disorganized = 0.0
+            avg_boring = 0.0
+            avg_unwelcoming = 0.0
+
+        return {
+            'total_attended': summary.total_attended,
+            'positive_feedback_count': summary.positive_feedback_count,
+            'negative_feedback_count': summary.negative_feedback_count,
+            'unique_evaluator_count': summary.unique_evaluator_count,
+            'positive_score_total': summary.positive_score_total,
+            'negative_score_total': summary.negative_score_total,
+            'well_organized_count': summary.punctual_count,
+            'engaging_count': summary.helpful_count,
+            'welcoming_count': summary.kind_count,
+            'disorganized_count': summary.late_count,
+            'boring_count': summary.unhelpful_count,
+            'unwelcoming_count': summary.rude_count,
+            'well_organized_average': round(avg_well_organized, 6),
+            'engaging_average': round(avg_engaging, 6),
+            'welcoming_average': round(avg_welcoming, 6),
+            'disorganized_average': round(avg_disorganized, 6),
+            'boring_average': round(avg_boring, 6),
+            'unwelcoming_average': round(avg_unwelcoming, 6),
+            'organizer_event_hot_score': round(float(getattr(obj.user, 'event_hot_score', 0.0) or 0.0), 6),
+            'feedback_submission_count': total_feedback,
+            'updated_at': summary.updated_at,
+        }
 
     def _real_coords(self, obj):
         """Return (lat, lng) from the stored model instance, or (None, None)."""

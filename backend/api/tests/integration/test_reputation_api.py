@@ -3,12 +3,14 @@ Integration tests for reputation API endpoints
 """
 import pytest
 from rest_framework import status
+from django.utils import timezone
+from datetime import timedelta
 
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import ReputationRep, NegativeRep, Badge, UserBadge
+from api.models import ReputationRep, NegativeRep, Badge, UserBadge, EventEvaluationSummary, Report
 
 
 @pytest.mark.django_db
@@ -157,6 +159,87 @@ class TestReputationViewSet:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) > 0
 
+    def test_create_reputation_event_requires_attended(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='checked_in',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+        })
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_create_reputation_event_attended_allowed(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': False,
+            'welcoming': True,
+        })
+        assert response.status_code == status.HTTP_201_CREATED
+
+    def test_organizer_cannot_submit_event_evaluation(self):
+        organizer = UserFactory()
+        attendee = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=attendee,
+            status='attended',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(organizer)
+
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+        })
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
 
 @pytest.mark.django_db
 @pytest.mark.integration
@@ -223,3 +306,313 @@ class TestNegativeRepViewSet:
         
         provider.refresh_from_db()
         assert provider.karma_score < 10
+
+    def test_negative_rep_event_requires_attended(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='checked_in',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.post('/api/reputation/negative/', {
+            'handshake_id': str(handshake.id),
+            'disorganized': True,
+        })
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_event_evaluation_summary_created_and_exposed_on_service(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+        )
+
+        participant_client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = participant_client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': False,
+        })
+        assert response.status_code == status.HTTP_201_CREATED
+
+        summary = EventEvaluationSummary.objects.get(service=event)
+        assert summary.total_attended == 1
+        assert summary.positive_feedback_count == 1
+        assert summary.negative_feedback_count == 0
+        assert summary.unique_evaluator_count == 1
+        assert summary.punctual_count == 1
+        assert summary.helpful_count == 1
+        assert summary.kind_count == 0
+        organizer.refresh_from_db()
+        assert organizer.event_hot_score == 2.0
+
+        organizer_client = AuthenticatedAPIClient().authenticate_user(organizer)
+        service_response = organizer_client.get(f'/api/services/{event.id}/')
+        assert service_response.status_code == status.HTTP_200_OK
+        payload = service_response.data.get('event_evaluation_summary')
+        assert payload is not None
+        assert payload['positive_feedback_count'] == 1
+        assert payload['unique_evaluator_count'] == 1
+        assert payload['well_organized_average'] == 1.0
+        assert payload['engaging_average'] == 1.0
+        assert payload['welcoming_average'] == 0.0
+        assert payload['organizer_event_hot_score'] == 2.0
+
+    def test_event_evaluation_summary_updates_after_negative_feedback(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+        )
+
+        participant_client = AuthenticatedAPIClient().authenticate_user(participant)
+        positive = participant_client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': False,
+            'welcoming': True,
+        })
+        assert positive.status_code == status.HTTP_201_CREATED
+
+        negative = participant_client.post('/api/reputation/negative/', {
+            'handshake_id': str(handshake.id),
+            'disorganized': True,
+            'boring': False,
+            'unwelcoming': True,
+        })
+        assert negative.status_code == status.HTTP_201_CREATED
+
+        summary = EventEvaluationSummary.objects.get(service=event)
+        assert summary.positive_feedback_count == 1
+        assert summary.negative_feedback_count == 1
+        assert summary.unique_evaluator_count == 1
+        assert summary.positive_score_total == 2
+        assert summary.negative_score_total == 2
+        assert summary.late_count == 1
+        assert summary.rude_count == 1
+        organizer.refresh_from_db()
+        assert organizer.event_hot_score == 0.0
+
+    def test_event_reputation_window_expired_for_positive(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now() - timedelta(days=8),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+        })
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_event_reputation_window_expired_for_negative(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now() - timedelta(days=8),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.post('/api/reputation/negative/', {
+            'handshake_id': str(handshake.id),
+            'disorganized': True,
+        })
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestEventNoShowAppeals:
+    """Integration tests for FR-F02e no-show appeal workflow."""
+
+    def test_participant_can_submit_no_show_appeal(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='no_show',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.post(
+            f'/api/handshakes/{handshake.id}/appeal-no-show/',
+            {'description': 'I attended and can provide proof.'},
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert 'report_id' in response.data
+        report = Report.objects.get(id=response.data['report_id'])
+        assert report.type == 'no_show'
+        assert report.status == 'pending'
+        assert report.related_handshake_id == handshake.id
+        assert report.reporter_id == participant.id
+        assert report.reported_user_id == organizer.id
+
+    def test_duplicate_no_show_appeal_is_rejected(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='no_show',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        first = client.post(f'/api/handshakes/{handshake.id}/appeal-no-show/', {'description': 'first'})
+        second = client.post(f'/api/handshakes/{handshake.id}/appeal-no-show/', {'description': 'second'})
+
+        assert first.status_code == status.HTTP_201_CREATED
+        assert second.status_code == status.HTTP_400_BAD_REQUEST
+        assert second.data['code'] == 'ALREADY_EXISTS'
+
+    def test_admin_can_overturn_no_show_appeal(self):
+        organizer = UserFactory()
+        participant = UserFactory(
+            no_show_count=3,
+            is_event_banned_until=timezone.now() + timedelta(days=7),
+        )
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='no_show',
+            provisioned_hours=0,
+        )
+        report = Report.objects.create(
+            reporter=participant,
+            reported_user=organizer,
+            related_handshake=handshake,
+            reported_service=event,
+            type='no_show',
+            status='pending',
+            description='I was there and checked in at the venue.',
+        )
+
+        admin = UserFactory(role='admin', is_staff=True, is_superuser=True)
+        admin_client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = admin_client.post(
+            f'/api/admin/reports/{report.id}/resolve/',
+            {'action': 'overturn_no_show', 'admin_notes': 'Evidence confirmed'},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        handshake.refresh_from_db()
+        participant.refresh_from_db()
+        report.refresh_from_db()
+        assert handshake.status == 'attended'
+        assert participant.no_show_count == 2
+        assert participant.is_event_banned_until is None
+        assert report.status == 'resolved'
+
+    def test_admin_can_uphold_no_show_appeal(self):
+        organizer = UserFactory()
+        participant = UserFactory(no_show_count=1)
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='no_show',
+            provisioned_hours=0,
+        )
+        report = Report.objects.create(
+            reporter=participant,
+            reported_user=organizer,
+            related_handshake=handshake,
+            reported_service=event,
+            type='no_show',
+            status='pending',
+            description='Appeal text',
+        )
+
+        admin = UserFactory(role='admin', is_staff=True, is_superuser=True)
+        admin_client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = admin_client.post(
+            f'/api/admin/reports/{report.id}/resolve/',
+            {'action': 'uphold_no_show'},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        handshake.refresh_from_db()
+        participant.refresh_from_db()
+        report.refresh_from_db()
+        assert handshake.status == 'no_show'
+        assert participant.no_show_count == 1
+        assert report.status == 'dismissed'
