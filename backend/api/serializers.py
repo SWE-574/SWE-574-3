@@ -309,10 +309,18 @@ class ServiceSerializer(serializers.ModelSerializer):
         Mirrors HandshakeService._capacity_statuses — pending never counts:
           One-Time  → accepted, completed, reported, paused
           Recurrent → accepted, reported, paused  (completed frees the slot)
+          Event     → accepted, checked_in, no_show  (credit-free lifecycle)
         """
+        event_statuses = {'accepted', 'checked_in', 'no_show'}
         one_time_statuses = {'accepted', 'completed', 'reported', 'paused'}
         recurrent_statuses = {'accepted', 'reported', 'paused'}
-        capacity_statuses = one_time_statuses if obj.schedule_type == 'One-Time' else recurrent_statuses
+
+        if obj.type == 'Event':
+            capacity_statuses = event_statuses
+        elif obj.schedule_type == 'One-Time':
+            capacity_statuses = one_time_statuses
+        else:
+            capacity_statuses = recurrent_statuses
 
         # Use prefetched handshakes to avoid N+1 on list endpoints
         if hasattr(obj, 'capacity_handshakes'):

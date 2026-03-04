@@ -997,7 +997,7 @@ export default function ServiceDetailPage() {
                         </Box>
                       </Box>
                     </Stack>
-                  ) : myEventHandshake?.status === 'accepted' ? (
+                  ) : myEventHandshake?.status === 'accepted' && isFutureEvent(service.scheduled_time) ? (
                     /* Joined — show leave or check-in based on lockdown */
                     <Stack gap={3}>
                       <Box bg={GRAY50} borderRadius="12px" p={4} border={`1px solid ${GRAY200}`}>

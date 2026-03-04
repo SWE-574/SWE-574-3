@@ -457,6 +457,11 @@ class EventHandshakeService:
                 'Check-in is only available within 24 hours of the event start.'
             )
 
+        if handshake.service.scheduled_time and handshake.service.scheduled_time <= timezone.now():
+            raise ValueError(
+                'Check-in is no longer available after the event has started.'
+            )
+
         with transaction.atomic():
             handshake.status = 'checked_in'
             handshake.save(update_fields=['status', 'updated_at'])
@@ -520,8 +525,10 @@ class EventHandshakeService:
                     user.save(update_fields=['is_event_banned_until'])
 
                 handshake = Handshake.objects.filter(
-                    service=service, requester_id=user_id
-                ).first()
+                    service=service,
+                    requester_id=user_id,
+                    status='no_show',
+                ).order_by('-id').first()
                 create_notification(
                     user=user,
                     notification_type='handshake_cancelled',
@@ -585,8 +592,10 @@ class EventHandshakeService:
             for user_id in participant_ids:
                 participant = User.objects.get(pk=user_id)
                 handshake = Handshake.objects.filter(
-                    service=service, requester_id=user_id
-                ).first()
+                    service=service,
+                    requester_id=user_id,
+                    status='cancelled',
+                ).order_by('-id').first()
                 create_notification(
                     user=participant,
                     notification_type='handshake_cancelled',
