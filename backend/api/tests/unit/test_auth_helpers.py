@@ -41,7 +41,7 @@ class TestAuthHelpers:
         # In DRF, cookies are stored in response.cookies (a SimpleCookie object)
         assert 'access_token' in response.cookies
         assert response.cookies['access_token'].value == "fake_access"
-        assert response.cookies['access_token']['httponly'] == ''
+        assert response.cookies['access_token']['httponly'] is True
         assert response.cookies['access_token']['samesite'].lower() == 'lax'.lower()
 
         assert 'refresh_token' in response.cookies
