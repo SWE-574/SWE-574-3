@@ -474,6 +474,11 @@ LOGGING = {
             'level': 'INFO',
             'propagate': False,
         },
+        'api.consumers': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
         'django.request': {
             'handlers': ['console', 'file'],
             'level': 'WARNING',

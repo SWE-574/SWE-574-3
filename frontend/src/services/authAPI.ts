@@ -25,4 +25,8 @@ export const authAPI = {
 
   logout: () =>
     apiClient.post<{ detail: string }>('/auth/logout/'),
+
+  /** For WebSocket auth when proxy does not forward cookies (e.g. Vite dev). */
+  getWsToken: () =>
+    apiClient.get<{ token: string }>('/auth/ws-token/'),
 }

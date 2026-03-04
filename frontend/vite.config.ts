@@ -2,6 +2,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import type { IncomingMessage } from 'node:http'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -35,11 +36,44 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: backendOrigin,
           changeOrigin: true,
+          configure: (proxy) => {
+            const forwardHeaders = (
+              proxyReq: { setHeader: (name: string, value: string | string[]) => void },
+              req: IncomingMessage,
+            ) => {
+              if (req.headers) {
+                for (const [key, value] of Object.entries(req.headers)) {
+                  if (value !== undefined && value !== '') {
+                    proxyReq.setHeader(key, Array.isArray(value) ? value.join(', ') : value)
+                  }
+                }
+              }
+            }
+            proxy.on('proxyReq', forwardHeaders)
+          },
         },
+        // WebSocket: forward all request headers (including Cookie).
+        // See https://vite.dev/config/server-options#server-proxy — configure extends http-proxy.
         '/ws': {
           target: backendOrigin,
           ws: true,
           changeOrigin: true,
+          configure: (proxy) => {
+            const forwardHeaders = (
+              proxyReq: { setHeader: (name: string, value: string | string[]) => void },
+              req: IncomingMessage,
+            ) => {
+              if (req.headers) {
+                for (const [key, value] of Object.entries(req.headers)) {
+                  if (value !== undefined && value !== '') {
+                    proxyReq.setHeader(key, Array.isArray(value) ? value.join(', ') : value)
+                  }
+                }
+              }
+            }
+            proxy.on('proxyReq', forwardHeaders)
+            proxy.on('proxyReqWs', forwardHeaders)
+          },
         },
       },
       watch: {

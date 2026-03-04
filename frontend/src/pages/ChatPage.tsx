@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Box, Flex, Text, Stack, Spinner } from '@chakra-ui/react'
 import {
@@ -45,6 +45,7 @@ import {
 
 const CONV_POLL_MS = 15_000
 const MSG_POLL_MS  = 5_000
+const POLL_IN_DEV  = false // In dev, rely on WebSocket only to avoid hammering the API
 
 const ACTIVE_STATUSES = new Set(['pending', 'accepted'])
 const CLOSED_STATUSES = new Set(['completed', 'cancelled', 'denied', 'reported', 'paused'])
@@ -1160,11 +1161,9 @@ function EmptyThread() {
 
 export default function ChatPage() {
   const { handshakeId: paramId } = useParams<{ handshakeId?: string }>()
-  const navigate    = useNavigate()
-  const { user }    = useAuthStore()
-  // Read once on mount and when auth changes — not on every render.
-  // Read fresh on every render so WS reconnects with the latest token after a refresh
-  const accessToken = localStorage.getItem('access_token')
+  const navigate = useNavigate()
+  const { user, isAuthenticated } = useAuthStore()
+  // WebSocket auth via Cookie only (Vite proxy forwards headers for /ws)
 
   const [conversations,        setConversations]        = useState<ChatConversation[]>([])
   const [messages,             setMessages]             = useState<ApiChatMessage[]>([])
@@ -1208,6 +1207,32 @@ export default function ChatPage() {
   useEffect(() => { setMessages([]); setSendError(null) }, [selectedId])
   useEffect(() => { setGroupMessages([]) }, [groupServiceId])
 
+  const fetchMessages = useCallback(async (signal: AbortSignal) => {
+    if (!selectedId) return
+    const fetched = await conversationAPI.getMessages(selectedId, signal)
+    setMessages((prev) => mergeMessages(prev, [...fetched].reverse()))
+  }, [selectedId])
+
+  const fetchGroupMessages = useCallback(async (signal: AbortSignal) => {
+    if (!groupServiceId) return
+    const fetched = await groupChatAPI.getMessages(groupServiceId, signal)
+    setGroupMessages(fetched)
+  }, [groupServiceId])
+
+  // Initial load from DB when conversation is selected (so old messages show even when polling is off in dev)
+  useEffect(() => {
+    if (!selectedId) return
+    const ac = new AbortController()
+    fetchMessages(ac.signal).catch(() => {})
+    return () => ac.abort()
+  }, [selectedId, fetchMessages])
+  useEffect(() => {
+    if (!groupServiceId) return
+    const ac = new AbortController()
+    fetchGroupMessages(ac.signal).catch(() => {})
+    return () => ac.abort()
+  }, [groupServiceId, fetchGroupMessages])
+
   const fetchConversations = useCallback(async (signal: AbortSignal) => {
     const data = await conversationAPI.listConversations(signal)
     setConversations(data)
@@ -1221,25 +1246,14 @@ export default function ChatPage() {
 
   const { isLoading: convLoading } = usePolling(fetchConversations, [fetchConversations], { interval: CONV_POLL_MS })
 
-  const fetchMessages = useCallback(async (signal: AbortSignal) => {
-    if (!selectedId) return
-    const fetched = await conversationAPI.getMessages(selectedId, signal)
-    setMessages((prev) => mergeMessages(prev, [...fetched].reverse()))
-  }, [selectedId])
+  const msgPollEnabled = !!selectedId && (import.meta.env.PROD || POLL_IN_DEV)
+  usePolling(fetchMessages, [fetchMessages], { interval: MSG_POLL_MS, enabled: msgPollEnabled })
 
-  usePolling(fetchMessages, [fetchMessages], { interval: MSG_POLL_MS, enabled: !!selectedId })
-
-  // ── Group chat polling ────────────────────────────────────────────────────
-  const fetchGroupMessages = useCallback(async (signal: AbortSignal) => {
-    if (!groupServiceId) return
-    const fetched = await groupChatAPI.getMessages(groupServiceId, signal)
-    setGroupMessages(fetched)
-  }, [groupServiceId])
-
-  usePolling(fetchGroupMessages, [fetchGroupMessages], { interval: MSG_POLL_MS, enabled: !!groupServiceId })
+  const groupPollEnabled = !!groupServiceId && (import.meta.env.PROD || POLL_IN_DEV)
+  usePolling(fetchGroupMessages, [fetchGroupMessages], { interval: MSG_POLL_MS, enabled: groupPollEnabled })
 
   // ── 1-1 WebSocket ─────────────────────────────────────────────────────────
-  const wsUrl = selectedId ? buildChatWsUrl(selectedId) : ''
+  const wsUrl = useMemo(() => (selectedId ? buildChatWsUrl(selectedId) : ''), [selectedId])
   const handleWsMessage = useCallback((msg: ApiChatMessage) => {
     if (!msg?.id) return
     if ((msg.handshake_id ?? msg.handshake) !== selectedId) return
@@ -1247,11 +1261,16 @@ export default function ChatPage() {
   }, [selectedId])
 
   const { isConnected: wsConnected, sendMessage: wsSend } = useWebSocket({
-    url: wsUrl, token: accessToken, onMessage: handleWsMessage, enabled: !!selectedId && !!accessToken,
+    url: wsUrl,
+    onMessage: handleWsMessage,
+    enabled: !!selectedId && isAuthenticated,
   })
 
   // ── Group WebSocket ────────────────────────────────────────────────────────
-  const groupWsUrl = groupServiceId ? buildGroupChatWsUrl(groupServiceId) : ''
+  const groupWsUrl = useMemo(
+    () => (groupServiceId ? buildGroupChatWsUrl(groupServiceId) : ''),
+    [groupServiceId],
+  )
   const handleGroupWsMessage = useCallback((msg: GroupChatMessage) => {
     if (!msg?.id) return
     setGroupMessages((prev) => {
@@ -1262,10 +1281,9 @@ export default function ChatPage() {
 
   const { isConnected: groupWsConnected, sendMessage: groupWsSend } = useWebSocket({
     url: groupWsUrl,
-    token: accessToken,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onMessage: handleGroupWsMessage as any,
-    enabled: !!groupServiceId && !!accessToken,
+    enabled: !!groupServiceId && isAuthenticated,
   })
 
   const selectConversation = useCallback((id: string) => {

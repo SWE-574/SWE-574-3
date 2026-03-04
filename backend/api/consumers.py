@@ -1,4 +1,6 @@
 import json
+import logging
+import urllib.parse
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
@@ -9,38 +11,63 @@ from .serializers import ChatMessageSerializer
 from .utils import create_notification
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
+
+
+def _get_token_from_scope(scope):
+    """
+    Get JWT access token from WebSocket scope: first from Cookie (same-origin),
+    then from query string (e.g. mobile clients). Allows access_token to be HttpOnly.
+    """
+    # 1. Cookie — collect all Cookie headers (some proxies send multiple), then parse
+    cookie_parts = []
+    for name, value in scope.get('headers', []):
+        if name.lower() == b'cookie':
+            cookie_parts.append(value.decode('utf-8', errors='replace'))
+    if cookie_parts:
+        cookie_str = ';'.join(cookie_parts)
+        for part in cookie_str.split(';'):
+            part = part.strip()
+            if '=' in part:
+                key, val = part.split('=', 1)
+                if key.strip().lower() == 'access_token' and val.strip():
+                    return urllib.parse.unquote(val.strip())
+    # 2. Query string (legacy / mobile)
+    query_string = scope.get('query_string', b'').decode()
+    if 'token=' in query_string:
+        parsed = urllib.parse.parse_qs(query_string)
+        tokens = parsed.get('token', [])
+        if tokens:
+            return tokens[0]
+    return None
 
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.handshake_id = self.scope['url_route']['kwargs']['handshake_id']
         self.room_group_name = f'chat_{self.handshake_id}'
-        
-        # Get token from query string
-        query_string = self.scope.get('query_string', b'').decode()
-        token = None
-        if 'token=' in query_string:
-            token = query_string.split('token=')[-1].split('&')[0]
-        
+
+        # Token from Cookie (same-origin) or query string (e.g. mobile)
+        token = _get_token_from_scope(self.scope)
         if not token:
             await self.close(code=4001)
             return
-        
+
         # Authenticate user
         try:
             user = await self.authenticate_user(token)
             if not user:
                 await self.close(code=4003)
                 return
-            
+
             # Verify user has access to this handshake
             has_access = await self.verify_handshake_access(user, self.handshake_id)
             if not has_access:
                 await self.close(code=4003)
                 return
-            
+
             self.user = user
-        except Exception as e:
+        except Exception:
             await self.close(code=4003)
             return
         
@@ -166,12 +193,7 @@ class PublicChatConsumer(AsyncWebsocketConsumer):
         self.room_id = self.scope['url_route']['kwargs']['room_id']
         self.room_group_name = f'public_chat_{self.room_id}'
         
-        # Get token from query string
-        query_string = self.scope.get('query_string', b'').decode()
-        token = None
-        if 'token=' in query_string:
-            token = query_string.split('token=')[-1].split('&')[0]
-        
+        token = _get_token_from_scope(self.scope)
         if not token:
             await self.close(code=4001)
             return
@@ -312,11 +334,7 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
         self.service_id = self.scope['url_route']['kwargs']['service_id']
         self.room_group_name = f'group_chat_{self.service_id}'
 
-        query_string = self.scope.get('query_string', b'').decode()
-        token = None
-        if 'token=' in query_string:
-            token = query_string.split('token=')[-1].split('&')[0]
-
+        token = _get_token_from_scope(self.scope)
         if not token:
             await self.close(code=4001)
             return

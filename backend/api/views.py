@@ -16,6 +16,8 @@ from django.db.utils import OperationalError
 from django.db.models import F
 from django.conf import settings
 from django.utils import timezone
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from decimal import Decimal
 from datetime import timedelta
 import logging
@@ -103,8 +105,8 @@ def get_cookie_settings(httponly: bool = True) -> dict:
 
 
 def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
-    """Attach JWT tokens as cookies to the response."""
-    response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=False))
+    """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS."""
+    response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=True))
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
 
 
@@ -533,6 +535,21 @@ class LogoutView(APIView):
         return response
 
 
+class WsTokenView(APIView):
+    """Return a short-lived access token for WebSocket auth (query string). Use when cookie is not forwarded by proxy (e.g. Vite dev)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary='Get WebSocket token',
+        description='Returns the current access token for use in WebSocket URL (e.g. ?token=). Cookie is preferred; use this when the proxy does not forward cookies.',
+        responses={200: inline_serializer('WsTokenResponse', {'token': drf_serializers.CharField()})},
+        tags=['Auth'],
+    )
+    def get(self, request, *args, **kwargs):
+        refresh = RefreshToken.for_user(request.user)
+        return Response({'token': str(refresh.access_token)}, status=status.HTTP_200_OK)
+
+
 class ForgotPasswordView(APIView):
     """Send a password-reset email via Resend."""
     permission_classes = [permissions.AllowAny]
@@ -622,6 +639,13 @@ class ResetPasswordView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         user = reset_token.user
+        try:
+            validate_password(new_password, user)
+        except DjangoValidationError as e:
+            return Response(
+                {'detail': ' '.join(e.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         user.set_password(new_password)
         user.save(update_fields=['password'])
         reset_token.is_used = True
