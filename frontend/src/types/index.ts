@@ -79,6 +79,9 @@ export interface User {
   is_banned?: boolean
   is_admin?: boolean
   warning_count?: number
+  // ─── Auth state ─────────────────────────────────────────────────────────────
+  is_verified?: boolean
+  is_onboarded?: boolean
   // ─── Event System ───────────────────────────────────────────────────────────
   is_event_banned_until?: string | null
   is_organizer_banned_until?: string | null

@@ -1,31 +1,23 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useEffect, useState } from 'react'
-// import apiClient from '@/services/api'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
+  /** If true, skip the onboarding redirect (used for the /onboarding route itself) */
+  skipOnboardingCheck?: boolean
 }
 
-const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
+const ProtectedRoute = ({ children, skipOnboardingCheck = false }: ProtectedRouteProps) => {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const user = useAuthStore((s) => s.user)
   const checkAuth = useAuthStore((s) => s.checkAuth)
   const location = useLocation()
   const [isChecking, setIsChecking] = useState(true)
-  // const [isOnboarded, setIsOnboarded] = useState<boolean | null>(null)
 
   useEffect(() => {
     checkAuth().then(() => setIsChecking(false))
   }, [checkAuth])
-
-  // useEffect(() => {
-  //   if (!isChecking && isAuthenticated) {
-  //     apiClient
-  //       .get<{ is_onboarded?: boolean }>('/users/me/profile/')
-  //       .then((res) => setIsOnboarded(res.data.is_onboarded ?? false))
-  //       .catch(() => setIsOnboarded(false))
-  //   }
-  // }, [isChecking, isAuthenticated])
 
   if (isChecking) {
     return (
@@ -46,9 +38,11 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
-  // if (!isOnboarded && location.pathname !== '/onboarding') {
-  //   return <Navigate to="/onboarding" replace />
-  // }
+  // Redirect non-onboarded users to the onboarding wizard
+  // skipOnboardingCheck=true on the /onboarding route itself to avoid infinite loop
+  if (!skipOnboardingCheck && user && user.is_onboarded === false) {
+    return <Navigate to="/onboarding" replace />
+  }
 
   return <>{children}</>
 }
