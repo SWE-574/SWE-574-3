@@ -58,7 +58,7 @@ export default function EventRosterModal({ isOpen, onClose, service, handshakes,
 
   return (
     <Box
-      position="fixed" inset={0} zIndex={300}
+      position="fixed" inset={0} zIndex={1000}
       bg="rgba(0,0,0,0.55)"
       display="flex" alignItems="center" justifyContent="center"
       p={4}
