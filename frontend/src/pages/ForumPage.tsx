@@ -104,7 +104,7 @@ function CategorySidebar({
   selectedSlug: string | null
   onSelect: (cat: ForumCategory) => void
   onHome: () => void
-  user: { first_name?: string; last_name?: string; name?: string; username?: string; avatar_url?: string | null; email?: string } | null
+  user: { first_name?: string; last_name?: string; name?: string; avatar_url?: string | null; email?: string } | null
   myTopics: number
   myReplies: number
   isAuthenticated: boolean
@@ -116,7 +116,7 @@ function CategorySidebar({
   const roleBg    = roleLabel === 'Admin' ? AMBER_LT : roleLabel === 'Moderator' ? PURPLE_LT : GREEN_LT
   const roleColor  = roleLabel === 'Admin' ? AMBER    : roleLabel === 'Moderator' ? PURPLE    : GREEN
   const fullName   = [user?.first_name, user?.last_name].filter(Boolean).join(' ')
-    || user?.name || user?.username || 'User'
+    || user?.name || user?.email || 'User'
 
   return (
     <Box
@@ -860,11 +860,11 @@ export default function ForumPage() {
     if (!user) return
     const ac = new AbortController()
     const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ')
-      || user.username || ''
+      || user.email || ''
     forumAPI.listTopics({ page_size: 100 }, ac.signal)
       .then((res) => {
         const mine = res.results.filter((t) =>
-          t.author_name === displayName || t.author_name === user.username
+          t.author_name === displayName || t.author_name === user.email
         )
         setMyTopics(mine.length)
         setMyReplies(mine.reduce((s, t) => s + (t.reply_count ?? 0), 0))

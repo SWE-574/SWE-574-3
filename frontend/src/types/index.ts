@@ -60,7 +60,6 @@ export type UserRole = (typeof UserRole)[keyof typeof UserRole]
 export interface User {
   id: string
   email: string
-  username?: string
   first_name: string
   last_name: string
   role: string
@@ -284,14 +283,77 @@ export interface NegativeReputationResponse extends ReputationResponse {
 
 export interface AdminReport {
   id: string
-  reporter: User
-  reported_user?: User
-  service?: Service
-  handshake?: Handshake
-  reason: string
+  reporter: string
+  reporter_name: string
+  reported_user?: string | null
+  reported_user_name?: string | null
+  reported_service?: string | null
+  reported_service_title?: string | null
+  related_handshake?: string | null
+  handshake_hours?: number | null
+  handshake_scheduled_time?: string | null
+  handshake_status?: string | null
+  reported_user_is_receiver?: boolean | null
+  type: 'no_show' | 'inappropriate_content' | 'service_issue' | 'spam' | 'scam' | 'harassment' | 'other'
   description: string
-  status: 'open' | 'resolved' | 'dismissed'
-  resolution_notes?: string
+  status: 'pending' | 'resolved' | 'dismissed'
+  admin_notes?: string | null
+  created_at: string
+  resolved_at?: string | null
+  resolved_by?: string | null
+}
+
+export interface AdminUserSummary {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  timebank_balance: number
+  karma_score: number
+  role: string
+  is_active: boolean
+  date_joined: string
+}
+
+export interface AdminMetrics {
+  timestamp: string
+  users: {
+    total: number
+    active: number
+    admins: number
+  }
+  services: {
+    total: number
+    active: number
+    offers: number
+    needs: number
+  }
+  handshakes: {
+    total: number
+    pending: number
+    accepted: number
+    completed: number
+  }
+  transactions: {
+    total: number
+    last_24h: number
+  }
+}
+
+export type AdminCommentStatus = 'active' | 'removed'
+
+export interface AdminComment {
+  id: string
+  service: string
+  service_title: string
+  user_id: string
+  user_name: string
+  parent_id?: string | null
+  body: string
+  is_deleted: boolean
+  status: AdminCommentStatus
+  is_verified_review: boolean
+  related_handshake?: string | null
   created_at: string
   updated_at: string
 }

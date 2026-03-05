@@ -5,9 +5,12 @@ from rest_framework.routers import DefaultRouter
 from rest_framework import views
 from rest_framework.response import Response
 from rest_framework import permissions
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from django.http import JsonResponse
 from django.db import connection
 from django.core.cache import cache
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from .authentication import CookieJWTAuthentication
 from .views import (
     UserRegistrationView,
     UserProfileView,
@@ -22,6 +25,7 @@ from .views import (
     ReputationViewSet,
     AdminReportViewSet,
     AdminUserViewSet,
+    AdminCommentViewSet,
     ExpressInterestView,
     TransactionHistoryViewSet,
     WikidataSearchView,
@@ -54,6 +58,7 @@ router.register(r'notifications', NotificationViewSet, basename='notification')
 router.register(r'reputation', ReputationViewSet, basename='reputation')
 router.register(r'admin/reports', AdminReportViewSet, basename='admin-report')
 router.register(r'admin/users', AdminUserViewSet, basename='admin-user')
+router.register(r'admin/comments', AdminCommentViewSet, basename='admin-comment')
 router.register(r'transactions', TransactionHistoryViewSet, basename='transaction')
 
 def health_check(request):
@@ -129,6 +134,9 @@ def health_check(request):
     return JsonResponse(health_status, status=status_code)
 
 
+@api_view(['GET'])
+@authentication_classes([CookieJWTAuthentication, JWTAuthentication])
+@permission_classes([permissions.IsAuthenticated])
 def metrics_endpoint(request):
     """Returns application metrics for monitoring."""
     from django.utils import timezone

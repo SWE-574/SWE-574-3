@@ -93,6 +93,42 @@ class AdminUserListSerializer(serializers.ModelSerializer):
             'is_active', 'date_joined'
         ]
         read_only_fields = fields
+
+
+class AdminCommentSerializer(serializers.ModelSerializer):
+    """Serializer used by admin comment moderation endpoints."""
+    user_id = serializers.UUIDField(source='user.id', read_only=True)
+    user_name = serializers.SerializerMethodField()
+    service_title = serializers.CharField(source='service.title', read_only=True)
+    parent_id = serializers.UUIDField(source='parent.id', read_only=True, allow_null=True)
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Comment
+        fields = [
+            'id',
+            'service',
+            'service_title',
+            'user_id',
+            'user_name',
+            'parent_id',
+            'body',
+            'is_deleted',
+            'status',
+            'is_verified_review',
+            'related_handshake',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_user_name(self, obj):
+        return f"{obj.user.first_name} {obj.user.last_name}".strip() or obj.user.email
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_status(self, obj):
+        return 'removed' if obj.is_deleted else 'active'
     
 @extend_schema_serializer(
     examples=[

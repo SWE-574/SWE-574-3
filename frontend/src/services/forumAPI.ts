@@ -45,6 +45,24 @@ export const forumAPI = {
     await apiClient.delete(`/forum/topics/${id}/`)
   },
 
+  pinTopic: async (id: string): Promise<ForumTopic> => {
+    const res = await apiClient.post<ForumTopic>(`/forum/topics/${id}/pin/`)
+    return res.data
+  },
+
+  lockTopic: async (id: string): Promise<ForumTopic> => {
+    const res = await apiClient.post<ForumTopic>(`/forum/topics/${id}/lock/`)
+    return res.data
+  },
+
+  listRecentPosts: async (
+    params: { page?: number; page_size?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<PaginatedResponse<ForumPost>> => {
+    const res = await apiClient.get<PaginatedResponse<ForumPost>>('/forum/posts/recent/', { params, signal })
+    return res.data
+  },
+
   // ── Posts ─────────────────────────────────────────────────────────────────
   listPosts: async (topicId: string, params: { page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<PaginatedResponse<ForumPost>> => {
     const res = await apiClient.get<PaginatedResponse<ForumPost>>(`/forum/topics/${topicId}/posts/`, { params, signal })

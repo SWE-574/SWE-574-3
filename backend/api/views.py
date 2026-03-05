@@ -47,6 +47,7 @@ from .serializers import (
     UserRegistrationSerializer, 
     UserProfileSerializer,
     AdminUserListSerializer,
+    AdminCommentSerializer,
     ServiceSerializer,
     TagSerializer,
     HandshakeSerializer,
@@ -4266,6 +4267,100 @@ class AdminUserViewSet(viewsets.ViewSet):
             'new_karma': user.karma_score,
             'message': f'Karma adjusted by {adjustment}'
         })
+
+
+class AdminCommentViewSet(viewsets.ViewSet):
+    """Admin-only moderation endpoints for service comments/reviews."""
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+    serializer_class = AdminCommentSerializer
+
+    def check_admin(self, request):
+        if request.user.role != 'admin':
+            return create_error_response(
+                'Admin access required',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def get_queryset(self):
+        return Comment.objects.select_related('user', 'service', 'parent', 'related_handshake').order_by('-created_at')
+
+    def list(self, request):
+        """List comments with moderation-friendly filters."""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        queryset = self.get_queryset()
+
+        status_filter = request.query_params.get('status', 'active').strip().lower()
+        if status_filter == 'removed':
+            queryset = queryset.filter(is_deleted=True)
+        elif status_filter == 'all':
+            pass
+        else:
+            queryset = queryset.filter(is_deleted=False)
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(body__icontains=search)
+                | Q(user__email__icontains=search)
+                | Q(user__first_name__icontains=search)
+                | Q(user__last_name__icontains=search)
+                | Q(service__title__icontains=search)
+            )
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request)
+        if page is not None:
+            serializer = self.serializer_class(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = self.serializer_class(queryset[:100], many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        """Retrieve one comment for moderation detail view."""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        comment = get_object_or_404(self.get_queryset(), id=pk)
+        serializer = self.serializer_class(comment)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='remove', throttle_classes=[ConfirmationThrottle])
+    def remove_comment(self, request, pk=None):
+        """Soft-remove a comment from admin moderation panel."""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        comment = get_object_or_404(self.get_queryset(), id=pk)
+        if not comment.is_deleted:
+            comment.is_deleted = True
+            comment.save(update_fields=['is_deleted', 'updated_at'])
+
+        serializer = self.serializer_class(comment)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='restore', throttle_classes=[ConfirmationThrottle])
+    def restore_comment(self, request, pk=None):
+        """Restore a previously removed comment."""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        comment = get_object_or_404(self.get_queryset(), id=pk)
+        if comment.is_deleted:
+            comment.is_deleted = False
+            comment.save(update_fields=['is_deleted', 'updated_at'])
+
+        serializer = self.serializer_class(comment)
+        return Response(serializer.data)
 
 class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
