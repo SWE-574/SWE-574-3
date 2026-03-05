@@ -3531,6 +3531,20 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 handshake=handshake,
                 service=handshake.service
             )
+
+        # For Offer/Need services, notify the reviewed user only when there is
+        # at least one positive trait or a review comment.
+        if not is_event_evaluation and (
+            rep.is_punctual or rep.is_helpful or rep.is_kind or bool(rep.comment)
+        ):
+            create_notification(
+                user=target_user,
+                notification_type='positive_rep',
+                title='Feedback Received',
+                message=f"{user.first_name} left feedback for '{handshake.service.title}'.",
+                handshake=handshake,
+                service=handshake.service,
+            )
         
         # Update karma (REQ-REP-006)
         karma_gain = 0
@@ -3553,6 +3567,103 @@ class ReputationViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(rep)
         return Response(serializer.data, status=201)
+
+    @action(detail=False, methods=['post'], url_path='add-review')
+    @track_performance
+    def add_review(self, request):
+        """
+        Add a verified review comment for an already-evaluated handshake.
+
+        This allows users who submitted evaluation traits first to add the
+        review text later, as long as the handshake's evaluation window is
+        still open.
+        """
+        handshake_id = request.data.get('handshake_id')
+        raw_comment = (request.data.get('comment') or '').strip()
+
+        if not handshake_id:
+            return create_error_response(
+                'handshake_id is required',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            handshake = Handshake.objects.select_related(
+                'service', 'service__user', 'requester'
+            ).get(id=handshake_id)
+        except Handshake.DoesNotExist:
+            return create_error_response(
+                'Handshake not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        required_status = 'attended' if handshake.service.type == 'Event' else 'completed'
+        if handshake.status != required_status:
+            return create_error_response(
+                'Handshake not found or not eligible for evaluation',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        in_window, window_error = _validate_feedback_window(handshake)
+        if not in_window:
+            return create_error_response(
+                window_error,
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_410_GONE,
+            )
+
+        user = request.user
+        from .utils import get_provider_and_receiver
+        provider, receiver = get_provider_and_receiver(handshake)
+        if user not in [provider, receiver]:
+            return create_error_response(
+                'Not authorized - you are not a participant in this handshake',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        has_evaluation = ReputationRep.objects.filter(handshake=handshake, giver=user).exists() or NegativeRep.objects.filter(
+            handshake=handshake, giver=user
+        ).exists()
+        if not has_evaluation:
+            return create_error_response(
+                'You must submit evaluation before adding a review',
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        existing_review = Comment.objects.filter(
+            related_handshake=handshake,
+            user=user,
+            is_verified_review=True,
+            is_deleted=False,
+        ).exists()
+        if existing_review:
+            return create_error_response(
+                'Review already submitted',
+                code=ErrorCodes.ALREADY_EXISTS,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000]
+        if not cleaned_comment:
+            return Response(
+                {'status': 'success', 'message': 'Evaluation already recorded. No review text provided.'},
+                status=status.HTTP_200_OK,
+            )
+
+        comment = Comment.objects.create(
+            service=handshake.service,
+            user=user,
+            body=cleaned_comment,
+            is_verified_review=True,
+            related_handshake=handshake,
+        )
+
+        return Response(CommentSerializer(comment).data, status=status.HTTP_201_CREATED)
 
 class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -4798,17 +4909,6 @@ class NegativeRepViewSet(viewsets.ViewSet):
         target_user.karma_score = F("karma_score") - karma_penalty
         target_user.save(update_fields=['karma_score'])
         target_user.refresh_from_db(fields=['karma_score'])
-
-        # Notify the receiver about negative feedback (without specific details)
-        create_notification(
-            user=target_user,
-            notification_type='negative_feedback',
-            title='Feedback Received',
-            message=f'You received feedback for the service "{handshake.service.title}". '
-                    f'Your karma was adjusted.',
-            handshake=handshake,
-            service=handshake.service
-        )
 
         if handshake.service.type == 'Event':
             EventEvaluationService.refresh_summary(handshake.service)

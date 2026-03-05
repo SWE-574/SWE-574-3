@@ -10,7 +10,16 @@ from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import ReputationRep, NegativeRep, Badge, UserBadge, EventEvaluationSummary, Report
+from api.models import (
+    ReputationRep,
+    NegativeRep,
+    Badge,
+    UserBadge,
+    EventEvaluationSummary,
+    Report,
+    Notification,
+    Comment,
+)
 
 
 @pytest.mark.django_db
@@ -79,6 +88,139 @@ class TestReputationViewSet:
 
         requester.refresh_from_db()
         assert requester.karma_score > 0
+
+    def test_positive_service_feedback_notifies_recipient(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=1),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=47),
+            evaluation_window_closed_at=None,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': False,
+            'kindness': False,
+        })
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Notification.objects.filter(
+            user=provider,
+            type='positive_rep',
+            title='Feedback Received',
+            related_handshake=handshake,
+            related_service=service,
+        ).exists()
+
+    def test_add_review_later_within_window_after_evaluation(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=1),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=47),
+            evaluation_window_closed_at=None,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        eval_response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': False,
+            'kindness': False,
+        })
+        assert eval_response.status_code == status.HTTP_201_CREATED
+        assert not Comment.objects.filter(
+            related_handshake=handshake,
+            user=requester,
+            is_verified_review=True,
+            is_deleted=False,
+        ).exists()
+
+        review_response = client.post('/api/reputation/add-review/', {
+            'handshake_id': str(handshake.id),
+            'comment': 'Adding my review later inside the evaluation window.',
+        })
+        assert review_response.status_code == status.HTTP_201_CREATED
+        assert Comment.objects.filter(
+            related_handshake=handshake,
+            user=requester,
+            is_verified_review=True,
+            is_deleted=False,
+        ).exists()
+
+    def test_add_review_later_rejected_after_window(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=60),
+            evaluation_window_ends_at=timezone.now() - timedelta(hours=1),
+            evaluation_window_closed_at=None,
+        )
+        ReputationRep.objects.create(
+            handshake=handshake,
+            giver=requester,
+            receiver=provider,
+            is_punctual=True,
+            is_helpful=False,
+            is_kind=False,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        response = client.post('/api/reputation/add-review/', {
+            'handshake_id': str(handshake.id),
+            'comment': 'Too late review',
+        })
+        assert response.status_code == status.HTTP_410_GONE
+
+    def test_add_review_without_comment_is_allowed_noop(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=1),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=47),
+            evaluation_window_closed_at=None,
+        )
+        ReputationRep.objects.create(
+            handshake=handshake,
+            giver=requester,
+            receiver=provider,
+            is_punctual=True,
+            is_helpful=False,
+            is_kind=False,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        response = client.post('/api/reputation/add-review/', {
+            'handshake_id': str(handshake.id),
+        })
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['status'] == 'success'
+        assert Comment.objects.filter(
+            related_handshake=handshake,
+            user=requester,
+            is_verified_review=True,
+            is_deleted=False,
+        ).count() == 0
     
     def test_create_reputation_duplicate(self):
         """Test cannot create duplicate reputation"""
@@ -271,6 +413,32 @@ class TestNegativeRepViewSet:
             giver=requester,
             receiver=provider
         ).exists()
+
+    def test_negative_feedback_is_silent_for_recipient(self):
+        provider = UserFactory(karma_score=10)
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=1),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=47),
+            evaluation_window_closed_at=None,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        response = client.post('/api/reputation/negative/', {
+            'handshake_id': str(handshake.id),
+            'is_late': True,
+        })
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert not Notification.objects.filter(
+            user=provider,
+            related_handshake=handshake,
+            type='negative_feedback',
+        ).exists()
     
     def test_negative_reputation_affects_karma(self):
         """Test negative reputation affects karma score"""
@@ -447,7 +615,7 @@ class TestNegativeRepViewSet:
             'engaging': True,
             'welcoming': True,
         })
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_410_GONE
 
     def test_event_reputation_window_expired_for_negative(self):
         organizer = UserFactory()
@@ -470,7 +638,7 @@ class TestNegativeRepViewSet:
             'handshake_id': str(handshake.id),
             'disorganized': True,
         })
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_410_GONE
 
 
 @pytest.mark.django_db

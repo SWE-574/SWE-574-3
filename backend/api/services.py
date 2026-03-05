@@ -601,11 +601,29 @@ class EventHandshakeService:
 
             window_start = service.event_completed_at
             window_end = window_start + timedelta(hours=settings.FEEDBACK_WINDOW_HOURS)
-            Handshake.objects.filter(service=service, status='attended').update(
+            attended_handshakes = list(
+                Handshake.objects.filter(service=service, status='attended').select_related('requester')
+            )
+            Handshake.objects.filter(
+                id__in=[handshake.id for handshake in attended_handshakes]
+            ).update(
                 evaluation_window_starts_at=window_start,
                 evaluation_window_ends_at=window_end,
                 evaluation_window_closed_at=None,
             )
+
+            for attended_handshake in attended_handshakes:
+                create_notification(
+                    user=attended_handshake.requester,
+                    notification_type='positive_rep',
+                    title='Leave Feedback',
+                    message=(
+                        f"Event '{service.title}' has ended. "
+                        f"You can now leave feedback for {organizer.first_name}."
+                    ),
+                    handshake=attended_handshake,
+                    service=service,
+                )
 
     @staticmethod
     def cancel_event(service: Service, organizer: User) -> None:

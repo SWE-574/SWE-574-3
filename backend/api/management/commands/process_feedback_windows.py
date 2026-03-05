@@ -2,12 +2,14 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import Handshake
+from api.models import Handshake, Notification
 from api.services import EventEvaluationService
+from api.utils import create_notification
 
 
 class Command(BaseCommand):
     help = 'Close expired feedback windows and finalize pending evaluation processing.'
+    EVENT_SCORE_ALERT_TITLE = 'Event Feedback Window Closed'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -50,7 +52,27 @@ class Command(BaseCommand):
         for service_id in event_service_ids:
             handshake = Handshake.objects.select_related('service').filter(service_id=service_id).first()
             if handshake:
-                EventEvaluationService.refresh_summary(handshake.service)
+                service = handshake.service
+                EventEvaluationService.refresh_summary(service)
+
+                alert_exists = Notification.objects.filter(
+                    user=service.user,
+                    related_service=service,
+                    type='positive_rep',
+                    title=self.EVENT_SCORE_ALERT_TITLE,
+                ).exists()
+                if not alert_exists:
+                    service.user.refresh_from_db(fields=['event_hot_score'])
+                    create_notification(
+                        user=service.user,
+                        notification_type='positive_rep',
+                        title=self.EVENT_SCORE_ALERT_TITLE,
+                        message=(
+                            f"Your 48-hour feedback window for '{service.title}' has closed. "
+                            f"Your updated event score is {service.user.event_hot_score:.2f}."
+                        ),
+                        service=service,
+                    )
 
         self.stdout.write(
             self.style.SUCCESS(
