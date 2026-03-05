@@ -3052,6 +3052,8 @@ class ChatViewSet(viewsets.ViewSet):
         
         handshakes = Handshake.objects.filter(
             Q(requester=user) | Q(service__user=user)
+        ).exclude(
+            service__type='Event'
         ).select_related(
             'service', 
             'requester', 
@@ -4184,6 +4186,26 @@ class PublicChatViewSet(viewsets.ViewSet):
     throttle_classes = [UserRateThrottle]
     pagination_class = StandardResultsSetPagination
 
+    def _check_event_access(self, request, service):
+        """For Event-type services, restrict access to organizer + active participants."""
+        if service.type != 'Event':
+            return None  # no restriction for non-events
+        user = request.user
+        if service.user == user:
+            return None  # organizer always has access
+        has_active_hs = Handshake.objects.filter(
+            service=service,
+            requester=user,
+            status__in=['accepted', 'checked_in', 'attended'],
+        ).exists()
+        if has_active_hs:
+            return None
+        return create_error_response(
+            'You must be a participant or organizer of this event to access chat',
+            code=ErrorCodes.PERMISSION_DENIED,
+            status_code=status.HTTP_403_FORBIDDEN
+        )
+
     @track_performance
     def retrieve(self, request, pk=None):
         """
@@ -4199,6 +4221,11 @@ class PublicChatViewSet(viewsets.ViewSet):
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        # For events, restrict to organizer + active participants
+        denied = self._check_event_access(request, service)
+        if denied:
+            return denied
 
         # Get or create chat room for the service (atomic to handle concurrent requests)
         room, _ = ChatRoom.objects.get_or_create(
@@ -4251,6 +4278,11 @@ class PublicChatViewSet(viewsets.ViewSet):
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        # For events, restrict to organizer + active participants
+        denied = self._check_event_access(request, service)
+        if denied:
+            return denied
 
         # Get or create chat room (atomic to handle concurrent requests)
         room, _ = ChatRoom.objects.get_or_create(
@@ -4319,6 +4351,10 @@ class GroupChatViewSet(viewsets.ViewSet):
         except Service.DoesNotExist:
             from rest_framework.exceptions import NotFound
             raise NotFound('Service not found')
+
+        if service.type == 'Event':
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Events use the event chat system, not group chat')
 
         if service.schedule_type != 'One-Time' or service.max_participants <= 1:
             from rest_framework.exceptions import PermissionDenied
