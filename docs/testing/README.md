@@ -91,6 +91,7 @@ make coverage-report
   - Full user flow tests
   - Cross-browser tests
   - Visual regression tests
+  - [**Comprehensive E2E Testing Wiki Documentation**](./E2E-Testing.md)
 
 ## Coverage Targets
 
