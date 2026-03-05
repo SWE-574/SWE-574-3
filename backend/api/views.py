@@ -4764,15 +4764,18 @@ class GroupChatViewSet(viewsets.ViewSet):
             raise NotFound('Service not found')
 
         is_event = service.type == 'Event'
-        is_group_service = service.schedule_type == 'One-Time' and service.max_participants > 1
-        if not is_event and not is_group_service:
+        if is_event:
             from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Group chat is only available for events or one-time group services')
+            raise PermissionDenied('Events use the event chat system, not group chat')
+
+        is_group_service = service.schedule_type == 'One-Time' and service.max_participants > 1
+        if not is_group_service:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Group chat is only available for one-time group services')
 
         user = request.user
         is_owner = service.user == user
-        # Events use additional active statuses beyond 'accepted'
-        active_statuses = ['accepted', 'checked_in', 'attended'] if is_event else ['accepted']
+        active_statuses = ['accepted']
         has_access = Handshake.objects.filter(
             service=service, requester=user, status__in=active_statuses
         ).exists()
