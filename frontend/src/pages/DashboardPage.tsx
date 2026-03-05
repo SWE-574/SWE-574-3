@@ -246,19 +246,7 @@ function ServiceCard({
       flexDirection="column"
       position="relative"
     >
-      {isOwn && onRemove && (
-        <Box
-          as="button" position="absolute" top="8px" right="8px" zIndex={2}
-          w="22px" h="22px" borderRadius="full" bg={RED_LT}
-          display="flex" alignItems="center" justifyContent="center"
-          onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRemove() }}
-          style={{ border: `1px solid ${RED}30`, cursor: 'pointer' }}
-          _hover={{ bg: RED, color: WHITE }}
-          color={RED} transition="all 0.15s"
-        >
-          <FiX size={12} />
-        </Box>
-      )}
+
       <CardHeader service={service} gradient={gradient} />
 
       <Flex direction="column" flex={1} px={3} pt="10px" pb={3}>
