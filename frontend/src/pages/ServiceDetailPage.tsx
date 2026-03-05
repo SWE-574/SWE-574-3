@@ -60,6 +60,44 @@ const REPORT_OPTIONS: { value: ReportType; label: string; desc: string }[] = [
   { value: 'other',                 label: 'Other',                 desc: 'Something else not listed above' },
 ]
 
+function getEvaluationWindowInfo(handshake?: Handshake) {
+  if (!handshake) {
+    return { isOpen: false, label: '' }
+  }
+
+  if (handshake.evaluation_window_closed_at) {
+    return { isOpen: false, label: 'Evaluation window closed' }
+  }
+
+  let deadlineMs: number | null = null
+  if (handshake.evaluation_window_ends_at) {
+    const parsed = new Date(handshake.evaluation_window_ends_at).getTime()
+    if (!Number.isNaN(parsed)) deadlineMs = parsed
+  }
+
+  if (deadlineMs == null) {
+    const startIso = handshake.evaluation_window_starts_at ?? handshake.updated_at
+    const parsedStart = new Date(startIso).getTime()
+    if (!Number.isNaN(parsedStart)) {
+      deadlineMs = parsedStart + (48 * 60 * 60 * 1000)
+    }
+  }
+
+  if (deadlineMs == null) {
+    return { isOpen: true, label: 'Evaluation window active (48h)' }
+  }
+
+  const msLeft = deadlineMs - Date.now()
+  if (msLeft <= 0) {
+    return { isOpen: false, label: 'Evaluation window closed' }
+  }
+
+  const totalMinutes = Math.ceil(msLeft / 60_000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return { isOpen: true, label: `${hours}h ${minutes}m left to evaluate` }
+}
+
 // ─── Gradient picker (same logic as DashboardPage) ───────────────────────────
 
 const CARD_GRADIENTS: Record<string, [string, string]> = {
@@ -432,6 +470,7 @@ export default function ServiceDetailPage() {
   const evaluationCounterpartName = evaluationHandshake
     ? (isOwn ? evaluationHandshake.requester_name : evaluationHandshake.provider_name)
     : 'counterpart'
+  const evaluationWindow = getEvaluationWindowInfo(evaluationHandshake)
 
   // Event-specific derived value — must come after exId / isEvent
   const myEventHandshake = isEvent
@@ -1338,13 +1377,22 @@ export default function ServiceDetailPage() {
                   {isAuthenticated && evaluationHandshake && (
                     <Box mt={4}>
                       <Box as="button" w="full" py="12px" borderRadius="11px"
-                        bg={GREEN_LT} color={GREEN} fontSize="14px" fontWeight={700}
+                        bg={evaluationWindow.isOpen ? GREEN_LT : GRAY100}
+                        color={evaluationWindow.isOpen ? GREEN : GRAY500}
+                        fontSize="14px" fontWeight={700}
                         display="flex" alignItems="center" justifyContent="center" gap="7px"
-                        onClick={() => setShowEvaluationModal(true)}
-                        style={{ border: `1px solid ${BLUE}40`, cursor: 'pointer' }}
+                        onClick={() => { if (evaluationWindow.isOpen) setShowEvaluationModal(true) }}
+                        style={{
+                          border: `1px solid ${BLUE}40`,
+                          cursor: evaluationWindow.isOpen ? 'pointer' : 'not-allowed',
+                          opacity: evaluationWindow.isOpen ? 1 : 0.8,
+                        }}
                       >
                         <FiStar size={14} /> Leave Evaluation
                       </Box>
+                      <Text mt={2} fontSize="12px" color={evaluationWindow.isOpen ? AMBER : GRAY500} textAlign="center" fontWeight={600}>
+                        {evaluationWindow.label}
+                      </Text>
                     </Box>
                   )}
 

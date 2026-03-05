@@ -3102,6 +3102,18 @@ class ChatViewSet(viewsets.ViewSet):
         for handshake in handshakes:
             # Get last message from prefetched data
             last_message = handshake.last_message_list[0] if handshake.last_message_list else None
+
+            window_start = handshake.evaluation_window_starts_at
+            window_end = handshake.evaluation_window_ends_at
+            if window_start is None or window_end is None:
+                if handshake.service.type == 'Event':
+                    window_start = handshake.service.event_completed_at or handshake.service.updated_at
+                else:
+                    window_start = handshake.updated_at
+
+                if window_start is not None:
+                    window_hours = getattr(settings, 'FEEDBACK_WINDOW_HOURS', settings.EVENT_FEEDBACK_WINDOW_HOURS)
+                    window_end = window_start + timedelta(hours=window_hours)
             
             from .utils import get_provider_and_receiver
             provider, receiver = get_provider_and_receiver(handshake)
@@ -3129,8 +3141,9 @@ class ChatViewSet(viewsets.ViewSet):
                 'is_provider': is_provider,
                 'provider_initiated': handshake.provider_initiated,
                 'requester_initiated': handshake.requester_initiated,
-                'evaluation_window_starts_at': handshake.evaluation_window_starts_at.isoformat() if handshake.evaluation_window_starts_at else None,
-                'evaluation_window_ends_at': handshake.evaluation_window_ends_at.isoformat() if handshake.evaluation_window_ends_at else None,
+                'updated_at': handshake.updated_at.isoformat() if handshake.updated_at else None,
+                'evaluation_window_starts_at': window_start.isoformat() if window_start else None,
+                'evaluation_window_ends_at': window_end.isoformat() if window_end else None,
                 'evaluation_window_closed_at': handshake.evaluation_window_closed_at.isoformat() if handshake.evaluation_window_closed_at else None,
                 'exact_location': handshake.exact_location,
                 'exact_duration': float(handshake.exact_duration) if handshake.exact_duration else None,

@@ -102,7 +102,16 @@ function getEvaluationWindowState(conv: ChatConversation): EvaluationWindowState
   }
 
   if (deadlineMs == null) {
-    return { isPending: true, isClosed: false, timeLeftLabel: 'Time left unavailable' }
+    if (conv.updated_at) {
+      const updatedMs = new Date(conv.updated_at).getTime()
+      if (!Number.isNaN(updatedMs)) {
+        deadlineMs = updatedMs + (48 * 60 * 60 * 1000)
+      }
+    }
+  }
+
+  if (deadlineMs == null) {
+    return { isPending: true, isClosed: false, timeLeftLabel: '48h window active' }
   }
 
   const msLeft = deadlineMs - Date.now()
@@ -201,7 +210,7 @@ function ConvRow({
     ? AMBER
     : (evalWindow.isClosed ? GRAY400 : (STATUS_DOT_COLOR[conv.status] ?? GRAY400))
   const label = evalWindow.isPending
-    ? 'Evaluation Waiting'
+    ? 'Evaluation Pending'
     : (evalWindow.isClosed ? 'Evaluation Closed' : (STATUS_LABEL[conv.status] ?? conv.status))
   const lm    = conv.last_message
   const myService = isServiceOwner(conv)
@@ -428,9 +437,16 @@ function ConversationSidebar({
   const filtered = tab === 'my_services' ? myServices : tab === 'my_interests' ? myInterests : conversations
 
   const active = filtered.filter((c) => ACTIVE_STATUSES.has(c.status))
-  const closed = filtered.filter((c) => CLOSED_STATUSES.has(c.status))
+  const evaluationPending = filtered.filter(
+    (c) => c.status === 'completed' && getEvaluationWindowState(c).isPending,
+  )
+  const evaluationPendingIds = new Set(evaluationPending.map((c) => c.handshake_id))
+  const closed = filtered.filter(
+    (c) => CLOSED_STATUSES.has(c.status) && !evaluationPendingIds.has(c.handshake_id),
+  )
 
   const activeGroups = groupByService(active)
+  const evaluationPendingGroups = groupByService(evaluationPending)
   const closedGroups = groupByService(closed)
 
   if (isLoading && conversations.length === 0) {
@@ -542,6 +558,36 @@ function ConversationSidebar({
         </Box>
       )}
 
+      {/* Evaluation Pending section */}
+      {evaluationPending.length > 0 && (
+        <Box>
+          <Box
+            px={4} py="8px" bg={GRAY50}
+            borderTop={active.length > 0 ? `1px solid ${GRAY200}` : 'none'}
+            borderBottom={`1px solid ${GRAY200}`}
+          >
+            <Flex align="center" gap={2}>
+              <Box w="7px" h="7px" borderRadius="full" bg={AMBER} />
+              <Text fontSize="11px" fontWeight={700} color={AMBER} textTransform="uppercase" letterSpacing="0.06em">
+                Evaluation Pending · {evaluationPending.length}
+              </Text>
+            </Flex>
+          </Box>
+          {Array.from(evaluationPendingGroups.entries()).map(([title, convs]) => (
+            <ServiceGroup
+              key={title}
+              title={title}
+              convs={convs}
+              selectedId={selectedId}
+              selectedGroupServiceId={selectedGroupServiceId}
+              onSelect={onSelect}
+              onSelectGroup={onSelectGroup}
+              defaultOpen={convs.some((c) => c.handshake_id === selectedId) || evaluationPendingGroups.size === 1}
+            />
+          ))}
+        </Box>
+      )}
+
       {/* Closed section toggle */}
       {closed.length > 0 && (
         <Box>
@@ -560,7 +606,7 @@ function ConversationSidebar({
               </Box>
               <Box w="7px" h="7px" borderRadius="full" bg={GRAY400} flexShrink={0} />
               <Text fontSize="11px" fontWeight={700} color={GRAY500} textTransform="uppercase" letterSpacing="0.06em">
-                Closed · {closed.length}
+                Completed / Closed · {closed.length}
               </Text>
             </Flex>
           </Box>
@@ -1330,7 +1376,10 @@ export default function ChatPage() {
     setConversations(filtered)
     // Auto-select first active conversation only when nothing is selected yet
     if (!selectedIdRef.current && !paramIdRef.current && filtered.length > 0) {
-      const first = filtered.find((c) => ACTIVE_STATUSES.has(c.status)) ?? filtered[0]
+      const first =
+        filtered.find((c) => ACTIVE_STATUSES.has(c.status))
+        ?? filtered.find((c) => c.status === 'completed' && getEvaluationWindowState(c).isPending)
+        ?? filtered[0]
       setSelectedId(first.handshake_id)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

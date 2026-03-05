@@ -49,6 +49,7 @@ export interface ChatConversation {
   receiver_confirmed_complete: boolean
   provider_initiated: boolean
   requester_initiated: boolean
+  updated_at: string | null
   evaluation_window_starts_at: string | null
   evaluation_window_ends_at: string | null
   evaluation_window_closed_at: string | null
@@ -88,7 +89,7 @@ export const conversationAPI = {
   listConversations: async (signal?: AbortSignal): Promise<ChatConversation[]> => {
     const res = await apiClient.get<ChatConversation[] | { results: ChatConversation[] }>(
       '/chats/',
-      { signal },
+      { signal, params: { force: 1 } },
     )
     const data = res.data
     return Array.isArray(data) ? data : (data.results ?? [])
