@@ -195,7 +195,7 @@ class TestGroupChatBlocksEvents:
 
 # ─── PublicChatConsumer.check_event_access (sync inner) ───────────────────────
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.unit
 class TestPublicChatConsumerEventAccess:
     """Unit tests for PublicChatConsumer.check_event_access database method.
