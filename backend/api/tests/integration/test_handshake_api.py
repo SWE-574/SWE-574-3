@@ -93,6 +93,43 @@ class TestHandshakeViewSet:
         assert response.status_code == status.HTTP_200_OK
         assert isinstance(response.data, list)
         assert len(response.data) == 3
+
+    def test_list_handshakes_includes_user_has_reviewed(self):
+        """GET /api/handshakes/ includes user_has_reviewed; True after current user submits review"""
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        now = timezone.now()
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=now - timedelta(hours=1),
+            evaluation_window_ends_at=now + timedelta(hours=47),
+            evaluation_window_closed_at=None,
+        )
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+
+        response = client.get('/api/handshakes/')
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) >= 1
+        h = next((x for x in response.data if str(x['id']) == str(handshake.id)), None)
+        assert h is not None
+        assert 'user_has_reviewed' in h
+        assert h['user_has_reviewed'] is False
+
+        client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': True,
+            'kindness': True,
+        })
+        response2 = client.get('/api/handshakes/')
+        assert response2.status_code == status.HTTP_200_OK
+        h2 = next((x for x in response2.data if str(x['id']) == str(handshake.id)), None)
+        assert h2 is not None
+        assert h2['user_has_reviewed'] is True
     
     def test_initiate_handshake(self):
         """Test provider initiating handshake"""
