@@ -82,7 +82,7 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.prod
+      target: production
       args:
         - VITE_API_URL=/api
         - VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN}

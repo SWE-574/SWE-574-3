@@ -73,7 +73,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: frontend
-          file: frontend/Dockerfile.prod
+          file: frontend/Dockerfile
+          target: production
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
