@@ -33,6 +33,7 @@ import { handshakeAPI, type InitiatePayload } from '@/services/handshakeAPI'
 import { HandshakeDetailsModal } from '@/components/HandshakeDetailsModal'
 import { ProviderDetailsModal } from '@/components/ProviderDetailsModal'
 import { ServiceConfirmationModal } from '@/components/ServiceConfirmationModal'
+import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 
 import {
   GREEN, GREEN_LT, GREEN_MD,
@@ -603,7 +604,7 @@ function HsStepBar({ conv }: { conv: ChatConversation }) {
 // ─── Action Card ──────────────────────────────────────────────────────────────
 
 function ActionCard({
-  conv, onInitiate, onShowApprove, onConfirm, onCancel, isCancelling,
+  conv, onInitiate, onShowApprove, onConfirm, onCancel, isCancelling, onOpenEvaluation,
 }: {
   conv: ChatConversation
   onInitiate: () => void
@@ -611,6 +612,7 @@ function ActionCard({
   onConfirm: () => void
   onCancel: () => Promise<void>
   isCancelling: boolean
+  onOpenEvaluation: () => void
 }) {
   const {
     status, is_provider, provider_initiated,
@@ -627,21 +629,35 @@ function ActionCard({
   if (!['pending', 'accepted', 'completed'].includes(status)) return null
 
   if (status === 'completed') {
+    const canEvaluate = conv.service_type?.toLowerCase() !== 'event' && !conv.user_has_reviewed
+
     return (
       <Box mx={4} my="10px" p={4} borderRadius="14px" bg={BLUE_LT} border={`1px solid #BFDBFE`}>
-        <Flex align="center" gap={3}>
-          <Box
-            w="34px" h="34px" borderRadius="full" flexShrink={0}
-            bg={BLUE} color={WHITE}
-            display="flex" alignItems="center" justifyContent="center"
-          >
-            <FiCheck size={14} strokeWidth={3} />
-          </Box>
-          <Box>
-            <Text fontSize="13px" fontWeight={700} color={BLUE}>Service Completed</Text>
-            <Text fontSize="12px" color="#3B82F6">TimeBank hours transferred successfully.</Text>
-          </Box>
+        <Flex align="center" justify="space-between" gap={3} flexWrap="wrap">
+          <Flex align="center" gap={3}>
+            <Box
+              w="34px" h="34px" borderRadius="full" flexShrink={0}
+              bg={BLUE} color={WHITE}
+              display="flex" alignItems="center" justifyContent="center"
+            >
+              <FiCheck size={14} strokeWidth={3} />
+            </Box>
+            <Box>
+              <Text fontSize="13px" fontWeight={700} color={BLUE}>Service Completed</Text>
+              <Text fontSize="12px" color="#3B82F6">TimeBank hours transferred successfully.</Text>
+            </Box>
+          </Flex>
+          {canEvaluate ? (
+            <CTA label="Leave Evaluation" bg={BLUE} onClick={onOpenEvaluation} />
+          ) : conv.user_has_reviewed ? (
+            <Text fontSize="12px" fontWeight={700} color={GREEN}>Evaluation submitted</Text>
+          ) : null}
         </Flex>
+        {canEvaluate && (
+          <Text fontSize="11px" color={GRAY500} mt={2}>
+            Your feedback updates your counterpart's karma score.
+          </Text>
+        )}
       </Box>
     )
   }
@@ -1182,6 +1198,7 @@ export default function ChatPage() {
   const [showInitiateModal, setShowInitiateModal] = useState(false)
   const [showApproveModal,  setShowApproveModal]  = useState(false)
   const [showConfirmModal,  setShowConfirmModal]  = useState(false)
+  const [showEvaluationModal, setShowEvaluationModal] = useState(false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLTextAreaElement>(null)
@@ -1565,6 +1582,7 @@ export default function ChatPage() {
                 onConfirm={() => setShowConfirmModal(true)}
                 onCancel={handleCancel}
                 isCancelling={isCancelling}
+                onOpenEvaluation={() => setShowEvaluationModal(true)}
               />
 
               {/* Messages */}
@@ -1677,6 +1695,18 @@ export default function ChatPage() {
           onConfirm={handleConfirm}
           provisioned_hours={selectedConv.provisioned_hours ?? undefined}
           other_user_name={selectedConv.other_user.name}
+        />
+      )}
+      {selectedConv && selectedId && (
+        <ServiceEvaluationModal
+          isOpen={showEvaluationModal}
+          onClose={() => setShowEvaluationModal(false)}
+          handshakeId={selectedId}
+          counterpartName={selectedConv.other_user.name}
+          alreadyReviewed={selectedConv.user_has_reviewed}
+          onSubmitted={async () => {
+            refreshConversations()
+          }}
         />
       )}
     </Box>

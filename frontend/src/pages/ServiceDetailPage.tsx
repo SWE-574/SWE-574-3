@@ -14,6 +14,7 @@ import { handshakeAPI } from '@/services/handshakeAPI'
 import { MapView } from '@/components/MapView'
 import EventRosterModal from '@/components/EventRosterModal'
 import EventChatModal from '@/components/EventChatModal'
+import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
   spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
@@ -373,6 +374,7 @@ export default function ServiceDetailPage() {
   const [showEventChat, setShowEventChat]   = useState(false)
   const [completing, setCompleting]         = useState(false)
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null)
+  const [showEvaluationModal, setShowEvaluationModal] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -418,6 +420,18 @@ export default function ServiceDetailPage() {
   const myHandshake = handshakes.find((h) => exId(h.service) === service?.id && exId(h.requester) === user?.id)
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
+  const currentUserId = user?.id ?? null
+  const completedHandshakes = !isEvent && !!currentUserId
+    ? handshakes.filter((h) =>
+      exId(h.service) === service?.id
+      && h.status === 'completed'
+      && (isOwn ? exId(h.requester) !== currentUserId : exId(h.requester) === currentUserId)
+    )
+    : []
+  const evaluationHandshake = completedHandshakes[0]
+  const evaluationCounterpartName = evaluationHandshake
+    ? (isOwn ? evaluationHandshake.requester_name : evaluationHandshake.provider_name)
+    : 'counterpart'
 
   // Event-specific derived value — must come after exId / isEvent
   const myEventHandshake = isEvent
@@ -526,6 +540,20 @@ export default function ServiceDetailPage() {
       toast.error(err.response?.data?.detail ?? 'Could not mark attendance.')
     } finally {
       setMarkingAttendedId(null)
+    }
+  }
+
+  const handleEvaluationSubmitted = async () => {
+    if (!service) return
+    try {
+      const [freshService, freshHandshakes] = await Promise.all([
+        serviceAPI.get(service.id),
+        handshakeAPI.list(),
+      ])
+      setService(freshService)
+      setHandshakes(freshHandshakes)
+    } catch {
+      // Keep current UI state; submission success is already acknowledged in modal.
     }
   }
 
@@ -1307,6 +1335,19 @@ export default function ServiceDetailPage() {
                     </Stack>
                   )}
 
+                  {isAuthenticated && evaluationHandshake && (
+                    <Box mt={4}>
+                      <Box as="button" w="full" py="12px" borderRadius="11px"
+                        bg={GREEN_LT} color={GREEN} fontSize="14px" fontWeight={700}
+                        display="flex" alignItems="center" justifyContent="center" gap="7px"
+                        onClick={() => setShowEvaluationModal(true)}
+                        style={{ border: `1px solid ${BLUE}40`, cursor: 'pointer' }}
+                      >
+                        <FiStar size={14} /> Leave Evaluation
+                      </Box>
+                    </Box>
+                  )}
+
                   {/* Report */}
                   {isAuthenticated && !isOwn && (
                     <Box textAlign="center" mt={4} pt={4} borderTop={`1px solid ${GRAY100}`}>
@@ -1372,6 +1413,15 @@ export default function ServiceDetailPage() {
           completing={completing}
         />
       )}
+      {evaluationHandshake && (
+        <ServiceEvaluationModal
+          isOpen={showEvaluationModal}
+          onClose={() => setShowEvaluationModal(false)}
+          handshakeId={evaluationHandshake.id}
+          counterpartName={evaluationCounterpartName}
+          onSubmitted={handleEvaluationSubmitted}
+        />
+      )}
 
       {showEventChat && service && (
         <EventChatModal
@@ -1380,6 +1430,7 @@ export default function ServiceDetailPage() {
           service={service}
         />
       )}
+
     </Box>
   )
 }

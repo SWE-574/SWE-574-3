@@ -244,9 +244,40 @@ export interface Transaction {
 export interface ReputationData {
   punctual?: boolean
   helpful?: boolean
-  kind?: boolean
+  kindness?: boolean
   handshake_id: string
-  recipient_id: string
+  comment?: string
+}
+
+export interface NegativeReputationData {
+  handshake_id: string
+  is_late?: boolean
+  is_unhelpful?: boolean
+  is_rude?: boolean
+  comment?: string
+}
+
+export interface ReputationResponse {
+  id: string
+  handshake: string
+  giver: string
+  giver_name: string
+  receiver: string
+  receiver_name: string
+  comment?: string | null
+  created_at: string
+}
+
+export interface PositiveReputationResponse extends ReputationResponse {
+  is_punctual: boolean
+  is_helpful: boolean
+  is_kind: boolean
+}
+
+export interface NegativeReputationResponse extends ReputationResponse {
+  is_late: boolean
+  is_unhelpful: boolean
+  is_rude: boolean
 }
 
 // ─── Admin Types ──────────────────────────────────────────────────────────────
