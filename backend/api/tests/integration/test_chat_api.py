@@ -405,3 +405,67 @@ class TestGroupChatViewSet:
             format='json',
         )
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # ── Event group chat  ─────────────────────────────────────────────────────
+
+    def test_event_organizer_can_access_group_chat(self):
+        """Event organizer can read the group chat."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, type='Event', schedule_type='One-Time',
+            max_participants=10, status='Active',
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_event_checked_in_participant_can_access_group_chat(self):
+        """A checked-in event participant can access group chat."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, type='Event', schedule_type='One-Time',
+            max_participants=10, status='Active',
+        )
+        participant = UserFactory()
+        HandshakeFactory(service=service, requester=participant, status='checked_in')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_event_attended_participant_can_access_group_chat(self):
+        """An attended event participant can access group chat."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, type='Event', schedule_type='One-Time',
+            max_participants=10, status='Active',
+        )
+        participant = UserFactory()
+        HandshakeFactory(service=service, requester=participant, status='attended')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_event_cancelled_participant_cannot_access_group_chat(self):
+        """A cancelled event participant cannot access group chat."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, type='Event', schedule_type='One-Time',
+            max_participants=10, status='Active',
+        )
+        participant = UserFactory()
+        HandshakeFactory(service=service, requester=participant, status='cancelled')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
