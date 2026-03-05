@@ -354,6 +354,34 @@ def _validate_event_feedback_window(service: Service) -> tuple[bool, str | None]
 
     return True, None
 
+
+def _validate_feedback_window(handshake: Handshake) -> tuple[bool, str | None]:
+    """Validate whether a handshake is still inside the feedback window."""
+    starts_at = getattr(handshake, 'evaluation_window_starts_at', None)
+    ends_at = getattr(handshake, 'evaluation_window_ends_at', None)
+    closed_at = getattr(handshake, 'evaluation_window_closed_at', None)
+
+    # Prefer explicit handshake-level window fields when available.
+    if starts_at and ends_at:
+        if closed_at is not None or timezone.now() > ends_at:
+            return False, 'The 48-hour evaluation window has closed.'
+        return True, None
+
+    # Backward-compatible fallback for records created before handshake window fields.
+    if handshake.service.type == 'Event':
+        return _validate_event_feedback_window(handshake.service)
+
+    # Standard service fallback: use handshake completion/update time as the start.
+    fallback_start = handshake.updated_at
+    if fallback_start is None:
+        return False, 'Evaluation window is unavailable for this handshake.'
+
+    window_hours = getattr(settings, 'FEEDBACK_WINDOW_HOURS', settings.EVENT_FEEDBACK_WINDOW_HOURS)
+    fallback_end = fallback_start + timedelta(hours=window_hours)
+    if timezone.now() > fallback_end:
+        return False, 'The 48-hour evaluation window has closed.'
+    return True, None
+
 class CustomTokenRefreshView(TokenRefreshView):
     """Custom token refresh: reads refresh token from cookie (or body), sets new cookies."""
 
@@ -2696,6 +2724,13 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         if handshake.provider_confirmed_complete and handshake.receiver_confirmed_complete:
             with transaction.atomic():
                 complete_timebank_transfer(handshake)
+                window_start = timezone.now()
+                Handshake.objects.filter(id=handshake.id).update(
+                    evaluation_window_starts_at=window_start,
+                    evaluation_window_ends_at=window_start + timedelta(hours=settings.FEEDBACK_WINDOW_HOURS),
+                    evaluation_window_closed_at=None,
+                )
+                handshake.refresh_from_db(fields=['status', 'evaluation_window_starts_at', 'evaluation_window_ends_at', 'evaluation_window_closed_at'])
                 create_notification(
                     user=handshake.service.user,
                     notification_type='positive_rep',
@@ -3094,6 +3129,9 @@ class ChatViewSet(viewsets.ViewSet):
                 'is_provider': is_provider,
                 'provider_initiated': handshake.provider_initiated,
                 'requester_initiated': handshake.requester_initiated,
+                'evaluation_window_starts_at': handshake.evaluation_window_starts_at.isoformat() if handshake.evaluation_window_starts_at else None,
+                'evaluation_window_ends_at': handshake.evaluation_window_ends_at.isoformat() if handshake.evaluation_window_ends_at else None,
+                'evaluation_window_closed_at': handshake.evaluation_window_closed_at.isoformat() if handshake.evaluation_window_closed_at else None,
                 'exact_location': handshake.exact_location,
                 'exact_duration': float(handshake.exact_duration) if handshake.exact_duration else None,
                 'scheduled_time': handshake.scheduled_time.isoformat() if handshake.scheduled_time else None,
@@ -3375,14 +3413,13 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_404_NOT_FOUND
             )
 
-        if handshake.service.type == 'Event':
-            in_window, window_error = _validate_event_feedback_window(handshake.service)
-            if not in_window:
-                return create_error_response(
-                    window_error,
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
+        in_window, window_error = _validate_feedback_window(handshake)
+        if not in_window:
+            return create_error_response(
+                window_error,
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_410_GONE
+            )
 
         user = request.user
         
@@ -4662,14 +4699,13 @@ class NegativeRepViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_404_NOT_FOUND
             )
 
-        if handshake.service.type == 'Event':
-            in_window, window_error = _validate_event_feedback_window(handshake.service)
-            if not in_window:
-                return create_error_response(
-                    window_error,
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
+        in_window, window_error = _validate_feedback_window(handshake)
+        if not in_window:
+            return create_error_response(
+                window_error,
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_410_GONE
+            )
 
         user = request.user
         

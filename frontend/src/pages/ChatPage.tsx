@@ -74,6 +74,52 @@ function fmtDateTime(iso: string) {
   } catch { return iso }
 }
 
+type EvaluationWindowState = {
+  isPending: boolean
+  isClosed: boolean
+  timeLeftLabel: string | null
+}
+
+function getEvaluationWindowState(conv: ChatConversation): EvaluationWindowState {
+  const isStandardService = conv.service_type?.toLowerCase() !== 'event'
+  const isEligible = conv.status === 'completed' && isStandardService && !conv.user_has_reviewed
+
+  if (!isEligible) {
+    return { isPending: false, isClosed: false, timeLeftLabel: null }
+  }
+
+  if (conv.evaluation_window_closed_at) {
+    return { isPending: false, isClosed: true, timeLeftLabel: null }
+  }
+
+  let deadlineMs: number | null = null
+  if (conv.evaluation_window_ends_at) {
+    const parsed = new Date(conv.evaluation_window_ends_at).getTime()
+    if (!Number.isNaN(parsed)) deadlineMs = parsed
+  } else if (conv.evaluation_window_starts_at) {
+    const start = new Date(conv.evaluation_window_starts_at).getTime()
+    if (!Number.isNaN(start)) deadlineMs = start + (48 * 60 * 60 * 1000)
+  }
+
+  if (deadlineMs == null) {
+    return { isPending: true, isClosed: false, timeLeftLabel: 'Time left unavailable' }
+  }
+
+  const msLeft = deadlineMs - Date.now()
+  if (msLeft <= 0) {
+    return { isPending: false, isClosed: true, timeLeftLabel: null }
+  }
+
+  const totalMinutes = Math.ceil(msLeft / 60_000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return {
+    isPending: true,
+    isClosed: false,
+    timeLeftLabel: `${hours}h ${minutes}m left`,
+  }
+}
+
 function initials(name: string): string {
   return name.split(' ').map((p) => p[0] ?? '').join('').toUpperCase().slice(0, 2)
 }
@@ -150,8 +196,13 @@ function isServiceOwner(conv: ChatConversation): boolean {
 function ConvRow({
   conv, isSelected, onClick,
 }: { conv: ChatConversation; isSelected: boolean; onClick: () => void }) {
-  const dot   = STATUS_DOT_COLOR[conv.status] ?? GRAY400
-  const label = STATUS_LABEL[conv.status] ?? conv.status
+  const evalWindow = getEvaluationWindowState(conv)
+  const dot = evalWindow.isPending
+    ? AMBER
+    : (evalWindow.isClosed ? GRAY400 : (STATUS_DOT_COLOR[conv.status] ?? GRAY400))
+  const label = evalWindow.isPending
+    ? 'Evaluation Waiting'
+    : (evalWindow.isClosed ? 'Evaluation Closed' : (STATUS_LABEL[conv.status] ?? conv.status))
   const lm    = conv.last_message
   const myService = isServiceOwner(conv)
 
@@ -198,6 +249,11 @@ function ConvRow({
             <Box w="6px" h="6px" borderRadius="full" flexShrink={0} bg={dot} />
             <Text fontSize="11px" color={GRAY500} fontWeight={500}>{label}</Text>
           </Flex>
+          {evalWindow.isPending && evalWindow.timeLeftLabel && (
+            <Text fontSize="10px" color={AMBER} fontWeight={600} mt="1px">
+              {evalWindow.timeLeftLabel}
+            </Text>
+          )}
           {lm && (
             <Text fontSize="11px" color={GRAY400} mt="1px"
               style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -629,7 +685,8 @@ function ActionCard({
   if (!['pending', 'accepted', 'completed'].includes(status)) return null
 
   if (status === 'completed') {
-    const canEvaluate = conv.service_type?.toLowerCase() !== 'event' && !conv.user_has_reviewed
+    const evalWindow = getEvaluationWindowState(conv)
+    const canEvaluate = evalWindow.isPending
 
     return (
       <Box mx={4} my="10px" p={4} borderRadius="14px" bg={BLUE_LT} border={`1px solid #BFDBFE`}>
@@ -651,11 +708,13 @@ function ActionCard({
             <CTA label="Leave Evaluation" bg={BLUE} onClick={onOpenEvaluation} />
           ) : conv.user_has_reviewed ? (
             <Text fontSize="12px" fontWeight={700} color={GREEN}>Evaluation submitted</Text>
+          ) : evalWindow.isClosed ? (
+            <Text fontSize="12px" fontWeight={700} color={GRAY600}>Evaluation window closed</Text>
           ) : null}
         </Flex>
         {canEvaluate && (
-          <Text fontSize="11px" color={GRAY500} mt={2}>
-            Your feedback updates your counterpart's karma score.
+          <Text fontSize="11px" color={AMBER} mt={2} fontWeight={700}>
+            Evaluation Waiting: {evalWindow.timeLeftLabel ?? 'Time left unavailable'}
           </Text>
         )}
       </Box>

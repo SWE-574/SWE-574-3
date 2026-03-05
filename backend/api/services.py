@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from datetime import timedelta
+from django.conf import settings
 from django.db import transaction
 from django.db import models as django_models
 from django.db.models import Q
@@ -597,6 +598,14 @@ class EventHandshakeService:
             service.status = 'Completed'
             service.event_completed_at = timezone.now()
             service.save(update_fields=['status', 'event_completed_at', 'updated_at'])
+
+            window_start = service.event_completed_at
+            window_end = window_start + timedelta(hours=settings.FEEDBACK_WINDOW_HOURS)
+            Handshake.objects.filter(service=service, status='attended').update(
+                evaluation_window_starts_at=window_start,
+                evaluation_window_ends_at=window_end,
+                evaluation_window_closed_at=None,
+            )
 
     @staticmethod
     def cancel_event(service: Service, organizer: User) -> None:

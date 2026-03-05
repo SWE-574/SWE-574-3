@@ -1062,6 +1062,7 @@ class HandshakeSerializer(serializers.ModelSerializer):
             'provider_confirmed_complete', 'receiver_confirmed_complete',
             'exact_location', 'exact_duration', 'scheduled_time',
             'provider_initiated', 'requester_initiated',
+            'evaluation_window_starts_at', 'evaluation_window_ends_at', 'evaluation_window_closed_at',
             'created_at', 'updated_at'
         ]
 

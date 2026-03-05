@@ -487,6 +487,9 @@ LOGGING = {
     },
 }
 
-# Event feedback window (FR-F02f): attendees can evaluate organizers only within this
-# fixed number of hours after event completion.
-EVENT_FEEDBACK_WINDOW_HOURS = int(os.environ.get('EVENT_FEEDBACK_WINDOW_HOURS', '168'))
+
+# System-wide feedback window (FR-F03): evaluations are accepted for this
+# fixed number of hours after completion.
+FEEDBACK_WINDOW_HOURS = int(os.environ.get('FEEDBACK_WINDOW_HOURS', '48'))
+# Backward-compatible alias for existing event-specific reads.
+EVENT_FEEDBACK_WINDOW_HOURS = int(os.environ.get('EVENT_FEEDBACK_WINDOW_HOURS', str(FEEDBACK_WINDOW_HOURS)))
