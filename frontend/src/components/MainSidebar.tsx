@@ -198,8 +198,9 @@ export function MainSidebar({
             <Box as="button" flex={1} minW="58px" py="8px" borderRadius="9px"
               fontSize="12px" fontWeight={700}
               display="flex" alignItems="center" justifyContent="center" gap="4px"
-              style={{ background: '#FFFBEB', color: '#D97706', border: '1px solid #FDE68A' }}
-              onClick={() => navigate('/post-event')}>
+              bg="#FFFBEB" color="#D97706" border="1px solid #FDE68A"
+              onClick={() => navigate('/post-event')}
+              _hover={{ bg: '#FEF3C7' }}>
               <FiPlus size={12} /> Event
             </Box>
           </Flex>

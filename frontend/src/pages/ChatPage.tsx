@@ -1249,10 +1249,12 @@ export default function ChatPage() {
 
   const fetchConversations = useCallback(async (signal: AbortSignal) => {
     const data = await conversationAPI.listConversations(signal)
-    setConversations(data)
+    // Filter out event conversations — events use a dedicated Event Chat modal
+    const filtered = data.filter((c) => c.service_type !== 'Event')
+    setConversations(filtered)
     // Auto-select first active conversation only when nothing is selected yet
-    if (!selectedIdRef.current && !paramIdRef.current && data.length > 0) {
-      const first = data.find((c) => ACTIVE_STATUSES.has(c.status)) ?? data[0]
+    if (!selectedIdRef.current && !paramIdRef.current && filtered.length > 0) {
+      const first = filtered.find((c) => ACTIVE_STATUSES.has(c.status)) ?? filtered[0]
       setSelectedId(first.handshake_id)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -14,6 +14,24 @@ export interface ApiChatMessage {
   created_at: string
 }
 
+export interface PublicChatMessage {
+  id: string
+  room: string
+  sender_id: string
+  sender_name: string
+  sender_avatar_url: string | null
+  body: string
+  created_at: string
+}
+
+interface PublicChatRoom {
+  id: string
+  name: string
+  type: string
+  related_service: string | null
+  created_at: string
+}
+
 export interface ChatConversation {
   handshake_id: string
   service_id: string
@@ -124,10 +142,38 @@ export const groupChatAPI = {
   },
 }
 
+// ─── Event Chat API (public chat rooms) ───────────────────────────────────────
+
+export const eventChatAPI = {
+  /**
+   * GET /api/public-chat/{serviceId}/ — get room info and messages for an event.
+   * Returns { room, messages: { count, next, previous, results } }.
+   */
+  getMessages: async (serviceId: string, signal?: AbortSignal): Promise<{ room: PublicChatRoom; messages: PublicChatMessage[] }> => {
+    const res = await apiClient.get<{ room: PublicChatRoom; messages: { results: PublicChatMessage[] } }>(
+      `/public-chat/${serviceId}/`,
+      { signal },
+    )
+    return {
+      room: res.data.room,
+      messages: res.data.messages?.results ?? [],
+    }
+  },
+
+  /**
+   * POST /api/public-chat/{serviceId}/ — send a message to the event chat.
+   */
+  sendMessage: async (serviceId: string, body: string): Promise<PublicChatMessage> => {
+    const res = await apiClient.post<PublicChatMessage>(`/public-chat/${serviceId}/`, { body })
+    return res.data
+  },
+}
+
 // Both dev and prod connect to the current host; the WS upgrade is forwarded
 // by Vite's /ws proxy rule (dev) or Nginx (prod). This respects VITE_BACKEND_URL
 // without hard-coding a port and works in Docker / LAN setups.
 const wsBase = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
-export const buildChatWsUrl     = (id: string) => `${wsBase}/ws/chat/${id}/`
+export const buildChatWsUrl      = (id: string) => `${wsBase}/ws/chat/${id}/`
 export const buildGroupChatWsUrl = (id: string) => `${wsBase}/ws/group-chat/${id}/`
+export const buildEventChatWsUrl = (roomId: string) => `${wsBase}/ws/public-chat/${roomId}/`

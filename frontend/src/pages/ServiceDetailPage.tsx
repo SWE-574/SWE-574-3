@@ -13,6 +13,7 @@ import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { MapView } from '@/components/MapView'
 import EventRosterModal from '@/components/EventRosterModal'
+import EventChatModal from '@/components/EventChatModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
   spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
@@ -369,6 +370,7 @@ export default function ServiceDetailPage() {
   const [checkinLoading, setCheckinLoading] = useState(false)
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [showRoster, setShowRoster]         = useState(false)
+  const [showEventChat, setShowEventChat]   = useState(false)
   const [completing, setCompleting]         = useState(false)
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null)
 
@@ -960,6 +962,16 @@ export default function ServiceDetailPage() {
                     )}
 
                     <Box as="button" w="full" py="11px" borderRadius="10px"
+                      bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                      display="flex" alignItems="center" justifyContent="center" gap="7px"
+                      onClick={() => setShowEventChat(true)}
+                      style={{ border: 'none', cursor: 'pointer' }}
+                      _hover={{ opacity: 0.9 }}
+                    >
+                      <FiMessageSquare size={14} /> Event Chat
+                    </Box>
+
+                    <Box as="button" w="full" py="11px" borderRadius="10px"
                       bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
                       display="flex" alignItems="center" justifyContent="center" gap="7px"
                       onClick={() => setShowRoster(true)}
@@ -1012,6 +1024,15 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
+                      <Box as="button" w="full" py="11px" borderRadius="10px"
+                        bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                        display="flex" alignItems="center" justifyContent="center" gap="7px"
+                        onClick={() => setShowEventChat(true)}
+                        style={{ border: 'none', cursor: 'pointer' }}
+                        _hover={{ opacity: 0.9 }}
+                      >
+                        <FiMessageSquare size={14} /> Event Chat
+                      </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'attended' ? (
                     <Stack gap={3}>
@@ -1025,6 +1046,15 @@ export default function ServiceDetailPage() {
                             The organizer marked you as attended.
                           </Text>
                         </Box>
+                      </Box>
+                      <Box as="button" w="full" py="11px" borderRadius="10px"
+                        bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                        display="flex" alignItems="center" justifyContent="center" gap="7px"
+                        onClick={() => setShowEventChat(true)}
+                        style={{ border: 'none', cursor: 'pointer' }}
+                        _hover={{ opacity: 0.9 }}
+                      >
+                        <FiMessageSquare size={14} /> Event Chat
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'accepted' && isFutureEvent(service.scheduled_time) ? (
@@ -1058,6 +1088,15 @@ export default function ServiceDetailPage() {
                           {leaveLoading ? 'Leaving…' : 'Leave Event'}
                         </Box>
                       )}
+                      <Box as="button" w="full" py="11px" borderRadius="10px"
+                        bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                        display="flex" alignItems="center" justifyContent="center" gap="7px"
+                        onClick={() => setShowEventChat(true)}
+                        style={{ border: 'none', cursor: 'pointer' }}
+                        _hover={{ opacity: 0.9 }}
+                      >
+                        <FiMessageSquare size={14} /> Event Chat
+                      </Box>
                     </Stack>
                   ) : !isFutureEvent(service.scheduled_time) ? (
                     /* Past event */
@@ -1331,6 +1370,14 @@ export default function ServiceDetailPage() {
           onMarkAttended={handleMarkAttended}
           markingHandshakeId={markingAttendedId}
           completing={completing}
+        />
+      )}
+
+      {showEventChat && service && (
+        <EventChatModal
+          isOpen={showEventChat}
+          onClose={() => setShowEventChat(false)}
+          service={service}
         />
       )}
     </Box>

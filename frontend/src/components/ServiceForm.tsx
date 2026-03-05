@@ -531,7 +531,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
             <Box>
               <Label required>Title</Label>
               <Input
-                placeholder={type === 'Offer' ? 'e.g. Guitar lessons for beginners' : 'e.g. Need help moving furniture'}
+                placeholder={type === 'Event' ? 'e.g. Weekend hiking meetup' : type === 'Offer' ? 'e.g. Guitar lessons for beginners' : 'e.g. Need help moving furniture'}
                 {...register('title')}
                 style={inputStyle}
                 _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
@@ -542,7 +542,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
             <Box>
               <Label required>Description</Label>
               <Textarea
-                placeholder="Describe what you're offering or what you need in detail…"
+                placeholder={type === 'Event' ? 'Describe your event, what participants can expect…' : "Describe what you're offering or what you need in detail…"}
                 rows={4}
                 {...register('description')}
                 style={{ ...inputStyle, resize: 'vertical' }}
@@ -570,7 +570,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
                 <ErrTxt msg={errors.duration?.message} />
               </Box>
               <Box>
-                <Label required>{type === 'Offer' ? 'Max participants' : 'Helpers needed'}</Label>
+                <Label required>{type === 'Need' ? 'Helpers needed' : 'Max participants'}</Label>
                 <Input
                   type="number" min={1} max={100} placeholder="1"
                   {...register('max_participants')}
