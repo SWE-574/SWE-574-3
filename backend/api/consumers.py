@@ -395,11 +395,14 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
         try:
             from .models import Service
             service = Service.objects.select_related('user').get(id=service_id)
-            if service.schedule_type != 'One-Time' or service.max_participants <= 1:
+            is_event = service.type == 'Event'
+            is_group_service = service.schedule_type == 'One-Time' and service.max_participants > 1
+            if not is_event and not is_group_service:
                 return False
             if service.user == user:
                 return True
-            return Handshake.objects.filter(service=service, requester=user, status='accepted').exists()
+            active_statuses = ['accepted', 'checked_in', 'attended'] if is_event else ['accepted']
+            return Handshake.objects.filter(service=service, requester=user, status__in=active_statuses).exists()
         except Exception:
             return False
 

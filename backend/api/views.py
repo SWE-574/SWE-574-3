@@ -925,7 +925,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         else:
             services_prefetch = Prefetch(
                 'services',
-                queryset=Service.objects.filter(is_visible=True).prefetch_related('tags')
+                queryset=Service.objects.filter(is_visible=True).exclude(status='Cancelled').prefetch_related('tags')
             )
 
         return (
@@ -1501,23 +1501,22 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if instance.user != request.user and getattr(request.user, 'role', None) != 'admin':
             raise PermissionDenied('Attempting to delete another user\'s service')
 
-        if instance.handshakes.exists():
+        active_handshakes = instance.handshakes.filter(
+            status__in=['pending', 'accepted', 'checked_in', 'attended']
+        )
+        if active_handshakes.exists():
             return create_error_response(
-                'Cannot delete this service because it already has at least one handshake.',
+                'Cannot remove this service because it has active handshakes. Cancel or complete those first.',
                 code=ErrorCodes.INVALID_STATE,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    
-    def perform_destroy(self, instance):
-        if instance.user != self.request.user and getattr(self.request.user, 'role', None) != 'admin':
-            raise PermissionDenied('Attempting to delete another user\'s service')
-
-        super().perform_destroy(instance)
+        # Soft-delete: mark as Cancelled instead of removing the row.
+        instance.status = 'Cancelled'
+        instance.save(update_fields=['status', 'updated_at'])
         invalidate_service_lists()
         invalidate_user_services(str(instance.user.id))
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['post'], url_path='toggle-visibility')
     def toggle_visibility(self, request, pk=None):
@@ -4320,17 +4319,21 @@ class GroupChatViewSet(viewsets.ViewSet):
             from rest_framework.exceptions import NotFound
             raise NotFound('Service not found')
 
-        if service.schedule_type != 'One-Time' or service.max_participants <= 1:
+        is_event = service.type == 'Event'
+        is_group_service = service.schedule_type == 'One-Time' and service.max_participants > 1
+        if not is_event and not is_group_service:
             from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Group chat is only available for one-time group services')
+            raise PermissionDenied('Group chat is only available for events or one-time group services')
 
         user = request.user
         is_owner = service.user == user
-        has_accepted = Handshake.objects.filter(
-            service=service, requester=user, status='accepted'
+        # Events use additional active statuses beyond 'accepted'
+        active_statuses = ['accepted', 'checked_in', 'attended'] if is_event else ['accepted']
+        has_access = Handshake.objects.filter(
+            service=service, requester=user, status__in=active_statuses
         ).exists()
 
-        if not is_owner and not has_accepted:
+        if not is_owner and not has_access:
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied('You must have an accepted handshake to join this group chat')
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, Flex, Text, Stack, Spinner } from '@chakra-ui/react'
 import {
   FiSend,
@@ -232,13 +232,19 @@ function ServiceGroup({
   }, [hasSelected])
 
   // Show group chat row when service is One-Time with max_participants > 1
-  // and at least one accepted handshake exists
+  // and at least one accepted handshake exists. Events always get group chat.
   const representativeConv = convs[0]
+  const isEvent = representativeConv?.service_type === 'Event'
   const isGroupEligible =
-    representativeConv?.schedule_type === 'One-Time' &&
-    representativeConv?.max_participants > 1
-  const hasAccepted = convs.some((c) => c.status === 'accepted')
-  const showGroupRow = isGroupEligible && hasAccepted
+    isEvent ||
+    (representativeConv?.schedule_type === 'One-Time' &&
+    representativeConv?.max_participants > 1)
+  const hasActiveParticipant = convs.some((c) =>
+    isEvent
+      ? ['accepted', 'checked_in', 'attended'].includes(c.status)
+      : c.status === 'accepted'
+  )
+  const showGroupRow = isGroupEligible && hasActiveParticipant
   const groupServiceId = representativeConv?.service_id ?? null
   const isGroupSelected = groupServiceId !== null && selectedGroupServiceId === groupServiceId
 
@@ -1161,6 +1167,8 @@ function EmptyThread() {
 
 export default function ChatPage() {
   const { handshakeId: paramId } = useParams<{ handshakeId?: string }>()
+  const [searchParams] = useSearchParams()
+  const groupParam = searchParams.get('group')
   const navigate = useNavigate()
   const { user, isAuthenticated } = useAuthStore()
   // WebSocket auth via Cookie only (Vite proxy forwards headers for /ws)
@@ -1202,6 +1210,16 @@ export default function ChatPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramId])
+
+  // Deep-link: ?group={serviceId} opens the group chat for that service
+  useEffect(() => {
+    if (groupParam && groupParam !== groupServiceId) {
+      setGroupServiceId(groupParam)
+      setSelectedId(null)
+      setMobileShowThread(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupParam])
 
   // Scroll to bottom — walk up to the first scrollable container and set scrollTop.
   // Using scrollIntoView would bubble up to body/html and shift the navbar.
@@ -1411,7 +1429,14 @@ export default function ChatPage() {
       refreshConversations()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      toast.error(err?.response?.data?.detail ?? 'Failed to cancel.')
+      const detail = err?.response?.data?.detail ?? ''
+      if (detail.toLowerCase().includes('only the service provider')) {
+        toast.error('Only the service provider can cancel this handshake.')
+      } else if (detail.toLowerCase().includes('only cancel accepted') || detail.toLowerCase().includes('can only cancel')) {
+        toast.error('Only accepted handshakes can be cancelled.')
+      } else {
+        toast.error(detail || 'Failed to cancel.')
+      }
     } finally {
       setIsCancelling(false)
     }

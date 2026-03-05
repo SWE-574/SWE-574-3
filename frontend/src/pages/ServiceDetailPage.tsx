@@ -368,6 +368,7 @@ export default function ServiceDetailPage() {
   const [leaveLoading, setLeaveLoading]     = useState(false)
   const [checkinLoading, setCheckinLoading] = useState(false)
   const [cancelLoading, setCancelLoading]   = useState(false)
+  const [removeLoading, setRemoveLoading]   = useState(false)
   const [showRoster, setShowRoster]         = useState(false)
   const [completing, setCompleting]         = useState(false)
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null)
@@ -544,6 +545,25 @@ export default function ServiceDetailPage() {
       const err = e as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail ?? 'Could not cancel event.')
     } finally { setCancelLoading(false) }
+  }
+
+  const handleRemoveListing = async () => {
+    if (!service || !isOwn) return
+    if (!window.confirm('Are you sure you want to remove this listing? This cannot be undone.')) return
+    setRemoveLoading(true)
+    try {
+      await serviceAPI.delete(service.id)
+      toast.success('Listing removed.')
+      navigate('/dashboard')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      const detail = err.response?.data?.detail ?? ''
+      if (detail.toLowerCase().includes('handshake')) {
+        toast.error("You can't remove this service because it has existing handshakes. Cancel or complete those first.")
+      } else {
+        toast.error(detail || 'Could not remove listing.')
+      }
+    } finally { setRemoveLoading(false) }
   }
 
   if (loading) return <LoadingSkeleton />
@@ -960,6 +980,15 @@ export default function ServiceDetailPage() {
                     )}
 
                     <Box as="button" w="full" py="11px" borderRadius="10px"
+                      bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                      display="flex" alignItems="center" justifyContent="center" gap="7px"
+                      onClick={() => navigate(`/messages?group=${service.id}`)}
+                      style={{ border: 'none', cursor: 'pointer' }}
+                    >
+                      <FiMessageSquare size={14} /> Event Chat
+                    </Box>
+
+                    <Box as="button" w="full" py="11px" borderRadius="10px"
                       bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
                       display="flex" alignItems="center" justifyContent="center" gap="7px"
                       onClick={() => setShowRoster(true)}
@@ -1012,6 +1041,14 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
+                      <Box as="button" w="full" py="11px" borderRadius="10px"
+                        bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                        display="flex" alignItems="center" justifyContent="center" gap="7px"
+                        onClick={() => navigate(`/messages?group=${service.id}`)}
+                        style={{ border: 'none', cursor: 'pointer' }}
+                      >
+                        <FiMessageSquare size={14} /> Event Chat
+                      </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'attended' ? (
                     <Stack gap={3}>
@@ -1025,6 +1062,14 @@ export default function ServiceDetailPage() {
                             The organizer marked you as attended.
                           </Text>
                         </Box>
+                      </Box>
+                      <Box as="button" w="full" py="11px" borderRadius="10px"
+                        bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                        display="flex" alignItems="center" justifyContent="center" gap="7px"
+                        onClick={() => navigate(`/messages?group=${service.id}`)}
+                        style={{ border: 'none', cursor: 'pointer' }}
+                      >
+                        <FiMessageSquare size={14} /> Event Chat
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'accepted' && isFutureEvent(service.scheduled_time) ? (
@@ -1058,6 +1103,14 @@ export default function ServiceDetailPage() {
                           {leaveLoading ? 'Leaving…' : 'Leave Event'}
                         </Box>
                       )}
+                      <Box as="button" w="full" py="11px" borderRadius="10px"
+                        bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                        display="flex" alignItems="center" justifyContent="center" gap="7px"
+                        onClick={() => navigate(`/messages?group=${service.id}`)}
+                        style={{ border: 'none', cursor: 'pointer' }}
+                      >
+                        <FiMessageSquare size={14} /> Event Chat
+                      </Box>
                     </Stack>
                   ) : !isFutureEvent(service.scheduled_time) ? (
                     /* Past event */
@@ -1191,6 +1244,18 @@ export default function ServiceDetailPage() {
                             )
                           })}
                         </Stack>
+                      )}
+
+                      {/* Remove-listing button (non-Event, Active, owner only) */}
+                      {service.status === 'Active' && (
+                        <Box as="button" w="full" py="10px" borderRadius="10px"
+                          bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="6px"
+                          onClick={handleRemoveListing}
+                          style={{ border: `1px solid ${RED}30`, cursor: removeLoading ? 'not-allowed' : 'pointer', opacity: removeLoading ? 0.65 : 1 }}
+                        >
+                          {removeLoading ? 'Removing…' : 'Remove Listing'}
+                        </Box>
                       )}
                     </Stack>
                   ) : isAuthenticated ? (
