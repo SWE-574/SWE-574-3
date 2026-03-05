@@ -1,8 +1,9 @@
 import { apiClient } from './api'
-import type { AdminComment, AdminMetrics, AdminReport, AdminUserSummary, PaginatedResponse } from '@/types'
+import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, PaginatedResponse } from '@/types'
 
 export type ReportStatusFilter = 'pending' | 'resolved' | 'dismissed'
 export type CommentStatusFilter = 'active' | 'removed' | 'all'
+export type AuditTargetFilter = 'user' | 'report' | 'handshake' | 'comment' | 'forum_topic' | 'all'
 export type ReportResolveAction =
   | 'confirm_no_show'
   | 'dismiss'
@@ -175,5 +176,25 @@ export const adminAPI = {
   restoreComment: async (id: string, signal?: AbortSignal): Promise<AdminComment> => {
     const res = await apiClient.post<AdminComment>(`/admin/comments/${id}/restore/`, {}, { signal })
     return res.data
+  },
+
+  getAuditLogs: async (
+    actionType?: string,
+    targetEntity: AuditTargetFilter = 'all',
+    page = 1,
+    pageSize = 20,
+    signal?: AbortSignal,
+  ): Promise<PaginatedResponse<AdminAuditLog>> => {
+    const res = await apiClient.get<PaginatedResponse<AdminAuditLog> | AdminAuditLog[]>('/admin/audit-logs/', {
+      params: {
+        action_type: actionType || undefined,
+        target_entity: targetEntity === 'all' ? undefined : targetEntity,
+        page,
+        page_size: pageSize,
+      },
+      signal,
+    })
+
+    return toPaginated(res.data)
   },
 }

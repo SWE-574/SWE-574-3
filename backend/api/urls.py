@@ -26,6 +26,7 @@ from .views import (
     AdminReportViewSet,
     AdminUserViewSet,
     AdminCommentViewSet,
+    AdminAuditLogViewSet,
     ExpressInterestView,
     TransactionHistoryViewSet,
     WikidataSearchView,
@@ -59,6 +60,7 @@ router.register(r'reputation', ReputationViewSet, basename='reputation')
 router.register(r'admin/reports', AdminReportViewSet, basename='admin-report')
 router.register(r'admin/users', AdminUserViewSet, basename='admin-user')
 router.register(r'admin/comments', AdminCommentViewSet, basename='admin-comment')
+router.register(r'admin/audit-logs', AdminAuditLogViewSet, basename='admin-audit-log')
 router.register(r'transactions', TransactionHistoryViewSet, basename='transaction')
 
 def health_check(request):
@@ -241,6 +243,10 @@ forum_topic_lock = ForumTopicViewSet.as_view({
     'post': 'lock'
 })
 
+forum_topic_report = ForumTopicViewSet.as_view({
+    'post': 'report'
+})
+
 forum_post_list_create = ForumPostViewSet.as_view({
     'get': 'list',
     'post': 'create'
@@ -249,6 +255,10 @@ forum_post_list_create = ForumPostViewSet.as_view({
 forum_post_detail = ForumPostViewSet.as_view({
     'patch': 'partial_update',
     'delete': 'destroy'
+})
+
+forum_post_report = ForumPostViewSet.as_view({
+    'post': 'report'
 })
 
 forum_post_recent = ForumPostViewSet.as_view({
@@ -298,8 +308,10 @@ urlpatterns = [
     path('forum/topics/<uuid:pk>/', forum_topic_detail, name='forum-topic-detail'),
     path('forum/topics/<uuid:pk>/pin/', forum_topic_pin, name='forum-topic-pin'),
     path('forum/topics/<uuid:pk>/lock/', forum_topic_lock, name='forum-topic-lock'),
+    path('forum/topics/<uuid:pk>/report/', forum_topic_report, name='forum-topic-report'),
     path('forum/topics/<uuid:topic_id>/posts/', forum_post_list_create, name='forum-post-list'),
     path('forum/posts/<uuid:pk>/', forum_post_detail, name='forum-post-detail'),
+    path('forum/posts/<uuid:pk>/report/', forum_post_report, name='forum-post-report'),
     path('forum/posts/recent/', forum_post_recent, name='forum-post-recent'),
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

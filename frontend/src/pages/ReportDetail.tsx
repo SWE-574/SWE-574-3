@@ -136,7 +136,9 @@ const ReportDetail = () => {
         <Text fontWeight={700} mb={1}>{report.type.replace('_', ' ')}</Text>
         <Text fontSize="sm" color="gray.600">Status: {report.status}</Text>
         <Text fontSize="sm" color="gray.600">Reporter: {report.reporter_name || 'Unknown'}</Text>
-        <Text fontSize="sm" color="gray.600">Reported user: {report.reported_user_name || 'Content unavailable'}</Text>
+        <Text fontSize="sm" color="gray.600">
+          Reported target: {report.reported_user_name || report.reported_forum_topic_title || report.reported_service_title || 'Content unavailable'}
+        </Text>
         <Text fontSize="sm" color="gray.600">Created: {new Date(report.created_at).toLocaleString()}</Text>
 
         <Box mt={4} p={3} borderRadius="10px" bg="#F8FAFC" border="1px solid #E2E8F0">

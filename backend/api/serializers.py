@@ -4,7 +4,7 @@ from rest_framework import serializers
 from .models import (
     User, Service, Tag, Handshake, ChatMessage, 
     Notification, ReputationRep, Badge, UserBadge, Report, TransactionHistory,
-    ChatRoom, PublicChatMessage, Comment, NegativeRep,
+    ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia
 )
 from django.contrib.auth.hashers import make_password
@@ -1299,6 +1299,10 @@ class ReportSerializer(serializers.ModelSerializer):
     reporter_name = serializers.SerializerMethodField()
     reported_user_name = serializers.SerializerMethodField()
     reported_service_title = serializers.SerializerMethodField()
+    reported_forum_topic = serializers.PrimaryKeyRelatedField(read_only=True)
+    reported_forum_post = serializers.PrimaryKeyRelatedField(read_only=True)
+    reported_forum_topic_title = serializers.SerializerMethodField()
+    reported_forum_post_excerpt = serializers.SerializerMethodField()
     handshake_hours = serializers.SerializerMethodField()
     handshake_scheduled_time = serializers.SerializerMethodField()
     handshake_status = serializers.SerializerMethodField()
@@ -1309,6 +1313,8 @@ class ReportSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'reporter', 'reporter_name', 'reported_user', 'reported_user_name',
             'reported_service', 'reported_service_title', 'related_handshake',
+            'reported_forum_topic', 'reported_forum_topic_title',
+            'reported_forum_post', 'reported_forum_post_excerpt',
             'handshake_hours', 'handshake_scheduled_time', 'handshake_status',
             'reported_user_is_receiver',
             'type', 'status', 'description', 'admin_notes', 
@@ -1329,6 +1335,21 @@ class ReportSerializer(serializers.ModelSerializer):
     def get_reported_service_title(self, obj):
         if obj.reported_service:
             return obj.reported_service.title
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_forum_topic_title(self, obj):
+        if obj.reported_forum_topic:
+            return obj.reported_forum_topic.title
+        if obj.reported_forum_post:
+            return obj.reported_forum_post.topic.title
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_forum_post_excerpt(self, obj):
+        if obj.reported_forum_post:
+            body = obj.reported_forum_post.body or ''
+            return body[:140]
         return None
 
     @extend_schema_field(OpenApiTypes.DECIMAL)
@@ -1398,6 +1419,28 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
         if obj.handshake and obj.handshake.service:
             return obj.handshake.service.title
         return None
+
+
+class AdminAuditLogSerializer(serializers.ModelSerializer):
+    admin_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AdminAuditLog
+        fields = [
+            'id',
+            'admin',
+            'admin_name',
+            'action_type',
+            'target_entity',
+            'target_id',
+            'reason',
+            'created_at',
+        ]
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_admin_name(self, obj):
+        full = f"{obj.admin.first_name} {obj.admin.last_name}".strip()
+        return full or obj.admin.email
 
 
 # Public Chat Serializers

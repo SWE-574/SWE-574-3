@@ -495,6 +495,8 @@ class Report(models.Model):
     reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reports_made')
     reported_user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='reports_received')
     reported_service = models.ForeignKey(Service, on_delete=models.CASCADE, null=True, blank=True, related_name='reports')
+    reported_forum_topic = models.ForeignKey('ForumTopic', on_delete=models.CASCADE, null=True, blank=True, related_name='reports')
+    reported_forum_post = models.ForeignKey('ForumPost', on_delete=models.CASCADE, null=True, blank=True, related_name='reports')
     related_handshake = models.ForeignKey(Handshake, on_delete=models.CASCADE, null=True, blank=True, related_name='reports')
     type = models.CharField(max_length=25, choices=TYPE_CHOICES)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
@@ -512,9 +514,53 @@ class Report(models.Model):
             models.Index(fields=['reporter']),
             models.Index(fields=['reported_user']),
             models.Index(fields=['reported_service']),
+            models.Index(fields=['reported_forum_topic']),
+            models.Index(fields=['reported_forum_post']),
             models.Index(fields=['related_handshake']),
             models.Index(fields=['resolved_by']),
             models.Index(fields=['status', 'created_at']),
+        ]
+
+
+class AdminAuditLog(models.Model):
+    """Immutable audit records for administrative moderation actions."""
+
+    ACTION_CHOICES = (
+        ('warn_user', 'Warn User'),
+        ('ban_user', 'Ban User'),
+        ('unban_user', 'Unban User'),
+        ('adjust_karma', 'Adjust Karma'),
+        ('resolve_report', 'Resolve Report'),
+        ('pause_handshake', 'Pause Handshake'),
+        ('remove_comment', 'Remove Comment'),
+        ('restore_comment', 'Restore Comment'),
+        ('lock_topic', 'Lock Topic'),
+        ('pin_topic', 'Pin Topic'),
+    )
+
+    TARGET_CHOICES = (
+        ('user', 'User'),
+        ('report', 'Report'),
+        ('handshake', 'Handshake'),
+        ('comment', 'Comment'),
+        ('forum_topic', 'Forum Topic'),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    admin = models.ForeignKey(User, on_delete=models.CASCADE, related_name='admin_audit_logs')
+    action_type = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    target_entity = models.CharField(max_length=32, choices=TARGET_CHOICES)
+    target_id = models.UUIDField()
+    reason = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['admin', 'created_at']),
+            models.Index(fields=['action_type', 'created_at']),
+            models.Index(fields=['target_entity', 'created_at']),
+            models.Index(fields=['target_id']),
         ]
 
 

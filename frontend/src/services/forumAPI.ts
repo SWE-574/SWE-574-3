@@ -1,6 +1,8 @@
 import { apiClient } from './api'
 import type { ForumCategory, ForumTopic, ForumPost } from '@/types'
 
+export type ForumReportType = 'inappropriate_content' | 'spam' | 'scam' | 'harassment' | 'other'
+
 interface PaginatedResponse<T> {
   count: number
   next: string | null
@@ -55,6 +57,10 @@ export const forumAPI = {
     return res.data
   },
 
+  reportTopic: async (id: string, type: ForumReportType, description = ''): Promise<void> => {
+    await apiClient.post(`/forum/topics/${id}/report/`, { type, description })
+  },
+
   listRecentPosts: async (
     params: { page?: number; page_size?: number } = {},
     signal?: AbortSignal,
@@ -81,5 +87,9 @@ export const forumAPI = {
 
   deletePost: async (postId: string): Promise<void> => {
     await apiClient.delete(`/forum/posts/${postId}/`)
+  },
+
+  reportPost: async (postId: string, type: ForumReportType, description = ''): Promise<void> => {
+    await apiClient.post(`/forum/posts/${postId}/report/`, { type, description })
   },
 }

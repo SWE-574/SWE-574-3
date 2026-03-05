@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Badge, Box, Button, Flex, Input, NativeSelect, Spinner, Table, Text, Textarea } from '@chakra-ui/react'
 import { toast } from 'sonner'
-import { adminAPI, type CommentStatusFilter, type ReportResolveAction, type ReportStatusFilter } from '@/services/adminAPI'
+import { adminAPI, type AuditTargetFilter, type CommentStatusFilter, type ReportResolveAction, type ReportStatusFilter } from '@/services/adminAPI'
 import { forumAPI } from '@/services/forumAPI'
 import AdminReauthBanner from '@/components/AdminReauthBanner'
 import { getErrorMessage } from '@/services/api'
 import { useAuthStore } from '@/store/useAuthStore'
-import type { AdminComment, AdminMetrics, AdminReport, AdminUserSummary, ForumTopic, PaginatedResponse } from '@/types'
+import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, ForumTopic, PaginatedResponse } from '@/types'
 
-type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation'
+type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 'audit'
 
 function asStatusCode(error: unknown): number | undefined {
   return (error as { response?: { status?: number } })?.response?.status
@@ -18,6 +18,10 @@ function asStatusCode(error: unknown): number | undefined {
 function userDisplayName(user: AdminUserSummary): string {
   const full = `${user.first_name || ''} ${user.last_name || ''}`.trim()
   return full || user.email
+}
+
+function formatAuditAction(action: string): string {
+  return action.replace(/_/g, ' ')
 }
 
 const AdminDashboard = () => {
@@ -32,6 +36,9 @@ const AdminDashboard = () => {
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
   const [forumPostsCount, setForumPostsCount] = useState<number | null>(null)
   const [pendingReportsCount, setPendingReportsCount] = useState<number | null>(null)
+  const [removedCommentsCount, setRemovedCommentsCount] = useState<number | null>(null)
+  const [dashboardPendingReports, setDashboardPendingReports] = useState<AdminReport[]>([])
+  const [dashboardRemovedComments, setDashboardRemovedComments] = useState<AdminComment[]>([])
 
   const [usersLoading, setUsersLoading] = useState(false)
   const [users, setUsers] = useState<PaginatedResponse<AdminUserSummary> | null>(null)
@@ -55,6 +62,11 @@ const AdminDashboard = () => {
   const [topicsLoading, setTopicsLoading] = useState(false)
   const [topics, setTopics] = useState<PaginatedResponse<ForumTopic> | null>(null)
   const [topicsPage, setTopicsPage] = useState(1)
+
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditLogs, setAuditLogs] = useState<PaginatedResponse<AdminAuditLog> | null>(null)
+  const [auditTarget, setAuditTarget] = useState<AuditTargetFilter>('all')
+  const [auditPage, setAuditPage] = useState(1)
 
   const [authIssue, setAuthIssue] = useState<string | null>(null)
 
@@ -84,13 +96,17 @@ const AdminDashboard = () => {
   const loadDashboard = useCallback(async () => {
     setDashboardLoading(true)
     try {
-      const [metricsData, pendingReports, recentPosts] = await Promise.all([
+      const [metricsData, pendingReports, removedComments, recentPosts] = await Promise.all([
         adminAPI.getMetrics(),
-        adminAPI.getReports('pending', 1, 1),
+        adminAPI.getReports('pending', 1, 5),
+        adminAPI.getComments('removed', 1, 5),
         forumAPI.listRecentPosts({ page: 1, page_size: 1 }),
       ])
       setMetrics(metricsData)
       setPendingReportsCount(pendingReports.count)
+      setRemovedCommentsCount(removedComments.count)
+      setDashboardPendingReports(pendingReports.results)
+      setDashboardRemovedComments(removedComments.results)
       setForumPostsCount(recentPosts.count)
       setAuthIssue(null)
     } catch (error) {
@@ -177,6 +193,23 @@ const AdminDashboard = () => {
     }
   }, [handleForbidden, topicsPage])
 
+  const loadAuditLogs = useCallback(async () => {
+    setAuditLoading(true)
+    try {
+      const result = await adminAPI.getAuditLogs(undefined, auditTarget, auditPage, 20)
+      setAuditLogs(result)
+      setAuthIssue(null)
+    } catch (error) {
+      if (asStatusCode(error) === 403) {
+        handleForbidden('Your account can no longer access admin audit logs. Please log in again.')
+        return
+      }
+      toast.error(getErrorMessage(error, 'Failed to load audit logs'))
+    } finally {
+      setAuditLoading(false)
+    }
+  }, [auditPage, auditTarget, handleForbidden])
+
   useEffect(() => {
     if (activeTab === 'dashboard') loadDashboard()
   }, [activeTab, loadDashboard])
@@ -196,6 +229,10 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (activeTab === 'moderation') loadTopics()
   }, [activeTab, loadTopics])
+
+  useEffect(() => {
+    if (activeTab === 'audit') loadAuditLogs()
+  }, [activeTab, loadAuditLogs])
 
   const handleWarnUser = async (user: AdminUserSummary) => {
     const message = window.prompt('Warning message', 'Please follow community guidelines.')
@@ -331,11 +368,11 @@ const AdminDashboard = () => {
   const summaryCards = useMemo(
     () => [
       { label: 'Total users', value: metrics?.users.total ?? '-' },
-      { label: 'Active users', value: metrics?.users.active ?? '-' },
       { label: 'Forum posts', value: forumPostsCount ?? '-' },
       { label: 'Flagged reports', value: pendingReportsCount ?? '-' },
+      { label: 'Removed comments', value: removedCommentsCount ?? '-' },
     ],
-    [metrics, forumPostsCount, pendingReportsCount],
+    [metrics, forumPostsCount, pendingReportsCount, removedCommentsCount],
   )
 
   return (
@@ -347,7 +384,7 @@ const AdminDashboard = () => {
         </Box>
 
         <Flex gap={2}>
-          {(['dashboard', 'users', 'reports', 'comments', 'moderation'] as AdminTab[]).map((tab) => (
+          {(['dashboard', 'users', 'reports', 'comments', 'moderation', 'audit'] as AdminTab[]).map((tab) => (
             <Box
               as="button"
               key={tab}
@@ -379,14 +416,108 @@ const AdminDashboard = () => {
           {dashboardLoading ? (
             <Flex py={10} justify="center"><Spinner /></Flex>
           ) : (
-            <Flex gap={3} wrap="wrap">
-              {summaryCards.map((card) => (
-                <Box key={card.label} p={4} borderRadius="12px" border="1px solid #E2E8F0" minW="180px" bg="white">
-                  <Text fontSize="sm" color="gray.500">{card.label}</Text>
-                  <Text fontSize="2xl" fontWeight={800}>{card.value}</Text>
+            <>
+              <Flex gap={3} wrap="wrap">
+                {summaryCards.map((card) => (
+                  <Box
+                    key={card.label}
+                    p={4}
+                    borderRadius="12px"
+                    border="1px solid #CFE3DA"
+                    borderTop="3px solid #2D5C4E"
+                    minW="180px"
+                    bg="#F8FCFA"
+                  >
+                    <Text fontSize="sm" color="#2D5C4E">{card.label}</Text>
+                    <Text fontSize="2xl" fontWeight={800} color="#1F2937">{card.value}</Text>
+                  </Box>
+                ))}
+              </Flex>
+
+              <Flex mt={4} gap={4} wrap="wrap" align="stretch">
+                <Box flex="1" minW={{ base: '100%', lg: '460px' }} border="1px solid #CFE3DA" borderRadius="12px" bg="#F8FCFA" p={4}>
+                  <Flex align="center" justify="space-between" mb={3}>
+                    <Text fontWeight={700} color="#2D5C4E">Action Needed: Recent Reports</Text>
+                    <Button size="xs" variant="outline" onClick={() => setActiveTab('reports')}>Open reports queue</Button>
+                  </Flex>
+
+                  {dashboardPendingReports.length === 0 ? (
+                    <Text fontSize="sm" color="gray.500">No pending reports right now.</Text>
+                  ) : (
+                    <Table.ScrollArea borderWidth="1px" borderColor="#E2E8F0" borderRadius="10px">
+                      <Table.Root size="sm" variant="line">
+                        <Table.Header>
+                          <Table.Row>
+                            <Table.ColumnHeader>Type</Table.ColumnHeader>
+                            <Table.ColumnHeader>Reporter</Table.ColumnHeader>
+                            <Table.ColumnHeader>Description</Table.ColumnHeader>
+                            <Table.ColumnHeader>Action</Table.ColumnHeader>
+                          </Table.Row>
+                        </Table.Header>
+                        <Table.Body>
+                          {dashboardPendingReports.map((report) => (
+                            <Table.Row key={report.id}>
+                              <Table.Cell>
+                                <Badge colorPalette="orange" textTransform="capitalize">{report.type.replace('_', ' ')}</Badge>
+                              </Table.Cell>
+                              <Table.Cell>{report.reporter_name || 'Unknown'}</Table.Cell>
+                              <Table.Cell>
+                                <Text maxW="260px" whiteSpace="normal">{report.description}</Text>
+                              </Table.Cell>
+                              <Table.Cell>
+                                <Button size="xs" variant="subtle" colorPalette="blue" onClick={() => navigate(`/report-detail/${report.id}`)}>
+                                  Review
+                                </Button>
+                              </Table.Cell>
+                            </Table.Row>
+                          ))}
+                        </Table.Body>
+                      </Table.Root>
+                    </Table.ScrollArea>
+                  )}
                 </Box>
-              ))}
-            </Flex>
+
+                <Box flex="1" minW={{ base: '100%', lg: '460px' }} border="1px solid #CFE3DA" borderRadius="12px" bg="#F8FCFA" p={4}>
+                  <Flex align="center" justify="space-between" mb={3}>
+                    <Text fontWeight={700} color="#2D5C4E">Action Needed: Recently Removed Comments</Text>
+                    <Button size="xs" variant="outline" onClick={() => setActiveTab('comments')}>Open comments queue</Button>
+                  </Flex>
+
+                  {dashboardRemovedComments.length === 0 ? (
+                    <Text fontSize="sm" color="gray.500">No removed comments requiring review.</Text>
+                  ) : (
+                    <Table.ScrollArea borderWidth="1px" borderColor="#E2E8F0" borderRadius="10px">
+                      <Table.Root size="sm" variant="line">
+                        <Table.Header>
+                          <Table.Row>
+                            <Table.ColumnHeader>Comment</Table.ColumnHeader>
+                            <Table.ColumnHeader>Author</Table.ColumnHeader>
+                            <Table.ColumnHeader>Service</Table.ColumnHeader>
+                            <Table.ColumnHeader>Action</Table.ColumnHeader>
+                          </Table.Row>
+                        </Table.Header>
+                        <Table.Body>
+                          {dashboardRemovedComments.map((comment) => (
+                            <Table.Row key={comment.id}>
+                              <Table.Cell>
+                                <Text maxW="260px" whiteSpace="normal">{comment.body}</Text>
+                              </Table.Cell>
+                              <Table.Cell>{comment.user_name}</Table.Cell>
+                              <Table.Cell>{comment.service_title}</Table.Cell>
+                              <Table.Cell>
+                                <Button size="xs" colorPalette="green" variant="subtle" onClick={() => setActiveTab('comments')}>
+                                  Restore from queue
+                                </Button>
+                              </Table.Cell>
+                            </Table.Row>
+                          ))}
+                        </Table.Body>
+                      </Table.Root>
+                    </Table.ScrollArea>
+                  )}
+                </Box>
+              </Flex>
+            </>
           )}
         </Box>
       )}
@@ -519,7 +650,12 @@ const AdminDashboard = () => {
                         </Badge>
                       </Table.Cell>
                       <Table.Cell>{report.reporter_name || 'Unknown'}</Table.Cell>
-                      <Table.Cell>{report.reported_user_name || 'Content unavailable'}</Table.Cell>
+                      <Table.Cell>
+                        {report.reported_user_name
+                          || report.reported_forum_topic_title
+                          || report.reported_service_title
+                          || 'Content unavailable'}
+                      </Table.Cell>
                       <Table.Cell>
                         <Badge colorPalette={report.status === 'pending' ? 'orange' : report.status === 'resolved' ? 'green' : 'gray'}>
                           {report.status}
@@ -731,6 +867,79 @@ const AdminDashboard = () => {
             <Button size="sm" variant="outline" disabled={!topics?.previous || topicsLoading} onClick={() => setTopicsPage((p) => Math.max(1, p - 1))}>Previous</Button>
             <Text fontSize="sm" color="gray.600">{topics?.count ?? 0} topics</Text>
             <Button size="sm" variant="outline" disabled={!topics?.next || topicsLoading} onClick={() => setTopicsPage((p) => p + 1)}>Next</Button>
+          </Flex>
+        </Box>
+      )}
+
+      {activeTab === 'audit' && (
+        <Box>
+          <Flex gap={2} mb={3}>
+            <NativeSelect.Root width="220px" bg="white">
+              <NativeSelect.Field
+                value={auditTarget}
+                onChange={(e) => {
+                  setAuditPage(1)
+                  setAuditTarget(e.target.value as AuditTargetFilter)
+                }}
+              >
+                <option value="all">All targets</option>
+                <option value="user">Users</option>
+                <option value="report">Reports</option>
+                <option value="handshake">Handshakes</option>
+                <option value="comment">Comments</option>
+                <option value="forum_topic">Forum topics</option>
+              </NativeSelect.Field>
+              <NativeSelect.Indicator />
+            </NativeSelect.Root>
+          </Flex>
+
+          {auditLoading ? (
+            <Flex py={8} justify="center"><Spinner /></Flex>
+          ) : (
+            <Table.ScrollArea borderWidth="1px" borderColor="#E2E8F0" borderRadius="12px" bg="white">
+              <Table.Root size="sm" variant="line" striped>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.ColumnHeader>When</Table.ColumnHeader>
+                    <Table.ColumnHeader>Admin</Table.ColumnHeader>
+                    <Table.ColumnHeader>Action</Table.ColumnHeader>
+                    <Table.ColumnHeader>Target</Table.ColumnHeader>
+                    <Table.ColumnHeader>Reason</Table.ColumnHeader>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {(auditLogs?.results || []).map((entry) => (
+                    <Table.Row key={entry.id}>
+                      <Table.Cell>{new Date(entry.created_at).toLocaleString()}</Table.Cell>
+                      <Table.Cell>{entry.admin_name}</Table.Cell>
+                      <Table.Cell>
+                        <Badge colorPalette="blue" textTransform="capitalize">{formatAuditAction(entry.action_type)}</Badge>
+                      </Table.Cell>
+                      <Table.Cell>
+                        <Text fontSize="sm">{entry.target_entity}</Text>
+                        <Text fontSize="xs" color="gray.500">{entry.target_id}</Text>
+                      </Table.Cell>
+                      <Table.Cell>
+                        <Text maxW="360px" whiteSpace="normal">{entry.reason || '-'}</Text>
+                      </Table.Cell>
+                    </Table.Row>
+                  ))}
+                  {(auditLogs?.results || []).length === 0 && (
+                    <Table.Row>
+                      <Table.Cell colSpan={5}>
+                        <Text py={4} textAlign="center" color="gray.500">No audit logs for selected filters.</Text>
+                      </Table.Cell>
+                    </Table.Row>
+                  )}
+                </Table.Body>
+              </Table.Root>
+            </Table.ScrollArea>
+          )}
+
+          <Flex justify="space-between" mt={3}>
+            <Button size="sm" variant="outline" disabled={!auditLogs?.previous || auditLoading} onClick={() => setAuditPage((p) => Math.max(1, p - 1))}>Previous</Button>
+            <Text fontSize="sm" color="gray.600">{auditLogs?.count ?? 0} entries</Text>
+            <Button size="sm" variant="outline" disabled={!auditLogs?.next || auditLoading} onClick={() => setAuditPage((p) => p + 1)}>Next</Button>
           </Flex>
         </Box>
       )}

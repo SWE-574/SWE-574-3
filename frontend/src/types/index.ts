@@ -289,6 +289,10 @@ export interface AdminReport {
   reported_user_name?: string | null
   reported_service?: string | null
   reported_service_title?: string | null
+  reported_forum_topic?: string | null
+  reported_forum_topic_title?: string | null
+  reported_forum_post?: string | null
+  reported_forum_post_excerpt?: string | null
   related_handshake?: string | null
   handshake_hours?: number | null
   handshake_scheduled_time?: string | null
@@ -356,6 +360,27 @@ export interface AdminComment {
   related_handshake?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface AdminAuditLog {
+  id: string
+  admin: string
+  admin_name: string
+  action_type:
+    | 'warn_user'
+    | 'ban_user'
+    | 'unban_user'
+    | 'adjust_karma'
+    | 'resolve_report'
+    | 'pause_handshake'
+    | 'remove_comment'
+    | 'restore_comment'
+    | 'lock_topic'
+    | 'pin_topic'
+  target_entity: 'user' | 'report' | 'handshake' | 'comment' | 'forum_topic'
+  target_id: string
+  reason?: string | null
+  created_at: string
 }
 
 // ─── Forum Types ──────────────────────────────────────────────────────────────

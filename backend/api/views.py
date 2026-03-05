@@ -40,6 +40,7 @@ from .models import (
     User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
     ChatRoom, PublicChatMessage, ServiceGroupChatMessage, Comment, NegativeRep,
+    AdminAuditLog,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
     EmailVerificationToken, PasswordResetToken,
 )
@@ -48,6 +49,7 @@ from .serializers import (
     UserProfileSerializer,
     AdminUserListSerializer,
     AdminCommentSerializer,
+    AdminAuditLogSerializer,
     ServiceSerializer,
     TagSerializer,
     HandshakeSerializer,
@@ -109,6 +111,20 @@ def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
     """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS."""
     response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=True))
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
+
+
+def log_admin_action(admin_user, action_type: str, target_entity: str, target_obj, reason: str = '') -> None:
+    """Best-effort admin audit logging for moderation actions."""
+    try:
+        AdminAuditLog.objects.create(
+            admin=admin_user,
+            action_type=action_type,
+            target_entity=target_entity,
+            target_id=target_obj.id,
+            reason=reason or None,
+        )
+    except Exception as exc:
+        logger.warning('Admin audit log failed for %s (%s): %s', action_type, target_entity, exc)
 
 
 def _send_email_async(to_email: str, subject: str, html: str) -> None:
@@ -3850,6 +3866,13 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                 )
 
             serializer = self.get_serializer(resolved_report)
+            log_admin_action(
+                request.user,
+                'resolve_report',
+                'report',
+                resolved_report,
+                admin_notes or action_type,
+            )
             return Response(serializer.data)
         
         from .utils import get_provider_and_receiver
@@ -3951,6 +3974,14 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                 report.admin_notes = admin_notes or f'No-show confirmed - hours {financial_action} after investigation'
                 report.save()
 
+            log_admin_action(
+                request.user,
+                'resolve_report',
+                'report',
+                report,
+                admin_notes or action_type,
+            )
+
         elif action_type == 'dismiss':
             # Complete transfer normally - hours go to provider
             handshake = report.related_handshake
@@ -4003,6 +4034,14 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                 report.resolved_at = timezone.now()
                 report.admin_notes = admin_notes or 'Report dismissed after investigation'
                 report.save()
+
+            log_admin_action(
+                request.user,
+                'resolve_report',
+                'report',
+                report,
+                admin_notes or action_type,
+            )
         
         else:
             return create_error_response(
@@ -4050,6 +4089,8 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         
         handshake.status = 'paused'
         handshake.save(update_fields=['status'])
+
+        log_admin_action(request.user, 'pause_handshake', 'handshake', handshake, 'Paused from report moderation')
         
         # Notify both parties
         from .utils import get_provider_and_receiver
@@ -4200,6 +4241,14 @@ class AdminUserViewSet(viewsets.ViewSet):
             message=request.data.get('message', 'You have received a formal warning from an administrator.'),
         )
 
+        log_admin_action(
+            request.user,
+            'warn_user',
+            'user',
+            user,
+            request.data.get('message', ''),
+        )
+
         return Response({'status': 'success', 'message': 'Warning issued'})
 
     @action(detail=True, methods=['post'], url_path='ban', throttle_classes=[ConfirmationThrottle])
@@ -4220,6 +4269,8 @@ class AdminUserViewSet(viewsets.ViewSet):
 
         user.is_active = False
         user.save()
+
+        log_admin_action(request.user, 'ban_user', 'user', user, 'Account suspended')
 
         return Response({'status': 'success', 'message': 'User banned'})
 
@@ -4242,6 +4293,8 @@ class AdminUserViewSet(viewsets.ViewSet):
         user.is_active = True
         user.save()
 
+        log_admin_action(request.user, 'unban_user', 'user', user, 'Account reactivated')
+
         return Response({'status': 'success', 'message': 'User unbanned'})
 
     @action(detail=True, methods=['post'], url_path='adjust-karma', throttle_classes=[ConfirmationThrottle])
@@ -4263,6 +4316,14 @@ class AdminUserViewSet(viewsets.ViewSet):
         adjustment = request.data.get('adjustment', 0)
         user.karma_score += adjustment
         user.save()
+
+        log_admin_action(
+            request.user,
+            'adjust_karma',
+            'user',
+            user,
+            f'Adjustment: {adjustment}',
+        )
 
         return Response({
             'status': 'success',
@@ -4345,6 +4406,7 @@ class AdminCommentViewSet(viewsets.ViewSet):
         if not comment.is_deleted:
             comment.is_deleted = True
             comment.save(update_fields=['is_deleted', 'updated_at'])
+            log_admin_action(request.user, 'remove_comment', 'comment', comment, 'Removed from moderation panel')
 
         serializer = self.serializer_class(comment)
         return Response(serializer.data)
@@ -4360,9 +4422,34 @@ class AdminCommentViewSet(viewsets.ViewSet):
         if comment.is_deleted:
             comment.is_deleted = False
             comment.save(update_fields=['is_deleted', 'updated_at'])
+            log_admin_action(request.user, 'restore_comment', 'comment', comment, 'Restored from moderation panel')
 
         serializer = self.serializer_class(comment)
         return Response(serializer.data)
+
+
+class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Admin-only read access to moderation audit entries."""
+
+    serializer_class = AdminAuditLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        if self.request.user.role != 'admin':
+            return AdminAuditLog.objects.none()
+
+        queryset = AdminAuditLog.objects.select_related('admin').all()
+
+        action_type = self.request.query_params.get('action_type', '').strip().lower()
+        if action_type:
+            queryset = queryset.filter(action_type=action_type)
+
+        target_entity = self.request.query_params.get('target_entity', '').strip().lower()
+        if target_entity:
+            queryset = queryset.filter(target_entity=target_entity)
+
+        return queryset.order_by('-created_at')
 
 class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -5360,6 +5447,10 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         
         topic.is_pinned = not topic.is_pinned
         topic.save(update_fields=['is_pinned'])
+
+        if request.user.role == 'admin':
+            state = 'Pinned' if topic.is_pinned else 'Unpinned'
+            log_admin_action(request.user, 'pin_topic', 'forum_topic', topic, state)
         
         serializer = self.get_serializer(topic)
         return Response(serializer.data)
@@ -5379,9 +5470,64 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         
         topic.is_locked = not topic.is_locked
         topic.save(update_fields=['is_locked'])
+
+        if request.user.role == 'admin':
+            state = 'Locked' if topic.is_locked else 'Unlocked'
+            log_admin_action(request.user, 'lock_topic', 'forum_topic', topic, state)
         
         serializer = self.get_serializer(topic)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='report', throttle_classes=[ConfirmationThrottle])
+    @track_performance
+    def report(self, request, pk=None):
+        """Report a forum topic for moderation."""
+        try:
+            topic = ForumTopic.objects.get(pk=pk, category__is_active=True)
+        except ForumTopic.DoesNotExist:
+            return create_error_response(
+                'Topic not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        if topic.author_id == request.user.id:
+            return create_error_response(
+                'You cannot report your own topic',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        report_type = request.data.get('type', 'inappropriate_content')
+        if report_type not in dict(Report.TYPE_CHOICES):
+            return create_error_response(
+                'Invalid report type.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        description = (request.data.get('description') or '').strip()
+        if not description:
+            description = f"Forum topic report: {topic.title}"
+
+        report = Report.objects.create(
+            reporter=request.user,
+            reported_user=topic.author,
+            reported_forum_topic=topic,
+            type=report_type,
+            description=description,
+        )
+
+        admins = User.objects.filter(role='admin', is_active=True)
+        for admin in admins:
+            create_notification(
+                user=admin,
+                notification_type='admin_warning',
+                title='New Forum Topic Report',
+                message=f"{request.user.first_name or request.user.email} reported topic '{topic.title}'.",
+            )
+
+        return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
 
 
 class ForumPostViewSet(viewsets.ViewSet):
@@ -5534,3 +5680,55 @@ class ForumPostViewSet(viewsets.ViewSet):
         post.is_deleted = True
         post.save(update_fields=['is_deleted'])
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='report', throttle_classes=[ConfirmationThrottle])
+    @track_performance
+    def report(self, request, pk=None):
+        """Report a forum post/reply for moderation."""
+        try:
+            post = ForumPost.objects.select_related('topic', 'author').get(pk=pk, topic__category__is_active=True)
+        except ForumPost.DoesNotExist:
+            return create_error_response(
+                'Post not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        if post.author_id == request.user.id:
+            return create_error_response(
+                'You cannot report your own post',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        report_type = request.data.get('type', 'inappropriate_content')
+        if report_type not in dict(Report.TYPE_CHOICES):
+            return create_error_response(
+                'Invalid report type.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        description = (request.data.get('description') or '').strip()
+        if not description:
+            description = f"Forum post report in topic '{post.topic.title}'"
+
+        report = Report.objects.create(
+            reporter=request.user,
+            reported_user=post.author,
+            reported_forum_topic=post.topic,
+            reported_forum_post=post,
+            type=report_type,
+            description=description,
+        )
+
+        admins = User.objects.filter(role='admin', is_active=True)
+        for admin in admins:
+            create_notification(
+                user=admin,
+                notification_type='admin_warning',
+                title='New Forum Post Report',
+                message=f"{request.user.first_name or request.user.email} reported content in '{post.topic.title}'.",
+            )
+
+        return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
