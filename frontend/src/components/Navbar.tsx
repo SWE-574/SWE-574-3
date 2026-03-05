@@ -178,7 +178,7 @@ const Navbar = () => {
       <Flex maxW="1440px" mx="auto" px={{ base: 4, md: 8 }} h="64px" align="center" justify="space-between" position="relative">
 
         {/* Logo */}
-        <Link to="/" style={{ textDecoration: 'none', flexShrink: 0 }}>
+        <Link to="/browse" style={{ textDecoration: 'none', flexShrink: 0 }}>
           <Flex align="center" gap={3}>
             <Logo size={32} />
             <Text fontWeight="800" fontSize="17px" color={GRAY900} letterSpacing="-0.3px">

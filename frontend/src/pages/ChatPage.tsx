@@ -386,7 +386,7 @@ function ServiceGroup({
                     fontSize="13px" fontWeight={isGroupSelected ? 700 : 600}
                     color={isGroupSelected ? BLUE : GRAY800}
                   >
-                    Group Chat
+                    {title}
                   </Text>
                   <Text fontSize="11px" color={GRAY500}>
                     {convs.filter((c) => c.status === 'accepted').length} participant{convs.filter((c) => c.status === 'accepted').length !== 1 ? 's' : ''}
@@ -1081,7 +1081,7 @@ function GroupChatThread({
 
           <Box flex={1} minW={0}>
             <Flex align="center" gap={2}>
-              <Text fontSize="14px" fontWeight={700} color={GRAY800}>Group Chat</Text>
+              <Text fontSize="14px" fontWeight={700} color={GRAY800}>{serviceTitle}</Text>
               <Box
                 px="6px" py="1px" borderRadius="full" fontSize="10px" fontWeight={700}
                 bg="#EFF6FF" color={BLUE}
