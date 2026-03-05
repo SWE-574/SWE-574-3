@@ -411,11 +411,41 @@ def _apply_blind_review_visibility(queryset):
             )
         ),
     ).exclude(
-        related_handshake__service__type__in=['Offer', 'Need'],
         related_handshake__evaluation_window_ends_at__gt=now,
         blind_target_positive_eval=False,
         blind_target_negative_eval=False,
     )
+
+
+def _build_event_comments_history(organizer: User, request=None) -> list[dict]:
+    """Return organizer Event comments grouped by event with newest-first ordering."""
+    comments = Comment.objects.filter(
+        service__type='Event',
+        service__user=organizer,
+        is_verified_review=True,
+        is_deleted=False,
+        related_handshake__isnull=False,
+        related_handshake__requester=F('user'),
+    ).select_related('user', 'service', 'related_handshake').order_by('-created_at')
+    comments = _apply_blind_review_visibility(comments)
+
+    grouped = {}
+    for comment in comments:
+        event = comment.service
+        event_id = str(event.id)
+        if event_id not in grouped:
+            grouped[event_id] = {
+                'event_id': event_id,
+                'event_title': event.title,
+                'event_status': event.status,
+                'event_scheduled_time': event.scheduled_time.isoformat() if event.scheduled_time else None,
+                'event_completed_at': event.event_completed_at.isoformat() if event.event_completed_at else None,
+                'comments': [],
+            }
+
+        grouped[event_id]['comments'].append(CommentSerializer(comment, context={'request': request}).data)
+
+    return list(grouped.values())
 
 class CustomTokenRefreshView(TokenRefreshView):
     """Custom token refresh: reads refresh token from cookie (or body), sets new cookies."""
@@ -1022,6 +1052,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             return Response(instance._cached_data)
             
         response_data = serializer.data
+        response_data['event_comments_history'] = _build_event_comments_history(instance, request)
         
         if not kwargs.get('id'):
             cache_user_profile(str(request.user.id), response_data)

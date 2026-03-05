@@ -227,3 +227,121 @@ class TestPublicUserProfile:
         assert response.status_code == status.HTTP_200_OK
         assert 'email' not in response.data
         assert 'timebank_balance' not in response.data
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestEventCommentsHistoryOnProfile:
+    def test_profile_includes_event_comments_grouped_newest_first(self):
+        organizer = UserFactory()
+        viewer = UserFactory()
+
+        old_event = ServiceFactory(user=organizer, type='Event', status='Completed')
+        new_event = ServiceFactory(user=organizer, type='Event', status='Completed')
+
+        old_hs = HandshakeFactory(
+            service=old_event,
+            requester=UserFactory(),
+            status='attended',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=72),
+            evaluation_window_ends_at=timezone.now() - timedelta(hours=24),
+            evaluation_window_closed_at=timezone.now() - timedelta(hours=24),
+        )
+        new_hs_1 = HandshakeFactory(
+            service=new_event,
+            requester=UserFactory(),
+            status='attended',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=72),
+            evaluation_window_ends_at=timezone.now() - timedelta(hours=24),
+            evaluation_window_closed_at=timezone.now() - timedelta(hours=24),
+        )
+        new_hs_2 = HandshakeFactory(
+            service=new_event,
+            requester=UserFactory(),
+            status='attended',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=72),
+            evaluation_window_ends_at=timezone.now() - timedelta(hours=24),
+            evaluation_window_closed_at=timezone.now() - timedelta(hours=24),
+        )
+
+        old_comment = Comment.objects.create(
+            service=old_event,
+            user=old_hs.requester,
+            body='Older event review',
+            is_verified_review=True,
+            related_handshake=old_hs,
+        )
+        new_comment_1 = Comment.objects.create(
+            service=new_event,
+            user=new_hs_1.requester,
+            body='Older review on newer event',
+            is_verified_review=True,
+            related_handshake=new_hs_1,
+        )
+        new_comment_2 = Comment.objects.create(
+            service=new_event,
+            user=new_hs_2.requester,
+            body='Newest review on newer event',
+            is_verified_review=True,
+            related_handshake=new_hs_2,
+        )
+
+        Comment.objects.filter(id=old_comment.id).update(created_at=timezone.now() - timedelta(days=3))
+        Comment.objects.filter(id=new_comment_1.id).update(created_at=timezone.now() - timedelta(days=2))
+        Comment.objects.filter(id=new_comment_2.id).update(created_at=timezone.now() - timedelta(days=1))
+
+        client = AuthenticatedAPIClient().authenticate_user(viewer)
+        response = client.get(f'/api/users/{organizer.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert 'event_comments_history' in response.data
+        history = response.data['event_comments_history']
+        assert len(history) == 2
+
+        assert history[0]['event_id'] == str(new_event.id)
+        assert history[1]['event_id'] == str(old_event.id)
+        assert history[0]['comments'][0]['body'] == 'Newest review on newer event'
+        assert history[0]['comments'][1]['body'] == 'Older review on newer event'
+
+    def test_event_comment_hidden_until_reciprocal_evaluation(self):
+        organizer = UserFactory()
+        viewer = UserFactory()
+        attendee = UserFactory()
+        event = ServiceFactory(user=organizer, type='Event', status='Completed')
+        handshake = HandshakeFactory(
+            service=event,
+            requester=attendee,
+            status='attended',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=1),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=47),
+            evaluation_window_closed_at=None,
+        )
+
+        Comment.objects.create(
+            service=event,
+            user=attendee,
+            body='Should stay hidden until organizer also evaluates.',
+            is_verified_review=True,
+            related_handshake=handshake,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(viewer)
+        hidden_response = client.get(f'/api/users/{organizer.id}/')
+        assert hidden_response.status_code == status.HTTP_200_OK
+        assert hidden_response.data['event_comments_history'] == []
+
+        ReputationRep.objects.create(
+            handshake=handshake,
+            giver=organizer,
+            receiver=attendee,
+            is_punctual=True,
+            is_helpful=False,
+            is_kind=False,
+        )
+
+        visible_response = client.get(f'/api/users/{organizer.id}/')
+        assert visible_response.status_code == status.HTTP_200_OK
+        assert len(visible_response.data['event_comments_history']) == 1
+        assert visible_response.data['event_comments_history'][0]['comments'][0]['body'] == (
+            'Should stay hidden until organizer also evaluates.'
+        )
