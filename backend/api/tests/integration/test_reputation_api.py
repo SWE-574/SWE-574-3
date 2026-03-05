@@ -221,6 +221,83 @@ class TestReputationViewSet:
             is_verified_review=True,
             is_deleted=False,
         ).count() == 0
+
+    def test_blind_review_hidden_until_counterparty_submits_evaluation(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=1),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=47),
+            evaluation_window_closed_at=None,
+        )
+
+        requester_client = AuthenticatedAPIClient().authenticate_user(requester)
+        create_response = requester_client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': False,
+            'kindness': False,
+            'comment': 'Private until both sides evaluate.',
+        })
+        assert create_response.status_code == status.HTTP_201_CREATED
+
+        provider_client = AuthenticatedAPIClient().authenticate_user(provider)
+        hidden_response = provider_client.get(f'/api/services/{service.id}/comments/')
+        assert hidden_response.status_code == status.HTTP_200_OK
+        assert hidden_response.data['count'] == 0
+
+        reciprocal_response = provider_client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': True,
+            'kindness': True,
+        })
+        assert reciprocal_response.status_code == status.HTTP_201_CREATED
+
+        revealed_response = provider_client.get(f'/api/services/{service.id}/comments/')
+        assert revealed_response.status_code == status.HTTP_200_OK
+        assert revealed_response.data['count'] == 1
+
+    def test_blind_review_revealed_after_window_expires_without_reciprocal(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=50),
+            evaluation_window_ends_at=timezone.now() - timedelta(minutes=1),
+            evaluation_window_closed_at=timezone.now(),
+        )
+
+        requester_client = AuthenticatedAPIClient().authenticate_user(requester)
+        create_response = requester_client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': False,
+            'kindness': False,
+            'comment': 'Visible after feedback window expiry.',
+        })
+        assert create_response.status_code == status.HTTP_410_GONE
+
+        # Create legacy-style verified review directly to validate display gating on read path.
+        Comment.objects.create(
+            service=service,
+            user=requester,
+            body='Visible after feedback window expiry.',
+            is_verified_review=True,
+            related_handshake=handshake,
+        )
+
+        provider_client = AuthenticatedAPIClient().authenticate_user(provider)
+        response = provider_client.get(f'/api/services/{service.id}/comments/')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['count'] == 1
     
     def test_create_reputation_duplicate(self):
         """Test cannot create duplicate reputation"""

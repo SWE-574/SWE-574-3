@@ -75,7 +75,7 @@ from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -381,6 +381,41 @@ def _validate_feedback_window(handshake: Handshake) -> tuple[bool, str | None]:
     if timezone.now() > fallback_end:
         return False, 'The 48-hour evaluation window has closed.'
     return True, None
+
+
+def _apply_blind_review_visibility(queryset):
+    """Hide one-sided 1-to-1 verified reviews until reciprocal eval or window expiry."""
+    now = timezone.now()
+
+    target_user_id_expr = Case(
+        When(
+            user_id=F('related_handshake__service__user_id'),
+            then=F('related_handshake__requester_id'),
+        ),
+        default=F('related_handshake__service__user_id'),
+        output_field=UUIDField(),
+    )
+
+    return queryset.annotate(
+        blind_target_user_id=target_user_id_expr,
+        blind_target_positive_eval=Exists(
+            ReputationRep.objects.filter(
+                handshake_id=OuterRef('related_handshake_id'),
+                giver_id=OuterRef('blind_target_user_id'),
+            )
+        ),
+        blind_target_negative_eval=Exists(
+            NegativeRep.objects.filter(
+                handshake_id=OuterRef('related_handshake_id'),
+                giver_id=OuterRef('blind_target_user_id'),
+            )
+        ),
+    ).exclude(
+        related_handshake__service__type__in=['Offer', 'Need'],
+        related_handshake__evaluation_window_ends_at__gt=now,
+        blind_target_positive_eval=False,
+        blind_target_negative_eval=False,
+    )
 
 class CustomTokenRefreshView(TokenRefreshView):
     """Custom token refresh: reads refresh token from cookie (or body), sets new cookies."""
@@ -1212,6 +1247,7 @@ class UserVerifiedReviewsView(APIView):
                 queryset=UserBadge.objects.select_related('badge')
             )
         ).order_by('-created_at')
+        comments = _apply_blind_review_visibility(comments)
         
         # Paginate
         paginator = self.pagination_class()
@@ -4653,6 +4689,7 @@ class CommentViewSet(viewsets.ViewSet):
                 to_attr='active_replies'
             )
         ).order_by('-created_at')
+        comments = _apply_blind_review_visibility(comments)
 
         # Paginate
         paginator = self.pagination_class()
@@ -4722,7 +4759,6 @@ class CommentViewSet(viewsets.ViewSet):
         - Handshake is completed
         - User has not already posted a verified review
         """
-        return Response({'handshakes': []})
 
         service = self._get_service(service_id)
         if service is None:

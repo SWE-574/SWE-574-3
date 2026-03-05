@@ -4,10 +4,12 @@ Integration tests for user API endpoints
 import pytest
 from rest_framework import status
 from decimal import Decimal
+from datetime import timedelta
+from django.utils import timezone
 
 from api.tests.helpers.factories import UserFactory, ServiceFactory, HandshakeFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Handshake, TransactionHistory, Badge, UserBadge
+from api.models import Handshake, TransactionHistory, Badge, UserBadge, Comment, ReputationRep
 
 
 @pytest.mark.django_db
@@ -156,6 +158,44 @@ class TestUserVerifiedReviewsView:
         assert 'results' in response.data
         if len(response.data['results']) > 0:
             assert response.data['results'][0]['is_verified_review'] is True
+
+    def test_hides_one_sided_review_until_reciprocal_evaluation(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=1),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=47),
+            evaluation_window_closed_at=None,
+        )
+        Comment.objects.create(
+            service=service,
+            user=requester,
+            body='Hidden before reciprocal evaluation.',
+            is_verified_review=True,
+            related_handshake=handshake,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(provider)
+        hidden_response = client.get(f'/api/users/{provider.id}/verified-reviews/')
+        assert hidden_response.status_code == status.HTTP_200_OK
+        assert hidden_response.data['count'] == 0
+
+        ReputationRep.objects.create(
+            handshake=handshake,
+            giver=provider,
+            receiver=requester,
+            is_punctual=True,
+            is_helpful=False,
+            is_kind=False,
+        )
+
+        revealed_response = client.get(f'/api/users/{provider.id}/verified-reviews/')
+        assert revealed_response.status_code == status.HTTP_200_OK
+        assert revealed_response.data['count'] == 1
 
 
 @pytest.mark.django_db
