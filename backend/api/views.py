@@ -2091,7 +2091,9 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         user = self.request.user
         return Handshake.objects.filter(
             Q(requester=user) | Q(service__user=user)
-        ).select_related('service', 'requester', 'service__user')
+        ).select_related('service', 'requester', 'service__user').prefetch_related(
+            Prefetch('reps', queryset=ReputationRep.objects.filter(giver=user), to_attr='user_reps')
+        )
 
     @action(detail=False, methods=['post'], url_path=r'services/(?P<service_id>[^/.]+)/interest', permission_classes=[permissions.IsAuthenticated])
     @track_performance

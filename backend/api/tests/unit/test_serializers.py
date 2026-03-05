@@ -7,13 +7,16 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError
 
-from api.models import Service, Tag, Handshake, Comment
+from rest_framework.test import APIRequestFactory
+
+from api.models import Service, Tag, Handshake, Comment, ReputationRep
 from api.serializers import (
     ServiceSerializer, UserProfileSerializer, PublicUserProfileSerializer,
     CommentSerializer, HandshakeSerializer
 )
 from api.tests.helpers.factories import (
-    UserFactory, ServiceFactory, TagFactory, HandshakeFactory, CommentFactory
+    UserFactory, ServiceFactory, TagFactory, HandshakeFactory, CommentFactory,
+    ReputationRepFactory,
 )
 
 User = get_user_model()
@@ -255,6 +258,29 @@ class TestHandshakeSerializer:
         assert data['status'] == handshake.status
         assert 'service_title' in data
         assert 'requester_name' in data
+
+    def test_user_has_reviewed_false_when_no_rep(self):
+        """user_has_reviewed is False when current user has not submitted a review"""
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(service=service, requester=requester, status='completed')
+        request = APIRequestFactory().get('/')
+        request.user = requester
+        serializer = HandshakeSerializer(handshake, context={'request': request})
+        assert serializer.data['user_has_reviewed'] is False
+
+    def test_user_has_reviewed_true_when_rep_exists(self):
+        """user_has_reviewed is True when current user has submitted a review for this handshake"""
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(service=service, requester=requester, status='completed')
+        ReputationRepFactory(handshake=handshake, giver=requester, receiver=provider)
+        request = APIRequestFactory().get('/')
+        request.user = requester
+        serializer = HandshakeSerializer(handshake, context={'request': request})
+        assert serializer.data['user_has_reviewed'] is True
 
 
 @pytest.mark.django_db

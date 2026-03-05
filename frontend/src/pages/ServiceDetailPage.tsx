@@ -466,7 +466,9 @@ export default function ServiceDetailPage() {
       && (isOwn ? exId(h.requester) !== currentUserId : exId(h.requester) === currentUserId)
     )
     : []
-  const evaluationHandshake = completedHandshakes[0]
+  // For "Leave Evaluation" we only care about the first completed handshake where user has NOT yet reviewed
+  const evaluationHandshake = completedHandshakes.find((h) => !h.user_has_reviewed) ?? completedHandshakes[0]
+  const showLeaveEvaluationCTA = !!evaluationHandshake && !evaluationHandshake.user_has_reviewed
   const evaluationCounterpartName = evaluationHandshake
     ? (isOwn ? evaluationHandshake.requester_name : evaluationHandshake.provider_name)
     : 'counterpart'
@@ -1376,23 +1378,32 @@ export default function ServiceDetailPage() {
 
                   {isAuthenticated && evaluationHandshake && (
                     <Box mt={4}>
-                      <Box as="button" w="full" py="12px" borderRadius="11px"
-                        bg={evaluationWindow.isOpen ? GREEN_LT : GRAY100}
-                        color={evaluationWindow.isOpen ? GREEN : GRAY500}
-                        fontSize="14px" fontWeight={700}
-                        display="flex" alignItems="center" justifyContent="center" gap="7px"
-                        onClick={() => { if (evaluationWindow.isOpen) setShowEvaluationModal(true) }}
-                        style={{
-                          border: `1px solid ${BLUE}40`,
-                          cursor: evaluationWindow.isOpen ? 'pointer' : 'not-allowed',
-                          opacity: evaluationWindow.isOpen ? 1 : 0.8,
-                        }}
-                      >
-                        <FiStar size={14} /> Leave Evaluation
-                      </Box>
-                      <Text mt={2} fontSize="12px" color={evaluationWindow.isOpen ? AMBER : GRAY500} textAlign="center" fontWeight={600}>
-                        {evaluationWindow.label}
-                      </Text>
+                      {showLeaveEvaluationCTA ? (
+                        <>
+                          <Box as="button" w="full" py="12px" borderRadius="11px"
+                            bg={evaluationWindow.isOpen ? GREEN_LT : GRAY100}
+                            color={evaluationWindow.isOpen ? GREEN : GRAY500}
+                            fontSize="14px" fontWeight={700}
+                            display="flex" alignItems="center" justifyContent="center" gap="7px"
+                            onClick={() => { if (evaluationWindow.isOpen) setShowEvaluationModal(true) }}
+                            style={{
+                              border: `1px solid ${BLUE}40`,
+                              cursor: evaluationWindow.isOpen ? 'pointer' : 'not-allowed',
+                              opacity: evaluationWindow.isOpen ? 1 : 0.8,
+                            }}
+                          >
+                            <FiStar size={14} /> Leave Evaluation
+                          </Box>
+                          <Text mt={2} fontSize="12px" color={evaluationWindow.isOpen ? AMBER : GRAY500} textAlign="center" fontWeight={600}>
+                            {evaluationWindow.label}
+                          </Text>
+                        </>
+                      ) : (
+                        <Flex align="center" justify="center" gap={2} py={2} px={3} borderRadius="11px" bg={GRAY100} color={GRAY500}>
+                          <FiCheckCircle size={14} color={GREEN} />
+                          <Text fontSize="13px" fontWeight={600}>You already reviewed this exchange.</Text>
+                        </Flex>
+                      )}
                     </Box>
                   )}
 

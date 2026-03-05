@@ -1089,6 +1089,7 @@ class HandshakeSerializer(serializers.ModelSerializer):
     service_title = serializers.CharField(source='service.title', read_only=True)
     requester_name = serializers.SerializerMethodField()
     provider_name = serializers.SerializerMethodField()
+    user_has_reviewed = serializers.SerializerMethodField()
 
     class Meta:
         model = Handshake
@@ -1099,6 +1100,7 @@ class HandshakeSerializer(serializers.ModelSerializer):
             'exact_location', 'exact_duration', 'scheduled_time',
             'provider_initiated', 'requester_initiated',
             'evaluation_window_starts_at', 'evaluation_window_ends_at', 'evaluation_window_closed_at',
+            'user_has_reviewed',
             'created_at', 'updated_at'
         ]
 
@@ -1111,6 +1113,15 @@ class HandshakeSerializer(serializers.ModelSerializer):
         from .utils import get_provider_and_receiver
         provider, _ = get_provider_and_receiver(obj)
         return f"{provider.first_name} {provider.last_name}".strip()
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_user_has_reviewed(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        if hasattr(obj, 'user_reps'):
+            return len(obj.user_reps) > 0
+        return ReputationRep.objects.filter(handshake=obj, giver=request.user).exists()
 
 # Chat Message Serializers
 @extend_schema_serializer(
