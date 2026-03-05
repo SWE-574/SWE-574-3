@@ -13,6 +13,8 @@ import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { MapView } from '@/components/MapView'
 import EventRosterModal from '@/components/EventRosterModal'
+import EventChatModal from '@/components/EventChatModal'
+import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
   spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
@@ -57,6 +59,44 @@ const REPORT_OPTIONS: { value: ReportType; label: string; desc: string }[] = [
   { value: 'service_issue',         label: 'Service issue',         desc: 'Problem with quality or description' },
   { value: 'other',                 label: 'Other',                 desc: 'Something else not listed above' },
 ]
+
+function getEvaluationWindowInfo(handshake?: Handshake) {
+  if (!handshake) {
+    return { isOpen: false, label: '' }
+  }
+
+  if (handshake.evaluation_window_closed_at) {
+    return { isOpen: false, label: 'Evaluation window closed' }
+  }
+
+  let deadlineMs: number | null = null
+  if (handshake.evaluation_window_ends_at) {
+    const parsed = new Date(handshake.evaluation_window_ends_at).getTime()
+    if (!Number.isNaN(parsed)) deadlineMs = parsed
+  }
+
+  if (deadlineMs == null) {
+    const startIso = handshake.evaluation_window_starts_at ?? handshake.updated_at
+    const parsedStart = new Date(startIso).getTime()
+    if (!Number.isNaN(parsedStart)) {
+      deadlineMs = parsedStart + (48 * 60 * 60 * 1000)
+    }
+  }
+
+  if (deadlineMs == null) {
+    return { isOpen: true, label: 'Evaluation window active (48h)' }
+  }
+
+  const msLeft = deadlineMs - Date.now()
+  if (msLeft <= 0) {
+    return { isOpen: false, label: 'Evaluation window closed' }
+  }
+
+  const totalMinutes = Math.ceil(msLeft / 60_000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return { isOpen: true, label: `${hours}h ${minutes}m left to evaluate` }
+}
 
 // ─── Gradient picker (same logic as DashboardPage) ───────────────────────────
 
@@ -370,8 +410,10 @@ export default function ServiceDetailPage() {
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [removeLoading, setRemoveLoading]   = useState(false)
   const [showRoster, setShowRoster]         = useState(false)
+  const [showEventChat, setShowEventChat]   = useState(false)
   const [completing, setCompleting]         = useState(false)
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null)
+  const [showEvaluationModal, setShowEvaluationModal] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -417,6 +459,21 @@ export default function ServiceDetailPage() {
   const myHandshake = handshakes.find((h) => exId(h.service) === service?.id && exId(h.requester) === user?.id)
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
+  const currentUserId = user?.id ?? null
+  const completedHandshakes = !isEvent && !!currentUserId
+    ? handshakes.filter((h) =>
+      exId(h.service) === service?.id
+      && h.status === 'completed'
+      && (isOwn ? exId(h.requester) !== currentUserId : exId(h.requester) === currentUserId)
+    )
+    : []
+  // For "Leave Evaluation" we only care about the first completed handshake where user has NOT yet reviewed
+  const evaluationHandshake = completedHandshakes.find((h) => !h.user_has_reviewed) ?? completedHandshakes[0]
+  const showLeaveEvaluationCTA = !!evaluationHandshake && !evaluationHandshake.user_has_reviewed
+  const evaluationCounterpartName = evaluationHandshake
+    ? (isOwn ? evaluationHandshake.requester_name : evaluationHandshake.provider_name)
+    : 'counterpart'
+  const evaluationWindow = getEvaluationWindowInfo(evaluationHandshake)
 
   // Event-specific derived value — must come after exId / isEvent
   const myEventHandshake = isEvent
@@ -525,6 +582,20 @@ export default function ServiceDetailPage() {
       toast.error(err.response?.data?.detail ?? 'Could not mark attendance.')
     } finally {
       setMarkingAttendedId(null)
+    }
+  }
+
+  const handleEvaluationSubmitted = async () => {
+    if (!service) return
+    try {
+      const [freshService, freshHandshakes] = await Promise.all([
+        serviceAPI.get(service.id),
+        handshakeAPI.list(),
+      ])
+      setService(freshService)
+      setHandshakes(freshHandshakes)
+    } catch {
+      // Keep current UI state; submission success is already acknowledged in modal.
     }
   }
 
@@ -1333,6 +1404,37 @@ export default function ServiceDetailPage() {
                     </Stack>
                   )}
 
+                  {isAuthenticated && evaluationHandshake && (
+                    <Box mt={4}>
+                      {showLeaveEvaluationCTA ? (
+                        <>
+                          <Box as="button" w="full" py="12px" borderRadius="11px"
+                            bg={evaluationWindow.isOpen ? GREEN_LT : GRAY100}
+                            color={evaluationWindow.isOpen ? GREEN : GRAY500}
+                            fontSize="14px" fontWeight={700}
+                            display="flex" alignItems="center" justifyContent="center" gap="7px"
+                            onClick={() => { if (evaluationWindow.isOpen) setShowEvaluationModal(true) }}
+                            style={{
+                              border: `1px solid ${BLUE}40`,
+                              cursor: evaluationWindow.isOpen ? 'pointer' : 'not-allowed',
+                              opacity: evaluationWindow.isOpen ? 1 : 0.8,
+                            }}
+                          >
+                            <FiStar size={14} /> Leave Evaluation
+                          </Box>
+                          <Text mt={2} fontSize="12px" color={evaluationWindow.isOpen ? AMBER : GRAY500} textAlign="center" fontWeight={600}>
+                            {evaluationWindow.label}
+                          </Text>
+                        </>
+                      ) : (
+                        <Flex align="center" justify="center" gap={2} py={2} px={3} borderRadius="11px" bg={GRAY100} color={GRAY500}>
+                          <FiCheckCircle size={14} color={GREEN} />
+                          <Text fontSize="13px" fontWeight={600}>You already reviewed this exchange.</Text>
+                        </Flex>
+                      )}
+                    </Box>
+                  )}
+
                   {/* Report */}
                   {isAuthenticated && !isOwn && (
                     <Box textAlign="center" mt={4} pt={4} borderTop={`1px solid ${GRAY100}`}>
@@ -1398,6 +1500,24 @@ export default function ServiceDetailPage() {
           completing={completing}
         />
       )}
+      {evaluationHandshake && (
+        <ServiceEvaluationModal
+          isOpen={showEvaluationModal}
+          onClose={() => setShowEvaluationModal(false)}
+          handshakeId={evaluationHandshake.id}
+          counterpartName={evaluationCounterpartName}
+          onSubmitted={handleEvaluationSubmitted}
+        />
+      )}
+
+      {showEventChat && service && (
+        <EventChatModal
+          isOpen={showEventChat}
+          onClose={() => setShowEventChat(false)}
+          service={service}
+        />
+      )}
+
     </Box>
   )
 }

@@ -15,6 +15,11 @@ export interface Handshake {
   provider_initiated?: boolean
   /** Set after requester approves details via /approve/ */
   requester_initiated?: boolean
+  evaluation_window_starts_at?: string | null
+  evaluation_window_ends_at?: string | null
+  evaluation_window_closed_at?: string | null
+  /** True if the current user has already submitted a review for this handshake */
+  user_has_reviewed?: boolean
   exact_location?: string | null
   exact_duration?: number | null
   scheduled_time?: string | null

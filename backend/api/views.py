@@ -75,7 +75,7 @@ from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -353,6 +353,99 @@ def _validate_event_feedback_window(service: Service) -> tuple[bool, str | None]
         return False, 'The event evaluation window has closed.'
 
     return True, None
+
+
+def _validate_feedback_window(handshake: Handshake) -> tuple[bool, str | None]:
+    """Validate whether a handshake is still inside the feedback window."""
+    starts_at = getattr(handshake, 'evaluation_window_starts_at', None)
+    ends_at = getattr(handshake, 'evaluation_window_ends_at', None)
+    closed_at = getattr(handshake, 'evaluation_window_closed_at', None)
+
+    # Prefer explicit handshake-level window fields when available.
+    if starts_at and ends_at:
+        if closed_at is not None or timezone.now() > ends_at:
+            return False, 'The 48-hour evaluation window has closed.'
+        return True, None
+
+    # Backward-compatible fallback for records created before handshake window fields.
+    if handshake.service.type == 'Event':
+        return _validate_event_feedback_window(handshake.service)
+
+    # Standard service fallback: use handshake completion/update time as the start.
+    fallback_start = handshake.updated_at
+    if fallback_start is None:
+        return False, 'Evaluation window is unavailable for this handshake.'
+
+    window_hours = getattr(settings, 'FEEDBACK_WINDOW_HOURS', settings.EVENT_FEEDBACK_WINDOW_HOURS)
+    fallback_end = fallback_start + timedelta(hours=window_hours)
+    if timezone.now() > fallback_end:
+        return False, 'The 48-hour evaluation window has closed.'
+    return True, None
+
+
+def _apply_blind_review_visibility(queryset):
+    """Hide one-sided 1-to-1 verified reviews until reciprocal eval or window expiry."""
+    now = timezone.now()
+
+    target_user_id_expr = Case(
+        When(
+            user_id=F('related_handshake__service__user_id'),
+            then=F('related_handshake__requester_id'),
+        ),
+        default=F('related_handshake__service__user_id'),
+        output_field=UUIDField(),
+    )
+
+    return queryset.annotate(
+        blind_target_user_id=target_user_id_expr,
+        blind_target_positive_eval=Exists(
+            ReputationRep.objects.filter(
+                handshake_id=OuterRef('related_handshake_id'),
+                giver_id=OuterRef('blind_target_user_id'),
+            )
+        ),
+        blind_target_negative_eval=Exists(
+            NegativeRep.objects.filter(
+                handshake_id=OuterRef('related_handshake_id'),
+                giver_id=OuterRef('blind_target_user_id'),
+            )
+        ),
+    ).exclude(
+        related_handshake__evaluation_window_ends_at__gt=now,
+        blind_target_positive_eval=False,
+        blind_target_negative_eval=False,
+    )
+
+
+def _build_event_comments_history(organizer: User, request=None) -> list[dict]:
+    """Return organizer Event comments grouped by event with newest-first ordering."""
+    comments = Comment.objects.filter(
+        service__type='Event',
+        service__user=organizer,
+        is_verified_review=True,
+        is_deleted=False,
+        related_handshake__isnull=False,
+        related_handshake__requester=F('user'),
+    ).select_related('user', 'service', 'related_handshake').order_by('-created_at')
+    comments = _apply_blind_review_visibility(comments)
+
+    grouped = {}
+    for comment in comments:
+        event = comment.service
+        event_id = str(event.id)
+        if event_id not in grouped:
+            grouped[event_id] = {
+                'event_id': event_id,
+                'event_title': event.title,
+                'event_status': event.status,
+                'event_scheduled_time': event.scheduled_time.isoformat() if event.scheduled_time else None,
+                'event_completed_at': event.event_completed_at.isoformat() if event.event_completed_at else None,
+                'comments': [],
+            }
+
+        grouped[event_id]['comments'].append(CommentSerializer(comment, context={'request': request}).data)
+
+    return list(grouped.values())
 
 class CustomTokenRefreshView(TokenRefreshView):
     """Custom token refresh: reads refresh token from cookie (or body), sets new cookies."""
@@ -959,6 +1052,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             return Response(instance._cached_data)
             
         response_data = serializer.data
+        response_data['event_comments_history'] = _build_event_comments_history(instance, request)
         
         if not kwargs.get('id'):
             cache_user_profile(str(request.user.id), response_data)
@@ -1184,6 +1278,7 @@ class UserVerifiedReviewsView(APIView):
                 queryset=UserBadge.objects.select_related('badge')
             )
         ).order_by('-created_at')
+        comments = _apply_blind_review_visibility(comments)
         
         # Paginate
         paginator = self.pagination_class()
@@ -1994,7 +2089,9 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         user = self.request.user
         return Handshake.objects.filter(
             Q(requester=user) | Q(service__user=user)
-        ).select_related('service', 'requester', 'service__user')
+        ).select_related('service', 'requester', 'service__user').prefetch_related(
+            Prefetch('reps', queryset=ReputationRep.objects.filter(giver=user), to_attr='user_reps')
+        )
 
     @action(detail=False, methods=['post'], url_path=r'services/(?P<service_id>[^/.]+)/interest', permission_classes=[permissions.IsAuthenticated])
     @track_performance
@@ -2695,6 +2792,13 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         if handshake.provider_confirmed_complete and handshake.receiver_confirmed_complete:
             with transaction.atomic():
                 complete_timebank_transfer(handshake)
+                window_start = timezone.now()
+                Handshake.objects.filter(id=handshake.id).update(
+                    evaluation_window_starts_at=window_start,
+                    evaluation_window_ends_at=window_start + timedelta(hours=settings.FEEDBACK_WINDOW_HOURS),
+                    evaluation_window_closed_at=None,
+                )
+                handshake.refresh_from_db(fields=['status', 'evaluation_window_starts_at', 'evaluation_window_ends_at', 'evaluation_window_closed_at'])
                 create_notification(
                     user=handshake.service.user,
                     notification_type='positive_rep',
@@ -3051,6 +3155,8 @@ class ChatViewSet(viewsets.ViewSet):
         
         handshakes = Handshake.objects.filter(
             Q(requester=user) | Q(service__user=user)
+        ).exclude(
+            service__type='Event'
         ).select_related(
             'service', 
             'requester', 
@@ -3064,6 +3170,18 @@ class ChatViewSet(viewsets.ViewSet):
         for handshake in handshakes:
             # Get last message from prefetched data
             last_message = handshake.last_message_list[0] if handshake.last_message_list else None
+
+            window_start = handshake.evaluation_window_starts_at
+            window_end = handshake.evaluation_window_ends_at
+            if window_start is None or window_end is None:
+                if handshake.service.type == 'Event':
+                    window_start = handshake.service.event_completed_at or handshake.service.updated_at
+                else:
+                    window_start = handshake.updated_at
+
+                if window_start is not None:
+                    window_hours = getattr(settings, 'FEEDBACK_WINDOW_HOURS', settings.EVENT_FEEDBACK_WINDOW_HOURS)
+                    window_end = window_start + timedelta(hours=window_hours)
             
             from .utils import get_provider_and_receiver
             provider, receiver = get_provider_and_receiver(handshake)
@@ -3091,6 +3209,10 @@ class ChatViewSet(viewsets.ViewSet):
                 'is_provider': is_provider,
                 'provider_initiated': handshake.provider_initiated,
                 'requester_initiated': handshake.requester_initiated,
+                'updated_at': handshake.updated_at.isoformat() if handshake.updated_at else None,
+                'evaluation_window_starts_at': window_start.isoformat() if window_start else None,
+                'evaluation_window_ends_at': window_end.isoformat() if window_end else None,
+                'evaluation_window_closed_at': handshake.evaluation_window_closed_at.isoformat() if handshake.evaluation_window_closed_at else None,
                 'exact_location': handshake.exact_location,
                 'exact_duration': float(handshake.exact_duration) if handshake.exact_duration else None,
                 'scheduled_time': handshake.scheduled_time.isoformat() if handshake.scheduled_time else None,
@@ -3372,14 +3494,13 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_404_NOT_FOUND
             )
 
-        if handshake.service.type == 'Event':
-            in_window, window_error = _validate_event_feedback_window(handshake.service)
-            if not in_window:
-                return create_error_response(
-                    window_error,
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
+        in_window, window_error = _validate_feedback_window(handshake)
+        if not in_window:
+            return create_error_response(
+                window_error,
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_410_GONE
+            )
 
         user = request.user
         
@@ -3478,6 +3599,20 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 handshake=handshake,
                 service=handshake.service
             )
+
+        # For Offer/Need services, notify the reviewed user only when there is
+        # at least one positive trait or a review comment.
+        if not is_event_evaluation and (
+            rep.is_punctual or rep.is_helpful or rep.is_kind or bool(rep.comment)
+        ):
+            create_notification(
+                user=target_user,
+                notification_type='positive_rep',
+                title='Feedback Received',
+                message=f"{user.first_name} left feedback for '{handshake.service.title}'.",
+                handshake=handshake,
+                service=handshake.service,
+            )
         
         # Update karma (REQ-REP-006)
         karma_gain = 0
@@ -3500,6 +3635,103 @@ class ReputationViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(rep)
         return Response(serializer.data, status=201)
+
+    @action(detail=False, methods=['post'], url_path='add-review')
+    @track_performance
+    def add_review(self, request):
+        """
+        Add a verified review comment for an already-evaluated handshake.
+
+        This allows users who submitted evaluation traits first to add the
+        review text later, as long as the handshake's evaluation window is
+        still open.
+        """
+        handshake_id = request.data.get('handshake_id')
+        raw_comment = (request.data.get('comment') or '').strip()
+
+        if not handshake_id:
+            return create_error_response(
+                'handshake_id is required',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            handshake = Handshake.objects.select_related(
+                'service', 'service__user', 'requester'
+            ).get(id=handshake_id)
+        except Handshake.DoesNotExist:
+            return create_error_response(
+                'Handshake not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        required_status = 'attended' if handshake.service.type == 'Event' else 'completed'
+        if handshake.status != required_status:
+            return create_error_response(
+                'Handshake not found or not eligible for evaluation',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        in_window, window_error = _validate_feedback_window(handshake)
+        if not in_window:
+            return create_error_response(
+                window_error,
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_410_GONE,
+            )
+
+        user = request.user
+        from .utils import get_provider_and_receiver
+        provider, receiver = get_provider_and_receiver(handshake)
+        if user not in [provider, receiver]:
+            return create_error_response(
+                'Not authorized - you are not a participant in this handshake',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        has_evaluation = ReputationRep.objects.filter(handshake=handshake, giver=user).exists() or NegativeRep.objects.filter(
+            handshake=handshake, giver=user
+        ).exists()
+        if not has_evaluation:
+            return create_error_response(
+                'You must submit evaluation before adding a review',
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        existing_review = Comment.objects.filter(
+            related_handshake=handshake,
+            user=user,
+            is_verified_review=True,
+            is_deleted=False,
+        ).exists()
+        if existing_review:
+            return create_error_response(
+                'Review already submitted',
+                code=ErrorCodes.ALREADY_EXISTS,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000]
+        if not cleaned_comment:
+            return Response(
+                {'status': 'success', 'message': 'Evaluation already recorded. No review text provided.'},
+                status=status.HTTP_200_OK,
+            )
+
+        comment = Comment.objects.create(
+            service=handshake.service,
+            user=user,
+            body=cleaned_comment,
+            is_verified_review=True,
+            related_handshake=handshake,
+        )
+
+        return Response(CommentSerializer(comment).data, status=status.HTTP_201_CREATED)
 
 class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -4183,6 +4415,26 @@ class PublicChatViewSet(viewsets.ViewSet):
     throttle_classes = [UserRateThrottle]
     pagination_class = StandardResultsSetPagination
 
+    def _check_event_access(self, request, service):
+        """For Event-type services, restrict access to organizer + active participants."""
+        if service.type != 'Event':
+            return None  # no restriction for non-events
+        user = request.user
+        if service.user == user:
+            return None  # organizer always has access
+        has_active_hs = Handshake.objects.filter(
+            service=service,
+            requester=user,
+            status__in=['accepted', 'checked_in', 'attended'],
+        ).exists()
+        if has_active_hs:
+            return None
+        return create_error_response(
+            'You must be a participant or organizer of this event to access chat',
+            code=ErrorCodes.PERMISSION_DENIED,
+            status_code=status.HTTP_403_FORBIDDEN
+        )
+
     @track_performance
     def retrieve(self, request, pk=None):
         """
@@ -4198,6 +4450,11 @@ class PublicChatViewSet(viewsets.ViewSet):
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        # For events, restrict to organizer + active participants
+        denied = self._check_event_access(request, service)
+        if denied:
+            return denied
 
         # Get or create chat room for the service (atomic to handle concurrent requests)
         room, _ = ChatRoom.objects.get_or_create(
@@ -4250,6 +4507,11 @@ class PublicChatViewSet(viewsets.ViewSet):
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        # For events, restrict to organizer + active participants
+        denied = self._check_event_access(request, service)
+        if denied:
+            return denied
 
         # Get or create chat room (atomic to handle concurrent requests)
         room, _ = ChatRoom.objects.get_or_create(
@@ -4459,6 +4721,7 @@ class CommentViewSet(viewsets.ViewSet):
                 to_attr='active_replies'
             )
         ).order_by('-created_at')
+        comments = _apply_blind_review_visibility(comments)
 
         # Paginate
         paginator = self.pagination_class()
@@ -4528,7 +4791,6 @@ class CommentViewSet(viewsets.ViewSet):
         - Handshake is completed
         - User has not already posted a verified review
         """
-        return Response({'handshakes': []})
 
         service = self._get_service(service_id)
         if service is None:
@@ -4629,14 +4891,13 @@ class NegativeRepViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_404_NOT_FOUND
             )
 
-        if handshake.service.type == 'Event':
-            in_window, window_error = _validate_event_feedback_window(handshake.service)
-            if not in_window:
-                return create_error_response(
-                    window_error,
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
+        in_window, window_error = _validate_feedback_window(handshake)
+        if not in_window:
+            return create_error_response(
+                window_error,
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_410_GONE
+            )
 
         user = request.user
         
@@ -4716,17 +4977,6 @@ class NegativeRepViewSet(viewsets.ViewSet):
         target_user.karma_score = F("karma_score") - karma_penalty
         target_user.save(update_fields=['karma_score'])
         target_user.refresh_from_db(fields=['karma_score'])
-
-        # Notify the receiver about negative feedback (without specific details)
-        create_notification(
-            user=target_user,
-            notification_type='negative_feedback',
-            title='Feedback Received',
-            message=f'You received feedback for the service "{handshake.service.title}". '
-                    f'Your karma was adjusted.',
-            handshake=handshake,
-            service=handshake.service
-        )
 
         if handshake.service.type == 'Event':
             EventEvaluationService.refresh_summary(handshake.service)

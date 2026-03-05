@@ -210,6 +210,12 @@ class PublicChatConsumer(AsyncWebsocketConsumer):
             if not room_exists:
                 await self.close(code=4004)
                 return
+
+            # For event rooms, restrict to organizer + active participants
+            event_access = await self.check_event_access(self.room_id, user)
+            if not event_access:
+                await self.close(code=4003)
+                return
             
             self.user = user
         except Exception:
@@ -286,6 +292,24 @@ class PublicChatConsumer(AsyncWebsocketConsumer):
         try:
             ChatRoom.objects.get(id=room_id)
             return True
+        except ChatRoom.DoesNotExist:
+            return False
+
+    @database_sync_to_async
+    def check_event_access(self, room_id, user):
+        """For event-linked rooms, only allow organizer + active participants."""
+        try:
+            room = ChatRoom.objects.select_related('related_service', 'related_service__user').get(id=room_id)
+            service = room.related_service
+            if not service or service.type != 'Event':
+                return True  # non-event rooms are open
+            if service.user == user:
+                return True  # organizer
+            return Handshake.objects.filter(
+                service=service,
+                requester=user,
+                status__in=['accepted', 'checked_in', 'attended'],
+            ).exists()
         except ChatRoom.DoesNotExist:
             return False
     
