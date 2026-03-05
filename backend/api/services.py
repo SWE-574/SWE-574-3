@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from datetime import timedelta
+from django.conf import settings
 from django.db import transaction
 from django.db import models as django_models
 from django.db.models import Q
@@ -597,6 +598,32 @@ class EventHandshakeService:
             service.status = 'Completed'
             service.event_completed_at = timezone.now()
             service.save(update_fields=['status', 'event_completed_at', 'updated_at'])
+
+            window_start = service.event_completed_at
+            window_end = window_start + timedelta(hours=settings.FEEDBACK_WINDOW_HOURS)
+            attended_handshakes = list(
+                Handshake.objects.filter(service=service, status='attended').select_related('requester')
+            )
+            Handshake.objects.filter(
+                id__in=[handshake.id for handshake in attended_handshakes]
+            ).update(
+                evaluation_window_starts_at=window_start,
+                evaluation_window_ends_at=window_end,
+                evaluation_window_closed_at=None,
+            )
+
+            for attended_handshake in attended_handshakes:
+                create_notification(
+                    user=attended_handshake.requester,
+                    notification_type='positive_rep',
+                    title='Leave Feedback',
+                    message=(
+                        f"Event '{service.title}' has ended. "
+                        f"You can now leave feedback for {organizer.first_name}."
+                    ),
+                    handshake=attended_handshake,
+                    service=service,
+                )
 
     @staticmethod
     def cancel_event(service: Service, organizer: User) -> None:

@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from api.models import Handshake, Service
+from api.models import Handshake, Notification, Service
 from api.services import EventHandshakeService
 from api.tests.helpers.factories import ServiceFactory, UserFactory, HandshakeFactory
 
@@ -223,6 +223,34 @@ class TestCompleteEvent:
         EventHandshakeService.complete_event(service, organizer)
         hs.refresh_from_db()
         assert hs.status == 'attended'
+
+    def test_complete_event_prompts_attended_participants_for_feedback(self):
+        organizer = UserFactory(first_name='Host')
+        service = _event_service(organizer=organizer, hours_until_start=12)
+
+        attended_user = UserFactory()
+        attended_hs = EventHandshakeService.join_event(service, attended_user)
+        EventHandshakeService.checkin(attended_hs, attended_user)
+        EventHandshakeService.mark_attended(attended_hs, organizer)
+
+        no_show_user = UserFactory()
+        EventHandshakeService.join_event(service, no_show_user)
+
+        EventHandshakeService.complete_event(service, organizer)
+
+        assert Notification.objects.filter(
+            user=attended_user,
+            type='positive_rep',
+            title='Leave Feedback',
+            related_service=service,
+            related_handshake=attended_hs,
+        ).exists()
+        assert not Notification.objects.filter(
+            user=no_show_user,
+            type='positive_rep',
+            title='Leave Feedback',
+            related_service=service,
+        ).exists()
 
     def test_three_no_shows_triggers_ban(self):
         """After 3 cumulative no-shows the user gets a 14-day event ban."""

@@ -360,6 +360,9 @@ class Handshake(models.Model):  # noqa: E302
     scheduled_time = models.DateTimeField(null=True, blank=True, help_text='Scheduled time for the service')
     provider_initiated = models.BooleanField(default=False, help_text='Whether provider has initiated the handshake')
     requester_initiated = models.BooleanField(default=False, help_text='Whether requester has initiated the handshake')
+    evaluation_window_starts_at = models.DateTimeField(null=True, blank=True)
+    evaluation_window_ends_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    evaluation_window_closed_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

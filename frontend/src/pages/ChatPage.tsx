@@ -33,6 +33,7 @@ import { handshakeAPI, type InitiatePayload } from '@/services/handshakeAPI'
 import { HandshakeDetailsModal } from '@/components/HandshakeDetailsModal'
 import { ProviderDetailsModal } from '@/components/ProviderDetailsModal'
 import { ServiceConfirmationModal } from '@/components/ServiceConfirmationModal'
+import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 
 import {
   GREEN, GREEN_LT, GREEN_MD,
@@ -71,6 +72,61 @@ function fmtDateTime(iso: string) {
       hour: '2-digit', minute: '2-digit',
     })
   } catch { return iso }
+}
+
+type EvaluationWindowState = {
+  isPending: boolean
+  isClosed: boolean
+  timeLeftLabel: string | null
+}
+
+function getEvaluationWindowState(conv: ChatConversation): EvaluationWindowState {
+  const isStandardService = conv.service_type?.toLowerCase() !== 'event'
+  const isEligible = conv.status === 'completed' && isStandardService && !conv.user_has_reviewed
+
+  if (!isEligible) {
+    return { isPending: false, isClosed: false, timeLeftLabel: null }
+  }
+
+  if (conv.evaluation_window_closed_at) {
+    return { isPending: false, isClosed: true, timeLeftLabel: null }
+  }
+
+  let deadlineMs: number | null = null
+  if (conv.evaluation_window_ends_at) {
+    const parsed = new Date(conv.evaluation_window_ends_at).getTime()
+    if (!Number.isNaN(parsed)) deadlineMs = parsed
+  } else if (conv.evaluation_window_starts_at) {
+    const start = new Date(conv.evaluation_window_starts_at).getTime()
+    if (!Number.isNaN(start)) deadlineMs = start + (48 * 60 * 60 * 1000)
+  }
+
+  if (deadlineMs == null) {
+    if (conv.updated_at) {
+      const updatedMs = new Date(conv.updated_at).getTime()
+      if (!Number.isNaN(updatedMs)) {
+        deadlineMs = updatedMs + (48 * 60 * 60 * 1000)
+      }
+    }
+  }
+
+  if (deadlineMs == null) {
+    return { isPending: true, isClosed: false, timeLeftLabel: '48h window active' }
+  }
+
+  const msLeft = deadlineMs - Date.now()
+  if (msLeft <= 0) {
+    return { isPending: false, isClosed: true, timeLeftLabel: null }
+  }
+
+  const totalMinutes = Math.ceil(msLeft / 60_000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return {
+    isPending: true,
+    isClosed: false,
+    timeLeftLabel: `${hours}h ${minutes}m left`,
+  }
 }
 
 function initials(name: string): string {
@@ -149,8 +205,13 @@ function isServiceOwner(conv: ChatConversation): boolean {
 function ConvRow({
   conv, isSelected, onClick,
 }: { conv: ChatConversation; isSelected: boolean; onClick: () => void }) {
-  const dot   = STATUS_DOT_COLOR[conv.status] ?? GRAY400
-  const label = STATUS_LABEL[conv.status] ?? conv.status
+  const evalWindow = getEvaluationWindowState(conv)
+  const dot = evalWindow.isPending
+    ? AMBER
+    : (evalWindow.isClosed ? GRAY400 : (STATUS_DOT_COLOR[conv.status] ?? GRAY400))
+  const label = evalWindow.isPending
+    ? 'Evaluation Pending'
+    : (evalWindow.isClosed ? 'Evaluation Closed' : (STATUS_LABEL[conv.status] ?? conv.status))
   const lm    = conv.last_message
   const myService = isServiceOwner(conv)
 
@@ -197,6 +258,11 @@ function ConvRow({
             <Box w="6px" h="6px" borderRadius="full" flexShrink={0} bg={dot} />
             <Text fontSize="11px" color={GRAY500} fontWeight={500}>{label}</Text>
           </Flex>
+          {evalWindow.isPending && evalWindow.timeLeftLabel && (
+            <Text fontSize="10px" color={AMBER} fontWeight={600} mt="1px">
+              {evalWindow.timeLeftLabel}
+            </Text>
+          )}
           {lm && (
             <Text fontSize="11px" color={GRAY400} mt="1px"
               style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -371,9 +437,16 @@ function ConversationSidebar({
   const filtered = tab === 'my_services' ? myServices : tab === 'my_interests' ? myInterests : conversations
 
   const active = filtered.filter((c) => ACTIVE_STATUSES.has(c.status))
-  const closed = filtered.filter((c) => CLOSED_STATUSES.has(c.status))
+  const evaluationPending = filtered.filter(
+    (c) => c.status === 'completed' && getEvaluationWindowState(c).isPending,
+  )
+  const evaluationPendingIds = new Set(evaluationPending.map((c) => c.handshake_id))
+  const closed = filtered.filter(
+    (c) => CLOSED_STATUSES.has(c.status) && !evaluationPendingIds.has(c.handshake_id),
+  )
 
   const activeGroups = groupByService(active)
+  const evaluationPendingGroups = groupByService(evaluationPending)
   const closedGroups = groupByService(closed)
 
   if (isLoading && conversations.length === 0) {
@@ -485,6 +558,36 @@ function ConversationSidebar({
         </Box>
       )}
 
+      {/* Evaluation Pending section */}
+      {evaluationPending.length > 0 && (
+        <Box>
+          <Box
+            px={4} py="8px" bg={GRAY50}
+            borderTop={active.length > 0 ? `1px solid ${GRAY200}` : 'none'}
+            borderBottom={`1px solid ${GRAY200}`}
+          >
+            <Flex align="center" gap={2}>
+              <Box w="7px" h="7px" borderRadius="full" bg={AMBER} />
+              <Text fontSize="11px" fontWeight={700} color={AMBER} textTransform="uppercase" letterSpacing="0.06em">
+                Evaluation Pending · {evaluationPending.length}
+              </Text>
+            </Flex>
+          </Box>
+          {Array.from(evaluationPendingGroups.entries()).map(([title, convs]) => (
+            <ServiceGroup
+              key={title}
+              title={title}
+              convs={convs}
+              selectedId={selectedId}
+              selectedGroupServiceId={selectedGroupServiceId}
+              onSelect={onSelect}
+              onSelectGroup={onSelectGroup}
+              defaultOpen={convs.some((c) => c.handshake_id === selectedId) || evaluationPendingGroups.size === 1}
+            />
+          ))}
+        </Box>
+      )}
+
       {/* Closed section toggle */}
       {closed.length > 0 && (
         <Box>
@@ -503,7 +606,7 @@ function ConversationSidebar({
               </Box>
               <Box w="7px" h="7px" borderRadius="full" bg={GRAY400} flexShrink={0} />
               <Text fontSize="11px" fontWeight={700} color={GRAY500} textTransform="uppercase" letterSpacing="0.06em">
-                Closed · {closed.length}
+                Completed / Closed · {closed.length}
               </Text>
             </Flex>
           </Box>
@@ -603,7 +706,7 @@ function HsStepBar({ conv }: { conv: ChatConversation }) {
 // ─── Action Card ──────────────────────────────────────────────────────────────
 
 function ActionCard({
-  conv, onInitiate, onShowApprove, onConfirm, onCancel, isCancelling,
+  conv, onInitiate, onShowApprove, onConfirm, onCancel, isCancelling, onOpenEvaluation,
 }: {
   conv: ChatConversation
   onInitiate: () => void
@@ -611,6 +714,7 @@ function ActionCard({
   onConfirm: () => void
   onCancel: () => Promise<void>
   isCancelling: boolean
+  onOpenEvaluation: () => void
 }) {
   const {
     status, is_provider, provider_initiated,
@@ -627,21 +731,38 @@ function ActionCard({
   if (!['pending', 'accepted', 'completed'].includes(status)) return null
 
   if (status === 'completed') {
+    const evalWindow = getEvaluationWindowState(conv)
+    const canEvaluate = evalWindow.isPending
+
     return (
       <Box mx={4} my="10px" p={4} borderRadius="14px" bg={BLUE_LT} border={`1px solid #BFDBFE`}>
-        <Flex align="center" gap={3}>
-          <Box
-            w="34px" h="34px" borderRadius="full" flexShrink={0}
-            bg={BLUE} color={WHITE}
-            display="flex" alignItems="center" justifyContent="center"
-          >
-            <FiCheck size={14} strokeWidth={3} />
-          </Box>
-          <Box>
-            <Text fontSize="13px" fontWeight={700} color={BLUE}>Service Completed</Text>
-            <Text fontSize="12px" color="#3B82F6">TimeBank hours transferred successfully.</Text>
-          </Box>
+        <Flex align="center" justify="space-between" gap={3} flexWrap="wrap">
+          <Flex align="center" gap={3}>
+            <Box
+              w="34px" h="34px" borderRadius="full" flexShrink={0}
+              bg={BLUE} color={WHITE}
+              display="flex" alignItems="center" justifyContent="center"
+            >
+              <FiCheck size={14} strokeWidth={3} />
+            </Box>
+            <Box>
+              <Text fontSize="13px" fontWeight={700} color={BLUE}>Service Completed</Text>
+              <Text fontSize="12px" color="#3B82F6">TimeBank hours transferred successfully.</Text>
+            </Box>
+          </Flex>
+          {canEvaluate ? (
+            <CTA label="Leave Evaluation" bg={BLUE} onClick={onOpenEvaluation} />
+          ) : conv.user_has_reviewed ? (
+            <Text fontSize="12px" fontWeight={700} color={GREEN}>Evaluation submitted</Text>
+          ) : evalWindow.isClosed ? (
+            <Text fontSize="12px" fontWeight={700} color={GRAY600}>Evaluation window closed</Text>
+          ) : null}
         </Flex>
+        {canEvaluate && (
+          <Text fontSize="11px" color={AMBER} mt={2} fontWeight={700}>
+            Evaluation Waiting: {evalWindow.timeLeftLabel ?? 'Time left unavailable'}
+          </Text>
+        )}
       </Box>
     )
   }
@@ -1182,6 +1303,7 @@ export default function ChatPage() {
   const [showInitiateModal, setShowInitiateModal] = useState(false)
   const [showApproveModal,  setShowApproveModal]  = useState(false)
   const [showConfirmModal,  setShowConfirmModal]  = useState(false)
+  const [showEvaluationModal, setShowEvaluationModal] = useState(false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLTextAreaElement>(null)
@@ -1254,7 +1376,10 @@ export default function ChatPage() {
     setConversations(filtered)
     // Auto-select first active conversation only when nothing is selected yet
     if (!selectedIdRef.current && !paramIdRef.current && filtered.length > 0) {
-      const first = filtered.find((c) => ACTIVE_STATUSES.has(c.status)) ?? filtered[0]
+      const first =
+        filtered.find((c) => ACTIVE_STATUSES.has(c.status))
+        ?? filtered.find((c) => c.status === 'completed' && getEvaluationWindowState(c).isPending)
+        ?? filtered[0]
       setSelectedId(first.handshake_id)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1565,6 +1690,7 @@ export default function ChatPage() {
                 onConfirm={() => setShowConfirmModal(true)}
                 onCancel={handleCancel}
                 isCancelling={isCancelling}
+                onOpenEvaluation={() => setShowEvaluationModal(true)}
               />
 
               {/* Messages */}
@@ -1677,6 +1803,18 @@ export default function ChatPage() {
           onConfirm={handleConfirm}
           provisioned_hours={selectedConv.provisioned_hours ?? undefined}
           other_user_name={selectedConv.other_user.name}
+        />
+      )}
+      {selectedConv && selectedId && (
+        <ServiceEvaluationModal
+          isOpen={showEvaluationModal}
+          onClose={() => setShowEvaluationModal(false)}
+          handshakeId={selectedId}
+          counterpartName={selectedConv.other_user.name}
+          alreadyReviewed={selectedConv.user_has_reviewed}
+          onSubmitted={async () => {
+            refreshConversations()
+          }}
         />
       )}
     </Box>
