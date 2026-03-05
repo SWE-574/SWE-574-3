@@ -96,6 +96,8 @@ const RegistrationPage = () => {
     defaultValues: { agreeToTerms: false },
   })
 
+  // react-hook-form watch() for conditional UI; rule expects memoizable deps
+  /* eslint-disable-next-line react-hooks/incompatible-library */
   const agreeToTerms = watch('agreeToTerms')
   const passwordValue = watch('password') ?? ''
 

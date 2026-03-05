@@ -13,6 +13,7 @@ import {
   PURPLE, PURPLE_LT, RED, RED_LT,
   GRAY50, GRAY100, GRAY200, GRAY400, GRAY500, GRAY700, GRAY800, WHITE,
 } from '@/theme/tokens'
+import { SidebarLayout } from '@/components/MainSidebar'
 
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
@@ -152,55 +153,57 @@ export default function ForumCategories() {
   }, [])
 
   return (
-    <Box bg={GRAY50} minH="calc(100vh - 64px)" py={{ base: 4, md: 6 }} px={{ base: 3, md: 6 }}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
-      <Box maxW="1100px" mx="auto">
+    <SidebarLayout sidebarProps={{ hideLocationFilters: true }}>
+      <Box flex={1} overflowY="auto" bg={GRAY50} py={{ base: 4, md: 6 }} px={{ base: 3, md: 6 }}>
+        <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+        <Box maxW="1100px" mx="auto">
 
-        {/* Header */}
-        <Box mb={8}>
-          <Text fontSize={{ base: '22px', md: '28px' }} fontWeight={800} color={GRAY800} mb={1}>
-            Community Forum
-          </Text>
-          <Text fontSize="14px" color={GRAY500}>
-            Discuss, ask questions, and share knowledge with the Hive community.
-          </Text>
+          {/* Header */}
+          <Box mb={8}>
+            <Text fontSize={{ base: '22px', md: '28px' }} fontWeight={800} color={GRAY800} mb={1}>
+              Community Forum
+            </Text>
+            <Text fontSize="14px" color={GRAY500}>
+              Discuss, ask questions, and share knowledge with the Hive community.
+            </Text>
+          </Box>
+
+          {error ? (
+            <Box textAlign="center" py={12}>
+              <Text color={RED} fontSize="14px">{error}</Text>
+            </Box>
+          ) : loading ? (
+            <Grid templateColumns={{ base: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }} gap={4}>
+              {[1,2,3,4,5,6].map((i) => (
+                <Box key={i} bg={WHITE} borderRadius="18px" border={`1px solid ${GRAY200}`} overflow="hidden" p={5}>
+                  <Box h="4px" bg={GRAY200} mx={-5} mt={-5} mb={4} />
+                  <Flex align="center" gap={3} mb={4}>
+                    <Skel h="44px" w="44px" />
+                    <Stack gap={2} flex={1}><Skel w="60%" /><Skel w="40%" h="12px" /></Stack>
+                  </Flex>
+                  <Skel h="12px" mb={2} /><Skel h="12px" w="80%" />
+                </Box>
+              ))}
+            </Grid>
+          ) : categories.length === 0 ? (
+            <Box textAlign="center" py={16}>
+              <Text fontSize="2xl" mb={3}>💬</Text>
+              <Text fontSize="16px" fontWeight={600} color={GRAY700} mb={1}>No categories yet</Text>
+              <Text fontSize="13px" color={GRAY400}>Forum categories will appear here.</Text>
+            </Box>
+          ) : (
+            <Grid templateColumns={{ base: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }} gap={4}>
+              {[...categories].sort((a, b) => a.display_order - b.display_order).map((cat) => (
+                <CategoryCard
+                  key={cat.id}
+                  cat={cat}
+                  onClick={() => navigate(`/forum/category/${cat.slug}`)}
+                />
+              ))}
+            </Grid>
+          )}
         </Box>
-
-        {error ? (
-          <Box textAlign="center" py={12}>
-            <Text color={RED} fontSize="14px">{error}</Text>
-          </Box>
-        ) : loading ? (
-          <Grid templateColumns={{ base: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }} gap={4}>
-            {[1,2,3,4,5,6].map((i) => (
-              <Box key={i} bg={WHITE} borderRadius="18px" border={`1px solid ${GRAY200}`} overflow="hidden" p={5}>
-                <Box h="4px" bg={GRAY200} mx={-5} mt={-5} mb={4} />
-                <Flex align="center" gap={3} mb={4}>
-                  <Skel h="44px" w="44px" />
-                  <Stack gap={2} flex={1}><Skel w="60%" /><Skel w="40%" h="12px" /></Stack>
-                </Flex>
-                <Skel h="12px" mb={2} /><Skel h="12px" w="80%" />
-              </Box>
-            ))}
-          </Grid>
-        ) : categories.length === 0 ? (
-          <Box textAlign="center" py={16}>
-            <Text fontSize="2xl" mb={3}>💬</Text>
-            <Text fontSize="16px" fontWeight={600} color={GRAY700} mb={1}>No categories yet</Text>
-            <Text fontSize="13px" color={GRAY400}>Forum categories will appear here.</Text>
-          </Box>
-        ) : (
-          <Grid templateColumns={{ base: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }} gap={4}>
-            {[...categories].sort((a, b) => a.display_order - b.display_order).map((cat) => (
-              <CategoryCard
-                key={cat.id}
-                cat={cat}
-                onClick={() => navigate(`/forum/category/${cat.slug}`)}
-              />
-            ))}
-          </Grid>
-        )}
       </Box>
-    </Box>
+    </SidebarLayout>
   )
 }

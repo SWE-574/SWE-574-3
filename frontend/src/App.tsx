@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
+import { Box } from '@chakra-ui/react'
 import { useAuthStore } from '@/store/useAuthStore'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import AdminProtectedRoute from '@/components/AdminProtectedRoute'
@@ -28,9 +29,7 @@ const TransactionHistoryPage = lazy(() => import('@/pages/TransactionHistoryPage
 const NotificationsPage      = lazy(() => import('@/pages/NotificationsPage'))
 const AdminDashboard         = lazy(() => import('@/pages/AdminDashboard'))
 const ReportDetail           = lazy(() => import('@/pages/ReportDetail'))
-const ForumCategories        = lazy(() => import('@/pages/ForumCategories'))
-const ForumTopicList         = lazy(() => import('@/pages/ForumTopicList'))
-const ForumTopicDetail       = lazy(() => import('@/pages/ForumTopicDetail'))
+const ForumPage              = lazy(() => import('@/pages/ForumPage'))
 const ForumCreateTopic       = lazy(() => import('@/pages/ForumCreateTopic'))
 const AchievementView        = lazy(() => import('@/pages/AchievementView'))
 const NotFoundPage           = lazy(() => import('@/pages/NotFoundPage'))
@@ -138,6 +137,7 @@ function EmailVerificationBanner() {
 }
 
 // ─── Pages that render their own header (no global Navbar) ────────────────────
+// Pages where the global top Navbar is hidden (they render their own navigation)
 const PAGES_WITHOUT_NAVBAR = [
   '/',
   '/login',
@@ -148,6 +148,10 @@ const PAGES_WITHOUT_NAVBAR = [
   '/verify-email-sent',
   '/onboarding',
 ]
+
+// Pages that fill the viewport — lock body scroll so navbar stays fixed
+// and macOS elastic-bounce doesn't move content under the navbar.
+const FULL_SCREEN_PREFIXES = ['/dashboard', '/forum', '/messages']
 
 // ─── Public pages where we skip the full-page spinner ─────────────────────────
 const PUBLIC_AUTH_PATHS = ['/login', '/register', '/', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
@@ -160,6 +164,32 @@ function App() {
   const showNavbar = !PAGES_WITHOUT_NAVBAR.some((p) =>
     p === location.pathname || location.pathname.startsWith(p + '/')
   )
+
+  // Lock/unlock body + html scroll for full-screen pages
+  const isFullScreenPage = FULL_SCREEN_PREFIXES.some((p) =>
+    location.pathname === p || location.pathname.startsWith(p + '/')
+  )
+  useEffect(() => {
+    const el = document.documentElement
+    const body = document.body
+    if (isFullScreenPage) {
+      el.style.overflow = 'hidden'
+      el.style.height = '100%'
+      body.style.overflow = 'hidden'
+      body.style.height = '100%'
+    } else {
+      el.style.overflow = ''
+      el.style.height = ''
+      body.style.overflow = ''
+      body.style.height = ''
+    }
+    return () => {
+      el.style.overflow = ''
+      el.style.height = ''
+      body.style.overflow = ''
+      body.style.height = ''
+    }
+  }, [isFullScreenPage])
 
   useEffect(() => {
     // On public auth pages there's no session to check — skip to avoid
@@ -184,8 +214,14 @@ function App() {
     )
   }
 
+  // The GAP value — used as: A (above navbar), B (navbar↔section), C (section↔bottom)
+  const GAP = '8px'
+
   return (
-    <>
+    <Box
+      bg={isFullScreenPage ? '#F9FAFB' : undefined}
+      pt={{ base: 0, md: isFullScreenPage ? GAP : 0 }}
+    >
       {showNavbar && <Navbar />}
       {showNavbar && <EmailVerificationBanner />}
       <Suspense fallback={<PageFallback />}>
@@ -202,10 +238,10 @@ function App() {
           <Route path="/service-detail/:id" element={<ServiceDetailPage />} />
           <Route path="/public-profile/:userId" element={<PublicProfile />} />
 
-          {/* ── Forum (public) ───────────────────────────────────────── */}
-          <Route path="/forum"                            element={<ForumCategories />} />
-          <Route path="/forum/category/:slug"             element={<ForumTopicList />} />
-          <Route path="/forum/topic/:topicId"             element={<ForumTopicDetail />} />
+          {/* ── Forum (public) — subreddit style single-page ─────────── */}
+          <Route path="/forum"                element={<ForumPage />} />
+          <Route path="/forum/category/:slug" element={<ForumPage />} />
+          <Route path="/forum/topic/:topicId" element={<ForumPage />} />
 
           {/* ── Onboarding (protected, skips onboarding redirect) ────── */}
           <Route
@@ -281,7 +317,7 @@ function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Suspense>
-    </>
+    </Box>
   )
 }
 

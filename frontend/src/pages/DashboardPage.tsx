@@ -1,33 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { usePolling } from '@/hooks/usePolling'
 import { useNavigate } from 'react-router-dom'
-import type { User } from '@/types'
 import {
   Box,
   Flex,
   Text,
   Input,
   Grid,
-  VStack,
   HStack,
   Spinner,
 } from '@chakra-ui/react'
 import {
   FiSearch,
-  FiNavigation,
   FiMapPin,
   FiClock,
   FiUsers,
   FiMonitor,
   FiCalendar,
-  FiLoader,
   FiRefreshCw,
-  FiPlus,
-  FiLayers,
   FiChevronDown,
   FiChevronUp,
-  FiZap,
-  FiAward,
   FiTrendingUp,
   FiGrid,
   FiWifi,
@@ -39,6 +31,7 @@ import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
+import { MainSidebar } from '@/components/MainSidebar'
 import type { Handshake } from '@/services/handshakeAPI'
 
 import {
@@ -51,7 +44,6 @@ import {
 
 const TRANSPARENT = 'transparent'
 
-const SIDEBAR_W = '268px'
 const DEBOUNCE_SEARCH   = 400
 const DEBOUNCE_DISTANCE = 600
 const POLL_INTERVAL     = 30_000
@@ -150,15 +142,6 @@ function MetaChip({ icon, label, maxW }: { icon: React.ReactNode; label: string;
       <Text fontSize="11px" color={GRAY600} fontWeight={500}
         style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
       >{label}</Text>
-    </Flex>
-  )
-}
-
-function StatPill({ label, value, bg, color }: { label: string; value: number; bg: string; color: string }) {
-  return (
-    <Flex direction="column" align="center" justify="center" px={3} py="10px" borderRadius="12px" bg={bg} flex={1} gap="2px">
-      <Text fontSize="18px" fontWeight={800} color={color} lineHeight={1}>{value}</Text>
-      <Text fontSize="10px" fontWeight={600} color={color} style={{ opacity: 0.7, letterSpacing: '0.03em' }}>{label}</Text>
     </Flex>
   )
 }
@@ -352,271 +335,7 @@ function ServiceCard({
   )
 }
 
-// ─── Sidebar content ──────────────────────────────────────────────────────────
 
-function Sidebar({
-  user, isAuthenticated, balance, pendingHs, acceptedHs, completedHs,
-  totalIncomingPending, myServices, incomingMap,
-  locationEnabled, locationLoading, locationError, userLocation,
-  distanceKm, distanceLabel,
-  toggleLocation, setDistanceKm, navigate,
-}: {
-  user: User | null
-  isAuthenticated: boolean
-  balance: number | null
-  pendingHs: number
-  acceptedHs: number
-  completedHs: number
-  totalIncomingPending: number
-  myServices: Service[]
-  incomingMap: Map<string, Handshake[]>
-  locationEnabled: boolean
-  locationLoading: boolean
-  locationError: string | null
-  userLocation: { lat: number; lng: number } | null
-  distanceKm: number
-  distanceLabel: string
-  toggleLocation: () => void
-  setDistanceKm: (v: number) => void
-  navigate: ReturnType<typeof useNavigate>
-}) {
-  return (
-    <Box
-      w={SIDEBAR_W} minW={SIDEBAR_W}
-      bg={WHITE}
-      borderRight={`1px solid ${GRAY200}`}
-      display="flex" flexDirection="column"
-      h="100%" overflow="hidden"
-    >
-      {/* User card */}
-      <Box px={4} pt={5} pb={4} borderBottom={`1px solid ${GRAY100}`}>
-        {isAuthenticated && user ? (
-          <>
-            <Flex align="center" gap={3} mb={4}>
-              <Avatar u={user} size={44} />
-              <Box flex={1} minW={0}>
-                <Text fontSize="14px" fontWeight={700} color={GRAY800}
-                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                >
-                  {fullName(user)}
-                </Text>
-                <Text fontSize="11px" color={GRAY400}
-                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                >
-                  {user.email}
-                </Text>
-              </Box>
-            </Flex>
-
-            {/* Time bank widget */}
-            <Box
-              borderRadius="14px" p="14px" mb={3} position="relative" overflow="hidden"
-              style={{ background: `linear-gradient(135deg, ${GREEN} 0%, #1a3d35 100%)` }}
-            >
-              <Box style={{ position: 'absolute', top: '-20px', right: '-20px', width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
-              <Flex align="center" gap="5px" mb="5px">
-                <FiZap size={11} color="rgba(255,255,255,0.65)" />
-                <Text fontSize="10px" fontWeight={600} color="rgba(255,255,255,0.65)"
-                  style={{ letterSpacing: '0.07em', textTransform: 'uppercase' }}
-                >
-                  Time Bank
-                </Text>
-              </Flex>
-              <Flex align="baseline" gap="5px">
-                <Text fontSize="28px" fontWeight={800} color={WHITE} lineHeight={1}>
-                  {balance !== null ? balance : '—'}
-                </Text>
-                <Text fontSize="12px" color="rgba(255,255,255,0.55)" fontWeight={500}>hours</Text>
-              </Flex>
-              {user.karma_score !== undefined && user.karma_score > 0 && (
-                <Flex align="center" gap="4px" mt="7px">
-                  <FiAward size={10} color="rgba(255,255,255,0.55)" />
-                  <Text fontSize="10px" color="rgba(255,255,255,0.55)">{user.karma_score} karma</Text>
-                </Flex>
-              )}
-            </Box>
-
-            {/* Stats row */}
-            <Flex gap="5px">
-              <StatPill label="Pending"  value={pendingHs}   bg={AMBER_LT} color={AMBER} />
-              <StatPill label="Active"   value={acceptedHs}  bg={GREEN_LT} color={GREEN} />
-              <StatPill label="Done"     value={completedHs} bg={BLUE_LT}  color={BLUE}  />
-            </Flex>
-
-            {totalIncomingPending > 0 && (
-              <Box
-                mt={3} p="10px" borderRadius="10px" bg="#FFF7ED" border="1px solid #FED7AA"
-                cursor="pointer" onClick={() => navigate('/messages')}
-                _hover={{ bg: '#FFEDD5' }} transition="background 0.15s"
-              >
-                <Flex align="center" justify="space-between">
-                  <Text fontSize="12px" fontWeight={600} color="#C2410C">
-                    {totalIncomingPending} new request{totalIncomingPending > 1 ? 's' : ''}
-                  </Text>
-                  <Box w="18px" h="18px" borderRadius="full" bg="#f97316" color={WHITE}
-                    display="flex" alignItems="center" justifyContent="center" fontSize="10px" fontWeight={800}
-                  >
-                    {totalIncomingPending}
-                  </Box>
-                </Flex>
-              </Box>
-            )}
-          </>
-        ) : (
-          <>
-            <Text fontSize="15px" fontWeight={700} color={GRAY800} mb={1}>Welcome to Hive</Text>
-            <Text fontSize="12px" color={GRAY500} mb={4}>Sign in to track your exchanges and post services.</Text>
-            <Flex gap={2}>
-              <Box as="button" flex={1} py="9px" borderRadius="9px" bg={GREEN} color={WHITE}
-                fontSize="13px" fontWeight={700} textAlign="center"
-                onClick={() => navigate('/login')} _hover={{ opacity: 0.9 }} transition="opacity 0.15s"
-              >
-                Sign In
-              </Box>
-              <Box as="button" flex={1} py="9px" borderRadius="9px" bg={GRAY100} color={GRAY700}
-                fontSize="13px" fontWeight={600} textAlign="center"
-                onClick={() => navigate('/register')} _hover={{ bg: GRAY200 }} transition="background 0.15s"
-              >
-                Register
-              </Box>
-            </Flex>
-          </>
-        )}
-      </Box>
-
-      {/* Quick actions */}
-      {isAuthenticated && (
-        <Box px={4} py={4} borderBottom={`1px solid ${GRAY100}`}>
-          <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
-            style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
-          >
-            Post a Service
-          </Text>
-          <Flex gap={2} flexWrap="wrap">
-            <Box as="button" flex={1} minW="60px" py="8px" borderRadius="9px" bg={GREEN} color={WHITE}
-              fontSize="12px" fontWeight={700}
-              display="flex" alignItems="center" justifyContent="center" gap="4px"
-              onClick={() => navigate('/post-offer')} _hover={{ opacity: 0.9 }} transition="opacity 0.15s"
-            >
-              <FiPlus size={12} /> Offer
-            </Box>
-            <Box as="button" flex={1} minW="60px" py="8px" borderRadius="9px" bg={BLUE_LT} color={BLUE}
-              fontSize="12px" fontWeight={700}
-              display="flex" alignItems="center" justifyContent="center" gap="4px"
-              border={`1px solid #BFDBFE`}
-              onClick={() => navigate('/post-need')} _hover={{ bg: '#DBEAFE' }} transition="background 0.15s"
-            >
-              <FiLayers size={12} /> Need
-            </Box>
-            <Box as="button" flex={1} minW="60px" py="8px" borderRadius="9px"
-              fontSize="12px" fontWeight={700}
-              display="flex" alignItems="center" justifyContent="center" gap="4px"
-              style={{ background: '#FFFBEB', color: '#D97706', border: '1px solid #FDE68A' }}
-              onClick={() => navigate('/post-event')} transition="background 0.15s"
-            >
-              <FiPlus size={12} /> Event
-            </Box>
-          </Flex>
-        </Box>
-      )}
-
-      {/* Location filter + my listings — scrollable */}
-      <Box flex={1} overflowY="auto" px={4} py={4}>
-        <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
-          style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
-        >
-          Location
-        </Text>
-        <Box
-          as="button" w="full" py="8px" px="11px" borderRadius="9px" mb={2}
-          bg={locationEnabled ? GREEN : GRAY100}
-          color={locationEnabled ? WHITE : GRAY700}
-          fontSize="12px" fontWeight={600}
-          display="flex" alignItems="center" gap="6px"
-          onClick={() => !locationLoading && toggleLocation()}
-          style={{ cursor: locationLoading ? 'not-allowed' : 'pointer', opacity: locationLoading ? 0.65 : 1 }}
-          transition="all 0.15s"
-        >
-          {locationLoading
-            ? <><FiLoader size={12} /> Getting location…</>
-            : locationEnabled
-              ? <><FiMapPin size={12} /> By distance — ON</>
-              : <><FiNavigation size={12} /> Enable location</>}
-        </Box>
-
-        {locationError && <Text fontSize="11px" color="red.500" mb={2}>{locationError}</Text>}
-
-        {/* Distance slider — always visible once location is available */}
-        {userLocation && (
-          <Box mb={4}>
-            <Flex justify="space-between" mb="6px">
-              <Text fontSize="11px" color={GRAY600} fontWeight={500}>
-                {locationEnabled ? `${distanceKm} km` : 'Disabled'}
-              </Text>
-              <Text fontSize="11px" color={GRAY400}>{locationEnabled ? distanceLabel : '—'}</Text>
-            </Flex>
-            <input
-              type="range" min={1} max={50} step={1} value={distanceKm}
-              onChange={(e) => { setDistanceKm(Number(e.target.value)); if (!locationEnabled) toggleLocation() }}
-              style={{ width: '100%', accentColor: GREEN, height: '4px', cursor: 'pointer', opacity: locationEnabled ? 1 : 0.5 }}
-            />
-            <Flex justify="space-between" mt="4px">
-              <Text fontSize="9px" color={GRAY400}>1 km</Text>
-              <Text fontSize="9px" color={GRAY400}>50 km</Text>
-            </Flex>
-          </Box>
-        )}
-
-        {/* My listings */}
-        {isAuthenticated && myServices.length > 0 && (
-          <>
-            <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3} mt={2}
-              style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
-            >
-              My Listings ({myServices.length})
-            </Text>
-            <VStack gap={2} align="stretch">
-              {myServices.slice(0, 4).map((s) => {
-                const incoming = incomingMap.get(s.id) ?? []
-                const pc = incoming.filter((h) => h.status === 'pending').length
-                return (
-                  <Box
-                    key={s.id} as="button" w="full" textAlign="left"
-                    px={3} py="8px" borderRadius="9px" bg={GRAY50}
-                    border={`1px solid ${GRAY100}`}
-                    borderLeft={`3px solid ${s.type === 'Offer' ? GREEN : s.type === 'Event' ? AMBER : BLUE}`}
-                    onClick={() => navigate(`/service-detail/${s.id}`)}
-                    _hover={{ bg: GRAY100 }} transition="background 0.1s"
-                  >
-                    <Flex align="center" justify="space-between">
-                      <Text fontSize="12px" fontWeight={600} color={GRAY700}
-                        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '150px' }}
-                      >
-                        {s.title}
-                      </Text>
-                      {pc > 0 && (
-                        <Box w="16px" h="16px" borderRadius="full" bg="#f97316" color={WHITE}
-                          display="flex" alignItems="center" justifyContent="center" fontSize="9px" fontWeight={800} flexShrink={0}
-                        >
-                          {pc}
-                        </Box>
-                      )}
-                    </Flex>
-                  </Box>
-                )
-              })}
-              {myServices.length > 4 && (
-                <Text fontSize="11px" color={GRAY400} textAlign="center">
-                  +{myServices.length - 4} more
-                </Text>
-              )}
-            </VStack>
-          </>
-        )}
-      </Box>
-    </Box>
-  )
-}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -746,23 +465,21 @@ const DashboardPage = () => {
   const pendingHs          = allHs.filter((h) => h.status === 'pending').length
   const acceptedHs         = allHs.filter((h) => h.status === 'accepted').length
   const completedHs        = allHs.filter((h) => h.status === 'completed').length
-  const totalIncomingPending = Array.from(incomingMap.values()).flat().filter((h) => h.status === 'pending').length
   const distanceLabel      = distanceKm <= 5 ? 'Nearby' : distanceKm <= 15 ? 'Local' : distanceKm <= 30 ? 'Wider' : 'City-wide'
-  const balance            = user?.timebank_balance ?? null
 
   const sidebarProps = {
-    user, isAuthenticated, balance, pendingHs, acceptedHs, completedHs,
-    totalIncomingPending, myServices, incomingMap,
+    pendingHs, acceptedHs, completedHs,
+    myServices, incomingMap,
     locationEnabled, locationLoading, locationError, userLocation,
-    distanceKm, distanceLabel, toggleLocation, setDistanceKm, navigate,
+    distanceKm, distanceLabel, toggleLocation, setDistanceKm,
   }
 
   return (
     /* ── ChatPage-style outer wrapper ────────────────────────────────────── */
-    <Box bg={GRAY50} minH="calc(100vh - 64px)" py={{ base: 0, md: '16px' }} px={{ base: 0, md: '16px' }}>
+    <Box bg={GRAY50} h="calc(100vh - 64px)" overflow="hidden" py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
       <Box
-        maxW="1400px" mx="auto"
-        h={{ base: 'calc(100vh - 64px)', md: 'calc(100vh - 96px)' }}
+        maxW="1440px" mx="auto"
+        h={{ base: 'calc(100vh - 64px)', md: 'calc(100vh - 88px)' }}
         borderRadius={{ base: 0, md: '20px' }}
         boxShadow={{ base: 'none', md: '0 4px 24px rgba(0,0,0,0.08)' }}
         border={{ base: 'none', md: `1px solid ${GRAY200}` }}
@@ -778,7 +495,7 @@ const DashboardPage = () => {
           top={0} left={0} bottom={0}
           flexShrink={0}
         >
-          <Sidebar {...sidebarProps} />
+          <MainSidebar {...sidebarProps} />
         </Box>
 
         {/* Mobile sidebar backdrop */}
@@ -926,14 +643,14 @@ const DashboardPage = () => {
           )}
 
           {/* Results count */}
-          <Box px={5} pt={3} pb={1} flexShrink={0} bgColor={TRANSPARENT}>
+          <Box px={{ base: 4, md: 6 }} pt={4} pb={2} flexShrink={0} bgColor={TRANSPARENT}>
             <Text fontSize="12px" color={GRAY400}>
               {isLoading && services.length === 0 ? 'Loading…' : `${services.length} service${services.length !== 1 ? 's' : ''}`}
             </Text>
           </Box>
 
           {/* Grid */}
-          <Box flex={1} overflowY="auto" px={{ base: 3, md: 5 }} pt={2} pb={6}>
+          <Box flex={1} overflowY="auto" px={{ base: 3, md: 6 }} pt={2} pb={8}>
             {isLoading && services.length === 0 ? (
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
             ) : fetchError && services.length === 0 ? (

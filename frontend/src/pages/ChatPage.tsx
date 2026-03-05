@@ -1203,7 +1203,21 @@ export default function ChatPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramId])
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length, groupMessages.length])
+  // Scroll to bottom — walk up to the first scrollable container and set scrollTop.
+  // Using scrollIntoView would bubble up to body/html and shift the navbar.
+  useEffect(() => {
+    const el = bottomRef.current
+    if (!el) return
+    let node: HTMLElement | null = el.parentElement
+    while (node && node !== document.body) {
+      const style = window.getComputedStyle(node)
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        node.scrollTop = node.scrollHeight
+        return
+      }
+      node = node.parentElement
+    }
+  }, [messages.length, groupMessages.length])
   useEffect(() => { setMessages([]); setSendError(null) }, [selectedId])
   useEffect(() => { setGroupMessages([]) }, [groupServiceId])
 
@@ -1407,10 +1421,10 @@ export default function ChatPage() {
   const showThread   = mobileShowThread || !!selectedId
 
   return (
-    <Box bg={GRAY50} minH="calc(100vh - 64px)" py={{ base: 0, md: 4 }} px={{ base: 0, md: 4 }}>
+    <Box bg={GRAY50} h="calc(100vh - 64px)" overflow="hidden" py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
       <Box
-        maxW="1360px" mx="auto"
-        h={{ base: 'calc(100vh - 64px)', md: 'calc(100vh - 96px)' }}
+        maxW="1440px" mx="auto"
+        h={{ base: 'calc(100vh - 64px)', md: 'calc(100vh - 88px)' }}
         borderRadius={{ base: 0, md: '20px' }}
         boxShadow={{ base: 'none', md: '0 4px 24px rgba(0,0,0,0.08)' }}
         border={{ base: 'none', md: `1px solid ${GRAY200}` }}

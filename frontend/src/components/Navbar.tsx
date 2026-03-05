@@ -154,20 +154,27 @@ const Navbar = () => {
 
   const balance = Number(user?.timebank_balance ?? 0)
   const p       = location.pathname
+  // On dashboard the sidebar already shows balance & post service — hide them from navbar
+  const isDashboard = p === '/dashboard'
 
   return (
     <Box
-      as="nav" position="sticky" top={0} zIndex={50}
+      as="nav"
+      position="sticky" top={{ base: 0, md: '8px' }} zIndex={50}
       ref={mobileRef}
+      mx="auto" maxW="1440px"
+      px={{ base: 0, md: 4 }}
+      borderRadius={{ base: 0, md: '16px' }}
+      mb={0}
       style={{
         background: WHITE,
-        borderBottom: `1px solid ${GRAY200}`,
-        boxShadow: '0 1px 0 rgba(0,0,0,0.06)',
+        border: `1px solid ${GRAY200}`,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.07)',
         WebkitFontSmoothing: 'antialiased',
         MozOsxFontSmoothing: 'grayscale',
       }}
     >
-      <Flex maxW="1440px" mx="auto" px={{ base: 4, md: 8 }} h="64px" align="center" justify="space-between">
+      <Flex maxW="1440px" mx="auto" px={{ base: 4, md: 8 }} h="64px" align="center" justify="space-between" position="relative">
 
         {/* Logo */}
         <Link to="/" style={{ textDecoration: 'none', flexShrink: 0 }}>
@@ -179,9 +186,12 @@ const Navbar = () => {
           </Flex>
         </Link>
 
-        {/* Desktop nav links */}
+        {/* Desktop nav links — absolutely centered, always in middle of navbar */}
         {isAuthenticated && (
-          <Flex align="center" gap={1} display={{ base: 'none', md: 'flex' }}>
+          <Flex
+            align="center" gap={1} display={{ base: 'none', md: 'flex' }}
+            position="absolute" left="50%" style={{ transform: 'translateX(-50%)' }}
+          >
             <NavLink to="/dashboard" icon={<FiGrid size={15} />} active={p === '/dashboard'}>Browse</NavLink>
             <NavLink to="/forum" icon={<FiMessageCircle size={15} />} active={p.startsWith('/forum')}>Forum</NavLink>
             <NavLink to="/messages" icon={<FiMessageSquare size={15} />} active={p === '/messages' || p.startsWith('/messages/')}>Messages</NavLink>
@@ -192,8 +202,11 @@ const Navbar = () => {
         <Flex align="center" gap={2}>
           {isAuthenticated ? (
             <>
-              {/* Post service — desktop */}
-              <Box display={{ base: 'none', md: 'block' }}>
+              {/* Post service — desktop (invisible on dashboard, keeps layout stable) */}
+              <Box
+                display={{ base: 'none', md: 'block' }}
+                style={{ visibility: isDashboard ? 'hidden' : 'visible' }}
+              >
                 <Dropdown
                   trigger={
                     <Flex
@@ -214,11 +227,15 @@ const Navbar = () => {
                 </Dropdown>
               </Box>
 
-              {/* Balance — desktop */}
+              {/* Balance — desktop (invisible on dashboard, keeps layout stable) */}
               <Flex
                 align="center" gap="5px" px="12px" py="5px" borderRadius="10px"
                 display={{ base: 'none', sm: 'flex' }}
-                style={{ background: GREEN_LT, border: `1px solid #BBF7D0`, fontSize: '13px', fontWeight: 700, color: GREEN }}
+                style={{
+                  background: GREEN_LT, border: `1px solid #BBF7D0`,
+                  fontSize: '13px', fontWeight: 700, color: GREEN,
+                  visibility: isDashboard ? 'hidden' : 'visible',
+                }}
               >
                 <span style={{ fontSize: '12px' }}>⏱</span>
                 {balance.toFixed(1)}h

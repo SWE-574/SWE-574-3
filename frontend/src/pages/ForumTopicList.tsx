@@ -12,6 +12,7 @@ import {
   GREEN, GREEN_LT,
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800, WHITE, RED,
 } from '@/theme/tokens'
+import { SidebarLayout } from '@/components/MainSidebar'
 
 const PAGE_SIZE = 15
 
@@ -168,156 +169,158 @@ export default function ForumTopicList() {
   }
 
   return (
-    <Box bg={GRAY50} minH="calc(100vh - 64px)" py={{ base: 4, md: 6 }} px={{ base: 3, md: 6 }}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
-      <Box maxW="860px" mx="auto">
+    <SidebarLayout sidebarProps={{ hideLocationFilters: true }}>
+      <Box flex={1} overflowY="auto" bg={GRAY50} py={{ base: 4, md: 6 }} px={{ base: 3, md: 6 }}>
+        <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+        <Box maxW="860px" mx="auto">
 
-        {/* Back + header */}
-        <Flex align="flex-start" justify="space-between" mb={6} gap={4} flexWrap="wrap">
-          <Box>
-            <Flex
-              as="button" align="center" gap={2}
-              color={GRAY500} fontSize="13px" mb={3} cursor="pointer" _hover={{ color: GRAY700 }}
-              onClick={() => navigate('/forum')}
-            >
-              <FiArrowLeft size={14} /> Forum
-            </Flex>
-            <Text fontSize={{ base: '20px', md: '26px' }} fontWeight={800} color={GRAY800} mb={1}>
-              {category ? category.name : (loading ? '...' : 'Category')}
-            </Text>
-            {category && (
-              <Text fontSize="13px" color={GRAY500}>{category.description}</Text>
+          {/* Back + header */}
+          <Flex align="flex-start" justify="space-between" mb={6} gap={4} flexWrap="wrap">
+            <Box>
+              <Flex
+                as="button" align="center" gap={2}
+                color={GRAY500} fontSize="13px" mb={3} cursor="pointer" _hover={{ color: GRAY700 }}
+                onClick={() => navigate('/forum')}
+              >
+                <FiArrowLeft size={14} /> Forum
+              </Flex>
+              <Text fontSize={{ base: '20px', md: '26px' }} fontWeight={800} color={GRAY800} mb={1}>
+                {category ? category.name : (loading ? '...' : 'Category')}
+              </Text>
+              {category && (
+                <Text fontSize="13px" color={GRAY500}>{category.description}</Text>
+              )}
+            </Box>
+
+            {isAuthenticated && (
+              <Button
+                size="sm"
+                bg={GREEN} color={WHITE}
+                borderRadius="10px"
+                px={4}
+                _hover={{ bg: '#214D41' }}
+                onClick={() => navigate(`/forum/new?category=${slug}`)}
+                flexShrink={0}
+              >
+                <Flex align="center" gap={2}><FiPlus size={14} /> New Topic</Flex>
+              </Button>
+            )}
+          </Flex>
+
+          {/* Topic list card */}
+          <Box
+            bg={WHITE}
+            borderRadius="18px"
+            border={`1px solid ${GRAY200}`}
+            boxShadow="0 2px 10px rgba(0,0,0,0.05)"
+            overflow="hidden"
+            mb={6}
+          >
+            {loading ? (
+              <Box p={5}>
+                <Stack gap={5}>
+                  {[1,2,3,4,5].map((i) => (
+                    <Flex key={i} align="flex-start" gap={3}>
+                      <Skel h="36px" w="36px" />
+                      <Box flex={1}>
+                        <Skel h="15px" w="70%" mb={2} />
+                        <Skel h="12px" w="40%" />
+                      </Box>
+                      <Skel h="36px" w="60px" />
+                    </Flex>
+                  ))}
+                </Stack>
+              </Box>
+            ) : error ? (
+              <Box p={8} textAlign="center">
+                <Text color={RED} fontSize="14px">{error}</Text>
+              </Box>
+            ) : topics.length === 0 ? (
+              <Box p={12} textAlign="center">
+                <Text fontSize="2xl" mb={3}>💬</Text>
+                <Text fontSize="15px" fontWeight={600} color={GRAY700} mb={1}>No topics yet</Text>
+                <Text fontSize="13px" color={GRAY400} mb={4}>Be the first to start a discussion!</Text>
+                {isAuthenticated && (
+                  <Button
+                    size="sm" bg={GREEN} color={WHITE} borderRadius="10px" px={4}
+                    _hover={{ bg: '#214D41' }}
+                    onClick={() => navigate(`/forum/new?category=${slug}`)}
+                  >
+                    <Flex align="center" gap={2}><FiPlus size={13} /> New Topic</Flex>
+                  </Button>
+                )}
+              </Box>
+            ) : (
+              <>
+                {/* Count header */}
+                <Box px={5} py={3} borderBottom={`1px solid ${GRAY100}`}>
+                  <Text fontSize="12px" color={GRAY400} fontWeight={500}>{total} topic{total !== 1 ? 's' : ''}</Text>
+                </Box>
+                {topics.map((t) => (
+                  <TopicRow key={t.id} topic={t} onClick={() => navigate(`/forum/topic/${t.id}`)} />
+                ))}
+              </>
             )}
           </Box>
 
-          {isAuthenticated && (
-            <Button
-              size="sm"
-              bg={GREEN} color={WHITE}
-              borderRadius="10px"
-              px={4}
-              _hover={{ bg: '#214D41' }}
-              onClick={() => navigate(`/forum/new?category=${slug}`)}
-              flexShrink={0}
-            >
-              <Flex align="center" gap={2}><FiPlus size={14} /> New Topic</Flex>
-            </Button>
-          )}
-        </Flex>
-
-        {/* Topic list card */}
-        <Box
-          bg={WHITE}
-          borderRadius="18px"
-          border={`1px solid ${GRAY200}`}
-          boxShadow="0 2px 10px rgba(0,0,0,0.05)"
-          overflow="hidden"
-          mb={6}
-        >
-          {loading ? (
-            <Box p={5}>
-              <Stack gap={5}>
-                {[1,2,3,4,5].map((i) => (
-                  <Flex key={i} align="flex-start" gap={3}>
-                    <Skel h="36px" w="36px" />
-                    <Box flex={1}>
-                      <Skel h="15px" w="70%" mb={2} />
-                      <Skel h="12px" w="40%" />
-                    </Box>
-                    <Skel h="36px" w="60px" />
-                  </Flex>
-                ))}
-              </Stack>
-            </Box>
-          ) : error ? (
-            <Box p={8} textAlign="center">
-              <Text color={RED} fontSize="14px">{error}</Text>
-            </Box>
-          ) : topics.length === 0 ? (
-            <Box p={12} textAlign="center">
-              <Text fontSize="2xl" mb={3}>💬</Text>
-              <Text fontSize="15px" fontWeight={600} color={GRAY700} mb={1}>No topics yet</Text>
-              <Text fontSize="13px" color={GRAY400} mb={4}>Be the first to start a discussion!</Text>
-              {isAuthenticated && (
-                <Button
-                  size="sm" bg={GREEN} color={WHITE} borderRadius="10px" px={4}
-                  _hover={{ bg: '#214D41' }}
-                  onClick={() => navigate(`/forum/new?category=${slug}`)}
-                >
-                  <Flex align="center" gap={2}><FiPlus size={13} /> New Topic</Flex>
-                </Button>
-              )}
-            </Box>
-          ) : (
-            <>
-              {/* Count header */}
-              <Box px={5} py={3} borderBottom={`1px solid ${GRAY100}`}>
-                <Text fontSize="12px" color={GRAY400} fontWeight={500}>{total} topic{total !== 1 ? 's' : ''}</Text>
+          {/* Pagination */}
+          {!loading && totalPages > 1 && (
+            <Flex justify="center" align="center" gap={2}>
+              <Box
+                as="button"
+                w="36px" h="36px" borderRadius="10px"
+                border={`1px solid ${GRAY200}`} bg={WHITE}
+                display="flex" alignItems="center" justifyContent="center"
+                cursor={page === 1 ? 'not-allowed' : 'pointer'}
+                color={page === 1 ? GRAY300 : GRAY600}
+                onClick={() => page > 1 && goPage(page - 1)}
+              >
+                <FiChevronLeft size={16} />
               </Box>
-              {topics.map((t) => (
-                <TopicRow key={t.id} topic={t} onClick={() => navigate(`/forum/topic/${t.id}`)} />
-              ))}
-            </>
+
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                .reduce<(number | '...')[]>((acc, p, i, arr) => {
+                  if (i > 0 && (p as number) - (arr[i - 1] as number) > 1) acc.push('...')
+                  acc.push(p)
+                  return acc
+                }, [])
+                .map((p, i) =>
+                  p === '...' ? (
+                    <Text key={`e${i}`} fontSize="13px" color={GRAY400} px={1}>…</Text>
+                  ) : (
+                    <Box
+                      key={p}
+                      as="button"
+                      w="36px" h="36px" borderRadius="10px"
+                      border={`1px solid ${page === p ? GREEN : GRAY200}`}
+                      bg={page === p ? GREEN : WHITE}
+                      color={page === p ? WHITE : GRAY600}
+                      fontWeight={page === p ? 700 : 400}
+                      fontSize="13px"
+                      cursor="pointer"
+                      onClick={() => goPage(p as number)}
+                    >
+                      {p}
+                    </Box>
+                  )
+                )}
+
+              <Box
+                as="button"
+                w="36px" h="36px" borderRadius="10px"
+                border={`1px solid ${GRAY200}`} bg={WHITE}
+                display="flex" alignItems="center" justifyContent="center"
+                cursor={page === totalPages ? 'not-allowed' : 'pointer'}
+                color={page === totalPages ? GRAY300 : GRAY600}
+                onClick={() => page < totalPages && goPage(page + 1)}
+              >
+                <FiChevronRight size={16} />
+              </Box>
+            </Flex>
           )}
         </Box>
-
-        {/* Pagination */}
-        {!loading && totalPages > 1 && (
-          <Flex justify="center" align="center" gap={2}>
-            <Box
-              as="button"
-              w="36px" h="36px" borderRadius="10px"
-              border={`1px solid ${GRAY200}`} bg={WHITE}
-              display="flex" alignItems="center" justifyContent="center"
-              cursor={page === 1 ? 'not-allowed' : 'pointer'}
-              color={page === 1 ? GRAY300 : GRAY600}
-              onClick={() => page > 1 && goPage(page - 1)}
-            >
-              <FiChevronLeft size={16} />
-            </Box>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
-              .reduce<(number | '...')[]>((acc, p, i, arr) => {
-                if (i > 0 && (p as number) - (arr[i - 1] as number) > 1) acc.push('...')
-                acc.push(p)
-                return acc
-              }, [])
-              .map((p, i) =>
-                p === '...' ? (
-                  <Text key={`e${i}`} fontSize="13px" color={GRAY400} px={1}>…</Text>
-                ) : (
-                  <Box
-                    key={p}
-                    as="button"
-                    w="36px" h="36px" borderRadius="10px"
-                    border={`1px solid ${page === p ? GREEN : GRAY200}`}
-                    bg={page === p ? GREEN : WHITE}
-                    color={page === p ? WHITE : GRAY600}
-                    fontWeight={page === p ? 700 : 400}
-                    fontSize="13px"
-                    cursor="pointer"
-                    onClick={() => goPage(p as number)}
-                  >
-                    {p}
-                  </Box>
-                )
-              )}
-
-            <Box
-              as="button"
-              w="36px" h="36px" borderRadius="10px"
-              border={`1px solid ${GRAY200}`} bg={WHITE}
-              display="flex" alignItems="center" justifyContent="center"
-              cursor={page === totalPages ? 'not-allowed' : 'pointer'}
-              color={page === totalPages ? GRAY300 : GRAY600}
-              onClick={() => page < totalPages && goPage(page + 1)}
-            >
-              <FiChevronRight size={16} />
-            </Box>
-          </Flex>
-        )}
       </Box>
-    </Box>
+    </SidebarLayout>
   )
 }

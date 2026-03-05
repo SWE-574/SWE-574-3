@@ -518,7 +518,6 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
   }), [userLocation])
 
   // For a single in-person service with no userLocation, center on its fuzzy marker
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialView = useMemo(() => {
     if (userLocation) return { longitude: userLocation.lng, latitude: userLocation.lat, zoom: 11 }
     const inPerson = services.filter((s) => s.location_type !== 'Online')
@@ -532,7 +531,7 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
       }
     }
     return ISTANBUL_CENTER
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userLocation, services])
 
   if (!TOKEN) {
     if (import.meta.env.DEV) {
