@@ -45,20 +45,25 @@ export default function EventChatModal({ isOpen, onClose, service }: Props) {
   const [roomId, setRoomId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [isSending, setIsSending] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
+  const [fetchDone, setFetchDone] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  const isLoading = isOpen && !fetchDone
   const organizerId = service.user?.id ?? (service as unknown as { provider?: { id: string } }).provider?.id
 
   // ── Fetch messages on open ────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      // Cleanup runs async (after render), so this is safe
+      return () => { setFetchDone(false) }
+    }
     const ac = new AbortController()
-    setIsLoading(true)
+    let cancelled = false
     eventChatAPI.getMessages(service.id, ac.signal)
       .then(({ room, messages: msgs }) => {
+        if (cancelled) return
         setRoomId(room.id)
         setMessages(msgs.slice().reverse()) // API returns newest-first; we want chronological
       })
@@ -68,8 +73,8 @@ export default function EventChatModal({ isOpen, onClose, service }: Props) {
           toast.error('Failed to load event chat')
         }
       })
-      .finally(() => setIsLoading(false))
-    return () => ac.abort()
+      .finally(() => { if (!cancelled) setFetchDone(true) })
+    return () => { cancelled = true; ac.abort() }
   }, [isOpen, service.id])
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
