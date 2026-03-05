@@ -33,13 +33,11 @@ import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
 import type { Handshake } from '@/services/handshakeAPI'
-import { toast } from 'sonner'
 
 import {
   GREEN, GREEN_LT,
   AMBER, AMBER_LT,
   BLUE, BLUE_LT,
-  RED, RED_LT,
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
@@ -213,7 +211,7 @@ function CardHeader({ service, gradient }: { service: Service; gradient: [string
 }
 
 function ServiceCard({
-  service, isOwn, handshake, incomingCount, pendingCount, onClick, onRemove,
+  service, isOwn, handshake, incomingCount, pendingCount, onClick,
 }: {
   service: Service
   isOwn: boolean
@@ -221,7 +219,6 @@ function ServiceCard({
   incomingCount: number
   pendingCount: number
   onClick: () => void
-  onRemove?: () => void
 }) {
   const owner     = service.user ?? service.provider
   const isOffer   = service.type === 'Offer'
@@ -701,22 +698,6 @@ const DashboardPage = () => {
                       incomingCount={aCount}
                       pendingCount={pCount}
                       onClick={() => navigate(`/service-detail/${service.id}`)}
-                      onRemove={isOwn ? async () => {
-                        if (!window.confirm('Are you sure you want to remove this listing? This cannot be undone.')) return
-                        try {
-                          await serviceAPI.delete(service.id)
-                          toast.success('Listing removed.')
-                          setServices((prev) => prev.filter((s) => s.id !== service.id))
-                        } catch (e: unknown) {
-                          const err = e as { response?: { data?: { detail?: string } } }
-                          const detail = err.response?.data?.detail ?? ''
-                          if (detail.toLowerCase().includes('handshake')) {
-                            toast.error("You can't remove this service because it has existing handshakes. Cancel or complete those first.")
-                          } else {
-                            toast.error(detail || 'Could not remove listing.')
-                          }
-                        }
-                      } : undefined}
                     />
                   )
                 })}
