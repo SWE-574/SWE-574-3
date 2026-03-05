@@ -23,28 +23,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8000/api/health/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
+    env_file: .env
     environment:
-      - DB_NAME=${DB_NAME:-the_hive_db}
-      - DB_USER=${DB_USER:-postgres}
-      - DB_PASSWORD=${DB_PASSWORD:-postgres123}
       - DB_HOST=db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
-      - DEBUG=${DEBUG:-True}
       - DJANGO_E2E=${DJANGO_E2E:-0}
       - E2E=${E2E:-0}
-      - DISABLE_THROTTLING=${DISABLE_THROTTLING:-1}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
-      - RESEND_API_KEY=${RESEND_API_KEY:-}
-      - RESEND_CUSTOM_DOMAIN=${RESEND_CUSTOM_DOMAIN:-false}
-      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-onboarding@resend.dev}
 
   frontend:
     build:
@@ -58,6 +50,7 @@ services:
       - "5173"
     depends_on:
       - backend
+    restart: unless-stopped
     environment:
       - VITE_API_URL=/api
 
@@ -65,6 +58,7 @@ services:
     image: ${POSTGIS_IMAGE:-postgis/postgis:15-3.4}
     volumes:
       - postgres_data:/var/lib/postgresql/data/
+    env_file: .env
     environment:
       - POSTGRES_DB=${DB_NAME:-the_hive_db}
       - POSTGRES_USER=${DB_USER:-postgres}

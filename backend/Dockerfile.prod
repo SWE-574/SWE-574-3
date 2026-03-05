@@ -32,20 +32,15 @@ WORKDIR /code
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install runtime dependencies including GDAL for GeoDjango
+# Install runtime dependencies (no -dev headers — only shared libs needed at runtime)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
-    libpq-dev \
     curl \
     gdal-bin \
-    libgdal-dev \
-    libgeos-dev \
-    libproj-dev \
+    libgdal36 \
+    libgeos-c1t64 \
+    libproj25 \
     && rm -rf /var/lib/apt/lists/*
-
-# Set GDAL environment variables
-ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
-ENV C_INCLUDE_PATH=/usr/include/gdal
 
 # Copy Python dependencies from builder (installed globally in /usr/local)
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
@@ -67,10 +62,6 @@ USER appuser
 
 # Expose port
 EXPOSE 8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/api/health/ || exit 1
 
 # Use entrypoint to run migrations, then exec the command
 ENTRYPOINT ["/code/entrypoint.sh"]
