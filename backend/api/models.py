@@ -382,6 +382,22 @@ class Handshake(models.Model):  # noqa: E302
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__original_status = self.status if self.pk else None
+
+    @property
+    def _status_changed(self):
+        return self.__original_status is not None and self.__original_status != self.status
+
+    @property
+    def _previous_status(self):
+        return self.__original_status
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.__original_status = self.status
+
     def __str__(self):
         return f"{self.requester.email} -> {self.service.title} ({self.status})"
 
@@ -418,9 +434,22 @@ class ChatMessage(models.Model):
         ]
 
 class Notification(models.Model):
+    NOTIFICATION_TYPE_CHOICES = (
+        ('handshake_request', 'Handshake Request'),
+        ('handshake_accepted', 'Handshake Accepted'),
+        ('handshake_denied', 'Handshake Denied'),
+        ('handshake_cancelled', 'Handshake Cancelled'),
+        ('chat_message', 'Chat Message'),
+        ('service_reminder', 'Service Reminder'),
+        ('service_confirmation', 'Service Confirmation'),
+        ('positive_rep', 'Positive Reputation'),
+        ('admin_warning', 'Admin Warning'),
+        ('dispute_resolved', 'Dispute Resolved'),
+    )
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
-    type = models.CharField(max_length=50)
+    type = models.CharField(max_length=50, choices=NOTIFICATION_TYPE_CHOICES)
     title = models.CharField(max_length=200)
     message = models.TextField()
     is_read = models.BooleanField(default=False)

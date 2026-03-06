@@ -1,7 +1,7 @@
 from django.db.models.signals import post_save, post_delete, pre_delete
 from django.dispatch import receiver
 from django.db import transaction
-from .models import Service, User, Tag, ChatRoom, Comment, ReputationRep, NegativeRep, Handshake
+from .models import Service, User, Tag, ChatRoom, Comment, ReputationRep, NegativeRep, Handshake, ChatMessage, Notification
 from .cache_utils import (
     invalidate_on_service_change,
     invalidate_on_user_change,
@@ -111,3 +111,68 @@ def update_hot_score_on_negative_rep_change(sender, instance, **kwargs):
                 except Service.DoesNotExist:
                     pass
         transaction.on_commit(update_scores)
+
+
+# ── Notification signals ────────────────────────────────────────────────────
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@receiver(post_save, sender=ChatMessage)
+def notify_on_new_chat_message(sender, instance, created, **kwargs):
+    """Create a notification when a new ChatMessage is created."""
+    if not created:
+        return
+    from .utils import create_notification
+    try:
+        handshake = instance.handshake
+        msg_sender = instance.sender
+        other_user = (
+            handshake.requester
+            if handshake.service.user == msg_sender
+            else handshake.service.user
+        )
+        transaction.on_commit(lambda: create_notification(
+            user=other_user,
+            notification_type='chat_message',
+            title='New Message',
+            message=f"New message from {msg_sender.first_name}",
+            handshake=handshake,
+        ))
+    except Exception:
+        logger.exception('Failed to queue chat notification for message %s', instance.pk)
+
+
+@receiver(post_save, sender=Handshake)
+def notify_on_handshake_status_change(sender, instance, created, **kwargs):
+    """Create notifications when a Handshake status transitions."""
+    if created or not instance._status_changed:
+        return
+    from .utils import create_notification
+
+    new_status = instance.status
+    service = instance.service
+
+    try:
+        if new_status == 'denied':
+            transaction.on_commit(lambda: create_notification(
+                user=instance.requester,
+                notification_type='handshake_denied',
+                title='Handshake Denied',
+                message=f"Your interest in '{service.title}' was not accepted.",
+                handshake=instance,
+                service=service,
+            ))
+        elif new_status == 'cancelled':
+            transaction.on_commit(lambda: create_notification(
+                user=instance.requester,
+                notification_type='handshake_cancelled',
+                title='Service Cancelled',
+                message=f"The service '{service.title}' has been cancelled.",
+                handshake=instance,
+                service=service,
+            ))
+    except Exception:
+        logger.exception('Failed to queue handshake notification for %s', instance.pk)

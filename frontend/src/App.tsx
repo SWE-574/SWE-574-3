@@ -7,6 +7,7 @@ import AdminProtectedRoute from '@/components/AdminProtectedRoute'
 import Navbar from '@/components/Navbar'
 import { authAPI } from '@/services/authAPI'
 import { toast } from 'sonner'
+import { useNotificationSocket } from '@/hooks/useNotificationSocket'
 
 // ─── Lazy-loaded Pages ────────────────────────────────────────────────────────
 const HomePage               = lazy(() => import('@/pages/HomePage'))
@@ -206,6 +207,9 @@ function App() {
     checkAuth()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
+
+  // ── Notification WebSocket (fires only when authenticated) ──────────────
+  useNotificationSocket()
 
   if (isLoading && !user && !isPublicAuthPage) {
     return (

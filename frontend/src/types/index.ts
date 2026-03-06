@@ -221,13 +221,26 @@ export interface ChatMessage {
 
 // ─── Notification Types ───────────────────────────────────────────────────────
 
+export type NotificationType =
+  | 'handshake_request'
+  | 'handshake_accepted'
+  | 'handshake_denied'
+  | 'handshake_cancelled'
+  | 'chat_message'
+  | 'service_reminder'
+  | 'service_confirmation'
+  | 'positive_rep'
+  | 'admin_warning'
+  | 'dispute_resolved'
+
 export interface Notification {
   id: string
-  recipient: string
-  notification_type: string
+  type: NotificationType
+  title: string
   message: string
   is_read: boolean
-  data?: Record<string, unknown>
+  related_handshake: string | null
+  related_service: string | null
   created_at: string
 }
 
