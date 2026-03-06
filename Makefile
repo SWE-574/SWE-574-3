@@ -29,7 +29,7 @@ export
 # Apple Silicon uses arm64 PostGIS image if the user hasn't overridden it
 UNAME_M := $(shell uname -m)
 ifeq ($(UNAME_M),arm64)
-  POSTGIS_IMAGE ?= postgis/postgis:15-3.4-alpine
+  POSTGIS_IMAGE ?= imresamu/postgis:15-3.4-alpine
 endif
 export POSTGIS_IMAGE
 
