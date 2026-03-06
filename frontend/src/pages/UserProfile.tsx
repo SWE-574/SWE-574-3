@@ -289,7 +289,7 @@ const UserProfile = () => {
       const resolvedSkills = await Promise.all(
         editSkills.map(async (tag) => {
           if (isUuid(tag.id)) return tag          // already a proper DB uuid
-          return tagAPI.ensureInDb(tag.name)      // QID or custom → create/find in DB
+          return tagAPI.ensureInDb(tag)      // Wikidata QID → create/find in DB
         })
       )
 

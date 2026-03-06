@@ -86,7 +86,7 @@ const OnboardingPage = () => {
       const resolvedSkills = await Promise.all(
         skills.map(async (tag) => {
           if (isUuid(tag.id)) return tag
-          return tagAPI.ensureInDb(tag.name)
+          return tagAPI.ensureInDb(tag)
         })
       )
 
@@ -264,7 +264,7 @@ const OnboardingPage = () => {
               <Box w="full" maxW="400px" p={4} borderRadius="10px"
                 border={`1px dashed ${GRAY300}`} bg={GRAY50} textAlign="center">
                 <Text fontSize="xs" color={GRAY400}>
-                  No skills added yet. Search above or press Enter to add your own.
+                  No skills added yet. Search Wikidata tags above.
                 </Text>
               </Box>
             )}
