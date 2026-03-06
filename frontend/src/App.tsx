@@ -151,13 +151,13 @@ const PAGES_WITHOUT_NAVBAR = [
 
 // Pages that fill the viewport — lock body scroll so navbar stays fixed
 // and macOS elastic-bounce doesn't move content under the navbar.
-const FULL_SCREEN_PREFIXES = ['/dashboard', '/forum', '/messages']
+const FULL_SCREEN_PREFIXES = ['/dashboard', '/forum', '/messages', '/admin']
 
 // ─── Public pages where we skip the full-page spinner ─────────────────────────
 const PUBLIC_AUTH_PATHS = ['/login', '/register', '/', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
 
 function App() {
-  const { checkAuth, refreshUser, isLoading, user } = useAuthStore()
+  const { checkAuth, isLoading, user } = useAuthStore()
   const location = useLocation()
 
   const isPublicAuthPage = PUBLIC_AUTH_PATHS.includes(location.pathname)
@@ -196,13 +196,8 @@ function App() {
     // triggering the /users/me/ → 401 → refresh-fail cycle on every keystroke.
     if (PUBLIC_AUTH_PATHS.includes(location.pathname)) return
 
-    // On every protected route change: verify auth and refresh balance/user data
-    checkAuth().then(() => {
-      const state = useAuthStore.getState()
-      if (state.isAuthenticated) {
-        refreshUser()
-      }
-    })
+    // On protected route changes, verify session once.
+    checkAuth()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
 

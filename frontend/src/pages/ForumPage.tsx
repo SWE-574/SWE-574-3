@@ -15,11 +15,11 @@ import {
 import {
   FiMessageSquare, FiBookOpen, FiCalendar, FiUsers, FiStar,
   FiZap, FiGlobe, FiCode, FiHeart, FiHome, FiTool, FiAward,
-  FiClock, FiEye, FiMapPin, FiLock,
+  FiClock, FiEye, FiMapPin, FiLock, FiFlag,
   FiPlus, FiArrowLeft, FiEdit2, FiTrash2, FiSend, FiCheck, FiX,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
-import { forumAPI } from '@/services/forumAPI'
+import { forumAPI, type ForumReportType } from '@/services/forumAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { ForumCategory, ForumTopic, ForumPost, User } from '@/types'
 import {
@@ -104,7 +104,7 @@ function CategorySidebar({
   selectedSlug: string | null
   onSelect: (cat: ForumCategory) => void
   onHome: () => void
-  user: { first_name?: string; last_name?: string; name?: string; username?: string; avatar_url?: string | null; email?: string } | null
+  user: { first_name?: string; last_name?: string; name?: string; avatar_url?: string | null; email?: string } | null
   myTopics: number
   myReplies: number
   isAuthenticated: boolean
@@ -116,7 +116,7 @@ function CategorySidebar({
   const roleBg    = roleLabel === 'Admin' ? AMBER_LT : roleLabel === 'Moderator' ? PURPLE_LT : GREEN_LT
   const roleColor  = roleLabel === 'Admin' ? AMBER    : roleLabel === 'Moderator' ? PURPLE    : GREEN
   const fullName   = [user?.first_name, user?.last_name].filter(Boolean).join(' ')
-    || user?.name || user?.username || 'User'
+    || user?.name || user?.email || 'User'
 
   return (
     <Box
@@ -459,12 +459,12 @@ function TopicListView({
             </Box>
             {topics.map((t) => (
               <Flex
-                key={t.id} as="button" w="full" align="flex-start" gap={3}
+                key={t.id} as="div" w="full" align="flex-start" gap={3}
                 px={4} py="14px" borderBottom={`1px solid ${GRAY100}`}
                 _last={{ borderBottom: 'none' }}
                 _hover={{ bg: GRAY50 }}
                 onClick={() => onSelectTopic(t.id)}
-                transition="background 0.12s" textAlign="left"
+                transition="background 0.12s" textAlign="left" cursor="pointer"
               >
                 <UserAvatar name={t.author_name} size={32} />
                 <Box flex={1} minW={0}>
@@ -606,6 +606,53 @@ function TopicDetailView({
     } catch { toast.error('Failed to delete') }
   }
 
+  const reportTopic = async () => {
+    if (!topic) return
+    if (!isAuthenticated) {
+      toast.error('Please sign in to flag content')
+      navigate('/login')
+      return
+    }
+    if (user?.id && topic.author_id === user.id) {
+      toast.error('You cannot flag your own topic')
+      return
+    }
+
+    const reportType: ForumReportType = 'inappropriate_content'
+    const description = window.prompt('Why are you flagging this topic? (optional)')
+    if (description === null) return
+
+    try {
+      await forumAPI.reportTopic(topic.id, reportType, description.trim())
+      toast.success('Topic flagged for moderator review')
+    } catch {
+      toast.error('Could not submit topic flag')
+    }
+  }
+
+  const reportReply = async (post: ForumPost) => {
+    if (!isAuthenticated) {
+      toast.error('Please sign in to flag content')
+      navigate('/login')
+      return
+    }
+    if (user?.id && post.author_id === user.id) {
+      toast.error('You cannot flag your own reply')
+      return
+    }
+
+    const reportType: ForumReportType = 'inappropriate_content'
+    const description = window.prompt('Why are you flagging this reply? (optional)')
+    if (description === null) return
+
+    try {
+      await forumAPI.reportPost(post.id, reportType, description.trim())
+      toast.success('Reply flagged for moderator review')
+    } catch {
+      toast.error('Could not submit reply flag')
+    }
+  }
+
   if (loading) {
     return (
       <Box flex={1} overflowY="auto" bg={GRAY50} p={{ base: 3, md: 5 }}>
@@ -649,9 +696,21 @@ function TopicDetailView({
           <Text fontSize={{ base: '17px', md: '22px' }} fontWeight={800} color={GRAY800} mb={2}>
             {topic.title}
           </Text>
-          <Flex align="center" gap={4} flexWrap="wrap">
+          <Flex align="center" justify="space-between" gap={3} flexWrap="wrap">
+            <Flex align="center" gap={4} flexWrap="wrap">
             <Flex align="center" gap={1} fontSize="12px" color={GRAY400}><FiMessageSquare size={11} /><Text>{topic.reply_count} replies</Text></Flex>
             <Flex align="center" gap={1} fontSize="12px" color={GRAY400}><FiEye size={11} /><Text>{topic.view_count} views</Text></Flex>
+            </Flex>
+            {isAuthenticated && (!user?.id || topic.author_id !== user.id) && (
+              <Button
+                size="xs"
+                variant="outline"
+                borderRadius="8px"
+                onClick={reportTopic}
+              >
+                <Flex align="center" gap={1}><FiFlag size={11} /></Flex>
+              </Button>
+            )}
           </Flex>
         </Box>
 
@@ -752,6 +811,11 @@ function TopicDetailView({
                             </Box>
                           </Flex>
                         )
+                      )}
+                      {!isOwn && isAuthenticated && (
+                        <Box as="button" p={1} borderRadius="6px" color={GRAY400} _hover={{ bg: RED_LT, color: RED }} onClick={() => void reportReply(post)}>
+                          <FiFlag size={12} />
+                        </Box>
                       )}
                     </Flex>
                     <Text fontSize="14px" color={GRAY700} lineHeight={1.7} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -860,11 +924,11 @@ export default function ForumPage() {
     if (!user) return
     const ac = new AbortController()
     const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ')
-      || user.username || ''
+      || user.email || ''
     forumAPI.listTopics({ page_size: 100 }, ac.signal)
       .then((res) => {
         const mine = res.results.filter((t) =>
-          t.author_name === displayName || t.author_name === user.username
+          t.author_name === displayName || t.author_name === user.email
         )
         setMyTopics(mine.length)
         setMyReplies(mine.reduce((s, t) => s + (t.reply_count ?? 0), 0))

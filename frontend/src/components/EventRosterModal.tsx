@@ -31,7 +31,9 @@ interface Props {
   handshakes: Handshake[]
   onComplete: () => void
   onMarkAttended: (handshakeId: string) => void
+  onReportParticipant: (handshake: Handshake) => void
   markingHandshakeId?: string | null
+  reportingIssue?: boolean
   completing: boolean
 }
 

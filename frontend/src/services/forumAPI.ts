@@ -1,6 +1,8 @@
 import { apiClient } from './api'
 import type { ForumCategory, ForumTopic, ForumPost } from '@/types'
 
+export type ForumReportType = 'inappropriate_content' | 'spam' | 'scam' | 'harassment' | 'other'
+
 interface PaginatedResponse<T> {
   count: number
   next: string | null
@@ -45,6 +47,28 @@ export const forumAPI = {
     await apiClient.delete(`/forum/topics/${id}/`)
   },
 
+  pinTopic: async (id: string): Promise<ForumTopic> => {
+    const res = await apiClient.post<ForumTopic>(`/forum/topics/${id}/pin/`)
+    return res.data
+  },
+
+  lockTopic: async (id: string): Promise<ForumTopic> => {
+    const res = await apiClient.post<ForumTopic>(`/forum/topics/${id}/lock/`)
+    return res.data
+  },
+
+  reportTopic: async (id: string, type: ForumReportType, description = ''): Promise<void> => {
+    await apiClient.post(`/forum/topics/${id}/report/`, { type, description })
+  },
+
+  listRecentPosts: async (
+    params: { page?: number; page_size?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<PaginatedResponse<ForumPost>> => {
+    const res = await apiClient.get<PaginatedResponse<ForumPost>>('/forum/posts/recent/', { params, signal })
+    return res.data
+  },
+
   // ── Posts ─────────────────────────────────────────────────────────────────
   listPosts: async (topicId: string, params: { page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<PaginatedResponse<ForumPost>> => {
     const res = await apiClient.get<PaginatedResponse<ForumPost>>(`/forum/topics/${topicId}/posts/`, { params, signal })
@@ -63,5 +87,9 @@ export const forumAPI = {
 
   deletePost: async (postId: string): Promise<void> => {
     await apiClient.delete(`/forum/posts/${postId}/`)
+  },
+
+  reportPost: async (postId: string, type: ForumReportType, description = ''): Promise<void> => {
+    await apiClient.post(`/forum/posts/${postId}/report/`, { type, description })
   },
 }

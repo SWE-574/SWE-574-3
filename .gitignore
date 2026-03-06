@@ -225,3 +225,6 @@ backend/staticfiles
 
 # Logs
 logs/
+
+backend/tests/reports/
+frontend/tests/reports/

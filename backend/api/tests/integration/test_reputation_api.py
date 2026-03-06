@@ -861,3 +861,76 @@ class TestEventNoShowAppeals:
         assert handshake.status == 'no_show'
         assert participant.no_show_count == 1
         assert report.status == 'dismissed'
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAdminReportResolutionStatusMapping:
+    """Ensure admin resolution actions map to expected Report.status values."""
+
+    def test_dismiss_action_sets_report_status_to_dismissed(self, monkeypatch):
+        monkeypatch.setattr('api.views.complete_timebank_transfer', lambda _handshake: None)
+
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='reported',
+            provisioned_hours=2,
+        )
+        report = Report.objects.create(
+            reporter=requester,
+            reported_user=provider,
+            related_handshake=handshake,
+            reported_service=service,
+            type='service_issue',
+            status='pending',
+            description='Service quality issue.',
+        )
+
+        admin = UserFactory(role='admin', is_staff=True, is_superuser=True)
+        admin_client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = admin_client.post(
+            f'/api/admin/reports/{report.id}/resolve/',
+            {'action': 'dismiss', 'admin_notes': 'No violation found.'},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        report.refresh_from_db()
+        assert report.status == 'dismissed'
+
+    def test_confirm_no_show_action_sets_report_status_to_resolved(self, monkeypatch):
+        monkeypatch.setattr('api.views.cancel_timebank_transfer', lambda _handshake: None)
+        monkeypatch.setattr('api.views.complete_timebank_transfer', lambda _handshake: None)
+
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='reported',
+            provisioned_hours=2,
+        )
+        report = Report.objects.create(
+            reporter=requester,
+            reported_user=provider,
+            related_handshake=handshake,
+            reported_service=service,
+            type='no_show',
+            status='pending',
+            description='Provider did not show up.',
+        )
+
+        admin = UserFactory(role='admin', is_staff=True, is_superuser=True)
+        admin_client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = admin_client.post(
+            f'/api/admin/reports/{report.id}/resolve/',
+            {'action': 'confirm_no_show', 'admin_notes': 'No-show confirmed.'},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        report.refresh_from_db()
+        assert report.status == 'resolved'

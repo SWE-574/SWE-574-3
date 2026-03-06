@@ -3,10 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Box, Flex, Text, Textarea, Button } from '@chakra-ui/react'
 import {
   FiArrowLeft, FiMessageSquare, FiEye, FiMapPin, FiLock,
-  FiEdit2, FiTrash2, FiSend, FiChevronLeft, FiChevronRight, FiCheck, FiX,
+  FiEdit2, FiTrash2, FiSend, FiChevronLeft, FiChevronRight, FiCheck, FiX, FiFlag,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
-import { forumAPI } from '@/services/forumAPI'
+import { forumAPI, type ForumReportType } from '@/services/forumAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { ForumTopic, ForumPost } from '@/types'
 import {
@@ -15,6 +15,18 @@ import {
 } from '@/theme/tokens'
 
 const PAGE_SIZE = 20
+const FORUM_REPORT_OPTIONS: ForumReportType[] = ['inappropriate_content', 'spam', 'scam', 'harassment', 'other']
+
+function askForumReportType(): ForumReportType | null {
+  const raw = window.prompt('Report reason: inappropriate_content | spam | scam | harassment | other', 'inappropriate_content')
+  if (!raw) return null
+  const normalized = raw.trim().toLowerCase() as ForumReportType
+  if (!FORUM_REPORT_OPTIONS.includes(normalized)) {
+    toast.error('Invalid report reason')
+    return null
+  }
+  return normalized
+}
 
 function timeAgo(iso: string) {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000)
@@ -56,9 +68,10 @@ interface PostCardProps {
   currentUserId?: string
   onEdit: (post: ForumPost) => void
   onDelete: (post: ForumPost) => void
+  onReport: (post: ForumPost) => void
 }
 
-function PostCard({ post, isOp, currentUserId, onEdit, onDelete }: PostCardProps) {
+function PostCard({ post, isOp, currentUserId, onEdit, onDelete, onReport }: PostCardProps) {
   const isOwn = currentUserId && post.author_id === currentUserId
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -118,6 +131,21 @@ function PostCard({ post, isOp, currentUserId, onEdit, onDelete }: PostCardProps
                   <FiTrash2 size={13} />
                 </Box>
               </Flex>
+            )}
+
+            {!isOwn && !confirmDelete && currentUserId && (
+              <Box
+                as="button"
+                p={1.5}
+                borderRadius="8px"
+                color={GRAY400}
+                cursor="pointer"
+                _hover={{ bg: RED_LT, color: RED }}
+                onClick={() => onReport(post)}
+                title="Report"
+              >
+                <FiFlag size={13} />
+              </Box>
             )}
 
             {confirmDelete && (
@@ -286,6 +314,44 @@ export default function ForumTopicDetail() {
     }
   }
 
+  const reportTopic = async () => {
+    if (!topic || !user?.id) return
+    if (topic.author_id === user.id) {
+      toast.error('You cannot report your own topic')
+      return
+    }
+
+    const reportType = askForumReportType()
+    if (!reportType) return
+    const description = window.prompt('Optional explanation', '') ?? ''
+
+    try {
+      await forumAPI.reportTopic(topic.id, reportType, description)
+      toast.success('Topic report submitted for moderation')
+    } catch {
+      toast.error('Failed to submit topic report')
+    }
+  }
+
+  const reportPost = async (post: ForumPost) => {
+    if (!user?.id) return
+    if (post.author_id === user.id) {
+      toast.error('You cannot report your own post')
+      return
+    }
+
+    const reportType = askForumReportType()
+    if (!reportType) return
+    const description = window.prompt('Optional explanation', '') ?? ''
+
+    try {
+      await forumAPI.reportPost(post.id, reportType, description)
+      toast.success('Post report submitted for moderation')
+    } catch {
+      toast.error('Failed to submit post report')
+    }
+  }
+
   const topicAuthorId = topic?.author_id
 
   return (
@@ -343,6 +409,19 @@ export default function ForumTopicDetail() {
                   <Text fontSize="12px" color={GRAY400}>
                     in <Text as="span" fontWeight={600} color={GRAY600}>{topic.category_name}</Text>
                   </Text>
+                  {isAuthenticated && user?.id !== topic.author_id && (
+                    <Box
+                      as="button"
+                      display="inline-flex"
+                      alignItems="center"
+                      gap={1}
+                      color={RED}
+                      fontSize="12px"
+                      onClick={reportTopic}
+                    >
+                      <FiFlag size={12} /> Report topic
+                    </Box>
+                  )}
                 </Flex>
               </Box>
 
@@ -393,6 +472,7 @@ export default function ForumTopicDetail() {
                       currentUserId={user?.id}
                       onEdit={setEditingPost}
                       onDelete={deletePost}
+                      onReport={reportPost}
                     />
                   )
                 ))}

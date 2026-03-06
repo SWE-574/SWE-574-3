@@ -4,7 +4,7 @@ from rest_framework import serializers
 from .models import (
     User, Service, Tag, Handshake, ChatMessage, 
     Notification, ReputationRep, Badge, UserBadge, Report, TransactionHistory,
-    ChatRoom, PublicChatMessage, Comment, NegativeRep,
+    ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia
 )
 from django.contrib.auth.hashers import make_password
@@ -93,6 +93,42 @@ class AdminUserListSerializer(serializers.ModelSerializer):
             'is_active', 'date_joined'
         ]
         read_only_fields = fields
+
+
+class AdminCommentSerializer(serializers.ModelSerializer):
+    """Serializer used by admin comment moderation endpoints."""
+    user_id = serializers.UUIDField(source='user.id', read_only=True)
+    user_name = serializers.SerializerMethodField()
+    service_title = serializers.CharField(source='service.title', read_only=True)
+    parent_id = serializers.UUIDField(source='parent.id', read_only=True, allow_null=True)
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Comment
+        fields = [
+            'id',
+            'service',
+            'service_title',
+            'user_id',
+            'user_name',
+            'parent_id',
+            'body',
+            'is_deleted',
+            'status',
+            'is_verified_review',
+            'related_handshake',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_user_name(self, obj):
+        return f"{obj.user.first_name} {obj.user.last_name}".strip() or obj.user.email
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_status(self, obj):
+        return 'removed' if obj.is_deleted else 'active'
     
 @extend_schema_serializer(
     examples=[
@@ -1261,8 +1297,26 @@ class BadgeSerializer(serializers.ModelSerializer):
 )
 class ReportSerializer(serializers.ModelSerializer):
     reporter_name = serializers.SerializerMethodField()
+    reporter_email = serializers.SerializerMethodField()
+    reporter_karma_score = serializers.SerializerMethodField()
+    reporter_warning_count = serializers.SerializerMethodField()
     reported_user_name = serializers.SerializerMethodField()
+    reported_user_email = serializers.SerializerMethodField()
+    reported_user_karma_score = serializers.SerializerMethodField()
     reported_service_title = serializers.SerializerMethodField()
+    reported_service_status = serializers.SerializerMethodField()
+    reported_service_type = serializers.SerializerMethodField()
+    reported_service_description = serializers.SerializerMethodField()
+    reported_service_location = serializers.SerializerMethodField()
+    reported_service_hours = serializers.SerializerMethodField()
+    reported_service_owner = serializers.SerializerMethodField()
+    reported_service_owner_name = serializers.SerializerMethodField()
+    reported_service_owner_email = serializers.SerializerMethodField()
+    reported_service_owner_karma_score = serializers.SerializerMethodField()
+    reported_forum_topic = serializers.PrimaryKeyRelatedField(read_only=True)
+    reported_forum_post = serializers.PrimaryKeyRelatedField(read_only=True)
+    reported_forum_topic_title = serializers.SerializerMethodField()
+    reported_forum_post_excerpt = serializers.SerializerMethodField()
     handshake_hours = serializers.SerializerMethodField()
     handshake_scheduled_time = serializers.SerializerMethodField()
     handshake_status = serializers.SerializerMethodField()
@@ -1271,17 +1325,47 @@ class ReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = Report
         fields = [
-            'id', 'reporter', 'reporter_name', 'reported_user', 'reported_user_name',
-            'reported_service', 'reported_service_title', 'related_handshake',
+            'id', 'reporter', 'reporter_name', 'reporter_email', 'reporter_karma_score', 'reporter_warning_count',
+            'reported_user', 'reported_user_name', 'reported_user_email', 'reported_user_karma_score',
+            'reported_service', 'reported_service_title', 'reported_service_status', 'reported_service_type',
+            'reported_service_description', 'reported_service_location', 'reported_service_hours',
+            'reported_service_owner', 'reported_service_owner_name', 'reported_service_owner_email',
+            'reported_service_owner_karma_score', 'related_handshake',
+            'reported_forum_topic', 'reported_forum_topic_title',
+            'reported_forum_post', 'reported_forum_post_excerpt',
             'handshake_hours', 'handshake_scheduled_time', 'handshake_status',
             'reported_user_is_receiver',
             'type', 'status', 'description', 'admin_notes', 
             'created_at', 'resolved_at', 'resolved_by'
         ]
 
+    def _get_context_service(self, obj):
+        """Resolve service context from report first, then handshake fallback."""
+        if obj.reported_service:
+            return obj.reported_service
+        handshake = getattr(obj, 'related_handshake', None)
+        if handshake and getattr(handshake, 'service', None):
+            return handshake.service
+        return None
+
+    def _get_context_handshake(self, obj):
+        return getattr(obj, 'related_handshake', None)
+
     @extend_schema_field(OpenApiTypes.STR)
     def get_reporter_name(self, obj):
         return f"{obj.reporter.first_name} {obj.reporter.last_name}".strip()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reporter_email(self, obj):
+        return obj.reporter.email
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_reporter_karma_score(self, obj):
+        return obj.reporter.karma_score
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_reporter_warning_count(self, obj):
+        return getattr(obj.reporter, 'warning_count', 0)
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_reported_user_name(self, obj):
@@ -1290,9 +1374,131 @@ class ReportSerializer(serializers.ModelSerializer):
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_user_email(self, obj):
+        if obj.reported_user:
+            return obj.reported_user.email
+        return None
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_reported_user_karma_score(self, obj):
+        if obj.reported_user:
+            return obj.reported_user.karma_score
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_reported_service_title(self, obj):
-        if obj.reported_service:
-            return obj.reported_service.title
+        service = self._get_context_service(obj)
+        if service:
+            return service.title
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_status(self, obj):
+        service = self._get_context_service(obj)
+        if service:
+            return service.status
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_type(self, obj):
+        service = self._get_context_service(obj)
+        if service:
+            return service.type
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_description(self, obj):
+        service = self._get_context_service(obj)
+        if not service:
+            return None
+
+        description = (getattr(service, 'description', '') or '').strip()
+        if description:
+            return description
+
+        # Some older records may have sparse descriptions; schedule_details is
+        # the closest service-context fallback we can safely expose.
+        schedule_details = (getattr(service, 'schedule_details', '') or '').strip()
+        if schedule_details:
+            return schedule_details
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_location(self, obj):
+        service = self._get_context_service(obj)
+        if not service:
+            return None
+
+        location_type = getattr(service, 'location_type', None)
+        location_area = getattr(service, 'location_area', None)
+        if location_type == 'online':
+            return 'Online'
+        if location_area:
+            return location_area
+        if location_type:
+            return location_type.replace('_', ' ').title()
+
+        handshake = self._get_context_handshake(obj)
+        exact_location = (getattr(handshake, 'exact_location', '') or '').strip() if handshake else ''
+        if exact_location:
+            return exact_location
+        return None
+
+    @extend_schema_field(OpenApiTypes.NUMBER)
+    def get_reported_service_hours(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.duration is not None:
+            return float(service.duration)
+
+        handshake = self._get_context_handshake(obj)
+        if handshake and getattr(handshake, 'exact_duration', None) is not None:
+            return float(handshake.exact_duration)
+
+        if handshake and getattr(handshake, 'provisioned_hours', None) is not None:
+            return float(handshake.provisioned_hours)
+        return None
+
+    @extend_schema_field(OpenApiTypes.UUID)
+    def get_reported_service_owner(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.user_id:
+            return str(service.user_id)
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_owner_name(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.user:
+            return f"{service.user.first_name} {service.user.last_name}".strip()
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_owner_email(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.user:
+            return service.user.email
+        return None
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_reported_service_owner_karma_score(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.user:
+            return service.user.karma_score
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_forum_topic_title(self, obj):
+        if obj.reported_forum_topic:
+            return obj.reported_forum_topic.title
+        if obj.reported_forum_post:
+            return obj.reported_forum_post.topic.title
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_forum_post_excerpt(self, obj):
+        if obj.reported_forum_post:
+            body = obj.reported_forum_post.body or ''
+            return body[:140]
         return None
 
     @extend_schema_field(OpenApiTypes.DECIMAL)
@@ -1362,6 +1568,28 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
         if obj.handshake and obj.handshake.service:
             return obj.handshake.service.title
         return None
+
+
+class AdminAuditLogSerializer(serializers.ModelSerializer):
+    admin_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AdminAuditLog
+        fields = [
+            'id',
+            'admin',
+            'admin_name',
+            'action_type',
+            'target_entity',
+            'target_id',
+            'reason',
+            'created_at',
+        ]
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_admin_name(self, obj):
+        full = f"{obj.admin.first_name} {obj.admin.last_name}".strip()
+        return full or obj.admin.email
 
 
 # Public Chat Serializers

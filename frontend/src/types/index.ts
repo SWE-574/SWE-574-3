@@ -60,7 +60,6 @@ export type UserRole = (typeof UserRole)[keyof typeof UserRole]
 export interface User {
   id: string
   email: string
-  username?: string
   first_name: string
   last_name: string
   role: string
@@ -284,16 +283,118 @@ export interface NegativeReputationResponse extends ReputationResponse {
 
 export interface AdminReport {
   id: string
-  reporter: User
-  reported_user?: User
-  service?: Service
-  handshake?: Handshake
-  reason: string
+  reporter: string
+  reporter_name: string
+  reporter_email?: string | null
+  reporter_karma_score?: number | null
+  reporter_warning_count?: number | null
+  reported_user?: string | null
+  reported_user_name?: string | null
+  reported_user_email?: string | null
+  reported_user_karma_score?: number | null
+  reported_service?: string | null
+  reported_service_title?: string | null
+  reported_service_status?: string | null
+  reported_service_type?: string | null
+  reported_service_description?: string | null
+  reported_service_location?: string | null
+  reported_service_hours?: number | null
+  reported_service_owner?: string | null
+  reported_service_owner_name?: string | null
+  reported_service_owner_email?: string | null
+  reported_service_owner_karma_score?: number | null
+  reported_forum_topic?: string | null
+  reported_forum_topic_title?: string | null
+  reported_forum_post?: string | null
+  reported_forum_post_excerpt?: string | null
+  related_handshake?: string | null
+  handshake_hours?: number | null
+  handshake_scheduled_time?: string | null
+  handshake_status?: string | null
+  reported_user_is_receiver?: boolean | null
+  type: 'no_show' | 'inappropriate_content' | 'service_issue' | 'spam' | 'scam' | 'harassment' | 'other'
   description: string
-  status: 'open' | 'resolved' | 'dismissed'
-  resolution_notes?: string
+  status: 'pending' | 'resolved' | 'dismissed'
+  admin_notes?: string | null
+  created_at: string
+  resolved_at?: string | null
+  resolved_by?: string | null
+}
+
+export interface AdminUserSummary {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  timebank_balance: number
+  karma_score: number
+  role: string
+  is_active: boolean
+  date_joined: string
+}
+
+export interface AdminMetrics {
+  timestamp: string
+  users: {
+    total: number
+    active: number
+    admins: number
+  }
+  services: {
+    total: number
+    active: number
+    offers: number
+    needs: number
+  }
+  handshakes: {
+    total: number
+    pending: number
+    accepted: number
+    completed: number
+  }
+  transactions: {
+    total: number
+    last_24h: number
+  }
+}
+
+export type AdminCommentStatus = 'active' | 'removed'
+
+export interface AdminComment {
+  id: string
+  service: string
+  service_title: string
+  user_id: string
+  user_name: string
+  parent_id?: string | null
+  body: string
+  is_deleted: boolean
+  status: AdminCommentStatus
+  is_verified_review: boolean
+  related_handshake?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface AdminAuditLog {
+  id: string
+  admin: string
+  admin_name: string
+  action_type:
+    | 'warn_user'
+    | 'ban_user'
+    | 'unban_user'
+    | 'adjust_karma'
+    | 'resolve_report'
+    | 'pause_handshake'
+    | 'remove_comment'
+    | 'restore_comment'
+    | 'lock_topic'
+    | 'pin_topic'
+  target_entity: 'user' | 'report' | 'handshake' | 'comment' | 'forum_topic'
+  target_id: string
+  reason?: string | null
+  created_at: string
 }
 
 // ─── Forum Types ──────────────────────────────────────────────────────────────

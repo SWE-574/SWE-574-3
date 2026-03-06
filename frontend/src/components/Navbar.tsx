@@ -154,6 +154,7 @@ const Navbar = () => {
 
   const balance = Number(user?.timebank_balance ?? 0)
   const p       = location.pathname
+  const isAdmin = user?.role === 'admin' || user?.is_admin === true
   // On dashboard the sidebar already shows balance & post service — hide them from navbar
   const isDashboard = p === '/dashboard'
 
@@ -284,7 +285,7 @@ const Navbar = () => {
                   </Box>
                   <Box py="4px">
                     <DropdownItem onClick={() => navigate('/profile')} icon={<FiUser size={14} />}>My Profile</DropdownItem>
-                    {user?.is_admin && (
+                    {isAdmin && (
                       <DropdownItem onClick={() => navigate('/admin')} icon={<FiGrid size={14} />}>Admin Panel</DropdownItem>
                     )}
                   </Box>
@@ -385,6 +386,11 @@ const Navbar = () => {
             <MobileNavLink to="/messages" icon={<FiMessageSquare size={16} />} active={p === '/messages' || p.startsWith('/messages/')} onClick={() => setMobileOpen(false)}>Messages</MobileNavLink>
             <MobileNavLink to="/notifications" icon={<FiBell size={16} />} active={p === '/notifications'} onClick={() => setMobileOpen(false)}>Notifications</MobileNavLink>
             <MobileNavLink to="/profile" icon={<FiUser size={16} />} active={p === '/profile'} onClick={() => setMobileOpen(false)}>My Profile</MobileNavLink>
+            {isAdmin && (
+              <MobileNavLink to="/admin" icon={<FiGrid size={16} />} active={p === '/admin' || p.startsWith('/admin?')} onClick={() => setMobileOpen(false)}>
+                Admin Panel
+              </MobileNavLink>
+            )}
           </Box>
 
           {/* Post service */}

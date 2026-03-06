@@ -12,7 +12,8 @@ if __name__ == "__main__":
 
 from api.models import (
     ChatMessage, Handshake, Notification, ReputationRep, Comment,
-    Service, Tag, User, UserBadge, ForumCategory, ForumTopic, ForumPost
+    Service, Tag, User, UserBadge, ForumCategory, ForumTopic, ForumPost,
+    Report, AdminAuditLog,
 )
 from api.achievement_utils import check_and_assign_badges
 from api.services import HandshakeService
@@ -50,6 +51,7 @@ if demo_users.exists():
     ForumTopic.objects.filter(author_id__in=user_ids).delete()
     ForumPost.objects.filter(author_id__in=user_ids).delete()
     ChatMessage.objects.filter(sender_id__in=user_ids).delete()
+    Report.objects.filter(Q(reporter_id__in=user_ids) | Q(reported_user_id__in=user_ids)).delete()
     demo_users.delete()
 
 orphaned_handshakes = Handshake.objects.filter(service__isnull=True)
@@ -906,6 +908,115 @@ admin_user = User.objects.create_superuser(
 )
 print(f"  Created: {admin_email} (Admin account)")
 
+print("\n[10/10] Creating admin-testable data (reports + audit logs)...")
+
+# ── Reports ──────────────────────────────────────────────────────────────────
+
+report1 = Report.objects.create(
+    reporter=burak,
+    reported_user=cem,
+    reported_service=cem_chess_offer,
+    type='inappropriate_content',
+    status='pending',
+    description='The service description is misleading — what was offered during the session had nothing to do with the listed title. I felt uncomfortable and left early.',
+)
+Report.objects.filter(pk=report1.pk).update(created_at=timezone.now() - timedelta(days=3))
+
+report2 = Report.objects.create(
+    reporter=can,
+    reported_user=burak,
+    type='harassment',
+    status='pending',
+    description='After I declined their service request I started receiving repeated unsolicited messages. The tone became aggressive and threatening. Please look into this.',
+)
+Report.objects.filter(pk=report2.pk).update(created_at=timezone.now() - timedelta(days=1))
+
+report3 = Report.objects.create(
+    reporter=deniz,
+    reported_service=burak_chess,
+    reported_user=burak,
+    type='spam',
+    status='pending',
+    description='This listing is an almost word-for-word copy of another listing from the same user. Appears to be duplicate spam to game the search ranking.',
+)
+Report.objects.filter(pk=report3.pk).update(created_at=timezone.now() - timedelta(days=5))
+
+report4 = Report.objects.create(
+    reporter=mehmet,
+    reported_user=elif_user,
+    reported_service=elif_manti,
+    type='service_issue',
+    status='resolved',
+    description='The cooking session was significantly shorter than the advertised 3 hours. We finished in under 90 minutes and some promised content was skipped.',
+    admin_notes='Reviewed chat logs and both users confirmed a mutual agreement to shorten the session due to a scheduling conflict on the requester\'s side. No misconduct found — both parties are satisfied. Closing as resolved.',
+    resolved_by=admin_user,
+    resolved_at=timezone.now() - timedelta(days=2),
+)
+Report.objects.filter(pk=report4.pk).update(created_at=timezone.now() - timedelta(days=7))
+
+report5 = Report.objects.create(
+    reporter=zeynep,
+    reported_user=deniz,
+    type='scam',
+    status='dismissed',
+    description='User asked me to pay outside the platform for an "extended" session. Felt like a scam attempt.',
+    admin_notes='Investigated the user\'s exchange history. No payment was requested or made. The "extended session" was a misunderstood offer for additional free help. Report dismissed.',
+    resolved_by=admin_user,
+    resolved_at=timezone.now() - timedelta(days=10),
+)
+Report.objects.filter(pk=report5.pk).update(created_at=timezone.now() - timedelta(days=12))
+
+print(f"  Created 5 test reports (3 pending, 1 resolved, 1 dismissed)")
+
+# ── Audit Logs ───────────────────────────────────────────────────────────────
+
+audit1 = AdminAuditLog.objects.create(
+    admin=admin_user,
+    action_type='warn_user',
+    target_entity='user',
+    target_id=burak.id,
+    reason='Multiple community members reported aggressive follow-up messages. Issued formal warning and reminded of platform code of conduct.',
+)
+AdminAuditLog.objects.filter(pk=audit1.pk).update(created_at=timezone.now() - timedelta(days=8))
+
+audit2 = AdminAuditLog.objects.create(
+    admin=admin_user,
+    action_type='adjust_karma',
+    target_entity='user',
+    target_id=can.id,
+    reason='Manually corrected karma score (+10) after a system error failed to record three completed exchanges from last month.',
+)
+AdminAuditLog.objects.filter(pk=audit2.pk).update(created_at=timezone.now() - timedelta(days=5))
+
+audit3 = AdminAuditLog.objects.create(
+    admin=admin_user,
+    action_type='resolve_report',
+    target_entity='report',
+    target_id=report4.id,
+    reason='Reviewed evidence and closed service_issue report. Both parties confirmed mutual agreement. No policy violation.',
+)
+AdminAuditLog.objects.filter(pk=audit3.pk).update(created_at=timezone.now() - timedelta(days=2))
+
+audit4 = AdminAuditLog.objects.create(
+    admin=admin_user,
+    action_type='lock_topic',
+    target_entity='forum_topic',
+    target_id=forum_topics[1].id,
+    reason='Thread derailed into off-topic arguments. Locked after moderator warning was ignored by participants.',
+)
+AdminAuditLog.objects.filter(pk=audit4.pk).update(created_at=timezone.now() - timedelta(days=14))
+
+audit5 = AdminAuditLog.objects.create(
+    admin=admin_user,
+    action_type='pin_topic',
+    target_entity='forum_topic',
+    target_id=forum_topics[0].id,
+    reason='Pinned welcome thread to top of General Discussion for better visibility for new members.',
+)
+AdminAuditLog.objects.filter(pk=audit5.pk).update(created_at=timezone.now() - timedelta(days=20))
+
+print(f"  Created 5 audit log entries")
+
 print("\n" + "=" * 60)
 print("Demo setup complete!")
 print("=" * 60)
@@ -920,6 +1031,8 @@ print(f"  Comments: {Comment.objects.count()}")
 print(f"  Reputation Entries: {ReputationRep.objects.count()}")
 print(f"  Forum Topics: {ForumTopic.objects.count()}")
 print(f"  Forum Posts: {ForumPost.objects.count()}")
+print(f"  Reports: {Report.objects.count()} ({Report.objects.filter(status='pending').count()} pending)")
+print(f"  Audit Logs: {AdminAuditLog.objects.count()}")
 print(f"\nDemo Accounts (password: demo123):")
 print(f"  Admin:   {admin_email} / {admin_password}")
 for user in all_users:

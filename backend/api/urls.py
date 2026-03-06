@@ -5,9 +5,12 @@ from rest_framework.routers import DefaultRouter
 from rest_framework import views
 from rest_framework.response import Response
 from rest_framework import permissions
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from django.http import JsonResponse
 from django.db import connection
 from django.core.cache import cache
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from .authentication import CookieJWTAuthentication
 from .views import (
     UserRegistrationView,
     UserProfileView,
@@ -22,6 +25,8 @@ from .views import (
     ReputationViewSet,
     AdminReportViewSet,
     AdminUserViewSet,
+    AdminCommentViewSet,
+    AdminAuditLogViewSet,
     ExpressInterestView,
     TransactionHistoryViewSet,
     WikidataSearchView,
@@ -54,6 +59,8 @@ router.register(r'notifications', NotificationViewSet, basename='notification')
 router.register(r'reputation', ReputationViewSet, basename='reputation')
 router.register(r'admin/reports', AdminReportViewSet, basename='admin-report')
 router.register(r'admin/users', AdminUserViewSet, basename='admin-user')
+router.register(r'admin/comments', AdminCommentViewSet, basename='admin-comment')
+router.register(r'admin/audit-logs', AdminAuditLogViewSet, basename='admin-audit-log')
 router.register(r'transactions', TransactionHistoryViewSet, basename='transaction')
 
 def health_check(request):
@@ -129,13 +136,21 @@ def health_check(request):
     return JsonResponse(health_status, status=status_code)
 
 
+@api_view(['GET'])
+@authentication_classes([CookieJWTAuthentication, JWTAuthentication])
+@permission_classes([permissions.IsAuthenticated])
 def metrics_endpoint(request):
     """Returns application metrics for monitoring."""
     from django.utils import timezone
     from api.models import User, Service, Handshake, TransactionHistory
     from django.db.models import Count, Q
     
-    if not request.user.is_authenticated or request.user.role != 'admin':
+    is_admin = (
+        getattr(request.user, 'role', None) == 'admin'
+        or bool(getattr(request.user, 'is_staff', False))
+    )
+
+    if not request.user.is_authenticated or not is_admin:
         return JsonResponse(
             {'error': 'Unauthorized - Admin access required'},
             status=403
@@ -233,6 +248,10 @@ forum_topic_lock = ForumTopicViewSet.as_view({
     'post': 'lock'
 })
 
+forum_topic_report = ForumTopicViewSet.as_view({
+    'post': 'report'
+})
+
 forum_post_list_create = ForumPostViewSet.as_view({
     'get': 'list',
     'post': 'create'
@@ -241,6 +260,10 @@ forum_post_list_create = ForumPostViewSet.as_view({
 forum_post_detail = ForumPostViewSet.as_view({
     'patch': 'partial_update',
     'delete': 'destroy'
+})
+
+forum_post_report = ForumPostViewSet.as_view({
+    'post': 'report'
 })
 
 forum_post_recent = ForumPostViewSet.as_view({
@@ -290,8 +313,10 @@ urlpatterns = [
     path('forum/topics/<uuid:pk>/', forum_topic_detail, name='forum-topic-detail'),
     path('forum/topics/<uuid:pk>/pin/', forum_topic_pin, name='forum-topic-pin'),
     path('forum/topics/<uuid:pk>/lock/', forum_topic_lock, name='forum-topic-lock'),
+    path('forum/topics/<uuid:pk>/report/', forum_topic_report, name='forum-topic-report'),
     path('forum/topics/<uuid:topic_id>/posts/', forum_post_list_create, name='forum-post-list'),
     path('forum/posts/<uuid:pk>/', forum_post_detail, name='forum-post-detail'),
+    path('forum/posts/<uuid:pk>/report/', forum_post_report, name='forum-post-report'),
     path('forum/posts/recent/', forum_post_recent, name='forum-post-recent'),
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

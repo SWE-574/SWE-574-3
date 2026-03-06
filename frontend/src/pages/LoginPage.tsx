@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, Link, Navigate } from 'react-router-dom'
+import { useNavigate, Link, Navigate, useLocation } from 'react-router-dom'
 import { Box, Flex, Text, Button, Input, VStack } from '@chakra-ui/react'
 import { FiArrowLeft, FiMail, FiLock } from 'react-icons/fi'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -13,7 +13,13 @@ import { Logo } from '@/components/Logo'
 
 const LoginPage = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { login, isLoading, isAuthenticated } = useAuthStore()
+
+  const redirectFromQuery = new URLSearchParams(location.search).get('redirect')
+  const safeRedirectFromQuery = redirectFromQuery && redirectFromQuery.startsWith('/') ? redirectFromQuery : null
+  const redirectFromState = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
+  const redirectAfterLogin = safeRedirectFromQuery || (redirectFromState && redirectFromState.startsWith('/') ? redirectFromState : null) || '/dashboard'
 
   const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState<string>(() => {
@@ -26,7 +32,7 @@ const LoginPage = () => {
   })
 
   // Guard after all hooks to satisfy Rules of Hooks
-  if (isAuthenticated) return <Navigate to="/dashboard" replace />
+  if (isAuthenticated) return <Navigate to={redirectAfterLogin} replace />
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

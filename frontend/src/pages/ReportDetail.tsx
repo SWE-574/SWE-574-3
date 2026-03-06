@@ -1,9 +1,23 @@
+import { useEffect } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { Flex, Spinner, Text } from '@chakra-ui/react'
+
 const ReportDetail = () => {
+  const navigate = useNavigate()
+  const { id } = useParams<{ id: string }>()
+
+  useEffect(() => {
+    const target = id
+      ? `/admin?tab=reports&reportId=${encodeURIComponent(id)}`
+      : '/admin?tab=reports'
+    navigate(target, { replace: true })
+  }, [id, navigate])
+
   return (
-    <div style={{ padding: '2rem' }}>
-      <h1>ReportDetail</h1>
-      <p>This page will be implemented during module migration.</p>
-    </div>
+    <Flex minH="40vh" justify="center" align="center" direction="column" gap={3}>
+      <Spinner />
+      <Text fontSize="sm" color="gray.600">Redirecting to report panel...</Text>
+    </Flex>
   )
 }
 

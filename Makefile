@@ -16,6 +16,16 @@ COMPOSE_INFRA  = docker compose -f docker-compose.infra.yml --env-file .env
 COMPOSE_DEV    = docker compose --env-file .env
 COMPOSE_PROD   = docker compose -f docker-compose.prod.yml --env-file .env
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  ENVIRONMENT VARIABLES
+# ─────────────────────────────────────────────────────────────────────────────
+# ── Guard: require .env ──────────────────────────────────────────────────────
+_check_env:
+	@test -f .env || (echo "ERROR: .env not found. Copy .env.example → .env first." && exit 1)
+
+-include .env
+export
+
 # Apple Silicon uses arm64 PostGIS image if the user hasn't overridden it
 UNAME_M := $(shell uname -m)
 ifeq ($(UNAME_M),arm64)
@@ -23,9 +33,6 @@ ifeq ($(UNAME_M),arm64)
 endif
 export POSTGIS_IMAGE
 
-# ── Guard: require .env ──────────────────────────────────────────────────────
-_check_env:
-	@test -f .env || (echo "ERROR: .env not found. Copy .env.example → .env first." && exit 1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Help
@@ -56,8 +63,9 @@ setup: _check_env ## One-time local setup: venv, deps, infra, migrate, demo data
 	@$(COMPOSE_INFRA) up -d
 	@echo "  Waiting for database to accept connections..."
 	@until docker compose -f docker-compose.infra.yml exec -T db pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	@sleep 2
 	$(call _log,"[4/6] Running Django migrations...")
-	@cd backend && $(PYEXEC) manage.py migrate
+	@sh -c 'set -e; for i in 1 2 3 4 5; do cd "$(CURDIR)/backend" && "$(CURDIR)/$(VENV)/bin/python" manage.py migrate && exit 0; echo "  DB not ready yet (attempt $$i/5), retrying in 3s..."; sleep 3; done; echo "migrate failed after 5 attempts"; exit 1'
 	$(call _log,"[5/6] Installing frontend dependencies...")
 	@cd frontend && npm install --silent
 	$(call _log,"[6/6] Seeding demo data...")
@@ -89,7 +97,7 @@ stop: ## Stop local infra (PostGIS + Redis containers)
 
 reset: ## Stop infra AND delete all Postgres + Redis data volumes (full reset)
 	$(call _warn,"This will permanently delete all local database and cache data.")
-	@printf "Continue? [y/N] " && read ans && [ "$$${ans:-N}" = "y" ] || (echo "Aborted."; exit 1)
+	@printf "Continue? [y/N] " && read ans && [ "$${ans:-N}" = "y" ] || (echo "Aborted."; exit 1)
 	$(call _log,"Stopping infra and removing volumes...")
 	@$(COMPOSE_INFRA) down -v --remove-orphans
 	$(call _ok,"Infra stopped and volumes deleted.")
