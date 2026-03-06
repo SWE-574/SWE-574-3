@@ -75,6 +75,14 @@ setup: _check_env ## One-time local setup: venv, deps, infra, migrate, demo data
 	@echo "  Login: elif@demo.com / demo123"
 
 dev: _check_env ## Start local dev: infra + backend (8000) + frontend (5173) in parallel
+	@for port in 8000 5173; do \
+	  pid=$$(lsof -ti tcp:$$port 2>/dev/null); \
+	  if [ -n "$$pid" ]; then \
+	    echo "  Killing process on port $$port (PID $$pid)..."; \
+	    kill -9 $$pid 2>/dev/null || true; \
+	    sleep 0.3; \
+	  fi; \
+	done
 	$(call _log,"Starting infra...")
 	@$(COMPOSE_INFRA) up -d
 	@until docker compose -f docker-compose.infra.yml exec -T db pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
