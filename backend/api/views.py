@@ -1763,6 +1763,50 @@ class ServiceViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(service)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['patch'], url_path='set-primary-media',
+            permission_classes=[permissions.IsAuthenticated])
+    def set_primary_media(self, request, pk=None):
+        """Set a media item as the primary (cover) photo for a service.
+
+        PATCH /api/services/{id}/set-primary-media/
+        Body: { "media_id": "<ServiceMedia UUID>" }
+
+        Moves the specified media to display_order=0 and re-numbers the rest.
+        Only the service owner can call this endpoint.
+        """
+        service = self.get_object()
+        if service.user != request.user:
+            return create_error_response(
+                'Only the owner can change the cover photo.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        media_id = request.data.get('media_id')
+        if not media_id:
+            return create_error_response(
+                'media_id is required.',
+                code=ErrorCodes.INVALID_INPUT,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        from .models import ServiceMedia as ServiceMediaModel
+        try:
+            primary = ServiceMediaModel.objects.get(id=media_id, service=service)
+        except ServiceMediaModel.DoesNotExist:
+            return create_error_response(
+                'Media not found for this service.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        # Re-order: primary → 0, others → 1, 2, 3 …
+        others = ServiceMediaModel.objects.filter(service=service).exclude(id=media_id).order_by('display_order', 'created_at')
+        primary.display_order = 0
+        primary.save(update_fields=['display_order'])
+        for idx, m in enumerate(others, start=1):
+            m.display_order = idx
+            m.save(update_fields=['display_order'])
+        serializer = self.get_serializer(service)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['post'], url_path='cancel-event',
             permission_classes=[permissions.IsAuthenticated])
     def cancel_event(self, request, pk=None):
@@ -1901,6 +1945,13 @@ class TagViewSet(viewsets.ModelViewSet):
     queryset = Tag.objects.all()
     serializer_class = TagSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Only direct tag endpoints need Wikidata enrichment. Nested serializers
+        # should stay lightweight to keep service list/detail responses fast.
+        context['include_wikidata_info'] = True
+        return context
     
     def get_queryset(self):
         queryset = Tag.objects.all()
