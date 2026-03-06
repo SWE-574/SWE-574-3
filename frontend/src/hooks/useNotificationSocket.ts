@@ -19,7 +19,7 @@ export function useNotificationSocket() {
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const attemptsRef = useRef(0)
   const enabledRef = useRef(false)
-  const connectRef = useRef<() => void>()
+  const connectRef = useRef<() => void>(undefined)
 
   const connect = useCallback(() => {
     if (!enabledRef.current) return
