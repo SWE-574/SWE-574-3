@@ -2847,9 +2847,23 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     def report_issue(self, request, pk=None):
         handshake = self.get_object()
         user = request.user
-        issue_type = (request.data.get('issue_type') or 'no_show').strip()
+        issue_type = (request.data.get('issue_type') or 'no_show').strip().lower()
         description = (request.data.get('description') or '').strip()
         is_event_handshake = handshake.service.type == 'Event'
+
+        # Event handshakes support broader behavior report types; non-event
+        # handshakes only support no-show/service-issue disputes.
+        if is_event_handshake:
+            allowed_types = {'no_show', 'service_issue', 'harassment', 'spam', 'scam', 'other'}
+        else:
+            allowed_types = {'no_show', 'service_issue'}
+
+        if issue_type not in allowed_types:
+            return create_error_response(
+                'Invalid issue_type.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         
         from .utils import get_provider_and_receiver
         provider, receiver = get_provider_and_receiver(handshake)
@@ -2939,6 +2953,14 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             )
 
         if not description:
+            default_descriptions = {
+                'no_show': 'No-show dispute reported',
+                'service_issue': 'Service issue reported',
+                'harassment': 'Harassment or abusive behavior reported',
+                'spam': 'Spam or disruptive behavior reported',
+                'scam': 'Scam or fraud concern reported',
+                'other': 'Other issue reported',
+            }
             description = default_descriptions.get(issue_type, 'Issue reported')
         
         report = Report.objects.create(
@@ -2946,8 +2968,8 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             reported_user=reported_user,
             related_handshake=handshake,
             reported_service=handshake.service,
-            type='no_show' if issue_type == 'no_show' else 'service_issue',
-            description=request.data.get('description', 'No-show reported')
+            type=issue_type,
+            description=description,
         )
 
         handshake.status = 'reported'
