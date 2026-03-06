@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { Box, Flex, Text, Stack, Spinner } from '@chakra-ui/react'
+import { Box, Button, Flex, Text, Stack, Spinner } from '@chakra-ui/react'
 import {
   FiSend,
   FiArrowLeft,
@@ -712,7 +712,7 @@ function HsStepBar({ conv }: { conv: ChatConversation }) {
 // ─── Action Card ──────────────────────────────────────────────────────────────
 
 function ActionCard({
-  conv, onInitiate, onShowApprove, onConfirm, onCancel, isCancelling, onOpenEvaluation,
+  conv, onInitiate, onShowApprove, onConfirm, onCancel, isCancelling, onOpenEvaluation, onReportNoShow, isReportingNoShow,
 }: {
   conv: ChatConversation
   onInitiate: () => void
@@ -721,6 +721,8 @@ function ActionCard({
   onCancel: () => Promise<void>
   isCancelling: boolean
   onOpenEvaluation: () => void
+  onReportNoShow: () => Promise<void>
+  isReportingNoShow: boolean
 }) {
   const {
     status, is_provider, provider_initiated,
@@ -865,7 +867,23 @@ function ActionCard({
               }
             </Text>
           </Box>
-          {!myConfirmed && <CTA label="Confirm Completion" bg={AMBER} onClick={onConfirm} />}
+          <Flex align="center" gap={2}>
+            {!myConfirmed && <CTA label="Confirm Completion" bg={AMBER} onClick={onConfirm} />}
+            <Button
+              px="12px"
+              h="34px"
+              borderRadius="9px"
+              border={`1px solid ${RED}`}
+              color={RED}
+              bg={RED_LT}
+              fontSize="12px"
+              fontWeight={700}
+              disabled={isReportingNoShow}
+              onClick={() => { void onReportNoShow() }}
+            >
+              {isReportingNoShow ? 'Reporting...' : 'Report No-Show'}
+            </Button>
+          </Flex>
         </Flex>
       </Box>
     )
@@ -1303,6 +1321,7 @@ export default function ChatPage() {
   const [isSending,            setIsSending]            = useState(false)
   const [sendError,            setSendError]            = useState<string | null>(null)
   const [isCancelling,         setIsCancelling]         = useState(false)
+  const [isReportingNoShow,    setIsReportingNoShow]    = useState(false)
   const [isApproving,          setIsApproving]          = useState(false)
   const [isDeclining,          setIsDeclining]          = useState(false)
   const [mobileShowThread,     setMobileShowThread]     = useState(!!paramId)
@@ -1569,6 +1588,28 @@ export default function ChatPage() {
     }
   }, [selectedId, isCancelling, refreshConversations])
 
+  const handleReportNoShow = useCallback(async () => {
+    if (!selectedId || isReportingNoShow) return
+
+    const description = window.prompt(
+      'Describe the no-show briefly (optional):',
+      'The other participant did not show up at the agreed time.',
+    )
+    if (description === null) return
+
+    setIsReportingNoShow(true)
+    try {
+      await handshakeAPI.report(selectedId, 'no_show', description.trim() || 'No-show reported by participant')
+      toast.success('No-show report submitted for admin review.')
+      refreshConversations()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(err?.response?.data?.detail ?? err?.message ?? 'Failed to submit no-show report.')
+    } finally {
+      setIsReportingNoShow(false)
+    }
+  }, [isReportingNoShow, refreshConversations, selectedId])
+
   const showConvList = !mobileShowThread
   const showThread   = mobileShowThread || !!selectedId
 
@@ -1716,6 +1757,8 @@ export default function ChatPage() {
                 onCancel={handleCancel}
                 isCancelling={isCancelling}
                 onOpenEvaluation={() => setShowEvaluationModal(true)}
+                onReportNoShow={handleReportNoShow}
+                isReportingNoShow={isReportingNoShow}
               />
 
               {/* Messages */}

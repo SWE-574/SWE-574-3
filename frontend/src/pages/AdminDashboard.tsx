@@ -509,6 +509,84 @@ const AdminDashboard = () => {
     }
   }, [loadDashboard, loadReports, openReport])
 
+  const deleteOpenReportedForumContent = useCallback(async () => {
+    if (!openReport) return
+
+    const hasReply = !!openReport.reported_forum_post
+    const targetId = hasReply ? openReport.reported_forum_post : openReport.reported_forum_topic
+    if (!targetId) {
+      toast.error('No forum content is linked to this report.')
+      return
+    }
+
+    const targetLabel = hasReply ? 'reply' : 'topic'
+    const confirmed = window.confirm(`Delete the reported forum ${targetLabel}? This cannot be undone.`)
+    if (!confirmed) return
+
+    setOpenReportActionLoading(true)
+    try {
+      if (hasReply) {
+        await forumAPI.deletePost(targetId)
+      } else {
+        await forumAPI.deleteTopic(targetId)
+      }
+
+      toast.success(`Reported forum ${targetLabel} deleted`)
+      await loadReports()
+      await loadDashboard()
+
+      try {
+        const refreshed = await adminAPI.getReport(openReport.id)
+        setOpenReport(refreshed)
+      } catch {
+        closeOpenReport()
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error, `Failed to delete reported forum ${targetLabel}`))
+    } finally {
+      setOpenReportActionLoading(false)
+    }
+  }, [closeOpenReport, loadDashboard, loadReports, openReport])
+
+  const closeOpenReportedService = useCallback(async () => {
+    if (!openReport) return
+
+    const serviceId = openReport.reported_service
+    if (!serviceId) {
+      toast.error('No service is linked to this report.')
+      return
+    }
+
+    if (openReport.reported_service_status === 'Cancelled' || openReportService?.status === 'Cancelled') {
+      toast.info('This service is already closed.')
+      return
+    }
+
+    const confirmed = window.confirm('Close the reported service? This will remove it from active listings.')
+    if (!confirmed) return
+
+    setOpenReportActionLoading(true)
+    try {
+      await serviceAPI.delete(serviceId)
+      toast.success('Reported service closed')
+      await loadReports()
+      await loadDashboard()
+
+      try {
+        const refreshed = await adminAPI.getReport(openReport.id)
+        setOpenReport(refreshed)
+      } catch {
+        closeOpenReport()
+      }
+
+      setOpenReportService((prev) => (prev ? { ...prev, status: 'Cancelled' } : prev))
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to close reported service'))
+    } finally {
+      setOpenReportActionLoading(false)
+    }
+  }, [closeOpenReport, loadDashboard, loadReports, openReport, openReportService])
+
   useEffect(() => {
     const tabParam = searchParams.get('tab')
     const reportIdParam = searchParams.get('reportId')
@@ -1334,6 +1412,8 @@ const AdminDashboard = () => {
                     || openReport.reported_forum_post_excerpt
                   )
                   const isForumReport = !!(openReport.reported_forum_topic || openReport.reported_forum_post)
+                  const isServiceReport = !!openReport.reported_service
+                  const isServiceAlreadyClosed = openReport.reported_service_status === 'Cancelled' || openReportService?.status === 'Cancelled'
                   const forumTopicPath = openReport.reported_forum_topic ? `/forum/topic/${openReport.reported_forum_topic}` : null
                   const forumReplyPath =
                     openReport.reported_forum_topic && openReport.reported_forum_post
@@ -1389,6 +1469,32 @@ const AdminDashboard = () => {
                         >
                           Dismiss report
                         </Button>
+                        {isServiceReport && (
+                          <Button
+                            bg={RED_LT}
+                            color={RED}
+                            border={`1px solid ${RED}`}
+                            _hover={{ bg: '#FEE4E2' }}
+                            disabled={openReportActionLoading || isServiceAlreadyClosed}
+                            onClick={closeOpenReportedService}
+                            borderRadius="8px"
+                          >
+                            {isServiceAlreadyClosed ? 'Service already closed' : 'Close reported service'}
+                          </Button>
+                        )}
+                        {isForumReport && (
+                          <Button
+                            bg={RED_LT}
+                            color={RED}
+                            border={`1px solid ${RED}`}
+                            _hover={{ bg: '#FEE4E2' }}
+                            disabled={openReportActionLoading || (!openReport.reported_forum_post && !openReport.reported_forum_topic)}
+                            onClick={deleteOpenReportedForumContent}
+                            borderRadius="8px"
+                          >
+                            Delete reported {openReport.reported_forum_post ? 'reply' : 'topic'}
+                          </Button>
+                        )}
                         {!isForumReport && (
                           <Button
                             bg={AMBER_LT}
@@ -1405,6 +1511,11 @@ const AdminDashboard = () => {
                         {!isForumReport && !openReport.related_handshake && (
                           <Text fontSize="12px" color={GRAY500}>
                             No linked handshake. Confirm no-show and pause actions are disabled.
+                          </Text>
+                        )}
+                        {isForumReport && !openReport.reported_forum_post && !openReport.reported_forum_topic && (
+                          <Text fontSize="12px" color={GRAY500}>
+                            This forum report has no linked topic/reply ID, so delete is disabled.
                           </Text>
                         )}
                       </Flex>
