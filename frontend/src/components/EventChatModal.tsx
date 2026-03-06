@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, type KeyboardEvent, type MouseEvent } from 'react'
 import { Box, Flex, Stack, Text, Textarea } from '@chakra-ui/react'
-import { FiX, FiSend, FiMessageSquare, FiUsers, FiWifi, FiWifiOff } from 'react-icons/fi'
+import { FiX, FiSend, FiMessageSquare, FiUsers, FiWifi, FiWifiOff, FiFlag } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
 import { eventChatAPI, buildEventChatWsUrl } from '@/services/conversationAPI'
@@ -11,6 +11,7 @@ import type { Service } from '@/types'
 import {
   AMBER, AMBER_LT,
   GREEN,
+  RED,
   GRAY50, GRAY100, GRAY200, GRAY400, GRAY500, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
@@ -35,11 +36,19 @@ interface Props {
   isOpen: boolean
   onClose: () => void
   service: Service
+  onReportUser?: (userId: string, userName: string) => void
+  reportingIssue?: boolean
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function EventChatModal({ isOpen, onClose, service }: Props) {
+export default function EventChatModal({
+  isOpen,
+  onClose,
+  service,
+  onReportUser,
+  reportingIssue = false,
+}: Props) {
   const { user } = useAuthStore()
   const [messages, setMessages] = useState<PublicChatMessage[]>([])
   const [roomId, setRoomId] = useState<string | null>(null)
@@ -237,6 +246,7 @@ export default function EventChatModal({ isOpen, onClose, service }: Props) {
               {messages.map((msg: PublicChatMessage) => {
                 const isMe = msg.sender_id === user?.id
                 const isOrganizer = msg.sender_id === organizerId
+                const canReportSender = !isMe && !!onReportUser && !!msg.sender_id
                 return (
                   <Box
                     key={msg.id}
@@ -268,6 +278,39 @@ export default function EventChatModal({ isOpen, onClose, service }: Props) {
                               border={`1px solid ${AMBER}30`}
                             >
                               Organizer
+                            </Box>
+                          )}
+                          {canReportSender && (
+                            <Box
+                              as="button"
+                              display="inline-flex"
+                              alignItems="center"
+                              gap={1}
+                              fontSize="10px"
+                              fontWeight={600}
+                              color={reportingIssue ? GRAY400 : GRAY500}
+                              onClick={() => {
+                                if (!reportingIssue && onReportUser) {
+                                  onReportUser(msg.sender_id, msg.sender_name || 'this user')
+                                }
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: reportingIssue ? 'not-allowed' : 'pointer',
+                                opacity: reportingIssue ? 0.7 : 1,
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!reportingIssue) {
+                                  (e.currentTarget as unknown as HTMLButtonElement).style.color = RED
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                (e.currentTarget as unknown as HTMLButtonElement).style.color = reportingIssue ? GRAY400 : GRAY500
+                              }}
+                            >
+                              <FiFlag size={10} />
+                              {'Report user'}
                             </Box>
                           )}
                         </Flex>

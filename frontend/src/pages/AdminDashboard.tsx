@@ -335,7 +335,23 @@ const AdminDashboard = () => {
     if (!confirmed) return
 
     try {
-      await adminAPI.resolveReport(report.id, action, reportNotes[report.id])
+      const updated = await adminAPI.resolveReport(report.id, action, reportNotes[report.id])
+      setReports((prev) => {
+        if (!prev) return prev
+
+        const upserted = prev.results.map((row) => (row.id === updated.id ? updated : row))
+        const filtered = reportStatus === 'pending'
+          ? upserted.filter((row) => row.status === 'pending')
+          : upserted
+
+        return {
+          ...prev,
+          results: filtered,
+          count: reportStatus === 'pending'
+            ? Math.max(0, prev.count - (upserted.length - filtered.length))
+            : prev.count,
+        }
+      })
       toast.success('Report updated')
       await loadReports()
       await loadDashboard()

@@ -50,8 +50,10 @@ const HS_BADGE: Record<Handshake['status'], { label: string; bg: string; color: 
 // ─── Report options ───────────────────────────────────────────────────────────
 
 type ReportType = 'inappropriate_content' | 'spam' | 'service_issue' | 'scam' | 'harassment' | 'other'
+type EventBehaviorIssueType = 'service_issue' | 'harassment' | 'spam' | 'scam' | 'other'
+type ReportOption = { value: string; label: string; desc: string }
 
-const REPORT_OPTIONS: { value: ReportType; label: string; desc: string }[] = [
+const REPORT_OPTIONS: ReportOption[] = [
   { value: 'inappropriate_content', label: 'Inappropriate content', desc: 'Offensive or violates guidelines' },
   { value: 'spam',                  label: 'Spam',                  desc: 'Misleading or fake content' },
   { value: 'scam',                  label: 'Scam or fraud',         desc: 'Attempting to deceive users' },
@@ -59,6 +61,26 @@ const REPORT_OPTIONS: { value: ReportType; label: string; desc: string }[] = [
   { value: 'service_issue',         label: 'Service issue',         desc: 'Problem with quality or description' },
   { value: 'other',                 label: 'Other',                 desc: 'Something else not listed above' },
 ]
+const EVENT_BEHAVIOR_REPORT_OPTIONS: ReportOption[] = [
+  { value: 'service_issue', label: 'Service issue', desc: 'Issue with event conduct or delivery' },
+  { value: 'harassment',    label: 'Harassment',    desc: 'Abusive, threatening, or unsafe behavior' },
+  { value: 'spam',          label: 'Spam',          desc: 'Repeated unwanted or disruptive messages' },
+  { value: 'scam',          label: 'Scam or fraud', desc: 'Attempt to deceive participants' },
+  { value: 'other',         label: 'Other',         desc: 'Something else not listed above' },
+]
+
+const EVENT_PARTICIPANT_STATUS_PRIORITY: Record<Handshake['status'], number> = {
+  attended: 6,
+  checked_in: 5,
+  accepted: 4,
+  reported: 3,
+  no_show: 2,
+  pending: 1,
+  completed: 1,
+  paused: 1,
+  denied: 0,
+  cancelled: 0,
+}
 
 function getEvaluationWindowInfo(handshake?: Handshake) {
   if (!handshake) {
@@ -226,10 +248,28 @@ function LoadingSkeleton() {
 
 // ─── Report Modal ─────────────────────────────────────────────────────────────
 
-function ReportModal({ onClose, onSubmit, loading }: {
-  onClose: () => void; onSubmit: (t: ReportType) => void; loading: boolean
+function ReportModal({
+  onClose,
+  onSubmit,
+  loading,
+  options,
+  title,
+  subtitle,
+  submitLabel = 'Submit Report',
+}: {
+  onClose: () => void
+  onSubmit: (t: string) => void
+  loading: boolean
+  options: ReportOption[]
+  title: string
+  subtitle: string
+  submitLabel?: string
 }) {
-  const [selected, setSelected] = useState<ReportType>('inappropriate_content')
+  const [selected, setSelected] = useState<string>(options[0]?.value ?? '')
+  const selectedValue = options.some((opt) => opt.value === selected)
+    ? selected
+    : (options[0]?.value ?? '')
+
   return (
     <Box
       position="fixed" inset={0} zIndex={200}
@@ -242,10 +282,10 @@ function ReportModal({ onClose, onSubmit, loading }: {
         boxShadow="0 20px 60px rgba(0,0,0,0.2)"
         onClick={(e) => e.stopPropagation()}
       >
-        <Text fontWeight={800} fontSize="18px" color={GRAY800} mb="4px">Report this listing</Text>
-        <Text fontSize="13px" color={GRAY500} mb={5}>Select a reason. Moderators will review your report.</Text>
+        <Text fontWeight={800} fontSize="18px" color={GRAY800} mb="4px">{title}</Text>
+        <Text fontSize="13px" color={GRAY500} mb={5}>{subtitle}</Text>
         <Stack gap={2} mb={5}>
-          {REPORT_OPTIONS.map((opt) => (
+          {options.map((opt) => (
             <Box
               key={opt.value}
               as="label"
@@ -256,7 +296,7 @@ function ReportModal({ onClose, onSubmit, loading }: {
               cursor="pointer" transition="all 0.15s"
             >
               <input type="radio" name="reportType" value={opt.value}
-                checked={selected === opt.value} onChange={() => setSelected(opt.value)}
+                checked={selectedValue === opt.value} onChange={() => setSelected(opt.value)}
                 style={{ marginTop: '3px', accentColor: RED }} />
               <Box>
                 <Text fontSize="14px" fontWeight={600} color={GRAY800}>{opt.label}</Text>
@@ -269,10 +309,10 @@ function ReportModal({ onClose, onSubmit, loading }: {
           <Box as="button" flex={1} py="10px" borderRadius="10px"
             bg={RED} color={WHITE} fontSize="14px" fontWeight={700}
             display="flex" alignItems="center" justifyContent="center" gap="6px"
-            onClick={() => !loading && onSubmit(selected)}
+            onClick={() => !loading && selectedValue && onSubmit(selectedValue)}
             style={{ opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer', border: 'none' }}
           >
-            <FiSend size={14} /> {loading ? 'Submitting…' : 'Submit Report'}
+            <FiSend size={14} /> {loading ? 'Submitting…' : submitLabel}
           </Box>
           <Box as="button" flex={1} py="10px" borderRadius="10px"
             bg={GRAY100} color={GRAY700} fontSize="14px" fontWeight={600}
@@ -399,8 +439,14 @@ export default function ServiceDetailPage() {
   const [handshakes, setHandshakes]     = useState<Handshake[]>([])
   const [interestLoading, setInterestLoading] = useState(false)
   const [showReport, setShowReport]     = useState(false)
+  const [showEventReport, setShowEventReport] = useState(false)
   const [reportLoading, setReportLoading] = useState(false)
   const [alreadyReported, setAlreadyReported] = useState(false)
+  const [eventReportTarget, setEventReportTarget] = useState<{
+    handshakeId: string
+    reportedUserId?: string
+    targetLabel: string
+  } | null>(null)
   const [imgIdx, setImgIdx]             = useState(0)
 
   // ─── Event-specific state ────────────────────────────────────────────────────────────
@@ -413,6 +459,7 @@ export default function ServiceDetailPage() {
   const [showEventChat, setShowEventChat]   = useState(false)
   const [completing, setCompleting]         = useState(false)
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null)
+  const [reportingEventIssue, setReportingEventIssue] = useState(false)
   const [showEvaluationModal, setShowEvaluationModal] = useState(false)
 
   useEffect(() => {
@@ -459,6 +506,42 @@ export default function ServiceDetailPage() {
   const myHandshake = handshakes.find((h) => exId(h.service) === service?.id && exId(h.requester) === user?.id)
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
+  const reportedParticipantIds = new Set(
+    incoming
+      .filter((h) => h.status === 'reported')
+      .map((h) => h.requester),
+  )
+  const eventIncomingParticipants = isEvent
+    ? Array.from(
+      incoming
+        .filter((h) => ['accepted', 'checked_in', 'attended', 'no_show', 'reported'].includes(h.status))
+        .reduce((acc, h) => {
+          const existing = acc.get(h.requester)
+          if (!existing) {
+            acc.set(h.requester, h)
+            return acc
+          }
+
+          const existingPriority = EVENT_PARTICIPANT_STATUS_PRIORITY[existing.status] ?? -1
+          const candidatePriority = EVENT_PARTICIPANT_STATUS_PRIORITY[h.status] ?? -1
+          if (candidatePriority > existingPriority) {
+            acc.set(h.requester, h)
+            return acc
+          }
+
+          if (candidatePriority === existingPriority) {
+            const existingTs = new Date(existing.updated_at ?? existing.created_at).getTime()
+            const candidateTs = new Date(h.updated_at ?? h.created_at).getTime()
+            if (candidateTs > existingTs) {
+              acc.set(h.requester, h)
+            }
+          }
+
+          return acc
+        }, new Map<string, Handshake>())
+        .values(),
+    )
+    : incoming
   const currentUserId = user?.id ?? null
   const completedHandshakes = !isEvent && !!currentUserId
     ? handshakes.filter((h) =>
@@ -519,6 +602,21 @@ export default function ServiceDetailPage() {
     finally { setReportLoading(false) }
   }
 
+  const openEventReportModal = (target: {
+    handshakeId: string
+    reportedUserId?: string
+    targetLabel: string
+  }) => {
+    if (reportingEventIssue) return
+    setEventReportTarget(target)
+    setShowEventReport(true)
+  }
+
+  const closeEventReportModal = () => {
+    setShowEventReport(false)
+    setEventReportTarget(null)
+  }
+
   // ─── Event Handlers ─────────────────────────────────────────────────────────────────
 
   const handleJoinEvent = async () => {
@@ -574,6 +672,89 @@ export default function ServiceDetailPage() {
       const err = e as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail ?? 'Could not complete event.')
     } finally { setCompleting(false) }
+  }
+
+  const handleReportParticipantBehavior = (participantHandshake: Handshake) => {
+    if (reportingEventIssue) return
+    if (reportedParticipantIds.has(participantHandshake.requester)) {
+      toast.info('You already reported this participant for this event.')
+      return
+    }
+    openEventReportModal({
+      handshakeId: participantHandshake.id,
+      reportedUserId: participantHandshake.requester,
+      targetLabel: participantHandshake.requester_name,
+    })
+  }
+
+  const handleReportEventChatUser = (targetUserId: string, targetUserName: string) => {
+    if (!service || reportingEventIssue) return
+    if (!user?.id || targetUserId === user.id) {
+      toast.error('You cannot report yourself.')
+      return
+    }
+
+    let handshakeId: string | null = null
+    let reportedUserId: string | undefined
+
+    if (isOwn) {
+      if (reportedParticipantIds.has(targetUserId)) {
+        toast.info('You already reported this participant for this event.')
+        return
+      }
+      const targetHandshake = eventIncomingParticipants.find((h) => h.requester === targetUserId)
+      if (!targetHandshake) {
+        toast.error('Could not find an active event participant to report.')
+        return
+      }
+      handshakeId = targetHandshake.id
+      reportedUserId = targetUserId
+    } else {
+      if (!myEventHandshake) {
+        toast.error('Join the event before reporting chat behavior.')
+        return
+      }
+      handshakeId = myEventHandshake.id
+      if (targetUserId !== provId) {
+        reportedUserId = targetUserId
+      }
+    }
+
+    if (!handshakeId) {
+      toast.error('Could not determine report context for this user.')
+      return
+    }
+
+    openEventReportModal({
+      handshakeId,
+      reportedUserId,
+      targetLabel: targetUserName,
+    })
+  }
+
+  const handleSubmitEventBehaviorReport = async (issueType: EventBehaviorIssueType) => {
+    if (!eventReportTarget) return
+    setReportingEventIssue(true)
+    try {
+      const selectedIssue = EVENT_BEHAVIOR_REPORT_OPTIONS.find((option) => option.value === issueType)
+      const autoDescription = selectedIssue
+        ? `${selectedIssue.label}. ${selectedIssue.desc}`
+        : `${issueType}`
+
+      await handshakeAPI.report(
+        eventReportTarget.handshakeId,
+        issueType,
+        autoDescription,
+        eventReportTarget.reportedUserId,
+      )
+      toast.success('Report submitted for moderator review.')
+      closeEventReportModal()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(err.response?.data?.detail ?? err.message ?? 'Failed to submit report.')
+    } finally {
+      setReportingEventIssue(false)
+    }
   }
 
   const handleMarkAttended = async (handshakeId: string) => {
@@ -1029,12 +1210,15 @@ export default function ServiceDetailPage() {
                       </Box>
                     )}
 
-                    {incoming.length === 0 ? (
+                    {eventIncomingParticipants.length === 0 ? (
                       <Text fontSize="13px" color={GRAY400} textAlign="center" py={3}>No participants yet.</Text>
                     ) : (
                       <Stack gap={2} maxH="200px" overflowY="auto">
-                        {incoming.map((h) => {
-                          const cfg = HS_BADGE[h.status] ?? { label: h.status, bg: GRAY100, color: GRAY500 }
+                        {eventIncomingParticipants.map((h) => {
+                          // Event reports should not alter owner-facing attendance/status display.
+                          const alreadyReportedParticipant = reportedParticipantIds.has(h.requester)
+                          const displayStatus = h.status === 'reported' ? 'accepted' : h.status
+                          const cfg = HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 }
                           return (
                             <Flex key={h.id} align="center" justify="space-between"
                               p="10px" bg={GRAY50} borderRadius="9px" gap={2}
@@ -1044,6 +1228,34 @@ export default function ServiceDetailPage() {
                               >
                                 {h.requester_name}
                               </Text>
+                              <Box
+                                as="button"
+                                display="inline-flex"
+                                alignItems="center"
+                                gap={1}
+                                fontSize="11px"
+                                fontWeight={600}
+                                color={reportingEventIssue || alreadyReportedParticipant ? GRAY300 : GRAY400}
+                                onClick={() => { void handleReportParticipantBehavior(h) }}
+                                style={{
+                                  cursor: reportingEventIssue || alreadyReportedParticipant ? 'not-allowed' : 'pointer',
+                                  opacity: reportingEventIssue || alreadyReportedParticipant ? 0.6 : 1,
+                                  flexShrink: 0,
+                                  background: 'none',
+                                  border: 'none',
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (!reportingEventIssue && !alreadyReportedParticipant) {
+                                    (e.currentTarget as unknown as HTMLButtonElement).style.color = RED
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  (e.currentTarget as unknown as HTMLButtonElement).style.color = reportingEventIssue || alreadyReportedParticipant ? GRAY300 : GRAY400
+                                }}
+                              >
+                                <FiFlag size={11} />
+                                {alreadyReportedParticipant ? 'Reported' : 'Report user'}
+                              </Box>
                               <Box px="7px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700}
                                 style={{ background: cfg.bg, color: cfg.color, flexShrink: 0 }}
                               >
@@ -1092,7 +1304,8 @@ export default function ServiceDetailPage() {
                     </Box>
                   </Stack>
                 ) : isAuthenticated ? (
-                  isEventBanned(user?.is_event_banned_until) ? (
+                  <>
+                  {isEventBanned(user?.is_event_banned_until) ? (
                     /* Banned participant */
                     <Stack gap={3}>
                       <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}>
@@ -1226,7 +1439,27 @@ export default function ServiceDetailPage() {
                         ? 'Joining…'
                         : `Join Event — ${spotsLeft(service.max_participants, service.participant_count ?? 0)} spot${spotsLeft(service.max_participants, service.participant_count ?? 0) !== 1 ? 's' : ''} left`}
                     </Box>
-                  )
+                  )}
+
+                {/* Report (same style/placement as other services) */}
+                {isAuthenticated && !isOwn && (
+                  <Box textAlign="center" mt={4} pt={4} borderTop={`1px solid ${GRAY100}`}>
+                    <Box
+                      as="button"
+                      display="inline-flex" alignItems="center" gap={2}
+                      fontSize="12px"
+                      color={alreadyReported ? GRAY300 : GRAY400}
+                      style={{ background: 'none', border: 'none', cursor: alreadyReported ? 'not-allowed' : 'pointer', transition: 'color 0.15s' }}
+                      onClick={() => { if (!alreadyReported) setShowReport(true) }}
+                      onMouseEnter={(e) => { if (!alreadyReported) (e.currentTarget as unknown as HTMLButtonElement).style.color = RED }}
+                      onMouseLeave={(e) => { (e.currentTarget as unknown as HTMLButtonElement).style.color = alreadyReported ? GRAY300 : GRAY400 }}
+                    >
+                      <FiFlag size={12} />
+                      {alreadyReported ? 'Already Reported' : 'Report this listing'}
+                    </Box>
+                  </Box>
+                )}
+                  </>
                 ) : (
                   /* Not authenticated */
                   <Stack gap={3}>
@@ -1490,7 +1723,25 @@ export default function ServiceDetailPage() {
       </Box>
 
       {showReport && (
-        <ReportModal onClose={() => setShowReport(false)} onSubmit={handleReport} loading={reportLoading} />
+        <ReportModal
+          onClose={() => setShowReport(false)}
+          onSubmit={(reason) => handleReport(reason as ReportType)}
+          loading={reportLoading}
+          options={REPORT_OPTIONS}
+          title="Report this listing"
+          subtitle="Select a reason. Moderators will review your report."
+        />
+      )}
+
+      {showEventReport && eventReportTarget && (
+        <ReportModal
+          onClose={closeEventReportModal}
+          onSubmit={(reason) => handleSubmitEventBehaviorReport(reason as EventBehaviorIssueType)}
+          loading={reportingEventIssue}
+          options={EVENT_BEHAVIOR_REPORT_OPTIONS}
+          title={`Report ${eventReportTarget.targetLabel}`}
+          subtitle="Select a reason. Moderators will review your report."
+        />
       )}
 
       {showRoster && service && (
@@ -1498,10 +1749,12 @@ export default function ServiceDetailPage() {
           isOpen={showRoster}
           onClose={() => setShowRoster(false)}
           service={service}
-          handshakes={incoming}
+          handshakes={eventIncomingParticipants}
           onComplete={handleCompleteEvent}
           onMarkAttended={handleMarkAttended}
+          onReportParticipant={handleReportParticipantBehavior}
           markingHandshakeId={markingAttendedId}
+          reportingIssue={reportingEventIssue}
           completing={completing}
         />
       )}
@@ -1520,6 +1773,8 @@ export default function ServiceDetailPage() {
           isOpen={showEventChat}
           onClose={() => setShowEventChat(false)}
           service={service}
+          onReportUser={handleReportEventChatUser}
+          reportingIssue={reportingEventIssue}
         />
       )}
 

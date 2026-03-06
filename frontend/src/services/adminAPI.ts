@@ -36,7 +36,8 @@ export const adminAPI = {
     signal?: AbortSignal,
   ): Promise<PaginatedResponse<AdminReport>> => {
     const res = await apiClient.get<PaginatedResponse<AdminReport> | AdminReport[]>('/admin/reports/', {
-      params: { status, page, page_size: pageSize },
+      // Cache-bust to avoid stale status rows after moderation actions.
+      params: { status, page, page_size: pageSize, _t: Date.now() },
       signal,
     })
     return toPaginated(res.data)

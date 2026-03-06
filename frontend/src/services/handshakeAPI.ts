@@ -33,7 +33,7 @@ export interface InitiatePayload {
   scheduled_time: string
 }
 
-export type HandshakeIssueType = 'no_show' | 'service_issue'
+export type HandshakeIssueType = 'no_show' | 'service_issue' | 'harassment' | 'spam' | 'scam' | 'other'
 
 export const handshakeAPI = {
   list: async (signal?: AbortSignal): Promise<Handshake[]> => {
@@ -92,10 +92,15 @@ export const handshakeAPI = {
     id: string,
     issueType: HandshakeIssueType,
     description: string,
+    reportedUserId?: string,
   ): Promise<{ status: string; report_id: string }> => {
     const res = await apiClient.post<{ status: string; report_id: string }>(
       `/handshakes/${id}/report/`,
-      { issue_type: issueType, description },
+      {
+        issue_type: issueType,
+        description,
+        ...(reportedUserId ? { reported_user_id: reportedUserId } : {}),
+      },
     )
     return res.data
   },

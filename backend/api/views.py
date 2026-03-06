@@ -2847,7 +2847,9 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     def report_issue(self, request, pk=None):
         handshake = self.get_object()
         user = request.user
-        issue_type = request.data.get('issue_type', 'no_show')
+        issue_type = (request.data.get('issue_type') or 'no_show').strip()
+        description = (request.data.get('description') or '').strip()
+        is_event_handshake = handshake.service.type == 'Event'
         
         from .utils import get_provider_and_receiver
         provider, receiver = get_provider_and_receiver(handshake)
@@ -2862,7 +2864,82 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_403_FORBIDDEN
             )
 
+        if is_event_handshake:
+            event_start = handshake.service.scheduled_time or handshake.scheduled_time
+            if not event_start:
+                return create_error_response(
+                    'Event start time is required to submit reports.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+            now = timezone.now()
+            report_window_ends_at = event_start + timedelta(hours=24)
+            if now < event_start or now > report_window_ends_at:
+                return create_error_response(
+                    'Event reports are allowed from event start time up to 24 hours after start.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
         reported_user = receiver if is_provider else provider
+        reported_user_id = request.data.get('reported_user_id')
+        if reported_user_id is not None:
+            if not is_event_handshake:
+                return create_error_response(
+                    'reported_user_id can only be used for event reports.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+            event_member_ids = set(
+                handshake.service.handshakes.filter(
+                    status__in=['accepted', 'reported', 'paused', 'checked_in', 'attended', 'no_show', 'completed']
+                ).values_list('requester_id', flat=True)
+            )
+            event_member_ids.add(handshake.service.user_id)
+
+            try:
+                target_user = User.objects.get(id=reported_user_id)
+            except (ValueError, TypeError, User.DoesNotExist):
+                return create_error_response(
+                    'Invalid reported_user_id.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if target_user.id not in event_member_ids:
+                return create_error_response(
+                    'reported_user_id must belong to the event organizer or an active participant.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if str(target_user.id) == str(user.id):
+                return create_error_response(
+                    'You cannot report yourself.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+            reported_user = target_user
+
+        has_open_duplicate = Report.objects.filter(
+            reporter=user,
+            reported_user=reported_user,
+            related_handshake=handshake,
+            type=issue_type,
+            status='pending',
+        ).exists()
+        if has_open_duplicate:
+            return create_error_response(
+                'You already have an open report for this issue and user in this event.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not description:
+            description = default_descriptions.get(issue_type, 'Issue reported')
         
         report = Report.objects.create(
             reporter=user,
