@@ -154,7 +154,7 @@ class TestServiceViewSet:
         assert response.status_code == status.HTTP_403_FORBIDDEN
     
     def test_delete_service(self):
-        """Test deleting a service"""
+        """Test soft-deleting a service (sets status to Cancelled)"""
         user = UserFactory()
         service = ServiceFactory(user=user)
         client = AuthenticatedAPIClient()
@@ -162,13 +162,46 @@ class TestServiceViewSet:
         
         response = client.delete(f'/api/services/{service.id}/')
         assert response.status_code == status.HTTP_204_NO_CONTENT
-        assert not Service.objects.filter(id=service.id).exists()
+        service.refresh_from_db()
+        assert service.status == 'Cancelled'
 
-    def test_delete_service_blocked_when_handshake_exists(self):
-        """Service cannot be deleted once any handshake exists."""
+    def test_deleted_service_hidden_from_list_visible_to_admin(self):
+        """Soft-deleted service is hidden from public list but visible to admin on user profile."""
+        user = UserFactory()
+        admin = AdminUserFactory()
+        service = ServiceFactory(user=user, status='Active')
+
+        owner_client = AuthenticatedAPIClient()
+        owner_client.authenticate_user(user)
+
+        # Soft-delete the service
+        resp = owner_client.delete(f'/api/services/{service.id}/')
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+
+        # Public service list should not include cancelled service
+        response = APIClient().get('/api/services/')
+        assert all(s['id'] != str(service.id) for s in response.data['results'])
+
+        # Admin viewing user profile should still see the cancelled service
+        admin_client = AuthenticatedAPIClient()
+        admin_client.authenticate_user(admin)
+        resp = admin_client.get(f'/api/users/{user.id}/')
+        svc_ids = [s['id'] for s in resp.data.get('services', [])]
+        assert str(service.id) in svc_ids
+
+        # Non-admin viewing user profile should NOT see the cancelled service
+        other = UserFactory()
+        other_client = AuthenticatedAPIClient()
+        other_client.authenticate_user(other)
+        resp = other_client.get(f'/api/users/{user.id}/')
+        svc_ids = [s['id'] for s in resp.data.get('services', [])]
+        assert str(service.id) not in svc_ids
+
+    def test_delete_service_blocked_when_active_handshake_exists(self):
+        """Service cannot be removed while it has active (non-terminal) handshakes."""
         user = UserFactory()
         service = ServiceFactory(user=user)
-        HandshakeFactory(service=service)
+        HandshakeFactory(service=service, status='pending')
 
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
@@ -176,7 +209,24 @@ class TestServiceViewSet:
         response = client.delete(f'/api/services/{service.id}/')
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.data.get('code') == 'INVALID_STATE'
+        assert 'active handshakes' in response.data.get('detail', '').lower()
         assert Service.objects.filter(id=service.id).exists()
+
+    def test_delete_service_allowed_when_only_terminal_handshakes(self):
+        """Service can be removed when all handshakes are in terminal states."""
+        user = UserFactory()
+        service = ServiceFactory(user=user)
+        HandshakeFactory(service=service, status='completed')
+        HandshakeFactory(service=service, status='cancelled')
+        HandshakeFactory(service=service, status='denied')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.delete(f'/api/services/{service.id}/')
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        service.refresh_from_db()
+        assert service.status == 'Cancelled'
 
     def test_delete_service_non_owner_does_not_leak_handshake_state(self):
         """Non-owner should get 403 even if the service has handshakes."""

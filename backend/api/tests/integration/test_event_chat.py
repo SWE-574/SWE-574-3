@@ -297,11 +297,11 @@ class TestPublicChatEventAccess:
 
 @pytest.mark.django_db
 @pytest.mark.integration
-class TestGroupChatRejectsEvents:
-    """Event-type services cannot use the group chat endpoint."""
+class TestGroupChatEventAccess:
+    """Event-type services can use group chat with appropriate roles."""
 
-    def test_event_service_get_denied(self):
-        """GET /api/group-chat/{event_id}/ returns 403 for Event."""
+    def test_event_organizer_can_access_group_chat(self):
+        """GET /api/group-chat/{event_id}/ returns 200 for organizer."""
         organizer = UserFactory()
         event = _event_service(organizer=organizer)
 
@@ -309,10 +309,10 @@ class TestGroupChatRejectsEvents:
         client.authenticate_user(organizer)
 
         response = client.get(f'/api/group-chat/{event.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.status_code == status.HTTP_200_OK
 
-    def test_event_service_post_denied(self):
-        """POST /api/group-chat/{event_id}/ returns 403 for Event."""
+    def test_event_organizer_can_post_group_chat(self):
+        """POST /api/group-chat/{event_id}/ returns 201 for organizer."""
         organizer = UserFactory()
         event = _event_service(organizer=organizer)
 
@@ -321,18 +321,28 @@ class TestGroupChatRejectsEvents:
 
         response = client.post(
             f'/api/group-chat/{event.id}/',
-            {'body': 'Should not work'},
+            {'body': 'Hello from organizer'},
             format='json',
         )
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-        assert not ServiceGroupChatMessage.objects.filter(service=event).exists()
+        assert response.status_code == status.HTTP_201_CREATED
 
-    def test_event_participant_also_denied_group_chat(self):
-        """Even an accepted event participant cannot use group chat."""
+    def test_event_checked_in_participant_can_access(self):
+        """A checked-in event participant can access group chat."""
         event = _event_service()
         participant = UserFactory()
-        HandshakeFactory(service=event, requester=participant, status='accepted',
-                         provisioned_hours=Decimal('0'))
+        HandshakeFactory(service=event, requester=participant, status='checked_in')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.get(f'/api/group-chat/{event.id}/')
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_event_cancelled_participant_denied_group_chat(self):
+        """A cancelled event participant cannot use group chat."""
+        event = _event_service()
+        participant = UserFactory()
+        HandshakeFactory(service=event, requester=participant, status='cancelled')
 
         client = AuthenticatedAPIClient()
         client.authenticate_user(participant)

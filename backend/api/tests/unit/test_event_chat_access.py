@@ -153,8 +153,8 @@ class TestPublicChatEventAccessHelper:
 
 @pytest.mark.django_db
 @pytest.mark.unit
-class TestGroupChatBlocksEvents:
-    """Unit tests for GroupChatViewSet._get_service_or_403 rejecting events."""
+class TestGroupChatEventAccess:
+    """Unit tests for GroupChatViewSet._get_service_or_403 event handling."""
 
     def _viewset_with_user(self, user):
         from api.views import GroupChatViewSet
@@ -163,24 +163,43 @@ class TestGroupChatBlocksEvents:
         viewset.request.user = user
         return viewset
 
-    def test_event_service_raises_permission_denied(self):
-        """Event service raises PermissionDenied regardless of user role."""
+    def test_event_organizer_allowed(self):
+        """Event organizer (service owner) can access group chat."""
         organizer = UserFactory()
         event = _event_service(organizer=organizer)
         vs = self._viewset_with_user(organizer)
 
-        with pytest.raises(PermissionDenied, match='event chat system'):
-            vs._get_service_or_403(vs.request, str(event.id))
+        result = vs._get_service_or_403(vs.request, str(event.id))
+        assert result == event
 
-    def test_event_with_participant_raises_permission_denied(self):
-        """Even accepted event participants are blocked from group chat."""
+    def test_event_checked_in_participant_allowed(self):
+        """Checked-in event participant can access group chat."""
         event = _event_service()
         participant = UserFactory()
-        HandshakeFactory(service=event, requester=participant, status='accepted',
-                         provisioned_hours=Decimal('0'))
+        HandshakeFactory(service=event, requester=participant, status='checked_in')
         vs = self._viewset_with_user(participant)
 
-        with pytest.raises(PermissionDenied, match='event chat system'):
+        result = vs._get_service_or_403(vs.request, str(event.id))
+        assert result == event
+
+    def test_event_attended_participant_allowed(self):
+        """Attended event participant can access group chat."""
+        event = _event_service()
+        participant = UserFactory()
+        HandshakeFactory(service=event, requester=participant, status='attended')
+        vs = self._viewset_with_user(participant)
+
+        result = vs._get_service_or_403(vs.request, str(event.id))
+        assert result == event
+
+    def test_event_cancelled_participant_denied(self):
+        """Cancelled event participant is denied group chat."""
+        event = _event_service()
+        participant = UserFactory()
+        HandshakeFactory(service=event, requester=participant, status='cancelled')
+        vs = self._viewset_with_user(participant)
+
+        with pytest.raises(PermissionDenied):
             vs._get_service_or_403(vs.request, str(event.id))
 
     def test_non_event_service_still_works(self):

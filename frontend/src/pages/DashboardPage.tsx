@@ -241,7 +241,9 @@ function ServiceCard({
       opacity={isDimmed ? 0.6 : 1}
       display="flex"
       flexDirection="column"
+      position="relative"
     >
+
       <CardHeader service={service} gradient={gradient} />
 
       <Flex direction="column" flex={1} px={3} pt="10px" pb={3}>

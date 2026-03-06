@@ -388,7 +388,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
 
   const { register, handleSubmit, control, watch, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
-    defaultValues: { location_type: 'Online', schedule_type: 'One-Time', max_participants: 1 },
+    defaultValues: { location_type: 'In-Person', schedule_type: 'One-Time', max_participants: 1 },
   })
 
   const locType   = watch('location_type')
@@ -569,8 +569,9 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
                 />
                 <ErrTxt msg={errors.duration?.message} />
               </Box>
+              {type === 'Event' && (
               <Box>
-                <Label required>{type === 'Need' ? 'Helpers needed' : 'Max participants'}</Label>
+                <Label required>Max participants</Label>
                 <Input
                   type="number" min={1} max={100} placeholder="1"
                   {...register('max_participants')}
@@ -579,6 +580,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
                 />
                 <ErrTxt msg={errors.max_participants?.message} />
               </Box>
+              )}
             </Grid>
 
             <Box>
@@ -590,7 +592,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
                   <SegmentedControl
                     value={field.value}
                     onChange={field.onChange}
-                    options={[{ value: 'Online', label: 'Online' }, { value: 'In-Person', label: 'In-Person' }]}
+                    options={[{ value: 'In-Person', label: 'In-Person' }, { value: 'Online', label: 'Online' }]}
                     accent={accent}
                   />
                 )}

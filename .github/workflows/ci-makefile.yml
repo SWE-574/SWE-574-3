@@ -18,8 +18,8 @@ jobs:
       - name: Verify make help exits 0
         run: make help
 
-      - name: Dry-run make dev-setup (syntax check)
-        run: make dev-setup --dry-run
+      - name: Dry-run make setup (syntax check)
+        run: make setup --dry-run
 
       - name: Confirm all .PHONY targets are reachable
         run: |
