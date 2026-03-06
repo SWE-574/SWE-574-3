@@ -827,7 +827,7 @@ export default function ServiceDetailPage() {
 
   if (error || !service) {
     return (
-      <Box bg={GRAY50} minH="calc(100vh - 64px)" display="flex" alignItems="center" justifyContent="center">
+      <Box bg={GRAY50} h="calc(100vh - 64px)" display="flex" alignItems="center" justifyContent="center">
         <Box textAlign="center" p={8}>
           <Text fontSize="3xl" mb={3}><FiAlertTriangle /></Text>
           <Text fontSize="18px" fontWeight={700} color={GRAY700} mb={4}>{error ?? 'Service not found'}</Text>
@@ -849,8 +849,9 @@ export default function ServiceDetailPage() {
     ? Math.min(100, ((service.participant_count ?? 0) / service.max_participants) * 100) : 0
 
   return (
-    <Box bg={GRAY50} minH="calc(100vh - 64px)" py={{ base: 3, md: 5 }} px={{ base: 3, md: 5 }}>
-      <Box maxW="1260px" mx="auto">
+    <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto"
+      py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
+      <Box maxW="1440px" mx="auto" py={{ base: 4, md: 5 }} px={{ base: 4, md: 5 }}>
 
         {/* Back */}
         <Box

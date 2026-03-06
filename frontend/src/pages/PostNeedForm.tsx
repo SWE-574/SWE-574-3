@@ -8,7 +8,9 @@ import { BLUE, GRAY50, GRAY200, GRAY400, GRAY500, WHITE } from '@/theme/tokens'
 export default function PostNeedForm() {
   const navigate = useNavigate()
   return (
-    <Box bg={GRAY50} minH="calc(100vh - 64px)" py={{ base: 3, md: 5 }} px={{ base: 3, md: 5 }}>
+    <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto"
+      py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
+      <Box maxW="1440px" mx="auto" py={{ base: 4, md: 6 }} px={{ base: 4, md: 6 }}>
       <Box maxW="720px" mx="auto">
 
         {/* Back */}
@@ -53,6 +55,7 @@ export default function PostNeedForm() {
           <ServiceForm type="Need" />
         </Box>
 
+      </Box>
       </Box>
     </Box>
   )
