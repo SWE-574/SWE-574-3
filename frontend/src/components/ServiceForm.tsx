@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Box, Flex, Grid, Input, Spinner, Stack, Text, Textarea,
 } from '@chakra-ui/react'
-import { FiX, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCircle, FiNavigation } from 'react-icons/fi'
+import { FiX, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCircle, FiNavigation, FiStar } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
 import WikidataTagAutocomplete from './WikidataTagAutocomplete'
@@ -379,6 +379,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
   // Media
   const [mediaFiles, setMediaFiles]         = useState<File[]>([])
   const [mediaPreviews, setMediaPreviews]   = useState<string[]>([])
+  const [primaryMediaIdx, setPrimaryMediaIdx] = useState(0)
   const [submitting, setSubmitting]         = useState(false)
 
   // Event-specific date/time
@@ -418,6 +419,29 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
   const removeMedia = (i: number) => {
     setMediaFiles((p) => p.filter((_, j) => j !== i))
     setMediaPreviews((p) => p.filter((_, j) => j !== i))
+    setPrimaryMediaIdx((prev) => {
+      if (prev === i) return 0
+      if (prev > i) return prev - 1
+      return prev
+    })
+  }
+
+  const setAsPrimary = (i: number) => {
+    if (i === primaryMediaIdx) return
+    // Move selected to front
+    setMediaFiles((p) => {
+      const next = [...p]
+      const [item] = next.splice(i, 1)
+      next.unshift(item)
+      return next
+    })
+    setMediaPreviews((p) => {
+      const next = [...p]
+      const [item] = next.splice(i, 1)
+      next.unshift(item)
+      return next
+    })
+    setPrimaryMediaIdx(0)
   }
 
   // ── Submit ───────────────────────────────────────────────────────────────
@@ -497,7 +521,14 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
       if (Object.keys(wikidataLabelMap).length > 0) {
         fd.append('wikidata_labels_json', JSON.stringify(wikidataLabelMap))
       }
-      mediaFiles.forEach((f) => fd.append('media', f))
+      // Send cover (primary) first so the backend stores it as display_order=0
+      const orderedFiles = primaryMediaIdx === 0
+        ? mediaFiles
+        : [
+            mediaFiles[primaryMediaIdx],
+            ...mediaFiles.filter((_, i) => i !== primaryMediaIdx),
+          ]
+      orderedFiles.forEach((f) => fd.append('media', f))
       const created = await serviceAPI.create(fd)
       toast.success(`${type} posted successfully!`)
       navigate(`/service-detail/${created.id}`)
@@ -744,45 +775,134 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
         <Section icon={<FiImage size={14} />} label="Photos">
           <Box>
             {mediaPreviews.length > 0 && (
-              <Grid templateColumns="repeat(auto-fill, minmax(90px, 1fr))" gap={3} mb={3}>
-                {mediaPreviews.map((src, i) => (
-                  <Box key={i} position="relative" borderRadius="10px" overflow="hidden"
-                    border={`1px solid ${GRAY200}`} style={{ aspectRatio: '1' }}
+              <Box mb={3}>
+                {/* Cover photo (large) */}
+                <Box position="relative" borderRadius="12px" overflow="hidden"
+                  border={`2px solid ${accent}`} mb={3}
+                  style={{ aspectRatio: '16/7' }}
+                >
+                  <img src={mediaPreviews[primaryMediaIdx]} alt="Cover photo"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  {/* Cover badge */}
+                  <Box
+                    position="absolute" top="8px" left="8px"
+                    px="8px" py="3px" borderRadius="full"
+                    bg="rgba(0,0,0,0.6)" color={WHITE}
+                    fontSize="11px" fontWeight={700}
+                    display="flex" alignItems="center" gap="4px"
+                    style={{ backdropFilter: 'blur(4px)' }}
                   >
-                    <img src={src} alt={`Preview ${i + 1}`}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                    <Box
-                      as="button"
-                      position="absolute" top="5px" right="5px"
-                      w="20px" h="20px" borderRadius="full"
-                      bg="rgba(0,0,0,0.55)" color={WHITE}
-                      display="flex" alignItems="center" justifyContent="center"
-                      onClick={(e) => { e.preventDefault(); removeMedia(i) }}
-                      style={{ border: 'none', cursor: 'pointer' }}
-                    >
-                      <FiX size={10} />
-                    </Box>
+                    <FiStar size={10} fill={WHITE} /> Cover Photo
                   </Box>
-                ))}
-              </Grid>
+                  {/* Remove */}
+                  <Box
+                    as="button"
+                    position="absolute" top="8px" right="8px"
+                    w="24px" h="24px" borderRadius="full"
+                    bg="rgba(0,0,0,0.6)" color={WHITE}
+                    display="flex" alignItems="center" justifyContent="center"
+                    onClick={(e) => { e.preventDefault(); removeMedia(primaryMediaIdx) }}
+                    style={{ border: 'none', cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+                  >
+                    <FiX size={12} />
+                  </Box>
+                </Box>
+
+                {/* Thumbnail strip */}
+                {mediaPreviews.length > 1 && (
+                  <Box>
+                    <Text fontSize="11px" color={GRAY400} mb={2}>
+                      Click <FiStar size={9} style={{ display: 'inline', verticalAlign: 'middle' }} /> to set as cover
+                    </Text>
+                    <Flex gap={2} flexWrap="wrap">
+                      {mediaPreviews.map((src, i) => {
+                        if (i === primaryMediaIdx) return null
+                        return (
+                          <Box key={i} position="relative" borderRadius="9px" overflow="hidden"
+                            border={`1px solid ${GRAY200}`}
+                            style={{ width: '80px', height: '80px', flexShrink: 0 }}
+                            cursor="pointer"
+                            onClick={() => setAsPrimary(i)}
+                          >
+                            <img src={src} alt={`Photo ${i + 1}`}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                            {/* Set as cover overlay */}
+                            <style>{`.thumb-overlay:hover { background: rgba(0,0,0,0.5) !important; } .thumb-overlay:hover .thumb-label { opacity: 1 !important; }`}</style>
+                            <Box
+                              className="thumb-overlay"
+                              position="absolute" inset={0}
+                              bg="rgba(0,0,0,0)"
+                              display="flex" alignItems="center" justifyContent="center"
+                              style={{ transition: 'background 0.15s' }}
+                            >
+                              <Box
+                                className="thumb-label"
+                                color={WHITE} fontSize="9px" fontWeight={700}
+                                display="flex" flexDirection="column" alignItems="center" gap="2px"
+                                style={{ opacity: 0, transition: 'opacity 0.15s', pointerEvents: 'none' }}
+                              >
+                                <FiStar size={14} />
+                                Cover
+                              </Box>
+                            </Box>
+                            {/* Remove button */}
+                            <Box
+                              as="button"
+                              position="absolute" top="4px" right="4px"
+                              w="18px" h="18px" borderRadius="full"
+                              bg="rgba(0,0,0,0.6)" color={WHITE}
+                              display="flex" alignItems="center" justifyContent="center"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeMedia(i) }}
+                              style={{ border: 'none', cursor: 'pointer' }}
+                            >
+                              <FiX size={9} />
+                            </Box>
+                          </Box>
+                        )
+                      })}
+
+                      {/* Add more slot */}
+                      {mediaFiles.length < 5 && (
+                        <Box
+                          as="label"
+                          display="flex" flexDirection="column" alignItems="center" justifyContent="center"
+                          gap={1} borderRadius="9px"
+                          border={`2px dashed ${GRAY200}`}
+                          cursor="pointer"
+                          style={{ width: '80px', height: '80px', flexShrink: 0 }}
+                          _hover={{ borderColor: GRAY300, bg: GRAY50 }}
+                        >
+                          <Box color={GRAY300}><FiImage size={18} /></Box>
+                          <Text fontSize="9px" color={GRAY400} fontWeight={500}>Add</Text>
+                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleMedia} />
+                        </Box>
+                      )}
+                    </Flex>
+                  </Box>
+                )}
+              </Box>
             )}
 
-            {mediaFiles.length < 5 && (
+            {/* Upload area — shown when no images yet */}
+            {mediaPreviews.length === 0 && (
               <Box
                 as="label"
                 display="flex" flexDirection="column" alignItems="center" justifyContent="center"
-                gap={2} py={6} px={4}
+                gap={2} py={8} px={4}
                 border={`2px dashed ${GRAY200}`} borderRadius="12px"
                 cursor="pointer" textAlign="center"
                 transition="all 0.15s"
                 _hover={{ borderColor: GRAY300, bg: GRAY50 }}
               >
-                <Box color={GRAY300}><FiImage size={24} /></Box>
-                <Text fontSize="13px" color={GRAY500} fontWeight={500}>
+                <Box color={GRAY300}><FiImage size={28} /></Box>
+                <Text fontSize="13px" color={GRAY500} fontWeight={600}>
                   Click to upload photos
                 </Text>
                 <Text fontSize="11px" color={GRAY400}>
-                  {mediaFiles.length}/5 photos · PNG, JPG up to 10 MB each
+                  Up to 5 photos · PNG, JPG up to 10 MB each
+                </Text>
+                <Text fontSize="11px" color={GRAY400}>
+                  First photo will be the cover image
                 </Text>
                 <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleMedia} />
               </Box>

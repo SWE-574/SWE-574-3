@@ -696,6 +696,48 @@ class ForgotPasswordView(APIView):
         )
 
 
+class ChangePasswordView(APIView):
+    """Change password for an authenticated user (requires current password)."""
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [SensitiveOperationThrottle]
+
+    @extend_schema(
+        summary='Change password',
+        description='Validates the current password then sets a new one. Requires authentication.',
+        request=inline_serializer('ChangePasswordRequest', {
+            'current_password': drf_serializers.CharField(),
+            'new_password': drf_serializers.CharField(min_length=8),
+        }),
+        responses={
+            200: inline_serializer('ChangePasswordResponse', {'detail': drf_serializers.CharField()}),
+            400: OpenApiResponse(description='Wrong current password or new password too short'),
+        },
+        tags=['Auth'],
+    )
+    def post(self, request, *args, **kwargs):
+        current_password = request.data.get('current_password', '')
+        new_password = request.data.get('new_password', '')
+        if not current_password or not new_password:
+            return Response(
+                {'detail': 'Both current_password and new_password are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(new_password) < 8:
+            return Response(
+                {'detail': 'New password must be at least 8 characters.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = request.user
+        if not user.check_password(current_password):
+            return Response(
+                {'detail': 'Current password is incorrect.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+        return Response({'detail': 'Password changed successfully.'})
+
+
 class ResetPasswordView(APIView):
     """Verify the reset token and set a new password."""
     permission_classes = [permissions.AllowAny]
@@ -1399,6 +1441,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'sort': request.query_params.get('sort', 'latest'),
             'page': request.query_params.get('page', '1'),
             'page_size': request.query_params.get('page_size'),
+            'user': request.query_params.get('user'),
             'is_admin': str(is_admin),  # Different cache for admin vs non-admin
         }
         
@@ -1475,6 +1518,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
         }
         
         queryset = search_engine.search(queryset, search_params)
+
+        # Filter by owner user (for profile pages)
+        user_param = self.request.query_params.get('user')
+        if user_param:
+            queryset = queryset.filter(user_id=user_param)
         
         # Apply ordering based on sort parameter
         # Must validate that lat/lng are valid numbers, not just truthy strings
@@ -1715,6 +1763,50 @@ class ServiceViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(service)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['patch'], url_path='set-primary-media',
+            permission_classes=[permissions.IsAuthenticated])
+    def set_primary_media(self, request, pk=None):
+        """Set a media item as the primary (cover) photo for a service.
+
+        PATCH /api/services/{id}/set-primary-media/
+        Body: { "media_id": "<ServiceMedia UUID>" }
+
+        Moves the specified media to display_order=0 and re-numbers the rest.
+        Only the service owner can call this endpoint.
+        """
+        service = self.get_object()
+        if service.user != request.user:
+            return create_error_response(
+                'Only the owner can change the cover photo.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        media_id = request.data.get('media_id')
+        if not media_id:
+            return create_error_response(
+                'media_id is required.',
+                code=ErrorCodes.INVALID_INPUT,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        from .models import ServiceMedia as ServiceMediaModel
+        try:
+            primary = ServiceMediaModel.objects.get(id=media_id, service=service)
+        except ServiceMediaModel.DoesNotExist:
+            return create_error_response(
+                'Media not found for this service.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        # Re-order: primary → 0, others → 1, 2, 3 …
+        others = ServiceMediaModel.objects.filter(service=service).exclude(id=media_id).order_by('display_order', 'created_at')
+        primary.display_order = 0
+        primary.save(update_fields=['display_order'])
+        for idx, m in enumerate(others, start=1):
+            m.display_order = idx
+            m.save(update_fields=['display_order'])
+        serializer = self.get_serializer(service)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['post'], url_path='cancel-event',
             permission_classes=[permissions.IsAuthenticated])
     def cancel_event(self, request, pk=None):
@@ -1853,6 +1945,13 @@ class TagViewSet(viewsets.ModelViewSet):
     queryset = Tag.objects.all()
     serializer_class = TagSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Only direct tag endpoints need Wikidata enrichment. Nested serializers
+        # should stay lightweight to keep service list/detail responses fast.
+        context['include_wikidata_info'] = True
+        return context
     
     def get_queryset(self):
         queryset = Tag.objects.all()

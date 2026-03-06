@@ -151,7 +151,13 @@ const PAGES_WITHOUT_NAVBAR = [
 
 // Pages that fill the viewport — lock body scroll so navbar stays fixed
 // and macOS elastic-bounce doesn't move content under the navbar.
-const FULL_SCREEN_PREFIXES = ['/dashboard', '/forum', '/messages', '/admin']
+const FULL_SCREEN_PREFIXES = [
+  '/dashboard', '/forum', '/messages', '/admin',
+  '/profile', '/public-profile',
+  '/service-detail', '/post-offer', '/post-need', '/post-event',
+  '/transaction-history', '/notifications', '/achievements',
+  '/onboarding',
+]
 
 // ─── Public pages where we skip the full-page spinner ─────────────────────────
 const PUBLIC_AUTH_PATHS = ['/login', '/register', '/', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
@@ -214,8 +220,8 @@ function App() {
 
   return (
     <Box
-      bg={isFullScreenPage ? '#F9FAFB' : undefined}
-      pt={{ base: 0, md: isFullScreenPage ? GAP : 0 }}
+      bg={showNavbar ? '#F9FAFB' : undefined}
+      pt={{ base: 0, md: showNavbar ? GAP : 0 }}
     >
       {showNavbar && <Navbar />}
       {showNavbar && <EmailVerificationBanner />}

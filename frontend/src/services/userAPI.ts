@@ -1,0 +1,81 @@
+import apiClient from './api'
+import type { User, BadgeProgress } from '@/types'
+
+export interface UserHistoryItem {
+  service_title: string
+  service_type: 'Offer' | 'Need' | 'Event'
+  duration: number | string
+  partner_name: string
+  partner_id: string
+  partner_avatar_url?: string | null
+  completed_date: string
+  was_provider: boolean
+}
+
+export interface UserUpdateData {
+  first_name?: string
+  last_name?: string
+  bio?: string
+  location?: string
+  show_history?: boolean
+  is_onboarded?: boolean
+  /** MinIO/https URL — set by the server after upload; do NOT send base64 */
+  avatar_url?: string
+  /** MinIO/https URL — set by the server after upload */
+  banner_url?: string
+  /** List of tag IDs (UUID strings or "custom:<name>") to set as user skills */
+  skill_ids?: string[]
+}
+
+/** Convert a base64 data URL → Blob so it can be sent as a file */
+export function dataURLtoBlob(dataUrl: string): Blob {
+  const [header, data] = dataUrl.split(',')
+  const mime = header.match(/:(.*?);/)?.[1] ?? 'image/jpeg'
+  const bytes = atob(data)
+  const arr = new Uint8Array(bytes.length)
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
+  return new Blob([arr], { type: mime })
+}
+
+export const userAPI = {
+  getMe: async (signal?: AbortSignal): Promise<User> => {
+    const res = await apiClient.get<User>('/users/me/', { signal })
+    return res.data
+  },
+
+  /**
+   * Update profile.
+   * Pass a FormData when avatar/banner files are included (multipart);
+   * pass a plain object for JSON-only updates.
+   */
+  updateMe: async (data: UserUpdateData | FormData): Promise<User> => {
+    const isFormData = data instanceof FormData
+    const res = await apiClient.patch<User>('/users/me/', data, {
+      headers: isFormData ? { 'Content-Type': 'multipart/form-data' } : {},
+    })
+    return res.data
+  },
+
+  getUser: async (id: string, signal?: AbortSignal): Promise<User> => {
+    const res = await apiClient.get<User>(`/users/${id}/`, { signal })
+    return res.data
+  },
+
+  getHistory: async (userId: string, signal?: AbortSignal): Promise<UserHistoryItem[]> => {
+    const res = await apiClient.get<UserHistoryItem[] | { results: UserHistoryItem[] }>(
+      `/users/${userId}/history/`,
+      { signal },
+    )
+    const data = res.data
+    return Array.isArray(data) ? data : (data.results ?? [])
+  },
+
+  getBadgeProgress: async (userId: string, signal?: AbortSignal): Promise<BadgeProgress[]> => {
+    const res = await apiClient.get<BadgeProgress[] | { results: BadgeProgress[] }>(
+      `/users/${userId}/badge-progress/`,
+      { signal },
+    )
+    const data = res.data
+    return Array.isArray(data) ? data : (data.results ?? [])
+  },
+}

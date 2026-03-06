@@ -81,6 +81,12 @@ export interface User {
   // ─── Auth state ─────────────────────────────────────────────────────────────
   is_verified?: boolean
   is_onboarded?: boolean
+  // ─── Reputation counts (returned by /users/:id/ detail) ────────────────────
+  punctual_count?: number
+  helpful_count?: number
+  kind_count?: number
+  location?: string
+  skills?: Tag[]
   // ─── Event System ───────────────────────────────────────────────────────────
   is_event_banned_until?: string | null
   is_organizer_banned_until?: string | null

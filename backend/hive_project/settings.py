@@ -110,6 +110,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'channels',
     'drf_spectacular',
+    'storages',
 
     #Local Apps
     'api',
@@ -276,13 +277,62 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# Media files (User uploads: videos, images)
-MEDIA_URL = '/media/'
+# ─── Media / MinIO (S3-compatible object storage) ────────────────────────────
+# All user-uploaded files (avatars, service photos, …) go to MinIO.
+# dev:  MinIO runs as a Docker sidecar (docker-compose.infra.yml)
+#       files are served directly at http://localhost:9000/hive-media/
+# prod: MinIO runs inside the stack; Nginx proxies /hive-media/ → minio:9000
+MINIO_ENDPOINT    = os.environ.get('MINIO_ENDPOINT', 'localhost:9000')
+MINIO_ACCESS_KEY  = os.environ.get('MINIO_ACCESS_KEY', 'minioadmin')
+MINIO_SECRET_KEY  = os.environ.get('MINIO_SECRET_KEY', 'minioadmin123')
+MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', 'hive-media')
+MINIO_USE_SSL     = os.environ.get('MINIO_USE_SSL', 'false').lower() == 'true'
+
+_minio_scheme         = 'https' if MINIO_USE_SSL else 'http'
+AWS_S3_ENDPOINT_URL   = f"{_minio_scheme}://{MINIO_ENDPOINT}"
+AWS_ACCESS_KEY_ID     = MINIO_ACCESS_KEY
+AWS_SECRET_ACCESS_KEY = MINIO_SECRET_KEY
+AWS_STORAGE_BUCKET_NAME = MINIO_BUCKET_NAME
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL       = 'public-read'
+AWS_S3_SIGNATURE_VERSION = 's3v4'
+AWS_S3_REGION_NAME    = 'us-east-1'
+AWS_QUERYSTRING_AUTH  = False
+
+# In Docker/production, Nginx proxies /hive-media/ to MinIO internally.
+# In local dev, hit MinIO directly.
+_is_docker = 'minio:' in MINIO_ENDPOINT   # True when MINIO_ENDPOINT=minio:9000 inside Docker
+if IS_PRODUCTION or _is_docker:
+    _frontend_host = FRONTEND_URL.replace('https://', '').replace('http://', '')
+    _custom_domain = f"{_frontend_host}/hive-media"
+    _url_protocol  = 'https:' if FRONTEND_URL.startswith('https://') else 'http:'
+    MEDIA_URL = f"{FRONTEND_URL}/hive-media/"
+else:
+    _custom_domain = None
+    _url_protocol  = 'http:'
+    MEDIA_URL = f"{AWS_S3_ENDPOINT_URL}/{MINIO_BUCKET_NAME}/"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        "OPTIONS": {
+            "bucket_name":   MINIO_BUCKET_NAME,
+            "endpoint_url":  AWS_S3_ENDPOINT_URL,
+            "custom_domain": _custom_domain,
+            "url_protocol":  _url_protocol,
+        },
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+# Keep MEDIA_ROOT for any legacy local-storage references (unused when MinIO is active)
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# File upload settings
-DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50MB max upload size
-FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50MB
+# File upload limits
+DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50 MB
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

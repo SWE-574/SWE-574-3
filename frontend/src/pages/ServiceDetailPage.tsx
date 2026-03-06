@@ -5,6 +5,7 @@ import {
   FiArrowLeft, FiClock, FiCalendar, FiMapPin, FiMonitor,
   FiUsers, FiStar, FiFlag, FiMessageSquare, FiSend,
   FiAlertTriangle, FiRefreshCw, FiCheckCircle, FiExternalLink,
+  FiChevronLeft, FiChevronRight, FiImage, FiX,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -448,6 +449,7 @@ export default function ServiceDetailPage() {
     targetLabel: string
   } | null>(null)
   const [imgIdx, setImgIdx]             = useState(0)
+  const [showImageLightbox, setShowImageLightbox] = useState(false)
 
   // ─── Event-specific state ────────────────────────────────────────────────────────────
   const [joinLoading, setJoinLoading]       = useState(false)
@@ -482,6 +484,33 @@ export default function ServiceDetailPage() {
     if (!user?.id || !service?.id) return
     setAlreadyReported(localStorage.getItem(`reported:${user.id}:${service.id}`) === '1')
   }, [user?.id, service?.id])
+
+  useEffect(() => {
+    if (!showImageLightbox) return
+
+    const visibleImages = service?.media?.filter((m) => (m.media_type ?? 'image') === 'image') ?? []
+    if (visibleImages.length === 0) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowImageLightbox(false)
+        return
+      }
+
+      if (visibleImages.length < 2) return
+
+      if (e.key === 'ArrowLeft') {
+        setImgIdx((prev) => (prev - 1 + visibleImages.length) % visibleImages.length)
+      }
+
+      if (e.key === 'ArrowRight') {
+        setImgIdx((prev) => (prev + 1) % visibleImages.length)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showImageLightbox, service?.media])
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const provider   = service?.user ?? null
@@ -827,7 +856,7 @@ export default function ServiceDetailPage() {
 
   if (error || !service) {
     return (
-      <Box bg={GRAY50} minH="calc(100vh - 64px)" display="flex" alignItems="center" justifyContent="center">
+      <Box bg={GRAY50} h="calc(100vh - 64px)" display="flex" alignItems="center" justifyContent="center">
         <Box textAlign="center" p={8}>
           <Text fontSize="3xl" mb={3}><FiAlertTriangle /></Text>
           <Text fontSize="18px" fontWeight={700} color={GRAY700} mb={4}>{error ?? 'Service not found'}</Text>
@@ -849,8 +878,9 @@ export default function ServiceDetailPage() {
     ? Math.min(100, ((service.participant_count ?? 0) / service.max_participants) * 100) : 0
 
   return (
-    <Box bg={GRAY50} minH="calc(100vh - 64px)" py={{ base: 3, md: 5 }} px={{ base: 3, md: 5 }}>
-      <Box maxW="1260px" mx="auto">
+    <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto"
+      py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
+      <Box maxW="1440px" mx="auto" py={{ base: 4, md: 5 }} px={{ base: 4, md: 5 }}>
 
         {/* Back */}
         <Box
@@ -874,27 +904,41 @@ export default function ServiceDetailPage() {
             <Box bg={WHITE} borderRadius="20px" border={`1px solid ${GRAY200}`} overflow="hidden"
               boxShadow="0 2px 12px rgba(0,0,0,0.06)"
             >
-              {/* Gradient header */}
+              {/* Gradient / Image header — fixed cover */}
               <Box
-                h="148px" position="relative" overflow="hidden"
+                h={{ base: '220px', md: '300px' }} position="relative" overflow="hidden"
                 style={{ background: `linear-gradient(135deg, ${gradient[0]} 0%, ${gradient[1]} 100%)` }}
               >
-                {/* Hero image overlay */}
-                {images.length > 0 && (
+                {images.length > 0 ? (
                   <>
-                    <img src={images[imgIdx]?.file_url} alt=""
-                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                    <img src={images[0].file_url} alt="Cover photo"
+                      style={{
+                        position: 'absolute', inset: 0, width: '100%', height: '100%',
+                        objectFit: 'cover',
+                      }}
                     />
-                    <Box style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.1) 60%)' }} />
+                    <Box style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.08) 55%)' }} />
                   </>
-                )}
-                {/* Decorative circles when no image */}
-                {images.length === 0 && (
+                ) : (
                   <>
-                    <Box style={{ position: 'absolute', top: '-30px', right: '-30px', width: '120px', height: '120px', borderRadius: '50%', background: 'rgba(255,255,255,0.07)' }} />
-                    <Box style={{ position: 'absolute', bottom: '-40px', left: '40%', width: '100px', height: '100px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
+                    <Box style={{ position: 'absolute', top: '-30px', right: '-30px', width: '160px', height: '160px', borderRadius: '50%', background: 'rgba(255,255,255,0.07)' }} />
+                    <Box style={{ position: 'absolute', bottom: '-50px', left: '40%', width: '130px', height: '130px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
                   </>
                 )}
+
+                {images.length > 0 && (
+                  <Box
+                    position="absolute" top="12px" left="12px"
+                    px="8px" py="3px" borderRadius="full"
+                    bg="rgba(0,0,0,0.5)" color={WHITE}
+                    fontSize="11px" fontWeight={700}
+                    display="flex" alignItems="center" gap="5px"
+                    style={{ backdropFilter: 'blur(6px)', zIndex: 2 }}
+                  >
+                    <FiStar size={10} fill={WHITE} /> Cover Photo
+                  </Box>
+                )}
+
                 {/* Title + type */}
                 <Box position="absolute" bottom={0} left={0} right={0} px={6} pb={5}>
                   <Flex align="center" gap="8px" mb="6px" flexWrap="wrap">
@@ -920,18 +964,6 @@ export default function ServiceDetailPage() {
                     {service.title}
                   </Text>
                 </Box>
-                {/* Image thumb strip */}
-                {images.length > 1 && (
-                  <Flex position="absolute" top={3} right={3} gap={1}>
-                    {images.slice(0, 5).map((_, i) => (
-                      <Box key={i} as="button" w="6px" h="6px" borderRadius="full"
-                        bg={i === imgIdx ? WHITE : 'rgba(255,255,255,0.45)'}
-                        onClick={() => setImgIdx(i)}
-                        style={{ border: 'none', cursor: 'pointer', padding: 0 }}
-                      />
-                    ))}
-                  </Flex>
-                )}
               </Box>
 
               <Box px={6} py={5}>
@@ -1051,21 +1083,77 @@ export default function ServiceDetailPage() {
                 {/* Image gallery */}
                 {images.length > 0 && (
                   <Box mb={6}>
-                    <Text fontSize="12px" fontWeight={700} color={GRAY400} mb={3}
-                      style={{ textTransform: 'uppercase', letterSpacing: '0.07em' }}
+                    <Flex align="center" justify="space-between" mb={3}>
+                      <Text fontSize="12px" fontWeight={700} color={GRAY400}
+                        style={{ textTransform: 'uppercase', letterSpacing: '0.07em' }}
+                      >
+                        Photos ({images.length})
+                      </Text>
+                      {isOwn && images.length > 1 && (
+                        <Text fontSize="11px" color={GRAY400}>
+                          Click ★ to set cover
+                        </Text>
+                      )}
+                    </Flex>
+                    <Grid
+                      templateColumns={{ base: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }}
+                      autoRows={{ base: '220px', sm: '140px', lg: '120px' }}
+                      autoFlow="dense"
+                      gap={3}
                     >
-                      Photos ({images.length})
-                    </Text>
-                    <Grid templateColumns={`repeat(${Math.min(images.length, 3)}, 1fr)`} gap={3}>
                       {images.slice(0, 6).map((m, i) => (
-                        <Box key={m.id} borderRadius="12px" overflow="hidden"
-                          border={`1px solid ${GRAY200}`} style={{ aspectRatio: '1' }}
-                          cursor="pointer" onClick={() => setImgIdx(i)}
-                          outline={imgIdx === i ? `2px solid ${isOffer ? GREEN : BLUE}` : 'none'}
-                          outlineOffset="2px"
+                        <Box
+                          key={m.id} position="relative" borderRadius="12px" overflow="hidden"
+                          border={imgIdx === i ? `2px solid ${isOffer ? GREEN : isEvent ? AMBER : BLUE}` : `1px solid ${GRAY200}`}
+                          gridColumn={i === 0 ? { base: 'span 1', sm: 'span 2' } : undefined}
+                          gridRow={i === 0 ? { base: 'span 1', sm: 'span 2' } : undefined}
+                          minH="0"
+                          cursor="pointer"
+                          onClick={() => {
+                            setImgIdx(i)
+                            setShowImageLightbox(true)
+                          }}
                         >
                           <img src={m.file_url} alt={`Photo ${i + 1}`}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                          {/* Cover badge on first image */}
+                          {i === 0 && (
+                            <Box
+                              position="absolute" top="6px" left="6px"
+                              px="6px" py="2px" borderRadius="full"
+                              bg="rgba(0,0,0,0.55)" color={WHITE}
+                              fontSize="10px" fontWeight={700}
+                              display="flex" alignItems="center" gap="3px"
+                              style={{ backdropFilter: 'blur(4px)' }}
+                            >
+                              <FiStar size={9} fill={WHITE} /> Cover
+                            </Box>
+                          )}
+                          {/* Set as Cover button for owner (non-primary images) */}
+                          {isOwn && i > 0 && (
+                            <Box
+                              as="button"
+                              position="absolute" bottom="6px" right="6px"
+                              px="7px" py="4px" borderRadius="8px"
+                              bg="rgba(0,0,0,0.6)" color={WHITE}
+                              fontSize="10px" fontWeight={700}
+                              display="flex" alignItems="center" gap="3px"
+                              style={{ border: 'none', cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+                              onClick={async (e: React.MouseEvent) => {
+                                e.stopPropagation()
+                                try {
+                                  const updated = await serviceAPI.setPrimaryMedia(service.id, m.id)
+                                  setService(updated)
+                                  setImgIdx(0)
+                                  toast.success('Cover photo updated!')
+                                } catch {
+                                  toast.error('Could not update cover photo.')
+                                }
+                              }}
+                            >
+                              <FiStar size={9} /> Set Cover
+                            </Box>
+                          )}
                         </Box>
                       ))}
                     </Grid>
@@ -1721,6 +1809,180 @@ export default function ServiceDetailPage() {
           </Stack>
         </Grid>
       </Box>
+
+      {showImageLightbox && images.length > 0 && (
+        <Box
+          position="fixed"
+          inset={0}
+          bg="rgba(31,41,55,0.58)"
+          zIndex={1400}
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          p={{ base: 4, md: 6 }}
+          onClick={() => setShowImageLightbox(false)}
+        >
+          <Box
+            position="relative"
+            w="100%"
+            maxW="1160px"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
+            <Box
+              position="relative"
+              borderRadius="20px"
+              overflow="hidden"
+              bg={WHITE}
+              border={`1px solid ${GRAY200}`}
+              boxShadow="0 24px 72px rgba(0,0,0,0.16)"
+            >
+              <Flex
+                align="center"
+                justify="space-between"
+                px={{ base: 4, md: 5 }}
+                py={3}
+                bg={WHITE}
+                borderBottom={`1px solid ${GRAY200}`}
+              >
+                <Box>
+                  <Text fontSize="12px" fontWeight={700} color={GRAY400}
+                    style={{ textTransform: 'uppercase', letterSpacing: '0.07em' }}
+                  >
+                    Photo Viewer
+                  </Text>
+                  <Text fontSize="14px" fontWeight={600} color={GRAY700} mt="2px">
+                    Image {imgIdx + 1} of {images.length}
+                  </Text>
+                </Box>
+
+                <Box
+                  as="button"
+                  w="36px"
+                  h="36px"
+                  borderRadius="full"
+                  bg={GRAY50}
+                  color={GRAY600}
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  border={`1px solid ${GRAY200}`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setShowImageLightbox(false)}
+                >
+                  <FiX size={17} />
+                </Box>
+              </Flex>
+
+              <Box
+                h={{ base: '260px', sm: '420px', lg: '620px' }}
+                position="relative"
+                bg={GRAY50}
+              >
+                <img
+                  src={images[imgIdx]?.file_url}
+                  alt={`Photo ${imgIdx + 1}`}
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                />
+
+                {images.length > 1 && (
+                  <>
+                    <Box
+                      as="button"
+                      position="absolute"
+                      left="14px"
+                      top="50%"
+                      transform="translateY(-50%)"
+                      w="42px"
+                      h="42px"
+                      borderRadius="full"
+                      bg={WHITE}
+                      color={GRAY700}
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="center"
+                      onClick={() => setImgIdx((imgIdx - 1 + images.length) % images.length)}
+                      border={`1px solid ${GRAY200}`}
+                      boxShadow="0 6px 18px rgba(0,0,0,0.10)"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <FiChevronLeft size={20} />
+                    </Box>
+                    <Box
+                      as="button"
+                      position="absolute"
+                      right="14px"
+                      top="50%"
+                      transform="translateY(-50%)"
+                      w="42px"
+                      h="42px"
+                      borderRadius="full"
+                      bg={WHITE}
+                      color={GRAY700}
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="center"
+                      onClick={() => setImgIdx((imgIdx + 1) % images.length)}
+                      border={`1px solid ${GRAY200}`}
+                      boxShadow="0 6px 18px rgba(0,0,0,0.10)"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <FiChevronRight size={20} />
+                    </Box>
+                  </>
+                )}
+
+                <Box
+                  position="absolute"
+                  left="16px"
+                  bottom="16px"
+                  px="10px"
+                  py="5px"
+                  borderRadius="full"
+                  bg={WHITE}
+                  color={GRAY700}
+                  fontSize="12px"
+                  fontWeight={700}
+                  display="flex"
+                  alignItems="center"
+                  gap="6px"
+                  border={`1px solid ${GRAY200}`}
+                  boxShadow="0 4px 12px rgba(0,0,0,0.08)"
+                >
+                  <FiImage size={12} /> {imgIdx + 1} / {images.length}
+                </Box>
+              </Box>
+
+              {images.length > 1 && (
+                <Box px={{ base: 3, md: 4 }} py={3} bg={WHITE} borderTop={`1px solid ${GRAY200}`}>
+                  <Flex gap={2} overflowX="auto">
+                    {images.map((img, i) => (
+                      <Box
+                        key={img.id}
+                        as="button"
+                        flex="0 0 auto"
+                        w={{ base: '70px', md: '86px' }}
+                        h={{ base: '70px', md: '86px' }}
+                        borderRadius="10px"
+                        overflow="hidden"
+                        border={i === imgIdx ? `2px solid ${isOffer ? GREEN : isEvent ? AMBER : BLUE}` : `1px solid ${GRAY200}`}
+                        onClick={() => setImgIdx(i)}
+                        boxShadow={i === imgIdx ? '0 6px 18px rgba(0,0,0,0.10)' : 'none'}
+                        style={{ cursor: 'pointer', background: 'transparent', padding: 0 }}
+                      >
+                        <img
+                          src={img.file_url}
+                          alt={`Thumbnail ${i + 1}`}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                      </Box>
+                    ))}
+                  </Flex>
+                </Box>
+              )}
+            </Box>
+          </Box>
+        </Box>
+      )}
 
       {showReport && (
         <ReportModal

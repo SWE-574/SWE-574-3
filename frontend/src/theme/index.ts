@@ -1,6 +1,14 @@
 import { createSystem, defaultConfig, defineConfig } from '@chakra-ui/react'
 
 const config = defineConfig({
+  globalCss: {
+    '.no-scrollbar': {
+      scrollbarWidth: 'none',
+      '&::-webkit-scrollbar': {
+        display: 'none',
+      },
+    },
+  },
   theme: {
     tokens: {
       colors: {

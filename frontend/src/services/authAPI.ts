@@ -23,6 +23,12 @@ export const authAPI = {
   sendVerification: () =>
     apiClient.post<{ detail: string }>('/auth/send-verification/'),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    apiClient.post<{ detail: string }>('/auth/change-password/', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+
   logout: () =>
     apiClient.post<{ detail: string }>('/auth/logout/'),
 

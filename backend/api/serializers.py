@@ -155,7 +155,14 @@ class TagSerializer(serializers.ModelSerializer):
     
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_wikidata_info(self, obj):
-        """Fetch Wikidata information for the tag if it has a Wikidata ID"""
+        """Fetch Wikidata information unless explicitly disabled via context.
+
+        Nested usages (for example service list/detail responses) do not need the
+        full Wikidata payload, and fetching it on every serialized tag adds slow
+        external HTTP calls that do not show up in Django query counts.
+        """
+        if self.context.get('include_wikidata_info') is False:
+            return None
         if obj.id and obj.id.startswith('Q'):
             try:
                 from .wikidata import fetch_wikidata_item
@@ -320,7 +327,7 @@ class ServiceSerializer(serializers.ModelSerializer):
 
             return super().to_internal_value(data)
 
-    tags = TagSerializer(many=True, required=False, read_only=True)
+    tags = serializers.SerializerMethodField()
     tag_ids = ListOrSingleValueField(
         child=serializers.CharField(),
         write_only=True,
@@ -355,6 +362,11 @@ class ServiceSerializer(serializers.ModelSerializer):
             'is_visible', 'media', 'participant_count', 'event_evaluation_summary',
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible']
+
+    @extend_schema_field(TagSerializer(many=True))
+    def get_tags(self, obj):
+        tag_context = {**self.context, 'include_wikidata_info': False}
+        return TagSerializer(obj.tags.all(), many=True, context=tag_context).data
     
     @extend_schema_field(OpenApiTypes.INT)
     def get_comment_count(self, obj):
@@ -561,15 +573,33 @@ class ServiceSerializer(serializers.ModelSerializer):
                 wikidata_labels = {}
         
         # Extract media payload if provided.
-        # Backward-compatible:
-        # - legacy: media: ["data:image/...", ...]
-        # - new: media: [{"media_type":"video","file_url":"https://..."}, ...]
+        # Supported formats (in priority order):
+        # 1. Multipart file upload via request.FILES ('media' key) → InMemoryUploadedFile / TemporaryUploadedFile
+        # 2. Legacy data URL strings: media: ["data:image/...", ...]
+        # 3. Dict objects: media: [{"media_type":"video","file_url":"https://..."}, ...]
         request = self.context.get('request')
-        media_payload = []
-        if request is not None and hasattr(request, 'data'):
-            media_payload = request.data.get('media', [])
-        if not isinstance(media_payload, list):
-            media_payload = []
+        # Collect all media items into a single flat list regardless of source.
+        # DRF multipart parser may return files nested inside a list, so we always flatten.
+        raw_media_items: list = []
+        if request is not None:
+            candidates: list = []
+            # Primary: Django's FILES MultiValueDict (most reliable for multipart uploads)
+            if hasattr(request, 'FILES'):
+                candidates = list(request.FILES.getlist('media') or [])
+            # Fallback: DRF's request.data (handles JSON / non-multipart payloads)
+            if not candidates and hasattr(request, 'data'):
+                if hasattr(request.data, 'getlist'):
+                    candidates = request.data.getlist('media') or []
+                else:
+                    raw = request.data.get('media', [])
+                    candidates = list(raw) if isinstance(raw, list) else ([raw] if raw else [])
+
+            # Flatten one level in case the parser wrapped all files in a nested list
+            for c in candidates:
+                if isinstance(c, list):
+                    raw_media_items.extend(c)
+                else:
+                    raw_media_items.append(c)
         
         # Handle location coordinates if provided (convert from string/float to Decimal, round to 6 decimal places)
         if 'location_lat' in validated_data and validated_data['location_lat']:
@@ -610,204 +640,180 @@ class ServiceSerializer(serializers.ModelSerializer):
             if request is None or not hasattr(request, 'user'):
                 raise serializers.ValidationError({'user': 'User is required'})
             validated_data['user'] = request.user
-        service = super().create(validated_data)
-        
-        # Collect all tags to add
-        tags_to_add = []
-        
-        # Add tags by ID (including auto-creation for Wikidata QIDs)
-        if tag_ids:
-            # First, get all existing tags
-            existing_tags = {tag.id: tag for tag in Tag.objects.filter(id__in=tag_ids)}
-            tags_to_add.extend(existing_tags.values())
 
-            # If a previously auto-created Wikidata tag still has fallback name=QID,
-            # try to backfill a human-readable label.
-            wikidata_qid_pattern = re.compile(r'^Q\d+$', re.IGNORECASE)
-            stale_qid_tags = [
-                tag for tid, tag in existing_tags.items()
-                if wikidata_qid_pattern.match(tid)
-                and (tag.name or '').strip().upper() == tid.upper()
-            ]
-            if stale_qid_tags:
-                from .wikidata import fetch_wikidata_item
+        from django.db import transaction as _transaction
+        from django.core.files.uploadedfile import InMemoryUploadedFile, TemporaryUploadedFile
 
-                for stale_tag in stale_qid_tags:
-                    label = wikidata_labels.get(stale_tag.id.upper())
-                    if not label:
-                        wikidata_info = fetch_wikidata_item(stale_tag.id.upper())
-                        label = (wikidata_info or {}).get('label')
-                    if not label:
-                        continue
-                    label = label.strip()[:100]
-                    if not label:
-                        continue
-                    duplicate_name_exists = Tag.objects.filter(name__iexact=label).exclude(id=stale_tag.id).exists()
-                    if duplicate_name_exists:
-                        continue
-                    stale_tag.name = label
-                    stale_tag.save(update_fields=['name'])
-            
-            # Find Wikidata QIDs that don't exist in database
-            missing_qids = [
-                tid for tid in tag_ids 
-                if tid not in existing_tags and wikidata_qid_pattern.match(tid)
-            ]
-            
-            # Auto-create tags for missing Wikidata QIDs
-            if missing_qids:
-                from .wikidata import fetch_wikidata_item
-                
-                for qid in missing_qids:
-                    # Normalize QID to uppercase (e.g., q28865 -> Q28865)
-                    normalized_qid = qid.upper()
-                    
-                    # Check if normalized version exists (in case of case mismatch)
-                    if normalized_qid in existing_tags:
-                        continue
+        with _transaction.atomic():
+            service = super().create(validated_data)
 
-                    # Prefer frontend-provided label, then fetch from Wikidata
-                    label_from_form = wikidata_labels.get(normalized_qid)
-                    if label_from_form:
-                        tag_name = label_from_form
-                    else:
-                        wikidata_info = fetch_wikidata_item(normalized_qid)
-                        if wikidata_info and wikidata_info.get('label'):
-                            tag_name = wikidata_info['label']
+            # ── Tags ────────────────────────────────────────────────────────────
+            tags_to_add = []
+
+            if tag_ids:
+                existing_tags = {tag.id: tag for tag in Tag.objects.filter(id__in=tag_ids)}
+                tags_to_add.extend(existing_tags.values())
+
+                wikidata_qid_pattern = re.compile(r'^Q\d+$', re.IGNORECASE)
+                stale_qid_tags = [
+                    tag for tid, tag in existing_tags.items()
+                    if wikidata_qid_pattern.match(tid)
+                    and (tag.name or '').strip().upper() == tid.upper()
+                ]
+                if stale_qid_tags:
+                    from .wikidata import fetch_wikidata_item
+                    for stale_tag in stale_qid_tags:
+                        label = wikidata_labels.get(stale_tag.id.upper())
+                        if not label:
+                            wikidata_info = fetch_wikidata_item(stale_tag.id.upper())
+                            label = (wikidata_info or {}).get('label')
+                        if not label:
+                            continue
+                        label = label.strip()[:100]
+                        if not label:
+                            continue
+                        if Tag.objects.filter(name__iexact=label).exclude(id=stale_tag.id).exists():
+                            continue
+                        stale_tag.name = label
+                        stale_tag.save(update_fields=['name'])
+
+                missing_qids = [
+                    tid for tid in tag_ids
+                    if tid not in existing_tags and wikidata_qid_pattern.match(tid)
+                ]
+                if missing_qids:
+                    from .wikidata import fetch_wikidata_item
+                    for qid in missing_qids:
+                        normalized_qid = qid.upper()
+                        if normalized_qid in existing_tags:
+                            continue
+                        label_from_form = wikidata_labels.get(normalized_qid)
+                        if label_from_form:
+                            tag_name = label_from_form
                         else:
-                        # Fallback: use the QID as name if Wikidata fetch fails
-                            tag_name = normalized_qid
-                            logger.warning(f"Could not fetch Wikidata info for {normalized_qid}, using QID as name")
-                    
-                    # Create the tag (use get_or_create to handle race conditions)
-                    tag, created = Tag.objects.get_or_create(
-                        id=normalized_qid,
-                        defaults={'name': tag_name}
-                    )
-                    if tag not in tags_to_add:
-                        tags_to_add.append(tag)
-                    
-                    if created:
-                        logger.info(f"Auto-created Wikidata tag: {normalized_qid} ({tag_name})")
-        
-        # Create or get tags by name
-        if tag_names:
-            for tag_name in tag_names:
-                if tag_name and tag_name.strip():
-                    tag_name_clean = tag_name.strip()
-                    # Try to get existing tag (case-insensitive search)
-                    try:
-                        tag = Tag.objects.get(name__iexact=tag_name_clean)
-                    except Tag.DoesNotExist:
-                        # Create new tag - generate a unique ID from the name
-                        import uuid
-                        tag_id = tag_name_clean.lower().replace(' ', '_').replace('-', '_')[:200]
-                        if Tag.objects.filter(id=tag_id).exists():
-                            tag_id = f"{tag_id}_{str(uuid.uuid4())[:8]}"
-                        tag = Tag.objects.create(
-                            id=tag_id,
-                            name=tag_name_clean
-                        )
-                    if tag not in tags_to_add:
-                        tags_to_add.append(tag)
-        
-        # Set all tags
-        if tags_to_add:
-            service.tags.set(tags_to_add)
-        
-        # Create ServiceMedia objects
-        if media_payload:
-            from .models import ServiceMedia
-            import base64
-            from django.core.files.base import ContentFile
-
-            allowed_media_types = {'image', 'video'}
-            max_media_items = 5
-
-            def _create_image_from_data_url(data_url: str, display_order: int) -> None:
-                # Parse data URL (format: data:image/png;base64,...)
-                if not data_url.startswith('data:'):
-                    return
-                header, encoded = data_url.split(',', 1)
-                mime_type = header.split(';')[0].split(':')[1]
-                if not mime_type.startswith('image/'):
-                    return
-
-                image_data = base64.b64decode(encoded)
-                ext_map = {
-                    'image/jpeg': 'jpg',
-                    'image/jpg': 'jpg',
-                    'image/png': 'png',
-                    'image/gif': 'gif',
-                    'image/webp': 'webp'
-                }
-                ext = ext_map.get(mime_type, 'jpg')
-                file_name = f"service_{service.id}_{display_order}.{ext}"
-                ServiceMedia.objects.create(
-                    service=service,
-                    media_type='image',
-                    file=ContentFile(image_data, name=file_name),
-                    display_order=display_order
-                )
-
-            for idx, item in enumerate(media_payload[:max_media_items]):
-                if not item:
-                    continue
-
-                # Legacy: list of image data URLs
-                if isinstance(item, str):
-                    try:
-                        _create_image_from_data_url(item, idx)
-                    except Exception as e:
-                        # Log error but don't fail service creation
-                        logger.warning(f"Failed to create service image from data URL: {e}")
-                    continue
-
-                # New format: dict objects
-                if isinstance(item, dict):
-                    media_type = (item.get('media_type') or 'image').strip().lower()
-                    if media_type not in allowed_media_types:
-                        raise serializers.ValidationError({'media': f"Invalid media_type '{media_type}'"})
-
-                    file_url = item.get('file_url')
-                    if not isinstance(file_url, str) or not file_url.strip():
-                        raise serializers.ValidationError({'media': 'Each media item must include a non-empty file_url'})
-                    file_url = file_url.strip()
-
-                    if media_type == 'video':
-                        if not file_url.startswith(('http://', 'https://')):
-                            raise serializers.ValidationError({'media': 'Video file_url must be an HTTP/HTTPS URL'})
-
-                        # Limit service videos to YouTube/Vimeo for consistent embedding support.
-                        youtube_pattern = r'(youtube\.com|youtu\.be)'
-                        vimeo_pattern = r'vimeo\.com'
-                        if not (re.search(youtube_pattern, file_url, re.IGNORECASE) or re.search(vimeo_pattern, file_url, re.IGNORECASE)):
-                            raise serializers.ValidationError({'media': 'Only YouTube or Vimeo URLs are supported for service videos'})
-                        ServiceMedia.objects.create(
-                            service=service,
-                            media_type='video',
-                            file_url=file_url,
-                            display_order=idx
-                        )
-                    else:
-                        # For images, accept either a data URL (decode) or an external URL.
-                        try:
-                            if file_url.startswith('data:'):
-                                _create_image_from_data_url(file_url, idx)
+                            wikidata_info = fetch_wikidata_item(normalized_qid)
+                            if wikidata_info and wikidata_info.get('label'):
+                                tag_name = wikidata_info['label']
                             else:
-                                ServiceMedia.objects.create(
-                                    service=service,
-                                    media_type='image',
-                                    file_url=file_url,
-                                    display_order=idx
-                                )
-                        except Exception as e:
-                            logger.warning(f"Failed to create service image media: {e}")
-                    continue
+                                tag_name = normalized_qid
+                                logger.warning(f"Could not fetch Wikidata info for {normalized_qid}, using QID as name")
+                        tag, created = Tag.objects.get_or_create(
+                            id=normalized_qid, defaults={'name': tag_name}
+                        )
+                        if tag not in tags_to_add:
+                            tags_to_add.append(tag)
+                        if created:
+                            logger.info(f"Auto-created Wikidata tag: {normalized_qid} ({tag_name})")
 
-                # Unknown item shape
-                raise serializers.ValidationError({'media': 'Media must be a list of strings (data URLs) or objects'})
-        
+            if tag_names:
+                for tag_name in tag_names:
+                    if tag_name and tag_name.strip():
+                        tag_name_clean = tag_name.strip()
+                        try:
+                            tag = Tag.objects.get(name__iexact=tag_name_clean)
+                        except Tag.DoesNotExist:
+                            import uuid as _uuid
+                            tag_id = tag_name_clean.lower().replace(' ', '_').replace('-', '_')[:200]
+                            if Tag.objects.filter(id=tag_id).exists():
+                                tag_id = f"{tag_id}_{str(_uuid.uuid4())[:8]}"
+                            tag = Tag.objects.create(id=tag_id, name=tag_name_clean)
+                        if tag not in tags_to_add:
+                            tags_to_add.append(tag)
+
+            if tags_to_add:
+                service.tags.set(tags_to_add)
+
+            # ── Media ────────────────────────────────────────────────────────────
+            if raw_media_items:
+                from .models import ServiceMedia
+                import base64
+                from django.core.files.base import ContentFile
+
+                allowed_media_types = {'image', 'video'}
+                max_media_items = 5
+
+                def _create_image_from_data_url(data_url: str, display_order: int) -> None:
+                    if not data_url.startswith('data:'):
+                        return
+                    header, encoded = data_url.split(',', 1)
+                    mime_type = header.split(';')[0].split(':')[1]
+                    if not mime_type.startswith('image/'):
+                        return
+                    image_data = base64.b64decode(encoded)
+                    ext_map = {
+                        'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
+                        'image/gif': 'gif', 'image/webp': 'webp',
+                    }
+                    ext = ext_map.get(mime_type, 'jpg')
+                    file_name = f"service_{service.id}_{display_order}.{ext}"
+                    ServiceMedia.objects.create(
+                        service=service, media_type='image',
+                        file=ContentFile(image_data, name=file_name),
+                        display_order=display_order,
+                    )
+
+                for idx, item in enumerate(raw_media_items[:max_media_items]):
+                    if not item:
+                        continue
+
+                    # ── Actual uploaded file (multipart/form-data) ──
+                    if isinstance(item, (InMemoryUploadedFile, TemporaryUploadedFile)):
+                        try:
+                            ServiceMedia.objects.create(
+                                service=service, media_type='image',
+                                file=item, display_order=idx,
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to save uploaded media file: {e}")
+                        continue
+
+                    # ── Legacy: bare data URL string ──
+                    if isinstance(item, str):
+                        try:
+                            _create_image_from_data_url(item, idx)
+                        except Exception as e:
+                            logger.warning(f"Failed to create service image from data URL: {e}")
+                        continue
+
+                    # ── Dict object (video URL or image data URL) ──
+                    if isinstance(item, dict):
+                        media_type = (item.get('media_type') or 'image').strip().lower()
+                        if media_type not in allowed_media_types:
+                            raise serializers.ValidationError({'media': f"Invalid media_type '{media_type}'"})
+                        file_url = item.get('file_url')
+                        if not isinstance(file_url, str) or not file_url.strip():
+                            raise serializers.ValidationError({'media': 'Each media item must include a non-empty file_url'})
+                        file_url = file_url.strip()
+                        if media_type == 'video':
+                            if not file_url.startswith(('http://', 'https://')):
+                                raise serializers.ValidationError({'media': 'Video file_url must be an HTTP/HTTPS URL'})
+                            youtube_pattern = r'(youtube\.com|youtu\.be)'
+                            vimeo_pattern = r'vimeo\.com'
+                            if not (re.search(youtube_pattern, file_url, re.IGNORECASE) or re.search(vimeo_pattern, file_url, re.IGNORECASE)):
+                                raise serializers.ValidationError({'media': 'Only YouTube or Vimeo URLs are supported for service videos'})
+                            ServiceMedia.objects.create(
+                                service=service, media_type='video',
+                                file_url=file_url, display_order=idx,
+                            )
+                        else:
+                            try:
+                                if file_url.startswith('data:'):
+                                    _create_image_from_data_url(file_url, idx)
+                                else:
+                                    ServiceMedia.objects.create(
+                                        service=service, media_type='image',
+                                        file_url=file_url, display_order=idx,
+                                    )
+                            except Exception as e:
+                                logger.warning(f"Failed to create service image media: {e}")
+                        continue
+
+                    # Unknown item shape — log and skip instead of hard-failing
+                    logger.warning(
+                        f"Skipping unknown media item type {type(item).__name__} "
+                        f"for service {service.id}"
+                    )
+
         return service
     
     def update(self, instance, validated_data):
@@ -878,6 +884,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     bio = serializers.CharField(max_length=1000, allow_blank=True, required=False)
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    location = serializers.CharField(max_length=200, allow_blank=True, required=False, allow_null=True)
     avatar_url = serializers.CharField(allow_blank=True, required=False)
     banner_url = serializers.CharField(allow_blank=True, required=False)
     video_intro_url = serializers.CharField(allow_blank=True, required=False, allow_null=True)
@@ -885,24 +892,35 @@ class UserProfileSerializer(serializers.ModelSerializer):
     show_history = serializers.BooleanField(required=False, default=True)
     video_intro_file_url = serializers.SerializerMethodField()
 
+    # Skills: read as tag objects, write as list of tag IDs or new tag names
+    skills = serializers.SerializerMethodField()
+    skill_ids = serializers.ListField(
+        child=serializers.CharField(allow_blank=True), write_only=True, required=False
+    )
+
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'first_name', 'last_name', 'bio', 'avatar_url',
-            'banner_url', 'timebank_balance', 'karma_score', 'role', 'services',
+            'id', 'email', 'first_name', 'last_name', 'bio', 'location',
+            'avatar_url', 'banner_url', 'timebank_balance', 'karma_score', 'role', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file', 'video_intro_file_url',
             'portfolio_images', 'show_history', 'featured_achievement_id',
             'is_onboarded', 'is_verified',
+            'skills', 'skill_ids',
         ]
         read_only_fields = [
             'id', 'email', 'timebank_balance', 'karma_score', 'role', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_file_url', 'featured_achievement_id', 'is_verified',
+            'skills',
         ]
         extra_kwargs = {
             'video_intro_file': {'write_only': True, 'required': False}
         }
+
+    def get_skills(self, obj):
+        return [{'id': str(t.id), 'name': t.name} for t in obj.skills.all()]
     
     @extend_schema_field(OpenApiTypes.STR)
     def get_video_intro_file_url(self, obj):
@@ -1007,6 +1025,54 @@ class UserProfileSerializer(serializers.ModelSerializer):
         """Deprecated: use achievements instead. Return list of achievement IDs for backward compatibility."""
         return self.get_achievements(obj)
 
+    def update(self, instance, validated_data):
+        import uuid as _uuid_mod
+        from django.core.files.storage import default_storage
+
+        skill_ids = validated_data.pop('skill_ids', None)
+
+        # ── File uploads (avatar / banner) ──────────────────────────────────────
+        # Accept multipart file uploads and store them in MinIO (default_storage).
+        # The resulting public URL is written back into avatar_url / banner_url.
+        request = self.context.get('request')
+        if request is not None:
+            for field_key, url_attr, folder in (
+                ('avatar', 'avatar_url', 'avatars'),
+                ('banner', 'banner_url', 'banners'),
+            ):
+                upload = request.FILES.get(field_key)
+                if upload:
+                    ext = upload.name.rsplit('.', 1)[-1].lower() if '.' in upload.name else 'jpg'
+                    path = default_storage.save(f'{folder}/{_uuid_mod.uuid4()}.{ext}', upload)
+                    # Remove stale data-URL or old path from validated_data so it does not
+                    # overwrite the freshly computed URL.
+                    validated_data.pop(url_attr, None)
+                    setattr(instance, url_attr, default_storage.url(path))
+
+        instance = super().update(instance, validated_data)
+        if skill_ids is not None:
+            import uuid as _uuid
+            from .models import Tag as TagModel
+            tags_to_set = []
+            for raw_id in skill_ids:
+                raw_id = str(raw_id).strip()
+                if not raw_id:
+                    continue
+                # Tag.id is a CharField — works for UUID strings AND Wikidata QIDs (e.g. "Q5140297")
+                tag = TagModel.objects.filter(id=raw_id).first()
+                if tag is None:
+                    # Not found by id → custom tag: strip "custom:" prefix, use name lookup
+                    name = raw_id.replace('custom:', '').strip()
+                    if name:
+                        tag = TagModel.objects.filter(name__iexact=name).first()
+                        if tag is None:
+                            # Create with a proper UUID id so the pk is never empty
+                            tag = TagModel.objects.create(id=str(_uuid.uuid4()), name=name)
+                if tag:
+                    tags_to_set.append(tag)
+            instance.skills.set(tags_to_set)
+        return instance
+
 class PublicUserProfileSerializer(serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     punctual_count = serializers.IntegerField(read_only=True)
@@ -1015,16 +1081,25 @@ class PublicUserProfileSerializer(serializers.ModelSerializer):
     achievements = serializers.SerializerMethodField()
     badges = serializers.SerializerMethodField()  # Deprecated: use achievements instead
     video_intro_file_url = serializers.SerializerMethodField()
+    skills = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
-            'id', 'first_name', 'last_name', 'bio', 'avatar_url',
+            'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
             'banner_url', 'karma_score', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
-            'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history'
+            'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
         ]
-        read_only_fields = fields
+        read_only_fields = [
+            'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
+            'banner_url', 'karma_score', 'services',
+            'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
+            'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
+        ]
+
+    def get_skills(self, obj):
+        return [{'id': str(t.id), 'name': t.name} for t in obj.skills.all()]
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_video_intro_file_url(self, obj):

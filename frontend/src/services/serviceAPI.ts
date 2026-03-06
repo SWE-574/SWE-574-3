@@ -11,6 +11,7 @@ export interface ServiceListParams {
   tags?: string[]
   page?: number
   page_size?: number
+  user_id?: string
 }
 
 type ServiceListResponse = Service[] | { results: Service[]; count?: number }
@@ -29,6 +30,7 @@ export const serviceAPI = {
     if (params?.tags?.length) params.tags.forEach(t => queryParams.append('tags', t))
     if (params?.page) queryParams.set('page', String(params.page))
     if (params?.page_size) queryParams.set('page_size', String(params.page_size))
+    if (params?.user_id) queryParams.set('user', params.user_id)
 
     const res = await apiClient.get<ServiceListResponse>('/services/', {
       params: queryParams,
@@ -44,7 +46,10 @@ export const serviceAPI = {
   },
 
   create: async (data: FormData | Record<string, unknown>): Promise<Service> => {
-    const res = await apiClient.post<Service>('/services/', data)
+    const isFormData = data instanceof FormData
+    const res = await apiClient.post<Service>('/services/', data, {
+      headers: isFormData ? { 'Content-Type': 'multipart/form-data' } : {},
+    })
     return res.data
   },
 
@@ -87,5 +92,10 @@ export const serviceAPI = {
 
   cancelEvent: async (serviceId: string): Promise<void> => {
     await apiClient.post(`/services/${serviceId}/cancel-event/`, {})
+  },
+
+  setPrimaryMedia: async (serviceId: string, mediaId: string): Promise<Service> => {
+    const res = await apiClient.patch<Service>(`/services/${serviceId}/set-primary-media/`, { media_id: mediaId })
+    return res.data
   },
 }

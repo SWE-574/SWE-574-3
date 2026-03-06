@@ -69,6 +69,22 @@ class User(AbstractUser):
         help_text='Whether to show transaction history publicly'
     )
 
+    # Human-readable location (city / country text)
+    location = models.CharField(
+        max_length=200,
+        blank=True,
+        null=True,
+        help_text='Human-readable location text, e.g. "Istanbul, Turkey"',
+    )
+
+    # Skills / interest tags (many-to-many to Tag)
+    skills = models.ManyToManyField(
+        'Tag',
+        blank=True,
+        related_name='skilled_users',
+        help_text='User-selected skill/interest tags',
+    )
+
     # Auth state fields
     is_verified = models.BooleanField(
         default=False,
