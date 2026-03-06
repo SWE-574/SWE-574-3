@@ -29,7 +29,7 @@ export
 # Apple Silicon uses arm64 PostGIS image if the user hasn't overridden it
 UNAME_M := $(shell uname -m)
 ifeq ($(UNAME_M),arm64)
-  POSTGIS_IMAGE ?= postgis/postgis:15-3.4-alpine
+  POSTGIS_IMAGE ?= imresamu/postgis:15-3.4-alpine
 endif
 export POSTGIS_IMAGE
 
@@ -42,13 +42,13 @@ help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Local development:'
-	@grep -E '^(setup|dev|stop|reset|install|demo|build|clean):.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(setup|dev|stop|reset|install|demo|build|clean):.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Testing (native):'
-	@grep -E '^(test|test-unit|test-integration|coverage):.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(test|test-unit|test-integration|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Docker:'
-	@grep -E '^(up|down|logs|docker-build|test-docker):.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(up|down|logs|docker-build|test-docker):.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  LOCAL DEVELOPMENT  (infra via docker compose, backend/frontend natively)
