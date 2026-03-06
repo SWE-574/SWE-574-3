@@ -10,7 +10,8 @@ from datetime import timedelta
 from api.models import (
     Service, Tag, Handshake, ChatMessage, ReputationRep,
     Comment, NegativeRep, TransactionHistory, Badge, UserBadge,
-    ForumCategory, ForumTopic, ForumPost, ServiceMedia, ServiceGroupChatMessage
+    ForumCategory, ForumTopic, ForumPost, ServiceMedia, ServiceGroupChatMessage,
+    Notification,
 )
 
 User = get_user_model()
@@ -224,3 +225,15 @@ class ForumPostFactory(factory.django.DjangoModelFactory):
     author = factory.SubFactory(UserFactory)
     body = factory.Faker('text', max_nb_chars=1000)
     is_deleted = False
+
+
+class NotificationFactory(factory.django.DjangoModelFactory):
+    """Factory for creating Notification instances"""
+    class Meta:
+        model = Notification
+
+    user = factory.SubFactory(UserFactory)
+    type = 'chat_message'
+    title = factory.Faker('sentence', nb_words=4)
+    message = factory.Faker('sentence', nb_words=8)
+    is_read = False

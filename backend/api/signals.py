@@ -115,6 +115,11 @@ def update_hot_score_on_negative_rep_change(sender, instance, **kwargs):
 
 # ── Notification signals ────────────────────────────────────────────────────
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 @receiver(post_save, sender=ChatMessage)
 def notify_on_new_chat_message(sender, instance, created, **kwargs):
     """Create a notification when a new ChatMessage is created."""
@@ -129,15 +134,15 @@ def notify_on_new_chat_message(sender, instance, created, **kwargs):
             if handshake.service.user == msg_sender
             else handshake.service.user
         )
-        create_notification(
+        transaction.on_commit(lambda: create_notification(
             user=other_user,
             notification_type='chat_message',
             title='New Message',
             message=f"New message from {msg_sender.first_name}",
             handshake=handshake,
-        )
+        ))
     except Exception:
-        pass
+        logger.exception('Failed to queue chat notification for message %s', instance.pk)
 
 
 @receiver(post_save, sender=Handshake)
@@ -150,21 +155,24 @@ def notify_on_handshake_status_change(sender, instance, created, **kwargs):
     new_status = instance.status
     service = instance.service
 
-    if new_status == 'denied':
-        create_notification(
-            user=instance.requester,
-            notification_type='handshake_denied',
-            title='Handshake Denied',
-            message=f"Your interest in '{service.title}' was not accepted.",
-            handshake=instance,
-            service=service,
-        )
-    elif new_status == 'cancelled':
-        create_notification(
-            user=instance.requester,
-            notification_type='handshake_cancelled',
-            title='Service Cancelled',
-            message=f"The service '{service.title}' has been cancelled.",
-            handshake=instance,
-            service=service,
-        )
+    try:
+        if new_status == 'denied':
+            transaction.on_commit(lambda: create_notification(
+                user=instance.requester,
+                notification_type='handshake_denied',
+                title='Handshake Denied',
+                message=f"Your interest in '{service.title}' was not accepted.",
+                handshake=instance,
+                service=service,
+            ))
+        elif new_status == 'cancelled':
+            transaction.on_commit(lambda: create_notification(
+                user=instance.requester,
+                notification_type='handshake_cancelled',
+                title='Service Cancelled',
+                message=f"The service '{service.title}' has been cancelled.",
+                handshake=instance,
+                service=service,
+            ))
+    except Exception:
+        logger.exception('Failed to queue handshake notification for %s', instance.pk)

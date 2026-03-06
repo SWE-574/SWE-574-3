@@ -214,7 +214,7 @@ def create_notification(
         related_handshake=handshake,
         related_service=service
     )
-    _broadcast_notification(notification)
+    transaction.on_commit(lambda: _broadcast_notification(notification))
     return notification
 
 

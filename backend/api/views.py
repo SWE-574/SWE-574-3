@@ -3549,44 +3549,25 @@ class ChatViewSet(viewsets.ViewSet):
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Notification Management
-    
+
     View and manage user notifications.
-    
-    **List Notifications:** GET /api/notifications/
-    **Retrieve Notification:** GET /api/notifications/{id}/
-    **Mark All Read:** POST /api/notifications/read/
-    
-    **Response Format:**
-    ```json
-    {
-        "id": "uuid",
-        "notification_type": "handshake_accepted",
-        "title": "Handshake Accepted",
-        "message": "Your interest in 'Web Development Help' has been accepted!",
-        "is_read": false,
-        "created_at": "2024-01-01T12:00:00Z",
-        "handshake": {...},
-        "service": {...}
-    }
-    ```
-    
-    **Notification Types:**
-    - `handshake_request`: New interest in your service
-    - `handshake_accepted`: Your interest was accepted
-    - `handshake_denied`: Your interest was denied
-    - `handshake_cancelled`: Service was cancelled
-    - `chat_message`: New chat message
-    - `service_reminder`: Upcoming service reminder
-    - `service_confirmation`: Service completion reminder
-    - `positive_rep`: Reputation received or badge earned
-    - `admin_warning`: Administrative warning
-    
-    **Error Scenarios:**
-    - 401 Unauthorized: Authentication required
-    - 404 Not Found: Notification does not exist
-    
-    **Authentication:** Required (JWT Bearer token)
-    **Pagination:** 20 items per page
+
+    **Endpoints:**
+    - ``GET  /api/notifications/``         — paginated list
+    - ``GET  /api/notifications/{id}/``    — single notification
+    - ``PATCH /api/notifications/{id}/read/`` — mark one as read
+    - ``POST  /api/notifications/read/``   — mark all as read
+    - ``GET  /api/notifications/unread-count/`` — unread count
+
+    **Response fields:** ``id``, ``type``, ``title``, ``message``,
+    ``is_read``, ``created_at``, ``related_handshake``, ``related_service``.
+
+    **Notification types:**
+    ``handshake_request``, ``handshake_accepted``, ``handshake_denied``,
+    ``handshake_cancelled``, ``chat_message``, ``service_reminder``,
+    ``service_confirmation``, ``positive_rep``, ``admin_warning``.
+
+    **Auth:** JWT Bearer · **Pagination:** 20 per page
     """
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]

@@ -70,7 +70,9 @@ export function useNotificationSocket() {
     }
   }, [addNotification, fetchUnreadCount])
 
-  connectRef.current = connect
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   const disconnect = useCallback(() => {
     if (reconnectRef.current) {

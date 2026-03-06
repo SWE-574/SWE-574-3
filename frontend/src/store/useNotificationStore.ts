@@ -49,6 +49,8 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
   },
 
   markAsRead: async (id: string) => {
+    const prev = get().notifications
+    const prevCount = get().unreadCount
     // Optimistic update
     set((state) => ({
       notifications: state.notifications.map((n) =>
@@ -60,7 +62,7 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
       await notificationAPI.markAsRead(id)
     } catch {
       // Revert on failure
-      get().fetchUnreadCount()
+      set({ notifications: prev, unreadCount: prevCount })
     }
   },
 

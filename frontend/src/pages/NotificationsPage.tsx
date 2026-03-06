@@ -152,7 +152,7 @@ const NotificationsPage = () => {
 
       {/* Subtle footer */}
       <Text fontSize="12px" color={GRAY500} textAlign="center" mt="16px">
-        Notifications older than 90 days are automatically removed
+        Notifications older than 90 days may be removed
       </Text>
     </Box>
   )

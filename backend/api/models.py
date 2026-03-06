@@ -394,6 +394,10 @@ class Handshake(models.Model):  # noqa: E302
     def _previous_status(self):
         return self.__original_status
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.__original_status = self.status
+
     def __str__(self):
         return f"{self.requester.email} -> {self.service.title} ({self.status})"
 
