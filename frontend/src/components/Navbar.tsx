@@ -386,6 +386,11 @@ const Navbar = () => {
             <MobileNavLink to="/messages" icon={<FiMessageSquare size={16} />} active={p === '/messages' || p.startsWith('/messages/')} onClick={() => setMobileOpen(false)}>Messages</MobileNavLink>
             <MobileNavLink to="/notifications" icon={<FiBell size={16} />} active={p === '/notifications'} onClick={() => setMobileOpen(false)}>Notifications</MobileNavLink>
             <MobileNavLink to="/profile" icon={<FiUser size={16} />} active={p === '/profile'} onClick={() => setMobileOpen(false)}>My Profile</MobileNavLink>
+            {isAdmin && (
+              <MobileNavLink to="/admin" icon={<FiGrid size={16} />} active={p === '/admin' || p.startsWith('/admin?')} onClick={() => setMobileOpen(false)}>
+                Admin Panel
+              </MobileNavLink>
+            )}
           </Box>
 
           {/* Post service */}

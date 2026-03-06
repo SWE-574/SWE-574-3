@@ -12,15 +12,20 @@ import { getErrorMessage } from '@/services/api'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, ForumTopic, PaginatedResponse, Service } from '@/types'
 import {
+  AMBER,
   GREEN,
   GREEN_LT,
   AMBER_LT,
+  BLUE,
+  BLUE_LT,
   GRAY50,
   GRAY200,
   GRAY500,
   GRAY600,
   GRAY700,
   GRAY800,
+  RED,
+  RED_LT,
   WHITE,
 } from '@/theme/tokens'
 
@@ -73,7 +78,6 @@ const AdminDashboard = () => {
   const [pendingReportsCount, setPendingReportsCount] = useState<number | null>(null)
   const [removedCommentsCount, setRemovedCommentsCount] = useState<number | null>(null)
   const [dashboardPendingReports, setDashboardPendingReports] = useState<AdminReport[]>([])
-  const [dashboardRemovedComments, setDashboardRemovedComments] = useState<AdminComment[]>([])
 
   const [usersLoading, setUsersLoading] = useState(false)
   const [users, setUsers] = useState<PaginatedResponse<AdminUserSummary> | null>(null)
@@ -147,7 +151,6 @@ const AdminDashboard = () => {
       setPendingReportsCount(pendingReports.count)
       setRemovedCommentsCount(removedComments.count)
       setDashboardPendingReports(pendingReports.results)
-      setDashboardRemovedComments(removedComments.results)
       setForumPostsCount(recentPosts.count)
       setAuthIssue(null)
     } catch (error) {
@@ -679,7 +682,15 @@ const AdminDashboard = () => {
                                 <Text maxW="260px" whiteSpace="normal">{report.description}</Text>
                               </Table.Cell>
                               <Table.Cell>
-                                <Button size="xs" variant="subtle" colorPalette="blue" borderRadius="8px" onClick={() => requestOpenReport(report.id)}>
+                                <Button
+                                  size="xs"
+                                  bg={BLUE_LT}
+                                  color={BLUE}
+                                  border={`1px solid ${BLUE}`}
+                                  _hover={{ bg: '#DBEAFE' }}
+                                  borderRadius="8px"
+                                  onClick={() => requestOpenReport(report.id)}
+                                >
                                   Review
                                 </Button>
                               </Table.Cell>
@@ -691,45 +702,6 @@ const AdminDashboard = () => {
                   )}
                 </Box>
 
-                <Box flex="1" minW={{ base: '100%', lg: '460px' }} border="1px solid #CFE3DA" borderRadius="12px" bg="#F8FCFA" p={4}>
-                  <Flex align="center" justify="space-between" mb={3}>
-                    <Text fontWeight={700} color="#2D5C4E">Action Needed: Recently Removed Comments</Text>
-                    <Button size="xs" variant="outline" onClick={() => setActiveTab('comments')}>Open comments queue</Button>
-                  </Flex>
-
-                  {dashboardRemovedComments.length === 0 ? (
-                    <Text fontSize="sm" color="gray.500">No removed comments requiring review.</Text>
-                  ) : (
-                    <Table.ScrollArea borderWidth="1px" borderColor="#E2E8F0" borderRadius="10px">
-                      <Table.Root size="sm" variant="line">
-                        <Table.Header>
-                          <Table.Row>
-                            <Table.ColumnHeader>Comment</Table.ColumnHeader>
-                            <Table.ColumnHeader>Author</Table.ColumnHeader>
-                            <Table.ColumnHeader>Service</Table.ColumnHeader>
-                            <Table.ColumnHeader>Action</Table.ColumnHeader>
-                          </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                          {dashboardRemovedComments.map((comment) => (
-                            <Table.Row key={comment.id}>
-                              <Table.Cell>
-                                <Text maxW="260px" whiteSpace="normal">{comment.body}</Text>
-                              </Table.Cell>
-                              <Table.Cell>{comment.user_name}</Table.Cell>
-                              <Table.Cell>{comment.service_title}</Table.Cell>
-                              <Table.Cell>
-                                <Button size="xs" colorPalette="green" variant="subtle" borderRadius="8px" onClick={() => setActiveTab('comments')}>
-                                  Restore from queue
-                                </Button>
-                              </Table.Cell>
-                            </Table.Row>
-                          ))}
-                        </Table.Body>
-                      </Table.Root>
-                    </Table.ScrollArea>
-                  )}
-                </Box>
               </Flex>
 
               <Box mt={6} border="1px solid #CFE3DA" borderRadius="12px" bg="#F8FCFA" p={4}>
@@ -805,11 +777,50 @@ const AdminDashboard = () => {
                       <Table.Cell>{user.karma_score}</Table.Cell>
                       <Table.Cell>
                         <Flex gap={2} wrap="wrap">
-                          <Button size="xs" colorPalette="blue" variant="subtle" borderRadius="8px" onClick={() => handleWarnUser(user)}>Warn</Button>
-                          <Button size="xs" colorPalette={user.is_active ? 'red' : 'green'} variant="subtle" borderRadius="8px" onClick={() => handleBanToggle(user)}>
+                          <Button
+                            size="xs"
+                            bg={WHITE}
+                            color={GRAY800}
+                            border={`1px solid ${GRAY200}`}
+                            _hover={{ bg: '#DBEAFE' }}
+                            borderRadius="8px"
+                            onClick={() => navigate(`/public-profile/${user.id}`)}
+                          >
+                            View
+                          </Button>
+                          <Button
+                            size="xs"
+                            bg={BLUE_LT}
+                            color={BLUE}
+                            border={`1px solid ${BLUE}`}
+                            _hover={{ bg: '#DBEAFE' }}
+                            borderRadius="8px"
+                            onClick={() => handleWarnUser(user)}
+                          >
+                            Warn
+                          </Button>
+                          <Button
+                            size="xs"
+                            bg={user.is_active ? RED_LT : GREEN_LT}
+                            color={user.is_active ? RED : GREEN}
+                            border={`1px solid ${user.is_active ? RED : GREEN}`}
+                            _hover={{ bg: user.is_active ? '#FEE4E2' : '#E8F5EE' }}
+                            borderRadius="8px"
+                            onClick={() => handleBanToggle(user)}
+                          >
                             {user.is_active ? 'Suspend' : 'Activate'}
                           </Button>
-                          <Button size="xs" colorPalette="orange" variant="subtle" borderRadius="8px" onClick={() => handleAdjustKarma(user)}>Adjust karma</Button>
+                          <Button
+                            size="xs"
+                            bg={AMBER_LT}
+                            color={AMBER}
+                            border={`1px solid ${AMBER}`}
+                            _hover={{ bg: '#FEF3C7' }}
+                            borderRadius="8px"
+                            onClick={() => handleAdjustKarma(user)}
+                          >
+                            Adjust karma
+                          </Button>
                         </Flex>
                       </Table.Cell>
                     </Table.Row>
@@ -921,8 +932,10 @@ const AdminDashboard = () => {
                           </Button>
                           <Button
                             size="xs"
-                            colorPalette="green"
-                            variant="subtle"
+                            bg={GREEN_LT}
+                            color={GREEN}
+                            border={`1px solid ${GREEN}`}
+                            _hover={{ bg: '#E8F5EE' }}
                             borderRadius="8px"
                             disabled={!report.related_handshake}
                             title={report.related_handshake ? undefined : 'No linked handshake'}
@@ -930,11 +943,23 @@ const AdminDashboard = () => {
                           >
                             Confirm
                           </Button>
-                          <Button size="xs" colorPalette="blue" variant="subtle" borderRadius="8px" onClick={() => handleResolveReport(report, 'dismiss')}>Dismiss</Button>
                           <Button
                             size="xs"
-                            colorPalette="orange"
-                            variant="subtle"
+                            bg={BLUE_LT}
+                            color={BLUE}
+                            border={`1px solid ${BLUE}`}
+                            _hover={{ bg: '#DBEAFE' }}
+                            borderRadius="8px"
+                            onClick={() => handleResolveReport(report, 'dismiss')}
+                          >
+                            Dismiss
+                          </Button>
+                          <Button
+                            size="xs"
+                            bg={AMBER_LT}
+                            color={AMBER}
+                            border={`1px solid ${AMBER}`}
+                            _hover={{ bg: '#FEF3C7' }}
                             borderRadius="8px"
                             disabled={!report.related_handshake}
                             title={report.related_handshake ? undefined : 'No linked handshake'}
@@ -1019,15 +1044,28 @@ const AdminDashboard = () => {
                         </Badge>
                       </Table.Cell>
                       <Table.Cell>
-                        {comment.is_deleted ? (
-                          <Button size="xs" colorPalette="green" variant="subtle" borderRadius="8px" onClick={() => handleRestoreComment(comment)}>
-                            Restore
+                        <Flex gap={2} wrap="wrap">
+                          <Button
+                            size="xs"
+                             bg={WHITE}
+                            color={GRAY800}
+                            border={`1px solid ${GRAY200}`}
+                            _hover={{ bg: '#DBEAFE' }}
+                            borderRadius="8px"
+                            onClick={() => navigate(`/service-detail/${comment.service}`)}
+                          >
+                            View
                           </Button>
-                        ) : (
-                          <Button size="xs" colorPalette="red" variant="subtle" borderRadius="8px" onClick={() => handleRemoveComment(comment)}>
-                            Remove
-                          </Button>
-                        )}
+                          {comment.is_deleted ? (
+                            <Button size="xs" colorPalette="green" variant="subtle" borderRadius="8px" onClick={() => handleRestoreComment(comment)}>
+                              Restore
+                            </Button>
+                          ) : (
+                            <Button size="xs" colorPalette="red" variant="subtle" borderRadius="8px" onClick={() => handleRemoveComment(comment)}>
+                              Remove
+                            </Button>
+                          )}
+                        </Flex>
                       </Table.Cell>
                     </Table.Row>
                   ))}
@@ -1103,10 +1141,37 @@ const AdminDashboard = () => {
                       </Table.Cell>
                       <Table.Cell>
                         <Flex gap={2}>
-                          <Button size="xs" colorPalette={topic.is_locked ? 'blue' : 'red'} variant="subtle" borderRadius="8px" onClick={() => handleLockTopic(topic.id)}>
+                          <Button
+                            size="xs"
+                            bg={WHITE}
+                            color={GRAY800}
+                            border={`1px solid ${GRAY200}`}
+                            _hover={{ bg: '#DBEAFE' }}
+                            borderRadius="8px"
+                            onClick={() => navigate(`/forum/topic/${topic.id}`)}
+                          >
+                            View
+                          </Button>
+                          <Button
+                            size="xs"
+                            bg={topic.is_locked ? BLUE_LT : RED_LT}
+                            color={topic.is_locked ? BLUE : RED}
+                            border={`1px solid ${topic.is_locked ? BLUE : RED}`}
+                            _hover={{ bg: topic.is_locked ? '#DBEAFE' : '#FEE4E2' }}
+                            borderRadius="8px"
+                            onClick={() => handleLockTopic(topic.id)}
+                          >
                             {topic.is_locked ? 'Unlock' : 'Lock'}
                           </Button>
-                          <Button size="xs" colorPalette={topic.is_pinned ? 'green' : 'yellow'} variant="subtle" borderRadius="8px" onClick={() => handlePinTopic(topic.id)}>
+                          <Button
+                            size="xs"
+                            bg={topic.is_pinned ? GREEN_LT : AMBER_LT}
+                            color={topic.is_pinned ? GREEN : AMBER}
+                            border={`1px solid ${topic.is_pinned ? GREEN : AMBER}`}
+                            _hover={{ bg: topic.is_pinned ? '#E8F5EE' : '#FEF3C7' }}
+                            borderRadius="8px"
+                            onClick={() => handlePinTopic(topic.id)}
+                          >
                             {topic.is_pinned ? 'Unpin' : 'Pin'}
                           </Button>
                         </Flex>
@@ -1291,9 +1356,10 @@ const AdminDashboard = () => {
 
                       <Flex direction="column" gap={2} mt={3}>
                         <Button
-                          bg={GREEN}
-                          color={WHITE}
-                          _hover={{ bg: '#24493E' }}
+                          bg={GREEN_LT}
+                          color={GREEN}
+                          border={`1px solid ${GREEN}`}
+                          _hover={{ bg: '#E8F5EE' }}
                           disabled={openReportActionLoading || !openReport.related_handshake}
                           onClick={() => resolveOpenReport('confirm_no_show')}
                           borderRadius="8px"
@@ -1301,10 +1367,10 @@ const AdminDashboard = () => {
                           Confirm no-show
                         </Button>
                         <Button
-                          bg={WHITE}
-                          color="#334155"
-                          border={`1px solid ${GRAY200}`}
-                          _hover={{ bg: GRAY50 }}
+                          bg={BLUE_LT}
+                          color={BLUE}
+                          border={`1px solid ${BLUE}`}
+                          _hover={{ bg: '#DBEAFE' }}
                           disabled={openReportActionLoading}
                           onClick={() => resolveOpenReport('dismiss')}
                           borderRadius="8px"
@@ -1312,10 +1378,10 @@ const AdminDashboard = () => {
                           Dismiss report
                         </Button>
                         <Button
-                          bg={GREEN_LT}
-                          color={GREEN}
-                          border={`1px solid ${GRAY200}`}
-                          _hover={{ bg: '#E8F5EE' }}
+                          bg={AMBER_LT}
+                          color={AMBER}
+                          border={`1px solid ${AMBER}`}
+                          _hover={{ bg: '#FEF3C7' }}
                           disabled={openReportActionLoading || !openReport.related_handshake}
                           onClick={pauseOpenReport}
                           borderRadius="8px"
@@ -1387,8 +1453,8 @@ const AdminDashboard = () => {
                                 <Text fontSize="xs" color={GRAY500} mb={2}>Actions on owner</Text>
                                 <Button
                                   bg={AMBER_LT}
-                                  color="#8A6116"
-                                  border={`1px solid ${GRAY200}`}
+                                  color={AMBER}
+                                  border={`1px solid ${AMBER}`}
                                   _hover={{ bg: '#FEF3C7' }}
                                   disabled={openReportActionLoading || !ownerUserId}
                                   onClick={warnOpenReportOwner}
@@ -1399,9 +1465,9 @@ const AdminDashboard = () => {
                                   Warn owner
                                 </Button>
                                 <Button
-                                  bg="#FEF2F2"
-                                  color="#B42318"
-                                  border={`1px solid ${GRAY200}`}
+                                  bg={RED_LT}
+                                  color={RED}
+                                  border={`1px solid ${RED}`}
                                   _hover={{ bg: '#FEE4E2' }}
                                   disabled={openReportActionLoading || !ownerUserId}
                                   onClick={suspendOpenReportOwner}
