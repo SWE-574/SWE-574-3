@@ -123,7 +123,7 @@ jobs:
 
       # ── 11. Cache npm packages ────────────────────────────────────────────
       - name: Cache npm packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.npm
           key: npm-e2e-${{ hashFiles('frontend/package-lock.json') }}
@@ -136,7 +136,7 @@ jobs:
 
       # ── 13. Cache Playwright browsers ─────────────────────────────────────
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('frontend/package-lock.json') }}
