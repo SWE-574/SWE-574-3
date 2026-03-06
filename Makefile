@@ -23,11 +23,7 @@ COMPOSE_PROD   = docker compose -f docker-compose.prod.yml --env-file .env
 _check_env:
 	@test -f .env || (echo "ERROR: .env not found. Copy .env.example → .env first." && exit 1)
 
-ifeq ($(wildcard .env),)
-  $(error ERROR: .env not found. Copy .env.example → .env first.)
-endif
-
-include .env
+-include .env
 export
 
 # Apple Silicon uses arm64 PostGIS image if the user hasn't overridden it
