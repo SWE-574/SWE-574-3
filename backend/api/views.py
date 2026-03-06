@@ -3587,11 +3587,21 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
+    @extend_schema(
+        summary='Mark all notifications as read',
+        request=None,
+        responses={200: inline_serializer('MarkAllReadResponse', {'status': drf_serializers.CharField()})},
+    )
     @action(detail=False, methods=['post'], url_path='read')
     def mark_all_read(self, request):
         Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
         return Response({'status': 'success'})
 
+    @extend_schema(
+        summary='Mark a single notification as read',
+        request=None,
+        responses={200: NotificationSerializer},
+    )
     @action(detail=True, methods=['patch'], url_path='read')
     def mark_read(self, request, pk=None):
         notification = self.get_object()
@@ -3600,6 +3610,10 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.get_serializer(notification)
         return Response(serializer.data)
 
+    @extend_schema(
+        summary='Get unread notification count',
+        responses={200: inline_serializer('UnreadCountResponse', {'count': drf_serializers.IntegerField()})},
+    )
     @action(detail=False, methods=['get'], url_path='unread-count')
     def unread_count(self, request):
         count = Notification.objects.filter(user=request.user, is_read=False).count()
