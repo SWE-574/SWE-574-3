@@ -16,7 +16,7 @@
     "test:e2e:report": "playwright show-report tests/reports/playwright"
   },
   "dependencies": {
-    "@chakra-ui/react": "^3.33.0",
+    "@chakra-ui/react": "^3.34.0",
     "@hookform/resolvers": "^5.2.2",
     "axios": "^1.13.6",
     "date-fns": "^4.1.0",
