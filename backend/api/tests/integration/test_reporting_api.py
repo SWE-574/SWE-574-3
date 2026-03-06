@@ -11,6 +11,20 @@ from api.tests.helpers.test_client import AuthenticatedAPIClient
 @pytest.mark.django_db
 @pytest.mark.integration
 class TestReportingAPI:
+    def test_user_can_report_non_active_listing(self):
+        reporter = UserFactory()
+        service = ServiceFactory(status="Agreed")
+
+        client = AuthenticatedAPIClient().authenticate_user(reporter)
+
+        response = client.post(
+            f"/api/services/{service.id}/report/",
+            {"issue_type": "spam", "description": "Report after status change."},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_201_CREATED
+        assert "report_id" in response.data
+
     def test_user_can_only_report_a_listing_once(self):
         reporter = UserFactory()
         service = ServiceFactory()

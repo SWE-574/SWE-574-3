@@ -1297,8 +1297,22 @@ class BadgeSerializer(serializers.ModelSerializer):
 )
 class ReportSerializer(serializers.ModelSerializer):
     reporter_name = serializers.SerializerMethodField()
+    reporter_email = serializers.SerializerMethodField()
+    reporter_karma_score = serializers.SerializerMethodField()
+    reporter_warning_count = serializers.SerializerMethodField()
     reported_user_name = serializers.SerializerMethodField()
+    reported_user_email = serializers.SerializerMethodField()
+    reported_user_karma_score = serializers.SerializerMethodField()
     reported_service_title = serializers.SerializerMethodField()
+    reported_service_status = serializers.SerializerMethodField()
+    reported_service_type = serializers.SerializerMethodField()
+    reported_service_description = serializers.SerializerMethodField()
+    reported_service_location = serializers.SerializerMethodField()
+    reported_service_hours = serializers.SerializerMethodField()
+    reported_service_owner = serializers.SerializerMethodField()
+    reported_service_owner_name = serializers.SerializerMethodField()
+    reported_service_owner_email = serializers.SerializerMethodField()
+    reported_service_owner_karma_score = serializers.SerializerMethodField()
     reported_forum_topic = serializers.PrimaryKeyRelatedField(read_only=True)
     reported_forum_post = serializers.PrimaryKeyRelatedField(read_only=True)
     reported_forum_topic_title = serializers.SerializerMethodField()
@@ -1311,8 +1325,12 @@ class ReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = Report
         fields = [
-            'id', 'reporter', 'reporter_name', 'reported_user', 'reported_user_name',
-            'reported_service', 'reported_service_title', 'related_handshake',
+            'id', 'reporter', 'reporter_name', 'reporter_email', 'reporter_karma_score', 'reporter_warning_count',
+            'reported_user', 'reported_user_name', 'reported_user_email', 'reported_user_karma_score',
+            'reported_service', 'reported_service_title', 'reported_service_status', 'reported_service_type',
+            'reported_service_description', 'reported_service_location', 'reported_service_hours',
+            'reported_service_owner', 'reported_service_owner_name', 'reported_service_owner_email',
+            'reported_service_owner_karma_score', 'related_handshake',
             'reported_forum_topic', 'reported_forum_topic_title',
             'reported_forum_post', 'reported_forum_post_excerpt',
             'handshake_hours', 'handshake_scheduled_time', 'handshake_status',
@@ -1321,9 +1339,33 @@ class ReportSerializer(serializers.ModelSerializer):
             'created_at', 'resolved_at', 'resolved_by'
         ]
 
+    def _get_context_service(self, obj):
+        """Resolve service context from report first, then handshake fallback."""
+        if obj.reported_service:
+            return obj.reported_service
+        handshake = getattr(obj, 'related_handshake', None)
+        if handshake and getattr(handshake, 'service', None):
+            return handshake.service
+        return None
+
+    def _get_context_handshake(self, obj):
+        return getattr(obj, 'related_handshake', None)
+
     @extend_schema_field(OpenApiTypes.STR)
     def get_reporter_name(self, obj):
         return f"{obj.reporter.first_name} {obj.reporter.last_name}".strip()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reporter_email(self, obj):
+        return obj.reporter.email
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_reporter_karma_score(self, obj):
+        return obj.reporter.karma_score
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_reporter_warning_count(self, obj):
+        return getattr(obj.reporter, 'warning_count', 0)
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_reported_user_name(self, obj):
@@ -1332,9 +1374,116 @@ class ReportSerializer(serializers.ModelSerializer):
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_user_email(self, obj):
+        if obj.reported_user:
+            return obj.reported_user.email
+        return None
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_reported_user_karma_score(self, obj):
+        if obj.reported_user:
+            return obj.reported_user.karma_score
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_reported_service_title(self, obj):
-        if obj.reported_service:
-            return obj.reported_service.title
+        service = self._get_context_service(obj)
+        if service:
+            return service.title
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_status(self, obj):
+        service = self._get_context_service(obj)
+        if service:
+            return service.status
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_type(self, obj):
+        service = self._get_context_service(obj)
+        if service:
+            return service.type
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_description(self, obj):
+        service = self._get_context_service(obj)
+        if not service:
+            return None
+
+        description = (getattr(service, 'description', '') or '').strip()
+        if description:
+            return description
+
+        # Some older records may have sparse descriptions; schedule_details is
+        # the closest service-context fallback we can safely expose.
+        schedule_details = (getattr(service, 'schedule_details', '') or '').strip()
+        if schedule_details:
+            return schedule_details
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_location(self, obj):
+        service = self._get_context_service(obj)
+        if not service:
+            return None
+
+        location_type = getattr(service, 'location_type', None)
+        location_area = getattr(service, 'location_area', None)
+        if location_type == 'online':
+            return 'Online'
+        if location_area:
+            return location_area
+        if location_type:
+            return location_type.replace('_', ' ').title()
+
+        handshake = self._get_context_handshake(obj)
+        exact_location = (getattr(handshake, 'exact_location', '') or '').strip() if handshake else ''
+        if exact_location:
+            return exact_location
+        return None
+
+    @extend_schema_field(OpenApiTypes.NUMBER)
+    def get_reported_service_hours(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.duration is not None:
+            return float(service.duration)
+
+        handshake = self._get_context_handshake(obj)
+        if handshake and getattr(handshake, 'exact_duration', None) is not None:
+            return float(handshake.exact_duration)
+
+        if handshake and getattr(handshake, 'provisioned_hours', None) is not None:
+            return float(handshake.provisioned_hours)
+        return None
+
+    @extend_schema_field(OpenApiTypes.UUID)
+    def get_reported_service_owner(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.user_id:
+            return str(service.user_id)
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_owner_name(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.user:
+            return f"{service.user.first_name} {service.user.last_name}".strip()
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reported_service_owner_email(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.user:
+            return service.user.email
+        return None
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_reported_service_owner_karma_score(self, obj):
+        service = self._get_context_service(obj)
+        if service and service.user:
+            return service.user.karma_score
         return None
 
     @extend_schema_field(OpenApiTypes.STR)

@@ -285,10 +285,24 @@ export interface AdminReport {
   id: string
   reporter: string
   reporter_name: string
+  reporter_email?: string | null
+  reporter_karma_score?: number | null
+  reporter_warning_count?: number | null
   reported_user?: string | null
   reported_user_name?: string | null
+  reported_user_email?: string | null
+  reported_user_karma_score?: number | null
   reported_service?: string | null
   reported_service_title?: string | null
+  reported_service_status?: string | null
+  reported_service_type?: string | null
+  reported_service_description?: string | null
+  reported_service_location?: string | null
+  reported_service_hours?: number | null
+  reported_service_owner?: string | null
+  reported_service_owner_name?: string | null
+  reported_service_owner_email?: string | null
+  reported_service_owner_karma_score?: number | null
   reported_forum_topic?: string | null
   reported_forum_topic_title?: string | null
   reported_forum_post?: string | null

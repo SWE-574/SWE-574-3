@@ -1747,7 +1747,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
         Endpoint: POST /api/services/{id}/report/
         Body: { "issue_type": "inappropriate_content"|"spam"|"service_issue", "description": "..." }
         """
-        service = self.get_object()
+        # Use an unfiltered lookup so users can report listings visible on detail
+        # pages even after status transitions (e.g., Active -> Agreed).
+        service = get_object_or_404(Service.objects.select_related('user'), pk=pk)
         issue_type = request.data.get('issue_type', 'inappropriate_content')
         description = (request.data.get('description') or '').strip()
 

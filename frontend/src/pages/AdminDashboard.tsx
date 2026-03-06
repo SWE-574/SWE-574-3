@@ -1,15 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Badge, Box, Button, Flex, Input, NativeSelect, Spinner, Table, Text, Textarea } from '@chakra-ui/react'
 import { toast } from 'sonner'
 import { adminAPI, type AuditTargetFilter, type CommentStatusFilter, type ReportResolveAction, type ReportStatusFilter } from '@/services/adminAPI'
 import { forumAPI } from '@/services/forumAPI'
+import { serviceAPI } from '@/services/serviceAPI'
 import AdminReauthBanner from '@/components/AdminReauthBanner'
 import AdminLayout from '@/components/AdminLayout'
 import AdminActivityFeed from '@/components/AdminActivityFeed'
 import { getErrorMessage } from '@/services/api'
 import { useAuthStore } from '@/store/useAuthStore'
-import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, ForumTopic, PaginatedResponse } from '@/types'
+import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, ForumTopic, PaginatedResponse, Service } from '@/types'
+import {
+  GREEN,
+  GREEN_LT,
+  AMBER_LT,
+  GRAY50,
+  GRAY200,
+  GRAY500,
+  GRAY600,
+  GRAY700,
+  GRAY800,
+  WHITE,
+} from '@/theme/tokens'
 
 type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 'audit'
 
@@ -26,8 +39,28 @@ function formatAuditAction(action: string): string {
   return action.replace(/_/g, ' ')
 }
 
+function asLabel(value: string | null | undefined, fallback = 'N/A') {
+  if (!value) return fallback
+  return value.replace(/_/g, ' ')
+}
+
+function getReportedObjectPath(report: AdminReport): string | null {
+  if (report.reported_service) return `/service-detail/${report.reported_service}`
+  if (report.reported_forum_topic) return `/forum/topic/${report.reported_forum_topic}`
+  if (report.reported_user) return `/public-profile/${report.reported_user}`
+  return null
+}
+
+function getReportedObjectLabel(report: AdminReport): string {
+  return report.reported_user_name
+    || report.reported_forum_topic_title
+    || report.reported_service_title
+    || 'Content unavailable'
+}
+
 const AdminDashboard = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard')
 
   const checkAuth = useAuthStore((s) => s.checkAuth)
@@ -53,6 +86,12 @@ const AdminDashboard = () => {
   const [reports, setReports] = useState<PaginatedResponse<AdminReport> | null>(null)
   const [reportStatus, setReportStatus] = useState<ReportStatusFilter>('pending')
   const [reportNotes, setReportNotes] = useState<Record<string, string>>({})
+  const [openReportId, setOpenReportId] = useState<string | null>(null)
+  const [openReport, setOpenReport] = useState<AdminReport | null>(null)
+  const [openReportService, setOpenReportService] = useState<Service | null>(null)
+  const [openReportLoading, setOpenReportLoading] = useState(false)
+  const [openReportActionLoading, setOpenReportActionLoading] = useState(false)
+  const [isNotesExpanded, setIsNotesExpanded] = useState(false)
 
   const [commentsLoading, setCommentsLoading] = useState(false)
   const [comments, setComments] = useState<PaginatedResponse<AdminComment> | null>(null)
@@ -285,6 +324,11 @@ const AdminDashboard = () => {
   }
 
   const handleResolveReport = async (report: AdminReport, action: ReportResolveAction) => {
+    if (action === 'confirm_no_show' && !report.related_handshake) {
+      toast.error('This report has no linked handshake. Confirm no-show is disabled.')
+      return
+    }
+
     const confirmed = window.confirm(`Confirm action: ${action.replace('_', ' ')}?`)
     if (!confirmed) return
 
@@ -299,6 +343,11 @@ const AdminDashboard = () => {
   }
 
   const handlePauseReport = async (report: AdminReport) => {
+    if (!report.related_handshake) {
+      toast.error('This report has no linked handshake. Pause is disabled.')
+      return
+    }
+
     const confirmed = window.confirm('Pause this handshake for investigation?')
     if (!confirmed) return
 
@@ -310,6 +359,189 @@ const AdminDashboard = () => {
       toast.error(getErrorMessage(error, 'Could not pause handshake'))
     }
   }
+
+  const closeOpenReport = useCallback(() => {
+    setOpenReportId(null)
+    setOpenReport(null)
+    setOpenReportService(null)
+    setOpenReportLoading(false)
+  }, [])
+
+  const closeOpenReportPanel = useCallback(() => {
+    closeOpenReport()
+    navigate('/admin?tab=reports', { replace: true })
+  }, [closeOpenReport, navigate])
+
+  const openReportPanel = useCallback(async (reportId: string) => {
+    if (openReportId === reportId) return
+
+    setOpenReportId(reportId)
+    setIsNotesExpanded(false)
+    setOpenReportLoading(true)
+    setOpenReportService(null)
+    try {
+      const detail = await adminAPI.getReport(reportId)
+      setOpenReport(detail)
+
+      if (detail.reported_service) {
+        try {
+          const service = await serviceAPI.get(detail.reported_service)
+          setOpenReportService(service)
+        } catch {
+          // Keep report panel usable even if service endpoint is unavailable.
+          setOpenReportService(null)
+        }
+      }
+
+      setReportNotes((prev) => ({
+        ...prev,
+        [reportId]: prev[reportId] ?? detail.admin_notes ?? '',
+      }))
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to load report detail'))
+      closeOpenReport()
+    } finally {
+      setOpenReportLoading(false)
+    }
+  }, [closeOpenReport, openReportId])
+
+  const resolveOpenReport = useCallback(async (action: ReportResolveAction) => {
+    if (!openReport) return
+    if (action === 'confirm_no_show' && !openReport.related_handshake) {
+      toast.error('This report has no linked handshake. Confirm no-show is disabled.')
+      return
+    }
+    const confirmed = window.confirm(`Confirm action: ${action.replace('_', ' ')}?`)
+    if (!confirmed) return
+
+    setOpenReportActionLoading(true)
+    try {
+      const updated = await adminAPI.resolveReport(openReport.id, action, reportNotes[openReport.id])
+      setOpenReport(updated)
+      toast.success('Report updated')
+      await loadReports()
+      await loadDashboard()
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to resolve report'))
+    } finally {
+      setOpenReportActionLoading(false)
+    }
+  }, [loadDashboard, loadReports, openReport, reportNotes])
+
+  const pauseOpenReport = useCallback(async () => {
+    if (!openReport) return
+    if (!openReport.related_handshake) {
+      toast.error('This report has no linked handshake. Pause is disabled.')
+      return
+    }
+    const confirmed = window.confirm('Pause this handshake for investigation?')
+    if (!confirmed) return
+
+    setOpenReportActionLoading(true)
+    try {
+      await adminAPI.pauseHandshake(openReport.id)
+      const refreshed = await adminAPI.getReport(openReport.id)
+      setOpenReport(refreshed)
+      toast.success('Handshake paused')
+      await loadReports()
+      await loadDashboard()
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Could not pause handshake'))
+    } finally {
+      setOpenReportActionLoading(false)
+    }
+  }, [loadDashboard, loadReports, openReport])
+
+  const requestOpenReport = useCallback((reportId: string) => {
+    if (openReportId && openReportId !== reportId) {
+      toast.info('Please close the current report first.')
+      return
+    }
+    navigate(`/admin?tab=reports&reportId=${encodeURIComponent(reportId)}`)
+  }, [navigate, openReportId])
+
+  const warnOpenReportOwner = useCallback(async () => {
+    if (!openReport) return
+    const ownerUserId = openReport.reported_service_owner || openReport.reported_user
+    const ownerName = openReport.reported_service_owner_name || openReport.reported_user_name || 'service owner'
+    if (!ownerUserId) return
+
+    const warningMessage = (reportNotes[openReport.id] || '').trim() || `Warning issued for report ${openReport.id}`
+    if (!window.confirm(`Issue warning to ${ownerName}?`)) return
+
+    setOpenReportActionLoading(true)
+    try {
+      await adminAPI.warnUser(ownerUserId, warningMessage)
+      const refreshed = await adminAPI.getReport(openReport.id)
+      setOpenReport(refreshed)
+      toast.success('Warning sent to owner')
+      await loadReports()
+      await loadDashboard()
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to warn owner'))
+    } finally {
+      setOpenReportActionLoading(false)
+    }
+  }, [loadDashboard, loadReports, openReport, reportNotes])
+
+  const suspendOpenReportOwner = useCallback(async () => {
+    if (!openReport) return
+    const ownerUserId = openReport.reported_service_owner || openReport.reported_user
+    const ownerName = openReport.reported_service_owner_name || openReport.reported_user_name || 'service owner'
+    if (!ownerUserId) return
+
+    if (!window.confirm(`Suspend ${ownerName}?`)) return
+
+    setOpenReportActionLoading(true)
+    try {
+      await adminAPI.banUser(ownerUserId)
+      const refreshed = await adminAPI.getReport(openReport.id)
+      setOpenReport(refreshed)
+      toast.success('Owner suspended')
+      await loadReports()
+      await loadDashboard()
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to suspend owner'))
+    } finally {
+      setOpenReportActionLoading(false)
+    }
+  }, [loadDashboard, loadReports, openReport])
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab')
+    const reportIdParam = searchParams.get('reportId')
+
+    if (tabParam === 'reports' && activeTab !== 'reports') {
+      setActiveTab('reports')
+    }
+
+    if (reportIdParam) {
+      if (activeTab !== 'reports') {
+        setActiveTab('reports')
+      }
+      if (openReportId !== reportIdParam) {
+        void openReportPanel(reportIdParam)
+      }
+      return
+    }
+
+    if (!reportIdParam && openReportId) {
+      closeOpenReport()
+    }
+  }, [activeTab, closeOpenReport, openReportId, openReportPanel, searchParams])
+
+  const handleTabChange = useCallback((tab: AdminTab) => {
+    setActiveTab(tab)
+    if (tab === 'reports') {
+      if (!searchParams.get('tab')) {
+        navigate('/admin?tab=reports', { replace: true })
+      }
+      return
+    }
+
+    closeOpenReport()
+    navigate('/admin', { replace: true })
+  }, [closeOpenReport, navigate, searchParams])
 
   const handleLockTopic = async (topicId: string) => {
     try {
@@ -378,7 +610,7 @@ const AdminDashboard = () => {
   )
 
   return (
-    <AdminLayout activeTab={activeTab} onTabChange={setActiveTab}>
+    <AdminLayout activeTab={activeTab} onTabChange={handleTabChange}>
       <Box p={{ base: 4, md: 8 }}>
         <Box mb={6}>
           <Text fontSize="2xl" fontWeight={800}>Admin Panel</Text>
@@ -447,7 +679,7 @@ const AdminDashboard = () => {
                                 <Text maxW="260px" whiteSpace="normal">{report.description}</Text>
                               </Table.Cell>
                               <Table.Cell>
-                                <Button size="xs" variant="subtle" colorPalette="blue" borderRadius="8px" onClick={() => navigate(`/report-detail/${report.id}`)}>
+                                <Button size="xs" variant="subtle" colorPalette="blue" borderRadius="8px" onClick={() => requestOpenReport(report.id)}>
                                   Review
                                 </Button>
                               </Table.Cell>
@@ -641,10 +873,22 @@ const AdminDashboard = () => {
                       </Table.Cell>
                       <Table.Cell>{report.reporter_name || 'Unknown'}</Table.Cell>
                       <Table.Cell>
-                        {report.reported_user_name
-                          || report.reported_forum_topic_title
-                          || report.reported_service_title
-                          || 'Content unavailable'}
+                        <Flex direction="column" gap={1} align="flex-start">
+                          <Text>{getReportedObjectLabel(report)}</Text>
+                          {getReportedObjectPath(report) && (
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              color="#2D5C4E"
+                              p={0}
+                              h="auto"
+                              minW="auto"
+                              onClick={() => navigate(getReportedObjectPath(report) as string)}
+                            >
+                              Open reported object
+                            </Button>
+                          )}
+                        </Flex>
                       </Table.Cell>
                       <Table.Cell>
                         <Badge colorPalette={report.status === 'pending' ? 'orange' : report.status === 'resolved' ? 'green' : 'gray'}>
@@ -667,9 +911,37 @@ const AdminDashboard = () => {
                       </Table.Cell>
                       <Table.Cell>
                         <Flex gap={2} wrap="wrap">
-                          <Button size="xs" colorPalette="green" variant="subtle" borderRadius="8px" onClick={() => handleResolveReport(report, 'confirm_no_show')}>Confirm</Button>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            borderRadius="8px"
+                            onClick={() => requestOpenReport(report.id)}
+                          >
+                            Detail
+                          </Button>
+                          <Button
+                            size="xs"
+                            colorPalette="green"
+                            variant="subtle"
+                            borderRadius="8px"
+                            disabled={!report.related_handshake}
+                            title={report.related_handshake ? undefined : 'No linked handshake'}
+                            onClick={() => handleResolveReport(report, 'confirm_no_show')}
+                          >
+                            Confirm
+                          </Button>
                           <Button size="xs" colorPalette="blue" variant="subtle" borderRadius="8px" onClick={() => handleResolveReport(report, 'dismiss')}>Dismiss</Button>
-                          <Button size="xs" colorPalette="orange" variant="subtle" borderRadius="8px" onClick={() => handlePauseReport(report)}>Pause</Button>
+                          <Button
+                            size="xs"
+                            colorPalette="orange"
+                            variant="subtle"
+                            borderRadius="8px"
+                            disabled={!report.related_handshake}
+                            title={report.related_handshake ? undefined : 'No linked handshake'}
+                            onClick={() => handlePauseReport(report)}
+                          >
+                            Pause
+                          </Button>
                         </Flex>
                       </Table.Cell>
                     </Table.Row>
@@ -931,6 +1203,279 @@ const AdminDashboard = () => {
             <Text fontSize="sm" color="gray.600">{auditLogs?.count ?? 0} entries</Text>
             <Button size="sm" variant="outline" disabled={!auditLogs?.next || auditLoading} onClick={() => setAuditPage((p) => p + 1)}>Next</Button>
           </Flex>
+        </Box>
+      )}
+
+      {activeTab === 'reports' && openReportId && (
+        <Box position="fixed" inset={0} zIndex={1500} bg="rgba(15, 23, 42, 0.24)" onClick={closeOpenReportPanel}>
+          <Box
+            position="absolute"
+            top={0}
+            right={0}
+            h="100vh"
+            w={{ base: '100%', md: '760px', lg: '840px' }}
+            bg={WHITE}
+            borderLeft={`1px solid ${GRAY200}`}
+            boxShadow="-8px 0 24px rgba(0,0,0,0.12)"
+            p={{ base: 4, md: 5 }}
+            overflowY="auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Flex align="center" justify="space-between" mb={4}>
+              <Box>
+                <Text fontSize="lg" fontWeight={800} color={GRAY800}>Report Detail</Text>
+                <Text fontSize="sm" color={GRAY600}>Quick review panel (close to open another).</Text>
+              </Box>
+              <Button size="sm" variant="ghost" onClick={closeOpenReportPanel} aria-label="Close report panel">x</Button>
+            </Flex>
+
+            {openReportLoading ? (
+              <Flex py={10} justify="center"><Spinner /></Flex>
+            ) : !openReport ? (
+              <Text fontSize="sm" color={GRAY600}>Report could not be loaded.</Text>
+            ) : (
+              <>
+                {(() => {
+                  const reportedProfilePath = openReport.reported_user ? `/public-profile/${openReport.reported_user}` : null
+                  const reportedServicePath = openReport.reported_service ? `/service-detail/${openReport.reported_service}` : null
+                  const ownerUserId = openReport.reported_service_owner || openReport.reported_user || null
+                  const hasReportedUserInfo = !!(openReport.reported_user_name || openReport.reported_user_email || openReport.reported_user_karma_score != null)
+                  const hasReportedUserCard = hasReportedUserInfo || !!ownerUserId
+                  const hasServiceInfo = !!(
+                    openReport.reported_service
+                    || openReport.reported_service_title
+                    || openReport.reported_service_type
+                    || openReport.reported_service_status
+                    || openReport.reported_service_description
+                    || openReport.reported_service_location
+                    || openReport.reported_service_hours != null
+                    || openReportService
+                  )
+                  const serviceType = openReport.reported_service_type || openReportService?.type
+                  const serviceStatus = openReport.reported_service_status || openReportService?.status
+                  const serviceTitle = openReport.reported_service_title || openReportService?.title
+                  const serviceDescription = openReport.reported_service_description || openReportService?.description
+                  const serviceLocation = openReport.reported_service_location
+                    || (openReportService
+                      ? (openReportService.location_type === 'Online'
+                        ? 'Online'
+                        : (openReportService.location_area || asLabel(openReportService.location_type)))
+                      : null)
+                  const serviceHours = openReport.reported_service_hours
+                    ?? (openReportService?.duration != null ? Number(openReportService.duration) : null)
+                  const hasForumInfo = !!(openReport.reported_forum_topic_title || openReport.reported_forum_post_excerpt)
+                  const hasHandshakeInfo = !!(openReport.related_handshake || openReport.handshake_status || openReport.handshake_scheduled_time || openReport.handshake_hours != null)
+                  const notesAndActionsCard = (
+                    <Box p={3} border={`1px solid ${GRAY200}`} borderRadius="10px" bg={GRAY50} flex={1}>
+                      <Flex align="center" justify="space-between" mb={2}>
+                        <Text fontSize="sm" fontWeight={600}>Admin notes & report actions</Text>
+                        <Button size="xs" variant="ghost" onClick={() => setIsNotesExpanded((prev) => !prev)}>
+                          {isNotesExpanded ? 'Collapse notes' : 'Expand notes'}
+                        </Button>
+                      </Flex>
+
+                      {isNotesExpanded ? (
+                        <Textarea
+                          value={reportNotes[openReport.id] || ''}
+                          onChange={(e) => setReportNotes((prev) => ({ ...prev, [openReport.id]: e.target.value }))}
+                          placeholder="Reason / moderation notes"
+                          minH="96px"
+                          bg={WHITE}
+                          borderColor={GRAY200}
+                        />
+                      ) : (
+                        <Text fontSize="sm" color={GRAY600} lineClamp="2">
+                          {(reportNotes[openReport.id] || '').trim() || 'No notes added yet.'}
+                        </Text>
+                      )}
+
+                      <Flex direction="column" gap={2} mt={3}>
+                        <Button
+                          bg={GREEN}
+                          color={WHITE}
+                          _hover={{ bg: '#24493E' }}
+                          disabled={openReportActionLoading || !openReport.related_handshake}
+                          onClick={() => resolveOpenReport('confirm_no_show')}
+                          borderRadius="8px"
+                        >
+                          Confirm no-show
+                        </Button>
+                        <Button
+                          bg={WHITE}
+                          color="#334155"
+                          border={`1px solid ${GRAY200}`}
+                          _hover={{ bg: GRAY50 }}
+                          disabled={openReportActionLoading}
+                          onClick={() => resolveOpenReport('dismiss')}
+                          borderRadius="8px"
+                        >
+                          Dismiss report
+                        </Button>
+                        <Button
+                          bg={GREEN_LT}
+                          color={GREEN}
+                          border={`1px solid ${GRAY200}`}
+                          _hover={{ bg: '#E8F5EE' }}
+                          disabled={openReportActionLoading || !openReport.related_handshake}
+                          onClick={pauseOpenReport}
+                          borderRadius="8px"
+                        >
+                          Pause handshake
+                        </Button>
+                        {!openReport.related_handshake && (
+                          <Text fontSize="12px" color={GRAY500}>
+                            No linked handshake. Confirm no-show and pause actions are disabled.
+                          </Text>
+                        )}
+                      </Flex>
+                    </Box>
+                  )
+
+                  return (
+                    <>
+                      <Flex gap={2} mb={3} wrap="wrap">
+                        <Badge colorPalette={openReport.status === 'pending' ? 'orange' : openReport.status === 'resolved' ? 'green' : 'gray'}>
+                          {asLabel(openReport.status)}
+                        </Badge>
+                        <Badge colorPalette="gray">{asLabel(openReport.type)}</Badge>
+                        {openReport.related_handshake && <Badge colorPalette="blue">Handshake linked</Badge>}
+                      </Flex>
+
+                      <Text fontSize="sm" color={GRAY600}>Created: {new Date(openReport.created_at).toLocaleString()}</Text>
+
+                      <Flex mt={3} gap={3} direction={{ base: 'column', md: 'row' }}>
+                        <Box p={3} border={`1px solid ${GRAY200}`} borderRadius="10px" bg={GRAY50} flex={1}>
+                          <Text fontSize="xs" color={GRAY500} mb={1}>Reporter</Text>
+                          <Text fontWeight={700}>{openReport.reporter_name || 'Unknown'}</Text>
+                          <Text fontSize="sm" color={GRAY600}>{openReport.reporter_email || 'Email unavailable'}</Text>
+                          <Text fontSize="sm" color={GRAY600}>Karma: {openReport.reporter_karma_score ?? 'N/A'}</Text>
+                          <Text fontSize="sm" color={GRAY600}>Warnings: {openReport.reporter_warning_count ?? 0}</Text>
+                          <Box mt={2} pt={2} borderTop={`1px solid ${GRAY200}`}>
+                            <Text fontSize="xs" color={GRAY500} mb={1}>Reporter statement</Text>
+                            <Badge
+                              colorPalette="gray"
+                              borderRadius="999px"
+                              px={3}
+                              py={1}
+                              textTransform="none"
+                            >
+                              {openReport.description || 'No description provided.'}
+                            </Badge>
+                          </Box>
+                        </Box>
+
+                        {hasReportedUserCard && (
+                          <Box p={3} border={`1px solid ${GRAY200}`} borderRadius="10px" bg={GRAY50} flex={1}>
+                            <Flex align="center" justify="space-between" gap={2} wrap="wrap" mb={1}>
+                              <Text fontSize="xs" color={GRAY500}>Reported user</Text>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                borderRadius="8px"
+                                disabled={!reportedProfilePath}
+                                onClick={() => reportedProfilePath && navigate(reportedProfilePath)}
+                              >
+                                View reported profile
+                              </Button>
+                            </Flex>
+                            <Text fontWeight={700}>{openReport.reported_user_name || openReport.reported_service_owner_name || 'Unknown'}</Text>
+                            <Text fontSize="sm" color={GRAY600}>{openReport.reported_user_email || openReport.reported_service_owner_email || 'Email unavailable'}</Text>
+                            <Text fontSize="sm" color={GRAY600}>Karma: {openReport.reported_user_karma_score ?? openReport.reported_service_owner_karma_score ?? 'N/A'}</Text>
+
+                            {ownerUserId && (
+                              <Box mt={3} borderTop={`1px solid ${GRAY200}`} pt={2}>
+                                <Text fontSize="xs" color={GRAY500} mb={2}>Actions on owner</Text>
+                                <Button
+                                  bg={AMBER_LT}
+                                  color="#8A6116"
+                                  border={`1px solid ${GRAY200}`}
+                                  _hover={{ bg: '#FEF3C7' }}
+                                  disabled={openReportActionLoading || !ownerUserId}
+                                  onClick={warnOpenReportOwner}
+                                  borderRadius="8px"
+                                  w="100%"
+                                  mb={2}
+                                >
+                                  Warn owner
+                                </Button>
+                                <Button
+                                  bg="#FEF2F2"
+                                  color="#B42318"
+                                  border={`1px solid ${GRAY200}`}
+                                  _hover={{ bg: '#FEE4E2' }}
+                                  disabled={openReportActionLoading || !ownerUserId}
+                                  onClick={suspendOpenReportOwner}
+                                  borderRadius="8px"
+                                  w="100%"
+                                >
+                                  Suspend owner
+                                </Button>
+                              </Box>
+                            )}
+                          </Box>
+                        )}
+                      </Flex>
+
+                      {hasServiceInfo && (
+                        <Flex mt={3} gap={3} direction={{ base: 'column', md: 'row' }}>
+                          <Box p={3} border={`1px solid ${GRAY200}`} borderRadius="10px" bg={GRAY50} flex={1}>
+                            <Flex align="center" justify="space-between" gap={2} wrap="wrap" mb={1}>
+                              <Text fontSize="xs" color={GRAY500}>Service context</Text>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                borderRadius="8px"
+                                disabled={!reportedServicePath}
+                                onClick={() => reportedServicePath && navigate(reportedServicePath)}
+                              >
+                                Open reported service
+                              </Button>
+                            </Flex>
+                            <Text fontWeight={700}>{serviceTitle || 'No service title'}</Text>
+                            {serviceType && <Text fontSize="sm" color={GRAY600}>Type: {asLabel(serviceType)}</Text>}
+                            {serviceStatus && <Text fontSize="sm" color={GRAY600}>Status: {asLabel(serviceStatus)}</Text>}
+                            <Text fontSize="sm" color={GRAY600}>Location: {serviceLocation || 'N/A'}</Text>
+                            <Text fontSize="sm" color={GRAY600}>Hours: {serviceHours ?? 'N/A'}</Text>
+                            <Box mt={2} pt={2} borderTop={`1px solid ${GRAY200}`}>
+                              <Text fontSize="xs" color={GRAY500} mb={1}>Description</Text>
+                              <Text fontSize="sm">{serviceDescription || 'No service description available.'}</Text>
+                            </Box>
+                          </Box>
+
+                          {notesAndActionsCard}
+                        </Flex>
+                      )}
+
+                      {hasForumInfo && (
+                        <Box p={3} border={`1px solid ${GRAY200}`} borderRadius="10px" bg={GRAY50} mt={3}>
+                          <Text fontSize="xs" color={GRAY500} mb={1}>Forum context</Text>
+                          {openReport.reported_forum_topic_title && <Text fontSize="sm" color={GRAY700}>Topic: {openReport.reported_forum_topic_title}</Text>}
+                          {openReport.reported_forum_post_excerpt && <Text fontSize="sm" color={GRAY700}>Post excerpt: {openReport.reported_forum_post_excerpt}</Text>}
+                        </Box>
+                      )}
+
+                      {hasHandshakeInfo && (
+                        <Box p={3} border={`1px solid ${GRAY200}`} borderRadius="10px" bg={GRAY50} mt={3}>
+                          <Text fontSize="xs" color={GRAY500} mb={1}>Handshake context</Text>
+                          {openReport.handshake_status && <Text fontSize="sm" color={GRAY700}>Status: {asLabel(openReport.handshake_status)}</Text>}
+                          {openReport.handshake_scheduled_time && (
+                            <Text fontSize="sm" color={GRAY700}>Scheduled: {new Date(openReport.handshake_scheduled_time).toLocaleString()}</Text>
+                          )}
+                          {openReport.handshake_hours != null && <Text fontSize="sm" color={GRAY700}>Hours: {openReport.handshake_hours}</Text>}
+                        </Box>
+                      )}
+
+                      {!hasServiceInfo && (
+                        <Box mt={4}>
+                          {notesAndActionsCard}
+                        </Box>
+                      )}
+                    </>
+                  )
+                })()}
+              </>
+            )}
+          </Box>
         </Box>
       )}
     </Box>

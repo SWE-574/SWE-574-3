@@ -510,7 +510,12 @@ export default function ServiceDetailPage() {
       toast.success('Report submitted. Thank you for keeping the community safe.')
       if (user?.id) localStorage.setItem(`reported:${user.id}:${service.id}`, '1')
       setAlreadyReported(true); setShowReport(false)
-    } catch { toast.error('Failed to submit report.') }
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number; data?: { detail?: string; non_field_errors?: string[] } } }
+      const errorMsg = err.response?.data?.detail || err.response?.data?.non_field_errors?.[0] || 'Failed to submit report.'
+      console.error('Report submission error:', { status: err.response?.status, detail: errorMsg, fullError: err })
+      toast.error(errorMsg)
+    }
     finally { setReportLoading(false) }
   }
 
