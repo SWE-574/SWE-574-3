@@ -21,23 +21,47 @@ const navItems: Array<{ tab: AdminTab; label: string; icon: React.ReactNode }> =
   { tab: 'audit', label: 'Audit Logs', icon: <FiActivity size={20} /> },
 ]
 
+const MOBILE_BREAKPOINT = 768
+
+const getSavedCollapsed = (): boolean => {
+  if (typeof window === 'undefined') return false
+  const saved = window.localStorage.getItem('adminSidebarCollapsed')
+  if (!saved) return false
+
+  try {
+    return Boolean(JSON.parse(saved))
+  } catch {
+    return false
+  }
+}
+
+const getIsMobileViewport = (): boolean => {
+  if (typeof window === 'undefined') return false
+  return window.innerWidth < MOBILE_BREAKPOINT
+}
+
 const AdminSidebar = ({ activeTab, onTabChange }: AdminSidebarProps) => {
-  const [isCollapsed, setIsCollapsed] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => getIsMobileViewport())
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (getIsMobileViewport()) return true
+    return getSavedCollapsed()
+  })
 
   useEffect(() => {
-    // Check if mobile on mount and listen for resize
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
+    // Keep viewport state in sync and enforce mobile-first collapsed behavior.
+    const checkMobile = () => {
+      const mobile = getIsMobileViewport()
+      setIsMobile(mobile)
+
+      if (mobile) {
+        setIsCollapsed(true)
+      } else {
+        setIsCollapsed(getSavedCollapsed())
+      }
+    }
 
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
-  }, [])
-
-  useEffect(() => {
-    // Load collapse state from localStorage
-    const saved = window.localStorage.getItem('adminSidebarCollapsed')
-    if (saved) setIsCollapsed(JSON.parse(saved))
   }, [])
 
   const handleToggleCollapse = () => {

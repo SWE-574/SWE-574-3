@@ -69,7 +69,6 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard')
 
   const checkAuth = useAuthStore((s) => s.checkAuth)
-  const refreshUser = useAuthStore((s) => s.refreshUser)
   const logout = useAuthStore((s) => s.logout)
 
   const [dashboardLoading, setDashboardLoading] = useState(false)
@@ -116,8 +115,8 @@ const AdminDashboard = () => {
   const [authIssue, setAuthIssue] = useState<string | null>(null)
 
   useEffect(() => {
-    checkAuth(true).then(() => refreshUser())
-  }, [checkAuth, refreshUser])
+    checkAuth(true)
+  }, [checkAuth])
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(userSearch.trim()), 350)
@@ -1328,7 +1327,18 @@ const AdminDashboard = () => {
                       : null)
                   const serviceHours = openReport.reported_service_hours
                     ?? (openReportService?.duration != null ? Number(openReportService.duration) : null)
-                  const hasForumInfo = !!(openReport.reported_forum_topic_title || openReport.reported_forum_post_excerpt)
+                  const hasForumInfo = !!(
+                    openReport.reported_forum_topic
+                    || openReport.reported_forum_topic_title
+                    || openReport.reported_forum_post
+                    || openReport.reported_forum_post_excerpt
+                  )
+                  const isForumReport = !!(openReport.reported_forum_topic || openReport.reported_forum_post)
+                  const forumTopicPath = openReport.reported_forum_topic ? `/forum/topic/${openReport.reported_forum_topic}` : null
+                  const forumReplyPath =
+                    openReport.reported_forum_topic && openReport.reported_forum_post
+                      ? `/forum/topic/${openReport.reported_forum_topic}#post-${openReport.reported_forum_post}`
+                      : null
                   const hasHandshakeInfo = !!(openReport.related_handshake || openReport.handshake_status || openReport.handshake_scheduled_time || openReport.handshake_hours != null)
                   const notesAndActionsCard = (
                     <Box p={3} border={`1px solid ${GRAY200}`} borderRadius="10px" bg={GRAY50} flex={1}>
@@ -1355,17 +1365,19 @@ const AdminDashboard = () => {
                       )}
 
                       <Flex direction="column" gap={2} mt={3}>
-                        <Button
-                          bg={GREEN_LT}
-                          color={GREEN}
-                          border={`1px solid ${GREEN}`}
-                          _hover={{ bg: '#E8F5EE' }}
-                          disabled={openReportActionLoading || !openReport.related_handshake}
-                          onClick={() => resolveOpenReport('confirm_no_show')}
-                          borderRadius="8px"
-                        >
-                          Confirm no-show
-                        </Button>
+                        {!isForumReport && (
+                          <Button
+                            bg={GREEN_LT}
+                            color={GREEN}
+                            border={`1px solid ${GREEN}`}
+                            _hover={{ bg: '#E8F5EE' }}
+                            disabled={openReportActionLoading || !openReport.related_handshake}
+                            onClick={() => resolveOpenReport('confirm_no_show')}
+                            borderRadius="8px"
+                          >
+                            Confirm no-show
+                          </Button>
+                        )}
                         <Button
                           bg={BLUE_LT}
                           color={BLUE}
@@ -1377,18 +1389,20 @@ const AdminDashboard = () => {
                         >
                           Dismiss report
                         </Button>
-                        <Button
-                          bg={AMBER_LT}
-                          color={AMBER}
-                          border={`1px solid ${AMBER}`}
-                          _hover={{ bg: '#FEF3C7' }}
-                          disabled={openReportActionLoading || !openReport.related_handshake}
-                          onClick={pauseOpenReport}
-                          borderRadius="8px"
-                        >
-                          Pause handshake
-                        </Button>
-                        {!openReport.related_handshake && (
+                        {!isForumReport && (
+                          <Button
+                            bg={AMBER_LT}
+                            color={AMBER}
+                            border={`1px solid ${AMBER}`}
+                            _hover={{ bg: '#FEF3C7' }}
+                            disabled={openReportActionLoading || !openReport.related_handshake}
+                            onClick={pauseOpenReport}
+                            borderRadius="8px"
+                          >
+                            Pause handshake
+                          </Button>
+                        )}
+                        {!isForumReport && !openReport.related_handshake && (
                           <Text fontSize="12px" color={GRAY500}>
                             No linked handshake. Confirm no-show and pause actions are disabled.
                           </Text>
@@ -1513,11 +1527,49 @@ const AdminDashboard = () => {
                       )}
 
                       {hasForumInfo && (
-                        <Box p={3} border={`1px solid ${GRAY200}`} borderRadius="10px" bg={GRAY50} mt={3}>
-                          <Text fontSize="xs" color={GRAY500} mb={1}>Forum context</Text>
-                          {openReport.reported_forum_topic_title && <Text fontSize="sm" color={GRAY700}>Topic: {openReport.reported_forum_topic_title}</Text>}
-                          {openReport.reported_forum_post_excerpt && <Text fontSize="sm" color={GRAY700}>Post excerpt: {openReport.reported_forum_post_excerpt}</Text>}
-                        </Box>
+                        <Flex mt={3} gap={3} direction={{ base: 'column', md: 'row' }}>
+                          <Box p={3} border={`1px solid ${GRAY200}`} borderRadius="10px" bg={GRAY50} flex={1}>
+                            <Flex align="center" justify="space-between" gap={2} wrap="wrap" mb={2}>
+                              <Text fontSize="xs" color={GRAY500}>Forum context</Text>
+                              <Flex gap={2} wrap="wrap">
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  borderRadius="8px"
+                                  disabled={!forumTopicPath}
+                                  onClick={() => forumTopicPath && navigate(forumTopicPath)}
+                                >
+                                  View reported forum
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  borderRadius="8px"
+                                  disabled={!forumReplyPath}
+                                  onClick={() => forumReplyPath && navigate(forumReplyPath)}
+                                >
+                                  View reported reply
+                                </Button>
+                              </Flex>
+                            </Flex>
+
+                            <Box p={2} border={`1px solid ${GRAY200}`} borderRadius="8px" bg={WHITE} mb={2}>
+                              <Text fontSize="xs" color={GRAY500}>Topic</Text>
+                              <Text fontSize="sm" color={GRAY700} fontWeight={600}>
+                                {openReport.reported_forum_topic_title || 'Topic unavailable'}
+                              </Text>
+                            </Box>
+
+                            <Box p={2} border={`1px solid ${GRAY200}`} borderRadius="8px" bg={WHITE}>
+                              <Text fontSize="xs" color={GRAY500}>Reply</Text>
+                              <Text fontSize="sm" color={GRAY700}>
+                                {openReport.reported_forum_post_excerpt || '-'}
+                              </Text>
+                            </Box>
+                          </Box>
+
+                          {notesAndActionsCard}
+                        </Flex>
                       )}
 
                       {hasHandshakeInfo && (
@@ -1531,7 +1583,7 @@ const AdminDashboard = () => {
                         </Box>
                       )}
 
-                      {!hasServiceInfo && (
+                      {!hasServiceInfo && !hasForumInfo && (
                         <Box mt={4}>
                           {notesAndActionsCard}
                         </Box>

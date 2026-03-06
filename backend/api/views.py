@@ -1022,6 +1022,13 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
     parser_classes = [JSONParser, FormParser, MultiPartParser]
     throttle_classes = [SensitiveOperationThrottle]  # Profile updates are sensitive operations
 
+    def get_throttles(self):
+        # Profile reads (`GET /users/me/`) are frequent in the SPA auth flow.
+        # Keep strict throttling for writes, but allow normal authenticated read rate.
+        if self.request.method in permissions.SAFE_METHODS:
+            return [UserRateThrottle()]
+        return [SensitiveOperationThrottle()]
+
     def get_queryset(self):
         badge_prefetch = Prefetch(
             'badges',
