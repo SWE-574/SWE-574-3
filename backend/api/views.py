@@ -3919,16 +3919,21 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         # Only admins can access
         if self.request.user.role != 'admin':
             return Report.objects.none()
-        
-        # Filter by status if provided in query params
-        status_filter = self.request.query_params.get('status', 'pending')
+
         queryset = Report.objects.all()
-        
+
+        # For retrieve (single object by PK), skip the status filter so resolved/dismissed
+        # reports can still be fetched for the detail panel.
+        if self.action == 'retrieve':
+            return queryset.order_by('-created_at')
+
+        # For list, filter by status (default: pending)
+        status_filter = self.request.query_params.get('status', 'pending')
         if status_filter:
             queryset = queryset.filter(status=status_filter)
         else:
             queryset = queryset.filter(status='pending')
-        
+
         return queryset.order_by('-created_at')
 
     @action(detail=True, methods=['post'], url_path='resolve', throttle_classes=[ConfirmationThrottle])
@@ -4341,6 +4346,13 @@ class AdminUserViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_404_NOT_FOUND
             )
 
+        if user == request.user:
+            return create_error_response(
+                'You cannot warn your own account.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+
         create_notification(
             user=user,
             notification_type='admin_warning',
@@ -4372,6 +4384,13 @@ class AdminUserViewSet(viewsets.ViewSet):
                 'User not found',
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        if user == request.user:
+            return create_error_response(
+                'You cannot suspend your own account.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
             )
 
         user.is_active = False

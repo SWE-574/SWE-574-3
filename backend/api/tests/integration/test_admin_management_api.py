@@ -162,6 +162,81 @@ class TestAdminManagementApi:
         assert all(item['action_type'] == 'resolve_report' for item in filtered_items)
         assert all(item['target_entity'] == 'report' for item in filtered_items)
 
+    def test_admin_cannot_suspend_themselves(self):
+        """An admin cannot suspend their own account via the ban endpoint."""
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.post(f'/api/admin/users/{admin.id}/ban/', {}, format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        admin.refresh_from_db()
+        assert admin.is_active is True  # account must remain active
+
+    def test_admin_cannot_warn_themselves(self):
+        """An admin cannot issue a warning to their own account."""
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.post(
+            f'/api/admin/users/{admin.id}/warn/',
+            {'message': 'Self-warning attempt'},
+            format='json',
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_admin_can_still_suspend_other_users(self):
+        """Regression: the self-suspend guard must not break normal ban flow."""
+        admin = AdminUserFactory()
+        target = UserFactory(is_active=True)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.post(f'/api/admin/users/{target.id}/ban/', {}, format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        target.refresh_from_db()
+        assert target.is_active is False
+
+    def test_resolved_report_is_retrievable_via_detail_endpoint(self):
+        """Resolved reports must return 200 on the detail endpoint (not 404)."""
+        admin = AdminUserFactory()
+        reporter = UserFactory()
+        reported = UserFactory()
+        report = Report.objects.create(
+            reporter=reporter,
+            reported_user=reported,
+            type='spam',
+            description='Spam listing.',
+            status='resolved',
+        )
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = client.get(f'/api/admin/reports/{report.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['id'] == str(report.id)
+        assert response.data['status'] == 'resolved'
+
+    def test_dismissed_report_is_retrievable_via_detail_endpoint(self):
+        """Dismissed reports must also return 200 on the detail endpoint."""
+        admin = AdminUserFactory()
+        reporter = UserFactory()
+        reported = UserFactory()
+        report = Report.objects.create(
+            reporter=reporter,
+            reported_user=reported,
+            type='harassment',
+            description='Harassment claim.',
+            status='dismissed',
+        )
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = client.get(f'/api/admin/reports/{report.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['status'] == 'dismissed'
+
     def test_admin_can_list_retrieve_and_pause_reports(self):
         admin = AdminUserFactory()
         provider = UserFactory()
