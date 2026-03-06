@@ -64,12 +64,35 @@ jobs:
             -p 9000:9000 -p 9001:9001 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin123 \
+            --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1" \
+            --health-interval 5s \
+            --health-timeout 3s \
+            --health-retries 20 \
             minio/minio:latest server /data --console-address ":9001"
 
       - name: Wait for MinIO
         run: |
-          curl --fail --retry 20 --retry-delay 3 --retry-connrefused \
-            http://127.0.0.1:9000/minio/health/live
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ci_minio)
+            if [ "$STATUS" = "healthy" ]; then
+              echo "MinIO is healthy."
+              break
+            fi
+            if [ "$STATUS" = "unhealthy" ]; then
+              echo "::error::MinIO became unhealthy"
+              docker logs ci_minio
+              exit 1
+            fi
+            echo "Waiting for MinIO... status=$STATUS ($i/30)"
+            sleep 2
+          done
+
+          STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ci_minio)
+          if [ "$STATUS" != "healthy" ]; then
+            echo "::error::MinIO did not become healthy in time"
+            docker logs ci_minio
+            exit 1
+          fi
 
       - name: Pin CI environment variables
         # $GITHUB_ENV overrides act's .env injection AND any job-level env for
