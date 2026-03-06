@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 # Utility functions for TimeBank and business logic
 
 from decimal import Decimal
@@ -8,6 +10,8 @@ from django.db import transaction
 from django.db.models import F
 
 from .models import Handshake, Notification, Service, User, TransactionHistory
+
+logger = logging.getLogger(__name__)
 from .cache_utils import invalidate_conversations, invalidate_transactions
 
 
@@ -201,8 +205,8 @@ def create_notification(
     handshake: Handshake | None = None,
     service: Service | None = None,
 ) -> Notification:
-    """Persist a notification and return the instance."""
-    return Notification.objects.create(
+    """Persist a notification and broadcast it via WebSocket."""
+    notification = Notification.objects.create(
         user=user,
         type=notification_type,
         title=title,
@@ -210,4 +214,27 @@ def create_notification(
         related_handshake=handshake,
         related_service=service
     )
+    _broadcast_notification(notification)
+    return notification
+
+
+def _broadcast_notification(notification: Notification) -> None:
+    """Push a notification to the user's WebSocket group."""
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        from .serializers import NotificationSerializer
+
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        async_to_sync(channel_layer.group_send)(
+            f'notifications_{notification.user_id}',
+            {
+                'type': 'send_notification',
+                'notification': NotificationSerializer(notification).data,
+            },
+        )
+    except Exception:
+        logger.exception('Failed to broadcast notification %s', notification.id)
 

@@ -22,6 +22,7 @@ import {
   WHITE,
 } from '@/theme/tokens'
 import { Logo } from '@/components/Logo'
+import { NotificationDropdown } from '@/components/NotificationDropdown'
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 function initials(user: { first_name?: string; last_name?: string; email?: string } | null) {
@@ -243,15 +244,8 @@ const Navbar = () => {
               </Flex>
 
               {/* Notifications */}
-              <Box
-                as="button" onClick={() => navigate('/notifications')}
-                p="8px" borderRadius="10px" cursor="pointer"
-                display={{ base: 'none', sm: 'flex' }} alignItems="center"
-                style={{ color: GRAY500, transition: 'background 0.15s' }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GRAY100 }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
-              >
-                <FiBell size={18} />
+              <Box display={{ base: 'none', sm: 'flex' }} alignItems="center">
+                <NotificationDropdown />
               </Box>
 
               {/* User dropdown — desktop */}

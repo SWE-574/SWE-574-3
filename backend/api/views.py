@@ -2752,15 +2752,6 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         handshake.status = 'denied'
         handshake.save()
 
-        create_notification(
-            user=handshake.requester,
-            notification_type='handshake_denied',
-            title='Handshake Denied',
-            message=f"Your interest in '{handshake.service.title}' was not accepted.",
-            handshake=handshake,
-            service=handshake.service
-        )
-
         serializer = self.get_serializer(handshake)
         return Response(serializer.data)
 
@@ -2789,15 +2780,6 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             # If the service was Agreed, reopen it now that the accepted slot is freed.
             if svc.status == 'Agreed':
                 Service.objects.filter(pk=svc.pk).update(status='Active')
-
-            create_notification(
-                user=handshake.requester,
-                notification_type='handshake_cancelled',
-                title='Service Cancelled',
-                message=f"The service '{svc.title}' has been cancelled.",
-                handshake=handshake,
-                service=svc
-            )
 
         serializer = self.get_serializer(handshake)
         return Response(serializer.data)
@@ -3547,16 +3529,6 @@ class ChatViewSet(viewsets.ViewSet):
         invalidate_conversations(str(handshake.requester.id))
         invalidate_conversations(str(handshake.service.user.id))
 
-        # Notify other user
-        other_user = handshake.requester if handshake.service.user == user else handshake.service.user
-        create_notification(
-            user=other_user,
-            notification_type='chat_message',
-            title='New Message',
-            message=f"New message from {user.first_name}",
-            handshake=handshake
-        )
-
         # Send message via WebSocket
         from channels.layers import get_channel_layer
         from asgiref.sync import async_to_sync
@@ -3638,6 +3610,19 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     def mark_all_read(self, request):
         Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
         return Response({'status': 'success'})
+
+    @action(detail=True, methods=['patch'], url_path='read')
+    def mark_read(self, request, pk=None):
+        notification = self.get_object()
+        notification.is_read = True
+        notification.save(update_fields=['is_read'])
+        serializer = self.get_serializer(notification)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='unread-count')
+    def unread_count(self, request):
+        count = Notification.objects.filter(user=request.user, is_read=False).count()
+        return Response({'count': count})
 
 class ReputationViewSet(viewsets.ModelViewSet):
     """

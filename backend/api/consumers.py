@@ -8,7 +8,6 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 import bleach
 from .models import Handshake, ChatMessage, ChatRoom, PublicChatMessage, ServiceGroupChatMessage
 from .serializers import ChatMessageSerializer
-from .utils import create_notification
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -97,9 +96,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     # Save message to database
                     message = await self.save_message(self.handshake_id, self.user.id, body)
                     
-                    # Create notification for other user
-                    await self.create_notification_for_message(self.handshake_id, self.user.id)
-                    
                     # Send message to room group
                     await self.channel_layer.group_send(
                         self.room_group_name,
@@ -168,22 +164,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def serialize_message(self, message):
         serializer = ChatMessageSerializer(message)
         return serializer.data
-    
-    @database_sync_to_async
-    def create_notification_for_message(self, handshake_id, sender_id):
-        try:
-            handshake = Handshake.objects.get(id=handshake_id)
-            sender = User.objects.get(id=sender_id)
-            other_user = handshake.requester if handshake.service.user == sender else handshake.service.user
-            create_notification(
-                user=other_user,
-                notification_type='chat_message',
-                title='New Message',
-                message=f"New message from {sender.first_name}",
-                handshake=handshake
-            )
-        except Exception:
-            pass
 
 
 class PublicChatConsumer(AsyncWebsocketConsumer):
@@ -451,4 +431,48 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
             'body': message.body,
             'created_at': message.created_at.isoformat(),
         }
+
+
+class NotificationConsumer(AsyncWebsocketConsumer):
+    """Server-push only consumer for real-time notification delivery."""
+
+    async def connect(self):
+        token = _get_token_from_scope(self.scope)
+        if not token:
+            await self.close(code=4001)
+            return
+
+        try:
+            user = await self._authenticate(token)
+            if not user:
+                await self.close(code=4003)
+                return
+            self.user = user
+            self.group_name = f'notifications_{user.id}'
+        except Exception:
+            await self.close(code=4003)
+            return
+
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        if hasattr(self, 'group_name'):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def send_notification(self, event):
+        """Handler for notification group messages — forwards to WebSocket client."""
+        await self.send(text_data=json.dumps({
+            'type': 'notification',
+            'notification': event['notification'],
+        }))
+
+    @database_sync_to_async
+    def _authenticate(self, token):
+        try:
+            from rest_framework_simplejwt.tokens import AccessToken
+            access_token = AccessToken(token)
+            return User.objects.get(id=access_token['user_id'], is_active=True)
+        except Exception:
+            return None
 
