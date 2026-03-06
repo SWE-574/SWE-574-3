@@ -145,7 +145,12 @@ def metrics_endpoint(request):
     from api.models import User, Service, Handshake, TransactionHistory
     from django.db.models import Count, Q
     
-    if not request.user.is_authenticated or request.user.role != 'admin':
+    is_admin = (
+        getattr(request.user, 'role', None) == 'admin'
+        or bool(getattr(request.user, 'is_staff', False))
+    )
+
+    if not request.user.is_authenticated or not is_admin:
         return JsonResponse(
             {'error': 'Unauthorized - Admin access required'},
             status=403

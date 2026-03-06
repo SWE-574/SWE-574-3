@@ -5,6 +5,8 @@ import { toast } from 'sonner'
 import { adminAPI, type AuditTargetFilter, type CommentStatusFilter, type ReportResolveAction, type ReportStatusFilter } from '@/services/adminAPI'
 import { forumAPI } from '@/services/forumAPI'
 import AdminReauthBanner from '@/components/AdminReauthBanner'
+import AdminLayout from '@/components/AdminLayout'
+import AdminActivityFeed from '@/components/AdminActivityFeed'
 import { getErrorMessage } from '@/services/api'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, ForumTopic, PaginatedResponse } from '@/types'
@@ -376,40 +378,20 @@ const AdminDashboard = () => {
   )
 
   return (
-    <Box p={{ base: 4, md: 8 }}>
-      <Flex justify="space-between" align="center" mb={6} wrap="wrap" gap={3}>
-        <Box>
+    <AdminLayout activeTab={activeTab} onTabChange={setActiveTab}>
+      <Box p={{ base: 4, md: 8 }}>
+        <Box mb={6}>
           <Text fontSize="2xl" fontWeight={800}>Admin Panel</Text>
           <Text color="gray.600" fontSize="sm">Backoffice tools for platform moderation and user management.</Text>
         </Box>
 
-        <Flex gap={2}>
-          {(['dashboard', 'users', 'reports', 'comments', 'moderation', 'audit'] as AdminTab[]).map((tab) => (
-            <Box
-              as="button"
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              px={3}
-              py={2}
-              borderRadius="10px"
-              fontWeight={600}
-              textTransform="capitalize"
-              bg={activeTab === tab ? '#2D5C4E' : '#F1F5F9'}
-              color={activeTab === tab ? 'white' : '#334155'}
-            >
-              {tab}
-            </Box>
-          ))}
-        </Flex>
-      </Flex>
-
-      {authIssue && (
-        <AdminReauthBanner
-          message={authIssue}
-          onReLogin={handleReLogin}
-          onDismiss={() => setAuthIssue(null)}
-        />
-      )}
+        {authIssue && (
+          <AdminReauthBanner
+            message={authIssue}
+            onReLogin={handleReLogin}
+            onDismiss={() => setAuthIssue(null)}
+          />
+        )}
 
       {activeTab === 'dashboard' && (
         <Box>
@@ -465,7 +447,7 @@ const AdminDashboard = () => {
                                 <Text maxW="260px" whiteSpace="normal">{report.description}</Text>
                               </Table.Cell>
                               <Table.Cell>
-                                <Button size="xs" variant="subtle" colorPalette="blue" onClick={() => navigate(`/report-detail/${report.id}`)}>
+                                <Button size="xs" variant="subtle" colorPalette="blue" borderRadius="8px" onClick={() => navigate(`/report-detail/${report.id}`)}>
                                   Review
                                 </Button>
                               </Table.Cell>
@@ -505,7 +487,7 @@ const AdminDashboard = () => {
                               <Table.Cell>{comment.user_name}</Table.Cell>
                               <Table.Cell>{comment.service_title}</Table.Cell>
                               <Table.Cell>
-                                <Button size="xs" colorPalette="green" variant="subtle" onClick={() => setActiveTab('comments')}>
+                                <Button size="xs" colorPalette="green" variant="subtle" borderRadius="8px" onClick={() => setActiveTab('comments')}>
                                   Restore from queue
                                 </Button>
                               </Table.Cell>
@@ -517,6 +499,14 @@ const AdminDashboard = () => {
                   )}
                 </Box>
               </Flex>
+
+              <Box mt={6} border="1px solid #CFE3DA" borderRadius="12px" bg="#F8FCFA" p={4}>
+                <Flex align="center" justify="space-between" mb={3}>
+                  <Text fontWeight={700} color="#2D5C4E">Recent Activity</Text>
+                  <Button size="xs" variant="outline" onClick={() => setActiveTab('audit')}>View all logs</Button>
+                </Flex>
+                <AdminActivityFeed limit={10} />
+              </Box>
             </>
           )}
         </Box>
@@ -583,11 +573,11 @@ const AdminDashboard = () => {
                       <Table.Cell>{user.karma_score}</Table.Cell>
                       <Table.Cell>
                         <Flex gap={2} wrap="wrap">
-                          <Button size="xs" colorPalette="blue" variant="subtle" onClick={() => handleWarnUser(user)}>Warn</Button>
-                          <Button size="xs" colorPalette={user.is_active ? 'red' : 'green'} variant="subtle" onClick={() => handleBanToggle(user)}>
+                          <Button size="xs" colorPalette="blue" variant="subtle" borderRadius="8px" onClick={() => handleWarnUser(user)}>Warn</Button>
+                          <Button size="xs" colorPalette={user.is_active ? 'red' : 'green'} variant="subtle" borderRadius="8px" onClick={() => handleBanToggle(user)}>
                             {user.is_active ? 'Suspend' : 'Activate'}
                           </Button>
-                          <Button size="xs" colorPalette="orange" variant="subtle" onClick={() => handleAdjustKarma(user)}>Adjust karma</Button>
+                          <Button size="xs" colorPalette="orange" variant="subtle" borderRadius="8px" onClick={() => handleAdjustKarma(user)}>Adjust karma</Button>
                         </Flex>
                       </Table.Cell>
                     </Table.Row>
@@ -677,9 +667,9 @@ const AdminDashboard = () => {
                       </Table.Cell>
                       <Table.Cell>
                         <Flex gap={2} wrap="wrap">
-                          <Button size="xs" colorPalette="green" variant="subtle" onClick={() => handleResolveReport(report, 'confirm_no_show')}>Confirm</Button>
-                          <Button size="xs" colorPalette="blue" variant="subtle" onClick={() => handleResolveReport(report, 'dismiss')}>Dismiss</Button>
-                          <Button size="xs" colorPalette="orange" variant="subtle" onClick={() => handlePauseReport(report)}>Pause</Button>
+                          <Button size="xs" colorPalette="green" variant="subtle" borderRadius="8px" onClick={() => handleResolveReport(report, 'confirm_no_show')}>Confirm</Button>
+                          <Button size="xs" colorPalette="blue" variant="subtle" borderRadius="8px" onClick={() => handleResolveReport(report, 'dismiss')}>Dismiss</Button>
+                          <Button size="xs" colorPalette="orange" variant="subtle" borderRadius="8px" onClick={() => handlePauseReport(report)}>Pause</Button>
                         </Flex>
                       </Table.Cell>
                     </Table.Row>
@@ -758,11 +748,11 @@ const AdminDashboard = () => {
                       </Table.Cell>
                       <Table.Cell>
                         {comment.is_deleted ? (
-                          <Button size="xs" colorPalette="green" variant="subtle" onClick={() => handleRestoreComment(comment)}>
+                          <Button size="xs" colorPalette="green" variant="subtle" borderRadius="8px" onClick={() => handleRestoreComment(comment)}>
                             Restore
                           </Button>
                         ) : (
-                          <Button size="xs" colorPalette="red" variant="subtle" onClick={() => handleRemoveComment(comment)}>
+                          <Button size="xs" colorPalette="red" variant="subtle" borderRadius="8px" onClick={() => handleRemoveComment(comment)}>
                             Remove
                           </Button>
                         )}
@@ -841,10 +831,10 @@ const AdminDashboard = () => {
                       </Table.Cell>
                       <Table.Cell>
                         <Flex gap={2}>
-                          <Button size="xs" colorPalette={topic.is_locked ? 'blue' : 'red'} variant="subtle" onClick={() => handleLockTopic(topic.id)}>
+                          <Button size="xs" colorPalette={topic.is_locked ? 'blue' : 'red'} variant="subtle" borderRadius="8px" onClick={() => handleLockTopic(topic.id)}>
                             {topic.is_locked ? 'Unlock' : 'Lock'}
                           </Button>
-                          <Button size="xs" colorPalette={topic.is_pinned ? 'green' : 'yellow'} variant="subtle" onClick={() => handlePinTopic(topic.id)}>
+                          <Button size="xs" colorPalette={topic.is_pinned ? 'green' : 'yellow'} variant="subtle" borderRadius="8px" onClick={() => handlePinTopic(topic.id)}>
                             {topic.is_pinned ? 'Unpin' : 'Pin'}
                           </Button>
                         </Flex>
@@ -944,6 +934,7 @@ const AdminDashboard = () => {
         </Box>
       )}
     </Box>
+    </AdminLayout>
   )
 }
 
