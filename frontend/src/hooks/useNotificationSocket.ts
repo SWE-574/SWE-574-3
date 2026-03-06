@@ -19,6 +19,7 @@ export function useNotificationSocket() {
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const attemptsRef = useRef(0)
   const enabledRef = useRef(false)
+  const connectRef = useRef<() => void>()
 
   const connect = useCallback(() => {
     if (!enabledRef.current) return
@@ -57,7 +58,7 @@ export function useNotificationSocket() {
         if (attemptsRef.current < MAX_RECONNECT) {
           const delay = Math.min(1000 * 2 ** attemptsRef.current, 30_000)
           attemptsRef.current += 1
-          reconnectRef.current = setTimeout(connect, delay)
+          reconnectRef.current = setTimeout(() => connectRef.current?.(), delay)
         }
       }
 
@@ -68,6 +69,8 @@ export function useNotificationSocket() {
       // connection failed — let reconnect handle it
     }
   }, [addNotification, fetchUnreadCount])
+
+  connectRef.current = connect
 
   const disconnect = useCallback(() => {
     if (reconnectRef.current) {

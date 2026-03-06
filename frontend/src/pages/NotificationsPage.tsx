@@ -6,7 +6,7 @@ import { useNotificationStore } from '@/store/useNotificationStore'
 import { NotificationItem } from '@/components/NotificationItem'
 import type { Notification } from '@/types'
 import {
-  GRAY100, GRAY200, GRAY500, GRAY800, GRAY900,
+  GRAY100, GRAY200, GRAY500, GRAY900,
   GREEN, GREEN_LT, WHITE,
 } from '@/theme/tokens'
 
