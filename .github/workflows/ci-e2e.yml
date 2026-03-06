@@ -39,6 +39,7 @@ jobs:
           # Ensure DB and Redis point at the docker-compose service names
           sed -i 's|DB_HOST=.*|DB_HOST=db|'         .env || true
           sed -i 's|REDIS_HOST=.*|REDIS_HOST=redis|' .env || true
+          sed -i 's|MINIO_ENDPOINT=.*|MINIO_ENDPOINT=minio:9000|' .env || true
           cat >> .env <<'EOF'
           SECRET_KEY=ci-e2e-secret-key-not-used-in-production
           DEBUG=True
@@ -84,6 +85,11 @@ jobs:
         run: |
           curl --fail --retry 10 --retry-delay 3 --retry-connrefused \
             http://localhost/api/health/
+
+      - name: Smoke-test MinIO media proxy
+        run: |
+          curl --fail --retry 10 --retry-delay 3 --retry-connrefused \
+            http://localhost/hive-media/
 
       # ── 6. Seed demo data ─────────────────────────────────────────────────
       - name: Seed demo data
@@ -181,6 +187,7 @@ jobs:
           docker compose logs --no-color --tail=200 backend  2>&1 | head -400
           docker compose logs --no-color --tail=100 frontend 2>&1 | head -200
           docker compose logs --no-color --tail=100 nginx    2>&1 | head -200
+          docker compose logs --no-color --tail=100 minio    2>&1 | head -200
 
       # ── 19. Tear down ─────────────────────────────────────────────────────
       - name: Tear down stack

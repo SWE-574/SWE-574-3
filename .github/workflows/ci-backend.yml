@@ -45,6 +45,11 @@ jobs:
       DB_PORT: 5432
       REDIS_HOST: 127.0.0.1
       REDIS_PORT: 6379
+      MINIO_ENDPOINT: 127.0.0.1:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_BUCKET_NAME: hive-media
+      MINIO_USE_SSL: "false"
       SECRET_KEY: ci-secret-key-not-used-in-production
       DEBUG: "True"
       ALLOWED_HOSTS: localhost,127.0.0.1
@@ -52,6 +57,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name ci_minio \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin123 \
+            minio/minio:latest server /data --console-address ":9001"
+
+      - name: Wait for MinIO
+        run: |
+          curl --fail --retry 20 --retry-delay 3 --retry-connrefused \
+            http://127.0.0.1:9000/minio/health/live
 
       - name: Pin CI environment variables
         # $GITHUB_ENV overrides act's .env injection AND any job-level env for
@@ -65,6 +83,11 @@ jobs:
             echo "DB_PORT=5432"
             echo "REDIS_HOST=127.0.0.1"
             echo "REDIS_PORT=6379"
+            echo "MINIO_ENDPOINT=127.0.0.1:9000"
+            echo "MINIO_ACCESS_KEY=minioadmin"
+            echo "MINIO_SECRET_KEY=minioadmin123"
+            echo "MINIO_BUCKET_NAME=hive-media"
+            echo "MINIO_USE_SSL=false"
             echo "SECRET_KEY=ci-secret-key-not-used-in-production"
             echo "DEBUG=True"
             echo "ALLOWED_HOSTS=localhost,127.0.0.1"
@@ -74,7 +97,7 @@ jobs:
       - name: Validate required env vars
         run: |
           missing=0
-          for var in DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT REDIS_HOST REDIS_PORT SECRET_KEY DJANGO_SETTINGS_MODULE; do
+          for var in DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT REDIS_HOST REDIS_PORT MINIO_ENDPOINT MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_BUCKET_NAME MINIO_USE_SSL SECRET_KEY DJANGO_SETTINGS_MODULE; do
             val=$(printenv "$var" || true)
             if [ -z "$val" ]; then
               echo "::error::Required env var $var is not set"
@@ -144,3 +167,7 @@ jobs:
         with:
           name: backend-coverage
           path: backend/tests/reports/coverage/
+
+      - name: Stop MinIO
+        if: always()
+        run: docker rm -f ci_minio || true
