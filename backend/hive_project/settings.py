@@ -417,7 +417,100 @@ SPECTACULAR_SETTINGS = {
         'Tokens are issued as cookies by `POST /api/auth/login/` and `POST /api/auth/register/`:\n'
         '- **`access_token`** — short-lived (5 min), non-HttpOnly, sent automatically by the browser.\n'
         '- **`refresh_token`** — long-lived (7 days), HttpOnly, used by `POST /api/auth/refresh/`.\n\n'
-        'The Swagger UI "Authorize" button accepts the raw Bearer token for manual testing.'
+        'The Swagger UI "Authorize" button accepts the raw Bearer token for manual testing.\n\n'
+        '---\n\n'
+        '## WebSocket Endpoints\n\n'
+        'Real-time features use WebSocket connections via Django Channels.\n'
+        'WebSocket URLs are **not** prefixed with `/api/`.\n\n'
+        '### Authentication\n'
+        'All WebSocket connections require a valid JWT access token. '
+        'It can be provided in two ways (checked in order):\n'
+        '1. **Cookie** — `access_token` cookie (same-origin / browser clients).\n'
+        '2. **Query string** — `?token=<ACCESS_TOKEN>` (mobile / cross-origin clients).\n\n'
+        '### Error Close Codes\n'
+        '| Code | Meaning |\n'
+        '|------|---------|\n'
+        '| 4001 | No token provided |\n'
+        '| 4003 | Authentication failed or access denied |\n'
+        '| 4004 | Resource not found (e.g. room does not exist) |\n\n'
+        '### 1. Private Chat — `ws://<host>/ws/chat/{handshake_id}/`\n'
+        'One-to-one chat between the two parties of a handshake '
+        '(service owner and requester).\n\n'
+        '**Send (client → server):**\n'
+        '```json\n'
+        '{ "type": "chat_message", "body": "Hello!" }\n'
+        '```\n'
+        '**Receive (server → client):**\n'
+        '```json\n'
+        '{\n'
+        '  "type": "chat_message",\n'
+        '  "message": {\n'
+        '    "id": "<uuid>",\n'
+        '    "handshake": "<uuid>",\n'
+        '    "handshake_id": "<uuid>",\n'
+        '    "sender": "<uuid>",\n'
+        '    "sender_id": "<uuid>",\n'
+        '    "sender_name": "Jane Doe",\n'
+        '    "sender_avatar_url": "https://...",\n'
+        '    "body": "Hello!",\n'
+        '    "created_at": "2025-01-01T12:00:00Z"\n'
+        '  }\n'
+        '}\n'
+        '```\n'
+        '**Access:** Only the handshake requester and the service owner.\n\n'
+        '### 2. Public Chat — `ws://<host>/ws/public-chat/{room_id}/`\n'
+        'Public discussion room linked to a service. For event-type services, '
+        'access is restricted to the organizer and active participants '
+        '(handshake status: accepted, checked_in, or attended).\n\n'
+        '**Send (client → server):**\n'
+        '```json\n'
+        '{ "type": "chat_message", "body": "Hi everyone!" }\n'
+        '```\n'
+        '**Receive (server → client):**\n'
+        '```json\n'
+        '{\n'
+        '  "type": "chat_message",\n'
+        '  "message": {\n'
+        '    "id": "<uuid>",\n'
+        '    "room": "<uuid>",\n'
+        '    "sender_id": "<uuid>",\n'
+        '    "sender_name": "Jane Doe",\n'
+        '    "sender_avatar_url": "https://...",\n'
+        '    "body": "Hi everyone!",\n'
+        '    "created_at": "2025-01-01T12:00:00Z"\n'
+        '  }\n'
+        '}\n'
+        '```\n'
+        '**Access:** Any authenticated user (non-event rooms) or organizer + active participants (event rooms).\n\n'
+        '### 3. Group Chat — `ws://<host>/ws/group-chat/{service_id}/`\n'
+        'Private group chat for event or multi-participant one-time services. '
+        'Only the service owner and users with an accepted handshake may connect.\n\n'
+        '**Send (client → server):**\n'
+        '```json\n'
+        '{ "type": "chat_message", "body": "Hey team!" }\n'
+        '```\n'
+        '**Receive (server → client):**\n'
+        '```json\n'
+        '{\n'
+        '  "type": "chat_message",\n'
+        '  "message": {\n'
+        '    "id": "<uuid>",\n'
+        '    "service": "<uuid>",\n'
+        '    "sender_id": "<uuid>",\n'
+        '    "sender_name": "Jane Doe",\n'
+        '    "sender_avatar_url": "https://...",\n'
+        '    "body": "Hey team!",\n'
+        '    "created_at": "2025-01-01T12:00:00Z"\n'
+        '  }\n'
+        '}\n'
+        '```\n'
+        '**Access:** Service owner + participants with accepted handshake '
+        '(events also allow checked_in / attended).\n\n'
+        '### Error Frame\n'
+        'If the server cannot process a message, it sends:\n'
+        '```json\n'
+        '{ "type": "error", "message": "An error occurred while processing your message" }\n'
+        '```\n'
     ),
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
@@ -425,6 +518,217 @@ SPECTACULAR_SETTINGS = {
     'SCHEMA_PATH_PREFIX': '/api/',
     # Register the cookie auth scheme alongside the default Bearer scheme
     'SECURITY': [{'cookieAuth': []}, {'jwtAuth': []}],
+    # Document WebSocket endpoints as x-webhooks in the generated schema
+    'APPEND_PATHS': {
+        '/ws/chat/{handshake_id}/': {
+            'get': {
+                'operationId': 'ws_private_chat',
+                'tags': ['WebSocket'],
+                'summary': 'Private Chat WebSocket',
+                'description': (
+                    'Opens a WebSocket connection for one-to-one chat between '
+                    'handshake parties.\n\n'
+                    '**Auth:** JWT via `access_token` cookie or `?token=<JWT>` query param.\n\n'
+                    '**Send:** `{ "type": "chat_message", "body": "<text>" }`\n\n'
+                    '**Receive:** `{ "type": "chat_message", "message": { ... } }`'
+                ),
+                'parameters': [
+                    {
+                        'name': 'handshake_id',
+                        'in': 'path',
+                        'required': True,
+                        'schema': {'type': 'string', 'format': 'uuid'},
+                        'description': 'UUID of the handshake whose chat to join.',
+                    },
+                    {
+                        'name': 'token',
+                        'in': 'query',
+                        'required': False,
+                        'schema': {'type': 'string'},
+                        'description': 'JWT access token (alternative to access_token cookie). Used by mobile clients.',
+                    },
+                ],
+                'responses': {
+                    '101': {
+                        'description': 'WebSocket upgrade — Switching Protocols',
+                        'content': {
+                            'application/json': {
+                                'schema': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'type': {'type': 'string', 'enum': ['chat_message', 'error']},
+                                        'message': {
+                                            'oneOf': [
+                                                {
+                                                    'type': 'object',
+                                                    'description': 'Chat message payload',
+                                                    'properties': {
+                                                        'id': {'type': 'string', 'format': 'uuid'},
+                                                        'handshake': {'type': 'string', 'format': 'uuid'},
+                                                        'handshake_id': {'type': 'string', 'format': 'uuid'},
+                                                        'sender': {'type': 'string', 'format': 'uuid'},
+                                                        'sender_id': {'type': 'string', 'format': 'uuid'},
+                                                        'sender_name': {'type': 'string'},
+                                                        'sender_avatar_url': {'type': 'string', 'nullable': True},
+                                                        'body': {'type': 'string', 'maxLength': 5000},
+                                                        'created_at': {'type': 'string', 'format': 'date-time'},
+                                                    },
+                                                },
+                                                {
+                                                    'type': 'string',
+                                                    'description': 'Error description (when type=error)',
+                                                },
+                                            ],
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '/ws/public-chat/{room_id}/': {
+            'get': {
+                'operationId': 'ws_public_chat',
+                'tags': ['WebSocket'],
+                'summary': 'Public Chat WebSocket',
+                'description': (
+                    'Opens a WebSocket connection for a public chat room '
+                    '(service discussion lobby).\n\n'
+                    '**Auth:** JWT via `access_token` cookie or `?token=<JWT>` query param.\n\n'
+                    '**Access:** Any authenticated user for non-event rooms. '
+                    'For event rooms: organizer + active participants only.\n\n'
+                    '**Send:** `{ "type": "chat_message", "body": "<text>" }`\n\n'
+                    '**Receive:** `{ "type": "chat_message", "message": { ... } }`'
+                ),
+                'parameters': [
+                    {
+                        'name': 'room_id',
+                        'in': 'path',
+                        'required': True,
+                        'schema': {'type': 'string', 'format': 'uuid'},
+                        'description': 'UUID of the public chat room to join.',
+                    },
+                    {
+                        'name': 'token',
+                        'in': 'query',
+                        'required': False,
+                        'schema': {'type': 'string'},
+                        'description': 'JWT access token (alternative to access_token cookie). Used by mobile clients.',
+                    },
+                ],
+                'responses': {
+                    '101': {
+                        'description': 'WebSocket upgrade — Switching Protocols',
+                        'content': {
+                            'application/json': {
+                                'schema': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'type': {'type': 'string', 'enum': ['chat_message', 'error']},
+                                        'message': {
+                                            'oneOf': [
+                                                {
+                                                    'type': 'object',
+                                                    'description': 'Chat message payload',
+                                                    'properties': {
+                                                        'id': {'type': 'string', 'format': 'uuid'},
+                                                        'room': {'type': 'string', 'format': 'uuid'},
+                                                        'sender_id': {'type': 'string', 'format': 'uuid'},
+                                                        'sender_name': {'type': 'string'},
+                                                        'sender_avatar_url': {'type': 'string', 'nullable': True},
+                                                        'body': {'type': 'string', 'maxLength': 5000},
+                                                        'created_at': {'type': 'string', 'format': 'date-time'},
+                                                    },
+                                                },
+                                                {
+                                                    'type': 'string',
+                                                    'description': 'Error description (when type=error)',
+                                                },
+                                            ],
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '/ws/group-chat/{service_id}/': {
+            'get': {
+                'operationId': 'ws_group_chat',
+                'tags': ['WebSocket'],
+                'summary': 'Group Chat WebSocket',
+                'description': (
+                    'Opens a WebSocket connection for a private group chat '
+                    '(event or multi-participant one-time service).\n\n'
+                    '**Auth:** JWT via `access_token` cookie or `?token=<JWT>` query param.\n\n'
+                    '**Access:** Service owner + users with an accepted handshake '
+                    '(events also allow checked_in / attended).\n\n'
+                    '**Send:** `{ "type": "chat_message", "body": "<text>" }`\n\n'
+                    '**Receive:** `{ "type": "chat_message", "message": { ... } }`'
+                ),
+                'parameters': [
+                    {
+                        'name': 'service_id',
+                        'in': 'path',
+                        'required': True,
+                        'schema': {'type': 'string', 'format': 'uuid'},
+                        'description': 'UUID of the service whose group chat to join.',
+                    },
+                    {
+                        'name': 'token',
+                        'in': 'query',
+                        'required': False,
+                        'schema': {'type': 'string'},
+                        'description': 'JWT access token (alternative to access_token cookie). Used by mobile clients.',
+                    },
+                ],
+                'responses': {
+                    '101': {
+                        'description': 'WebSocket upgrade — Switching Protocols',
+                        'content': {
+                            'application/json': {
+                                'schema': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'type': {'type': 'string', 'enum': ['chat_message', 'error']},
+                                        'message': {
+                                            'oneOf': [
+                                                {
+                                                    'type': 'object',
+                                                    'description': 'Chat message payload',
+                                                    'properties': {
+                                                        'id': {'type': 'string', 'format': 'uuid'},
+                                                        'service': {'type': 'string', 'format': 'uuid'},
+                                                        'sender_id': {'type': 'string', 'format': 'uuid'},
+                                                        'sender_name': {'type': 'string'},
+                                                        'sender_avatar_url': {'type': 'string', 'nullable': True},
+                                                        'body': {'type': 'string', 'maxLength': 5000},
+                                                        'created_at': {'type': 'string', 'format': 'date-time'},
+                                                    },
+                                                },
+                                                {
+                                                    'type': 'string',
+                                                    'description': 'Error description (when type=error)',
+                                                },
+                                            ],
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    # Tag descriptions for the WebSocket section
+    'TAGS': [
+        {'name': 'WebSocket', 'description': 'Real-time WebSocket endpoints (use ws:// or wss://, not HTTP).'},
+    ],
 }
 
 # Logging Configuration
