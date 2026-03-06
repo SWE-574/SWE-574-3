@@ -44,7 +44,7 @@ export default function ForumCreateTopic() {
     watch,
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { category: preselectedSlug, title: '', body: '' },
+    defaultValues: { category: '', title: '', body: '' },
   })
 
   const bodyValue = watch('body')
@@ -56,10 +56,11 @@ export default function ForumCreateTopic() {
       .then((data) => {
         const active = data.filter((c) => c.is_active)
         setCategories(active)
-        if (preselectedSlug && active.some((c) => c.slug === preselectedSlug)) {
-          setValue('category', preselectedSlug)
-        } else if (active.length > 0 && !preselectedSlug) {
-          setValue('category', active[0].slug)
+        const preselected = active.find((c) => c.slug === preselectedSlug)
+        if (preselected) {
+          setValue('category', preselected.id)
+        } else if (active.length > 0) {
+          setValue('category', active[0].id)
         }
       })
       .catch(() => {})
@@ -88,7 +89,7 @@ export default function ForumCreateTopic() {
     }
   }
 
-  const selectedCat = categories.find((c) => c.slug === watch('category'))
+  const selectedCat = categories.find((c) => c.id === watch('category'))
 
   return (
     <Box bg={GRAY50} minH="calc(100vh - 64px)" py={{ base: 4, md: 6 }} px={{ base: 3, md: 6 }}>
@@ -147,7 +148,7 @@ export default function ForumCreateTopic() {
                     _focus={{ borderColor: GREEN }}
                   >
                     {categories.map((cat) => (
-                      <option key={cat.id} value={cat.slug}>
+                      <option key={cat.id} value={cat.id}>
                         {cat.name}
                       </option>
                     ))}

@@ -466,7 +466,7 @@ function TopicListView({
                 onClick={() => onSelectTopic(t.id)}
                 transition="background 0.12s" textAlign="left" cursor="pointer"
               >
-                <UserAvatar name={t.author_name} size={32} />
+                <UserAvatar name={t.author_name} avatarUrl={t.author_avatar_url} size={32} />
                 <Box flex={1} minW={0}>
                   <Flex align="center" gap={2} mb={1} flexWrap="wrap">
                     {t.is_pinned && (
@@ -717,7 +717,7 @@ function TopicDetailView({
         {/* OP body */}
         <Box px={5} py={5} bg={GREEN_LT}>
           <Flex gap={3}>
-            <UserAvatar name={topic.author_name} size={38} />
+            <UserAvatar name={topic.author_name} avatarUrl={topic.author_avatar_url} size={38} />
             <Box flex={1}>
               <Flex align="center" gap={2} mb={2}>
                 <Text fontSize="14px" fontWeight={700} color={GRAY800}>{topic.author_name}</Text>
@@ -753,7 +753,7 @@ function TopicDetailView({
               return (
                 <Box key={post.id} px={4} py={4} borderBottom={`1px solid ${GRAY100}`} _last={{ borderBottom: 'none' }}>
                   <Flex gap={3}>
-                    <UserAvatar name={post.author_name} size={32} />
+                    <UserAvatar name={post.author_name} avatarUrl={post.author_avatar_url} size={32} />
                     <Box flex={1}>
                       <Text fontSize="12px" color={GRAY500} mb={2}>Editing…</Text>
                       <Textarea
@@ -779,7 +779,7 @@ function TopicDetailView({
               <Box key={post.id} px={4} py="14px" borderBottom={`1px solid ${GRAY100}`} _last={{ borderBottom: 'none' }}
                 bg={isAuthor ? '#F0FDF4' : WHITE}>
                 <Flex gap={3}>
-                  <UserAvatar name={post.author_name} size={32} />
+                  <UserAvatar name={post.author_name} avatarUrl={post.author_avatar_url} size={32} />
                   <Box flex={1}>
                     <Flex align="center" justify="space-between" mb="6px" flexWrap="wrap" gap={2}>
                       <Flex align="center" gap={2}>
