@@ -878,6 +878,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     bio = serializers.CharField(max_length=1000, allow_blank=True, required=False)
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    location = serializers.CharField(max_length=200, allow_blank=True, required=False, allow_null=True)
     avatar_url = serializers.CharField(allow_blank=True, required=False)
     banner_url = serializers.CharField(allow_blank=True, required=False)
     video_intro_url = serializers.CharField(allow_blank=True, required=False, allow_null=True)
@@ -885,24 +886,35 @@ class UserProfileSerializer(serializers.ModelSerializer):
     show_history = serializers.BooleanField(required=False, default=True)
     video_intro_file_url = serializers.SerializerMethodField()
 
+    # Skills: read as tag objects, write as list of tag IDs or new tag names
+    skills = serializers.SerializerMethodField()
+    skill_ids = serializers.ListField(
+        child=serializers.CharField(allow_blank=True), write_only=True, required=False
+    )
+
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'first_name', 'last_name', 'bio', 'avatar_url',
-            'banner_url', 'timebank_balance', 'karma_score', 'role', 'services',
+            'id', 'email', 'first_name', 'last_name', 'bio', 'location',
+            'avatar_url', 'banner_url', 'timebank_balance', 'karma_score', 'role', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file', 'video_intro_file_url',
             'portfolio_images', 'show_history', 'featured_achievement_id',
             'is_onboarded', 'is_verified',
+            'skills', 'skill_ids',
         ]
         read_only_fields = [
             'id', 'email', 'timebank_balance', 'karma_score', 'role', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_file_url', 'featured_achievement_id', 'is_verified',
+            'skills',
         ]
         extra_kwargs = {
             'video_intro_file': {'write_only': True, 'required': False}
         }
+
+    def get_skills(self, obj):
+        return [{'id': str(t.id), 'name': t.name} for t in obj.skills.all()]
     
     @extend_schema_field(OpenApiTypes.STR)
     def get_video_intro_file_url(self, obj):
@@ -1007,6 +1019,32 @@ class UserProfileSerializer(serializers.ModelSerializer):
         """Deprecated: use achievements instead. Return list of achievement IDs for backward compatibility."""
         return self.get_achievements(obj)
 
+    def update(self, instance, validated_data):
+        skill_ids = validated_data.pop('skill_ids', None)
+        instance = super().update(instance, validated_data)
+        if skill_ids is not None:
+            import uuid as _uuid
+            from .models import Tag as TagModel
+            tags_to_set = []
+            for raw_id in skill_ids:
+                raw_id = str(raw_id).strip()
+                if not raw_id:
+                    continue
+                # Tag.id is a CharField — works for UUID strings AND Wikidata QIDs (e.g. "Q5140297")
+                tag = TagModel.objects.filter(id=raw_id).first()
+                if tag is None:
+                    # Not found by id → custom tag: strip "custom:" prefix, use name lookup
+                    name = raw_id.replace('custom:', '').strip()
+                    if name:
+                        tag = TagModel.objects.filter(name__iexact=name).first()
+                        if tag is None:
+                            # Create with a proper UUID id so the pk is never empty
+                            tag = TagModel.objects.create(id=str(_uuid.uuid4()), name=name)
+                if tag:
+                    tags_to_set.append(tag)
+            instance.skills.set(tags_to_set)
+        return instance
+
 class PublicUserProfileSerializer(serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     punctual_count = serializers.IntegerField(read_only=True)
@@ -1015,16 +1053,25 @@ class PublicUserProfileSerializer(serializers.ModelSerializer):
     achievements = serializers.SerializerMethodField()
     badges = serializers.SerializerMethodField()  # Deprecated: use achievements instead
     video_intro_file_url = serializers.SerializerMethodField()
+    skills = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
-            'id', 'first_name', 'last_name', 'bio', 'avatar_url',
+            'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
             'banner_url', 'karma_score', 'services',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
-            'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history'
+            'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
         ]
-        read_only_fields = fields
+        read_only_fields = [
+            'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
+            'banner_url', 'karma_score', 'services',
+            'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
+            'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
+        ]
+
+    def get_skills(self, obj):
+        return [{'id': str(t.id), 'name': t.name} for t in obj.skills.all()]
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_video_intro_file_url(self, obj):

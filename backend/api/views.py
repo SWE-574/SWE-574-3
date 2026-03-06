@@ -696,6 +696,48 @@ class ForgotPasswordView(APIView):
         )
 
 
+class ChangePasswordView(APIView):
+    """Change password for an authenticated user (requires current password)."""
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [SensitiveOperationThrottle]
+
+    @extend_schema(
+        summary='Change password',
+        description='Validates the current password then sets a new one. Requires authentication.',
+        request=inline_serializer('ChangePasswordRequest', {
+            'current_password': drf_serializers.CharField(),
+            'new_password': drf_serializers.CharField(min_length=8),
+        }),
+        responses={
+            200: inline_serializer('ChangePasswordResponse', {'detail': drf_serializers.CharField()}),
+            400: OpenApiResponse(description='Wrong current password or new password too short'),
+        },
+        tags=['Auth'],
+    )
+    def post(self, request, *args, **kwargs):
+        current_password = request.data.get('current_password', '')
+        new_password = request.data.get('new_password', '')
+        if not current_password or not new_password:
+            return Response(
+                {'detail': 'Both current_password and new_password are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(new_password) < 8:
+            return Response(
+                {'detail': 'New password must be at least 8 characters.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = request.user
+        if not user.check_password(current_password):
+            return Response(
+                {'detail': 'Current password is incorrect.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+        return Response({'detail': 'Password changed successfully.'})
+
+
 class ResetPasswordView(APIView):
     """Verify the reset token and set a new password."""
     permission_classes = [permissions.AllowAny]
@@ -1399,6 +1441,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'sort': request.query_params.get('sort', 'latest'),
             'page': request.query_params.get('page', '1'),
             'page_size': request.query_params.get('page_size'),
+            'user': request.query_params.get('user'),
             'is_admin': str(is_admin),  # Different cache for admin vs non-admin
         }
         
@@ -1475,6 +1518,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
         }
         
         queryset = search_engine.search(queryset, search_params)
+
+        # Filter by owner user (for profile pages)
+        user_param = self.request.query_params.get('user')
+        if user_param:
+            queryset = queryset.filter(user_id=user_param)
         
         # Apply ordering based on sort parameter
         # Must validate that lat/lng are valid numbers, not just truthy strings
