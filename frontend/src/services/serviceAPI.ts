@@ -11,6 +11,7 @@ export interface ServiceListParams {
   tags?: string[]
   page?: number
   page_size?: number
+  user_id?: string
 }
 
 type ServiceListResponse = Service[] | { results: Service[]; count?: number }
@@ -29,6 +30,7 @@ export const serviceAPI = {
     if (params?.tags?.length) params.tags.forEach(t => queryParams.append('tags', t))
     if (params?.page) queryParams.set('page', String(params.page))
     if (params?.page_size) queryParams.set('page_size', String(params.page_size))
+    if (params?.user_id) queryParams.set('user', params.user_id)
 
     const res = await apiClient.get<ServiceListResponse>('/services/', {
       params: queryParams,
