@@ -74,7 +74,7 @@ const AdminSidebar = ({ activeTab, onTabChange }: AdminSidebarProps) => {
   const showLabels = !isCollapsed
 
   return (
-    <Flex direction="column" h="100vh" w={sidebarWidth} bg={WHITE} borderRight={`1px solid ${GRAY100}`} transition="width 0.2s" p={0}>
+    <Flex direction="column" h="100%" w={sidebarWidth} bg={WHITE} borderRight={`1px solid ${GRAY100}`} transition="width 0.2s" p={0}>
       {/* Header with collapse toggle */}
       <Flex align="center" justify="space-between" p={4} borderBottom={`1px solid ${GRAY100}`}>
         {showLabels && <Text fontSize="sm" fontWeight={700} color={GRAY700}>Admin Menu</Text>}

@@ -151,7 +151,7 @@ const PAGES_WITHOUT_NAVBAR = [
 
 // Pages that fill the viewport — lock body scroll so navbar stays fixed
 // and macOS elastic-bounce doesn't move content under the navbar.
-const FULL_SCREEN_PREFIXES = ['/dashboard', '/forum', '/messages']
+const FULL_SCREEN_PREFIXES = ['/dashboard', '/forum', '/messages', '/admin']
 
 // ─── Public pages where we skip the full-page spinner ─────────────────────────
 const PUBLIC_AUTH_PATHS = ['/login', '/register', '/', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
