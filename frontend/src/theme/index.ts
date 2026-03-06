@@ -4,7 +4,6 @@ const config = defineConfig({
   globalCss: {
     '.no-scrollbar': {
       scrollbarWidth: 'none',
-      msOverflowStyle: 'none',
       '&::-webkit-scrollbar': {
         display: 'none',
       },

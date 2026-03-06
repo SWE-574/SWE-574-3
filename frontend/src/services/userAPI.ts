@@ -19,12 +19,22 @@ export interface UserUpdateData {
   location?: string
   show_history?: boolean
   is_onboarded?: boolean
-  /** Base64 data URL (e.g. "data:image/jpeg;base64,...") or https URL */
+  /** MinIO/https URL — set by the server after upload; do NOT send base64 */
   avatar_url?: string
-  /** Base64 data URL or https URL */
+  /** MinIO/https URL — set by the server after upload */
   banner_url?: string
   /** List of tag IDs (UUID strings or "custom:<name>") to set as user skills */
   skill_ids?: string[]
+}
+
+/** Convert a base64 data URL → Blob so it can be sent as a file */
+export function dataURLtoBlob(dataUrl: string): Blob {
+  const [header, data] = dataUrl.split(',')
+  const mime = header.match(/:(.*?);/)?.[1] ?? 'image/jpeg'
+  const bytes = atob(data)
+  const arr = new Uint8Array(bytes.length)
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
+  return new Blob([arr], { type: mime })
 }
 
 export const userAPI = {
@@ -33,8 +43,16 @@ export const userAPI = {
     return res.data
   },
 
-  updateMe: async (data: UserUpdateData): Promise<User> => {
-    const res = await apiClient.patch<User>('/users/me/', data)
+  /**
+   * Update profile.
+   * Pass a FormData when avatar/banner files are included (multipart);
+   * pass a plain object for JSON-only updates.
+   */
+  updateMe: async (data: UserUpdateData | FormData): Promise<User> => {
+    const isFormData = data instanceof FormData
+    const res = await apiClient.patch<User>('/users/me/', data, {
+      headers: isFormData ? { 'Content-Type': 'multipart/form-data' } : {},
+    })
     return res.data
   },
 

@@ -46,7 +46,10 @@ export const serviceAPI = {
   },
 
   create: async (data: FormData | Record<string, unknown>): Promise<Service> => {
-    const res = await apiClient.post<Service>('/services/', data)
+    const isFormData = data instanceof FormData
+    const res = await apiClient.post<Service>('/services/', data, {
+      headers: isFormData ? { 'Content-Type': 'multipart/form-data' } : {},
+    })
     return res.data
   },
 
@@ -89,5 +92,10 @@ export const serviceAPI = {
 
   cancelEvent: async (serviceId: string): Promise<void> => {
     await apiClient.post(`/services/${serviceId}/cancel-event/`, {})
+  },
+
+  setPrimaryMedia: async (serviceId: string, mediaId: string): Promise<Service> => {
+    const res = await apiClient.patch<Service>(`/services/${serviceId}/set-primary-media/`, { media_id: mediaId })
+    return res.data
   },
 }

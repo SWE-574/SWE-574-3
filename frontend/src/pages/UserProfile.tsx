@@ -8,7 +8,7 @@ import {
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
-import { userAPI } from '@/services/userAPI'
+import { userAPI, dataURLtoBlob } from '@/services/userAPI'
 import { serviceAPI } from '@/services/serviceAPI'
 import { authAPI } from '@/services/authAPI'
 import type { Service, BadgeProgress, Tag } from '@/types'
@@ -234,21 +234,9 @@ const UserProfile = () => {
     return () => ac.abort()
   }, [user])
 
-  if (!user) {
-    return <Flex h="calc(100vh - 64px)" align="center" justify="center"><Spinner color={GREEN} size="lg" /></Flex>
-  }
-
-  const displayName = `${user.first_name} ${user.last_name}`.trim() || user.email
-  const ini         = getInitials(user.first_name, user.last_name, user.email)
-  const bgColor     = avatarBg(displayName)
-  const balance     = user.timebank_balance ?? 0
-  const balanceWarn = balance > 10
-
-  const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
-  const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
-
   // ── Handlers ─────────────────────────────────────────────────────────────────
   const startEdit = () => {
+    if (!user) return
     setFirstName(user.first_name || ''); setLastName(user.last_name || '')
     setBio(user.bio || ''); setLocation(user.location || '')
     setShowHistory(user.show_history ?? false)
@@ -280,6 +268,19 @@ const UserProfile = () => {
     setCropModal(m => ({ ...m, open: false }))
   }, [])
 
+  if (!user) {
+    return <Flex h="calc(100vh - 64px)" align="center" justify="center"><Spinner color={GREEN} size="lg" /></Flex>
+  }
+
+  const displayName = `${user.first_name} ${user.last_name}`.trim() || user.email
+  const ini         = getInitials(user.first_name, user.last_name, user.email)
+  const bgColor     = avatarBg(displayName)
+  const balance     = user.timebank_balance ?? 0
+  const balanceWarn = balance > 10
+
+  const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
+  const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
+
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -292,16 +293,25 @@ const UserProfile = () => {
         })
       )
 
-      const updated = await userAPI.updateMe({
-        first_name: firstName,
-        last_name: lastName,
-        bio,
-        location,
-        show_history: showHistory,
-        skill_ids: resolvedSkills.map(t => t.id),
-        ...(avatarPreview ? { avatar_url: avatarPreview } : {}),
-        ...(bannerPreview ? { banner_url: bannerPreview } : {}),
-      })
+      // Build a FormData payload so that avatar/banner are sent as real files
+      // (multipart), not base64 strings. The backend uploads them to MinIO and
+      // stores the resulting public URL in avatar_url / banner_url.
+      const fd = new FormData()
+      fd.append('first_name', firstName)
+      fd.append('last_name', lastName)
+      fd.append('bio', bio)
+      fd.append('location', location)
+      fd.append('show_history', String(showHistory))
+      resolvedSkills.forEach(t => fd.append('skill_ids', t.id))
+      if (avatarPreview) {
+        const blob = dataURLtoBlob(avatarPreview)
+        fd.append('avatar', blob, 'avatar.jpg')
+      }
+      if (bannerPreview) {
+        const blob = dataURLtoBlob(bannerPreview)
+        fd.append('banner', blob, 'banner.jpg')
+      }
+      const updated = await userAPI.updateMe(fd)
       updateUserOptimistically(updated)
       await refreshUser()
       setEditing(false); setAvatarPreview(null); setBannerPreview(null)

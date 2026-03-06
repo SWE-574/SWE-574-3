@@ -169,10 +169,13 @@ const PublicProfile = () => {
       return
     }
     const ac = new AbortController()
-    setLoading(true); setNotFound(false)
 
-    userAPI.getUser(userId, ac.signal)
-      .then(u => {
+    const loadProfile = async () => {
+      setLoading(true)
+      setNotFound(false)
+
+      try {
+        const u = await userAPI.getUser(userId, ac.signal)
         setProfileUser(u)
         serviceAPI.list({ user_id: userId, status: 'Active', page_size: 50 }, ac.signal)
           .then(setServices).catch(() => {})
@@ -180,12 +183,15 @@ const PublicProfile = () => {
           userAPI.getHistory(userId, ac.signal).then(setHistory).catch(() => {})
         }
         userAPI.getBadgeProgress(userId, ac.signal).then(setBadges).catch(() => {})
-      })
-      .catch(err => {
+      } catch (err) {
         const status = (err as { response?: { status?: number } })?.response?.status
         if (status === 404) setNotFound(true)
-      })
-      .finally(() => setLoading(false))
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    void loadProfile()
 
     return () => ac.abort()
   }, [userId, currentUser, navigate])

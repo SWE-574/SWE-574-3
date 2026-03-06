@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box, Flex, Text, Button, Input, Textarea, VStack, HStack, Avatar,
@@ -6,7 +6,7 @@ import {
 import { FiArrowLeft, FiArrowRight, FiCheck, FiCamera, FiX } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
-import { userAPI } from '@/services/userAPI'
+import { userAPI, dataURLtoBlob } from '@/services/userAPI'
 import { tagAPI } from '@/services/tagAPI'
 
 import type { Tag } from '@/types'
@@ -90,13 +90,15 @@ const OnboardingPage = () => {
         })
       )
 
-      const updated = await userAPI.updateMe({
-        bio,
-        location,
-        skill_ids: resolvedSkills.map(t => t.id),
-        is_onboarded: true,
-        ...(avatarPreview ? { avatar_url: avatarPreview } : {}),
-      })
+      const fd = new FormData()
+      fd.append('bio', bio)
+      fd.append('location', location)
+      resolvedSkills.forEach(t => fd.append('skill_ids', t.id))
+      fd.append('is_onboarded', 'true')
+      if (avatarPreview) {
+        fd.append('avatar', dataURLtoBlob(avatarPreview), 'avatar.jpg')
+      }
+      const updated = await userAPI.updateMe(fd)
       updateUserOptimistically({ ...updated, is_onboarded: true })
       await refreshUser()
       toast.success('Welcome to The Hive!')
