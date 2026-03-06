@@ -155,13 +155,13 @@ class TagSerializer(serializers.ModelSerializer):
     
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_wikidata_info(self, obj):
-        """Fetch Wikidata information only when explicitly requested via context.
+        """Fetch Wikidata information unless explicitly disabled via context.
 
         Nested usages (for example service list/detail responses) do not need the
         full Wikidata payload, and fetching it on every serialized tag adds slow
         external HTTP calls that do not show up in Django query counts.
         """
-        if not self.context.get('include_wikidata_info', False):
+        if self.context.get('include_wikidata_info') is False:
             return None
         if obj.id and obj.id.startswith('Q'):
             try:
@@ -327,7 +327,7 @@ class ServiceSerializer(serializers.ModelSerializer):
 
             return super().to_internal_value(data)
 
-    tags = TagSerializer(many=True, required=False, read_only=True)
+    tags = serializers.SerializerMethodField()
     tag_ids = ListOrSingleValueField(
         child=serializers.CharField(),
         write_only=True,
@@ -362,6 +362,11 @@ class ServiceSerializer(serializers.ModelSerializer):
             'is_visible', 'media', 'participant_count', 'event_evaluation_summary',
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible']
+
+    @extend_schema_field(TagSerializer(many=True))
+    def get_tags(self, obj):
+        tag_context = {**self.context, 'include_wikidata_info': False}
+        return TagSerializer(obj.tags.all(), many=True, context=tag_context).data
     
     @extend_schema_field(OpenApiTypes.INT)
     def get_comment_count(self, obj):
