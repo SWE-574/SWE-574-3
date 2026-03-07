@@ -22,16 +22,23 @@ import { loginAs, USERS } from './helpers/auth'
 
 const GROUP_SERVICE_TITLE = 'Traditional Manti Cooking Workshop'
 
-/** Expand the Manti service-group accordion and click the group-chat row. */
+/** Ensure the Manti accordion is open and click the group-chat row. */
 async function openGroupChat(page: import('@playwright/test').Page) {
-  // The accordion header is a button containing the service title + "GROUP" badge
+  // Wait for the accordion header to appear
   const header = page.getByRole('button', { name: new RegExp(GROUP_SERVICE_TITLE, 'i') }).first()
   await expect(header).toBeVisible({ timeout: 20_000 })
-  await header.click()
 
-  // Inside the expanded accordion, the group row is a button with "participant" text
+  // The group row is inside the expanded accordion — a button with "participant" text
   const groupRow = page.locator('button').filter({ hasText: /participant/i }).first()
-  await expect(groupRow).toBeVisible({ timeout: 10_000 })
+
+  // If the accordion auto-opened (e.g. a conversation inside was selected), the group
+  // row is already visible. Only click the header if we need to expand it.
+  const isVisible = await groupRow.isVisible().catch(() => false)
+  if (!isVisible) {
+    await header.click()
+    await expect(groupRow).toBeVisible({ timeout: 10_000 })
+  }
+
   return groupRow
 }
 

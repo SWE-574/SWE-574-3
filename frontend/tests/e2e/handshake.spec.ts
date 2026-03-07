@@ -34,13 +34,22 @@ test.describe('Handshake — express interest', () => {
     await page.getByText(TARGET_SERVICE).first().click()
     await expect(page).toHaveURL(/\/service-detail\//)
 
-    // Request the service — button is "Request this Service" for Offer-type
+    // The button text depends on whether a handshake already exists (idempotent test):
+    //  - Fresh state: "Request this Service" or "Offer to Help"
+    //  - Already requested: "View Chat (Pending)"
     const requestBtn = page.getByRole('button', { name: /Request this Service|Offer to Help/i })
-    await expect(requestBtn).toBeVisible({ timeout: 10_000 })
-    await requestBtn.click()
+    const alreadyBtn = page.getByRole('button', { name: /View Chat/i })
 
-    // Expect success toast
-    await expectToast(page, /Interest expressed|Messages|already/i)
+    // Wait for either button to appear
+    await expect(requestBtn.or(alreadyBtn)).toBeVisible({ timeout: 10_000 })
+
+    if (await requestBtn.isVisible()) {
+      await requestBtn.click()
+      await expectToast(page, /Interest expressed|Messages|already/i)
+    } else {
+      // Handshake already exists from a prior run — that's fine
+      await expect(alreadyBtn).toBeVisible()
+    }
   })
 
   test('requester sees the new conversation in /messages', async ({ page }) => {
