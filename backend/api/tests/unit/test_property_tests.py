@@ -221,8 +221,8 @@ class PropertyTestBalanceProvisioningAccuracy(HypothesisTestCase):
     
     @settings(max_examples=30)
     @given(
-        hours=st.decimals(min_value=Decimal('0.50'), max_value=Decimal('5.00'), places=2),
-        initial_balance=st.decimals(min_value=Decimal('3.00'), max_value=Decimal('20.00'), places=2)
+        hours=st.integers(min_value=1, max_value=5).map(lambda value: Decimal(str(value))),
+        initial_balance=st.integers(min_value=3, max_value=20).map(lambda value: Decimal(str(value)))
     )
     def test_provisioning_accuracy_property(self, hours, initial_balance):
         """Test that provisioning accurately deducts hours."""

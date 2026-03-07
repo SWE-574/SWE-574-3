@@ -24,6 +24,7 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from datetime import timedelta
+from urllib.parse import quote_plus
 import random
 
 print("=" * 60)
@@ -95,37 +96,63 @@ print(f"  Processed {len(tags_data)} tags ({created_count} created)")
 
 print("\n[3/8] Creating demo users with Turkish names...")
 
+def png_placeholder(label, width, height, bg='2D5C4E', fg='F9FAFB'):
+    text = quote_plus(label)
+    return f"https://placehold.co/{width}x{height}/{bg}/{fg}.png?text={text}"
+
+
 def dicebear_avatar(seed):
-    return f"https://api.dicebear.com/9.x/avataaars/svg?seed={seed}"
+    avatar_palette = [
+        ('2D5C4E', 'F9FAFB'),
+        ('1D4ED8', 'EFF6FF'),
+        ('7C3AED', 'F3E8FF'),
+        ('D97706', 'FFFBEB'),
+        ('0D9488', 'F0FDFA'),
+        ('EA580C', 'FFF7ED'),
+    ]
+    bg, fg = avatar_palette[sum(ord(char) for char in seed) % len(avatar_palette)]
+    initials = ''.join(part[0] for part in seed.replace('-', ' ').split()[:2]).upper() or 'H'
+    return png_placeholder(initials, 256, 256, bg=bg, fg=fg)
 
 
 def picsum_image(seed, width, height):
-    return f"https://picsum.photos/seed/{seed}/{width}/{height}"
+    banner_palette = [
+        ('2D5C4E', 'F9FAFB'),
+        ('1A3A30', 'F0FDF4'),
+        ('1D4ED8', 'EFF6FF'),
+        ('7C3AED', 'F3E8FF'),
+        ('D97706', 'FFFBEB'),
+        ('0D9488', 'F0FDFA'),
+    ]
+    bg, fg = banner_palette[sum(ord(char) for char in seed) % len(banner_palette)]
+    label = seed.replace('-', ' ').title()
+    return png_placeholder(label, width, height, bg=bg, fg=fg)
 
 
 def semantic_service_image(service, width=800, height=600):
     title = service.title.lower()
     semantic_presets = [
-        (('manti', 'börek', 'coffee', 'cooking'), ('turkish-food,cooking', 101)),
-        (('guitar', 'music'), ('guitar,music', 102)),
-        (('jogging', 'running', 'sports'), ('running,fitness', 103)),
-        (('watercolor', 'painting', 'art'), ('painting,art', 104)),
-        (('gardening', 'plant', 'balcony'), ('gardening,plants', 105)),
-        (('photography', 'camera', 'photo'), ('photography,camera', 106)),
-        (('chess',), ('chess,board-game', 107)),
-        (('language', 'english', 'turkish', 'french'), ('language,conversation', 108)),
-        (('genealogy', 'history', 'archive'), ('books,history', 109)),
-        (('smartphone', 'tech', 'app', 'printer'), ('technology,devices', 110)),
+        (('manti', 'börek', 'coffee', 'cooking', 'meal'), ('Shared Meals', 'D97706', 'FFFBEB')),
+        (('guitar', 'music'), ('Music Circle', '7C3AED', 'F3E8FF')),
+        (('jogging', 'running', 'sports'), ('Walking And Running', '1D4ED8', 'EFF6FF')),
+        (('watercolor', 'painting', 'art'), ('Creative Workshop', '7C3AED', 'F3E8FF')),
+        (('gardening', 'plant', 'balcony', 'garden'), ('Garden Workday', '0D9488', 'F0FDFA')),
+        (('photography', 'camera', 'photo'), ('Photo Walk', '1D4ED8', 'EFF6FF')),
+        (('chess',), ('Chess Meetup', '2D5C4E', 'F9FAFB')),
+        (('language', 'english', 'turkish', 'french', 'conversation'), ('Language Exchange', 'EA580C', 'FFF7ED')),
+        (('genealogy', 'history', 'archive'), ('Family Archive Help', '2D5C4E', 'F9FAFB')),
+        (('smartphone', 'tech', 'app', 'printer', 'phone'), ('Tech Support', '0D9488', 'F0FDFA')),
     ]
 
-    category = 'community,workshop'
-    lock = 199
+    label = 'Hive Community'
+    bg = '2D5C4E'
+    fg = 'F9FAFB'
     for keywords, preset in semantic_presets:
         if any(keyword in title for keyword in keywords):
-            category, lock = preset
+            label, bg, fg = preset
             break
 
-    return f"https://loremflickr.com/{width}/{height}/{category}?lock={lock}"
+    return png_placeholder(label, width, height, bg=bg, fg=fg)
 
 
 def is_fixed_group_offer(service):
@@ -186,8 +213,8 @@ def create_or_update_user(
 
 elif_user = create_or_update_user(
     'elif@demo.com', 'Elif', 'Yılmaz',
-    'Freelance designer and cooking enthusiast living in Beşiktaş. Love sharing traditional Turkish recipes and learning about Istanbul\'s food culture!',
-    Decimal('6.50'), 35, date_joined_offset_days=45,
+    'Freelance designer and cooking enthusiast living in Beşiktaş. I love hosting neighbor-friendly food circles and sharing practical kitchen skills people can reuse at home.',
+    Decimal('7.00'), 35, date_joined_offset_days=45,
     avatar_url=dicebear_avatar('elif'),
     banner_url=picsum_image('elif-banner', 1200, 400),
     location='Beşiktaş, Istanbul',
@@ -213,8 +240,8 @@ ayse = create_or_update_user(
 
 mehmet = create_or_update_user(
     'mehmet@demo.com', 'Mehmet', 'Özkan',
-    'Retired teacher living in Şişli. Expert in genealogy research and Istanbul history. Enjoy helping others discover their family roots and learn about our city\'s rich past.',
-    Decimal('8.50'), 55, date_joined_offset_days=90,
+    'Retired teacher living in Şişli. I help neighbors navigate family archives, local history, and everyday digital tasks with patience and care.',
+    Decimal('9.00'), 55, date_joined_offset_days=90,
     avatar_url=dicebear_avatar('mehmet'),
     banner_url=picsum_image('mehmet-banner', 1200, 400),
     location='Şişli, Istanbul',
@@ -231,8 +258,8 @@ zeynep = create_or_update_user(
 
 can = create_or_update_user(
     'can@demo.com', 'Can', 'Şahin',
-    'Photography hobbyist based in Beşiktaş. Specialize in Istanbul landmarks and street photography. Happy to share tips on composition, lighting, and capturing the city\'s unique character.',
-    Decimal('5.50'), 28, date_joined_offset_days=25,
+    'Photography hobbyist based in Beşiktaş. I enjoy community photo walks, documenting neighborhood stories, and helping others feel confident behind the camera.',
+    Decimal('6.00'), 28, date_joined_offset_days=25,
     avatar_url=dicebear_avatar('can'),
     banner_url=picsum_image('can-banner', 1200, 400),
     location='Beşiktaş, Istanbul',
@@ -249,8 +276,8 @@ deniz = create_or_update_user(
 
 burak = create_or_update_user(
     'burak@demo.com', 'Burak', 'Kurt',
-    'Chess player and music lover. Intermediate level chess player looking to improve and teach others. Also enjoy discussing music and sharing recommendations.',
-    Decimal('4.50'), 15, date_joined_offset_days=15,
+    'Chess player and music lover. I like low-pressure skill swaps, practice sessions, and small group meetups where everyone leaves having learned something useful.',
+    Decimal('5.00'), 15, date_joined_offset_days=15,
     avatar_url=dicebear_avatar('burak'),
     banner_url=picsum_image('burak-banner', 1200, 400),
     location='Kadıköy, Istanbul',
@@ -327,8 +354,8 @@ photography_seed_time = now + timedelta(days=5)
 
 elif_manti = Service.objects.create(
     user=elif_user,
-    title='Traditional Manti Cooking Workshop',
-    description='Learn to make authentic Turkish manti from scratch! We\'ll cover everything: dough preparation, spiced meat filling, the art of folding those tiny dumplings, and the perfect yogurt-garlic sauce. Perfect for beginners. Takes place in my Beşiktaş kitchen, all ingredients provided.',
+    title='Neighborhood Manti Cooking Circle',
+    description='A shared cooking session for neighbors who want to learn one reliable community meal together. We\'ll prepare dough, filling, folding, and sauce side by side, with everyone leaving able to make it again for friends or family.',
     type='Offer',
     duration=Decimal('3.00'),
     location_type='In-Person',
@@ -348,10 +375,10 @@ print(f"  Created: {elif_manti.title}")
 
 elif_borek = Service.objects.create(
     user=elif_user,
-    title='Börek Making Session',
-    description='Master the art of Turkish börek! We\'ll make both cheese and spinach varieties. Learn proper phyllo handling, layering techniques, and achieving that perfect golden crust. Great for anyone who loves Turkish pastries.',
+    title='Community Börek Prep Session',
+    description='A practical shared kitchen session focused on making two reliable börek fillings for potlucks, neighbor visits, or family tables. We will split tasks, talk through timing, and practice techniques that make home cooking easier.',
     type='Offer',
-    duration=Decimal('2.50'),
+    duration=Decimal('2.00'),
     location_type='In-Person',
     location_area='Beşiktaş',
     location_lat=Decimal('41.0422'),
@@ -369,8 +396,8 @@ print(f"  Created: {elif_borek.title}")
 
 elif_tech = Service.objects.create(
     user=elif_user,
-    title='Help with 3D Printer Setup',
-    description='I just got a 3D printer but struggling with initial setup and calibration. Looking for someone with experience to help me get started and understand the basics of 3D printing.',
+    title='Help Setting Up a Shared 3D Printer',
+    description='Our small building makers group got a 3D printer, and I need help getting it calibrated so more neighbors can use it for signs, labels, and simple repair parts.',
     type='Need',
     duration=Decimal('2.00'),
     location_type='In-Person',
@@ -389,10 +416,10 @@ print(f"  Created: {elif_tech.title}")
 
 cem_chess_offer = Service.objects.create(
     user=cem,
-    title='Chess Strategy Lessons for Beginners',
-    description='Learn chess fundamentals! I\'ll teach opening principles, basic tactics, endgame techniques, and how to think strategically. Perfect for complete beginners or those who know the rules but want to improve. We can play in a quiet café in Kadıköy.',
+    title='Chess Strategy Hour for New Players',
+    description='Friendly chess support for people who know the basics and want more confidence. We can review openings, common mistakes, and how to think a few moves ahead without pressure.',
     type='Offer',
-    duration=Decimal('1.50'),
+    duration=Decimal('2.00'),
     location_type='In-Person',
     location_area='Kadıköy',
     location_lat=Decimal('40.9819'),
@@ -409,8 +436,8 @@ print(f"  Created: {cem_chess_offer.title}")
 
 cem_genealogy = Service.objects.create(
     user=cem,
-    title='Genealogy Research Assistance',
-    description='I can help you get started with tracing your family tree! I\'ll show you how to use online databases, read old records, and organize your findings. Great for anyone curious about their family history, especially Turkish ancestry.',
+    title='Family Archive Starter Help',
+    description='I can help you begin tracing family connections and organizing old records. This is a good fit for anyone who wants to preserve stories, names, and documents for future generations.',
     type='Offer',
     duration=Decimal('1.00'),
     location_type='Online',
@@ -426,8 +453,8 @@ print(f"  Created: {cem_genealogy.title}")
 
 ayse_gardening = Service.objects.create(
     user=ayse,
-    title='Urban Balcony Gardening Workshop',
-    description='Learn how to grow vegetables and herbs in small spaces! Perfect for apartment dwellers. We\'ll cover container selection, soil preparation, watering schedules, and basic plant care. Hands-on workshop in my Üsküdar garden.',
+    title='Community Balcony Garden Workday',
+    description='A hands-on session for neighbors who want to grow herbs and vegetables in small spaces. We will work through containers, soil, watering, and seasonal planning in a practical, shared setting.',
     type='Offer',
     duration=Decimal('2.00'),
     location_type='In-Person',
@@ -447,8 +474,8 @@ print(f"  Created: {ayse_gardening.title}")
 
 ayse_plant_advice = Service.objects.create(
     user=ayse,
-    title='Plant Care Consultation',
-    description='Having trouble with your houseplants? I can help diagnose issues, suggest care routines, and share tips for keeping your plants healthy. Bring photos or we can video call to see your plants.',
+    title='Plant Rescue Check-In',
+    description='Bring photos of a struggling plant and we can work out a realistic care routine together. Good for busy people who want simple, sustainable plant care advice.',
     type='Offer',
     duration=Decimal('1.00'),
     location_type='Online',
@@ -464,8 +491,8 @@ print(f"  Created: {ayse_plant_advice.title}")
 
 mehmet_genealogy = Service.objects.create(
     user=mehmet,
-    title='Advanced Genealogy Research Help',
-    description='Experienced genealogist offering in-depth research assistance. I specialize in Ottoman-era records, Turkish archives, and connecting family branches. Can help with complex cases and hard-to-find ancestors.',
+    title='Local History and Family Archive Help',
+    description='I help people make sense of family papers, oral histories, and archive searches. Ideal for anyone trying to preserve family memory or connect younger relatives with older stories.',
     type='Offer',
     duration=Decimal('2.00'),
     location_type='Online',
@@ -481,10 +508,10 @@ print(f"  Created: {mehmet_genealogy.title}")
 
 mehmet_tech = Service.objects.create(
     user=mehmet,
-    title='Help with Smartphone and Apps',
-    description='Need help setting up your smartphone or learning how to use apps? I\'m patient and can help with basics like WhatsApp, email, photos, and navigation apps. Perfect for seniors or anyone new to smartphones.',
+    title='Need Patient Help with e-Devlet and Phone Basics',
+    description='I would appreciate calm, step-by-step help with phone settings, e-Devlet access, and everyday apps so I can handle more errands independently.',
     type='Need',
-    duration=Decimal('1.50'),
+    duration=Decimal('2.00'),
     location_type='In-Person',
     location_area='Şişli',
     location_lat=Decimal('41.0602'),
@@ -501,8 +528,8 @@ print(f"  Created: {mehmet_tech.title}")
 
 zeynep_language = Service.objects.create(
     user=zeynep,
-    title='Turkish-English Language Exchange',
-    description='Practice conversation in a relaxed, friendly setting! I\'m a native Turkish speaker fluent in English. We can chat about daily life, culture, or any topic you\'re interested in. Great for intermediate learners on both sides.',
+    title='Conversation Exchange for New Neighbors',
+    description='Relaxed Turkish-English conversation practice for people settling into a neighborhood, a new job, or a new community. We can focus on everyday confidence and useful phrases.',
     type='Offer',
     duration=Decimal('1.00'),
     location_type='Online',
@@ -518,8 +545,8 @@ print(f"  Created: {zeynep_language.title}")
 
 zeynep_cooking_need = Service.objects.create(
     user=zeynep,
-    title='Learn Turkish Coffee Making',
-    description='I\'ve always wanted to learn how to make proper Turkish coffee the traditional way. Looking for someone who can teach me the technique, timing, and the cultural aspects of coffee preparation.',
+    title='Learn Turkish Coffee for Community Gatherings',
+    description='I want to learn a reliable Turkish coffee routine I can use when hosting neighbors and friends. Looking for someone who can teach both technique and cultural context.',
     type='Need',
     duration=Decimal('1.00'),
     location_type='In-Person',
@@ -538,8 +565,8 @@ print(f"  Created: {zeynep_cooking_need.title}")
 
 can_photography = Service.objects.create(
     user=can,
-    title='Istanbul Landmarks Photography Tips',
-    description='Love photography? Join me for a walk around Beşiktaş and learn techniques for capturing Istanbul\'s iconic landmarks. We\'ll cover composition, lighting, timing, and how to avoid crowds. Bring your camera or smartphone!',
+    title='Neighborhood Photo Walk for Local Stories',
+    description='A relaxed photo walk focused on capturing everyday neighborhood life with more care and confidence. Bring a camera or phone and we will talk through composition, light, and respectful storytelling.',
     type='Offer',
     duration=Decimal('2.00'),
     location_type='In-Person',
@@ -559,8 +586,8 @@ print(f"  Created: {can_photography.title}")
 
 can_cooking_need = Service.objects.create(
     user=can,
-    title='Learn Basic Turkish Cooking',
-    description='I\'m new to cooking and want to learn some basic Turkish dishes. Looking for someone patient who can teach me simple, delicious recipes I can make at home. Vegetarian-friendly preferred!',
+    title='Learn Two Shared Meal Recipes',
+    description='I want to learn a couple of dependable Turkish dishes I can cook for friends, neighbors, and shared dinners. Looking for a patient teacher and practical recipes.',
     type='Need',
     duration=Decimal('2.00'),
     location_type='In-Person',
@@ -579,10 +606,10 @@ print(f"  Created: {can_cooking_need.title}")
 
 deniz_tech = Service.objects.create(
     user=deniz,
-    title='Smartphone Setup and App Help',
-    description='Need help with your smartphone? I can assist with setup, installing apps, organizing your home screen, backing up photos, and learning useful apps for daily life. Patient and beginner-friendly!',
+    title='Smartphone Help for Parents and Neighbors',
+    description='Patient, beginner-friendly support with phone setup, useful apps, backups, and digital basics. Especially helpful for people supporting older relatives or neighbors who are new to smartphones.',
     type='Offer',
-    duration=Decimal('1.50'),
+    duration=Decimal('2.00'),
     location_type='In-Person',
     location_area='Kadıköy',
     location_lat=Decimal('40.9819'),
@@ -599,8 +626,8 @@ print(f"  Created: {deniz_tech.title}")
 
 burak_chess = Service.objects.create(
     user=burak,
-    title='Looking for Chess Practice Partner',
-    description='Intermediate chess player looking for regular practice games. Prefer casual, friendly matches where we can discuss moves and learn together. Can meet at a quiet café in Kadıköy.',
+    title='Looking for a Weekly Chess Practice Partner',
+    description='I am looking for steady, friendly practice games where we can talk through moves and keep each other improving over time. Casual and community-minded is ideal.',
     type='Need',
     duration=Decimal('1.00'),
     location_type='In-Person',
@@ -619,10 +646,10 @@ print(f"  Created: {burak_chess.title}")
 
 burak_guitar = Service.objects.create(
     user=burak,
-    title='Guitar Basics for Beginners',
-    description='Friendly beginner guitar session covering tuning, basic chords, strumming rhythm, and a simple song to practice at home. Bring your own guitar if you have one, or I can provide a spare acoustic for the lesson.',
+    title='Beginner Guitar Circle',
+    description='A welcoming beginner session covering tuning, a few chords, rhythm, and one simple song people can keep practicing together. Good for anyone who wants a gentle start.',
     type='Offer',
-    duration=Decimal('1.50'),
+    duration=Decimal('2.00'),
     location_type='In-Person',
     location_area='Kadıköy',
     location_lat=Decimal('40.9819'),
@@ -640,8 +667,8 @@ print(f"  Created: {burak_guitar.title}")
 
 deniz_jogging = Service.objects.create(
     user=deniz,
-    title='Morning Jogging Partner in Kadıköy',
-    description='Looking for a reliable jogging partner for easy-paced morning runs along the Kadıköy coast. Hoping to stay consistent, keep each other motivated, and gradually build up endurance together.',
+    title='Morning Accountability Jog in Kadıköy',
+    description='Looking for a reliable morning partner for easy-paced runs along the Kadıköy coast. The goal is consistency, motivation, and a supportive routine more than speed.',
     type='Need',
     duration=Decimal('1.00'),
     location_type='In-Person',
@@ -660,8 +687,8 @@ print(f"  Created: {deniz_jogging.title}")
 
 ayse_watercolor = Service.objects.create(
     user=ayse,
-    title='Watercolor Painting for Beginners',
-    description='A calm beginner-friendly watercolor session focused on brush control, color mixing, and simple botanical illustrations. Great for anyone curious about painting and looking for a relaxed creative workshop.',
+    title='Watercolor Postcards for the Community Board',
+    description='A calm beginner-friendly watercolor session where we practice color mixing and simple illustrations by creating postcards or noticeboard art for shared spaces.',
     type='Offer',
     duration=Decimal('2.00'),
     location_type='In-Person',

@@ -38,7 +38,7 @@ SAMPLE_SERVICES = [
         'title': 'Need Help with Tech',
         'description': 'Looking for help setting up my computer',
         'type': 'Need',
-        'duration': Decimal('1.50'),
+        'duration': Decimal('2.00'),
         'location_type': 'Online',
         'max_participants': 1,
     },

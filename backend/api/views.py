@@ -18,7 +18,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 import logging
 import bleach
@@ -1168,7 +1168,7 @@ class UserHistoryView(APIView):
         {
             "service_title": "Web Development Help",
             "service_type": "Offer",
-            "duration": 2.5,
+            "duration": 2,
             "partner_name": "Jane Smith",
             "partner_id": "uuid",
             "partner_avatar_url": "https://example.com/avatar.jpg",
@@ -1394,7 +1394,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         "title": "Web Development Help",
         "description": "I can help with React and Django",
         "type": "Offer",
-        "duration": 2.5,
+        "duration": 2,
         "max_participants": 1,
         "tags": ["uuid1", "uuid2"],
         "location_type": "remote",
@@ -1409,7 +1409,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         "title": "Web Development Help",
         "description": "I can help with React and Django",
         "type": "Offer",
-        "duration": 2.5,
+        "duration": 2,
         "max_participants": 1,
         "status": "Active",
         "user": {
@@ -2170,7 +2170,7 @@ class ExpressInterestView(APIView):
         "service": {...},
         "requester": {...},
         "status": "pending",
-        "provisioned_hours": 2.5,
+        "provisioned_hours": 2,
         "created_at": "2024-01-01T12:00:00Z"
     }
     ```
@@ -2293,7 +2293,7 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     ```json
     {
         "exact_location": "123 Main St, San Francisco",
-        "exact_duration": 2.5,
+        "exact_duration": 2,
         "scheduled_time": "2024-12-25T14:00:00Z"
     }
     ```
@@ -2301,7 +2301,7 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     **Confirm Completion Request Format:**
     ```json
     {
-        "hours": 2.5
+        "hours": 2
     }
     ```
     (Optional: adjust hours if different from provisioned amount)
@@ -2321,9 +2321,9 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         "service": {...},
         "requester": {...},
         "status": "accepted",
-        "provisioned_hours": 2.5,
+        "provisioned_hours": 2,
         "exact_location": "123 Main St",
-        "exact_duration": 2.5,
+        "exact_duration": 2,
         "scheduled_time": "2024-12-25T14:00:00Z",
         "provider_confirmed_complete": false,
         "receiver_confirmed_complete": false,
@@ -2567,7 +2567,16 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                     code=ErrorCodes.VALIDATION_ERROR,
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
-        except (ValueError, TypeError):
+            if (
+                handshake.service.type in ('Offer', 'Need')
+                and exact_duration_decimal != exact_duration_decimal.to_integral_value()
+            ):
+                return create_error_response(
+                    'Duration must be a whole number of hours',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+        except (InvalidOperation, ValueError, TypeError):
             return create_error_response(
                 'Invalid duration format',
                 code=ErrorCodes.VALIDATION_ERROR,
@@ -3271,6 +3280,15 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                         code=ErrorCodes.VALIDATION_ERROR,
                         status_code=status.HTTP_400_BAD_REQUEST
                     )
+                if (
+                    handshake.service.type in ('Offer', 'Need')
+                    and hours_decimal != hours_decimal.to_integral_value()
+                ):
+                    return create_error_response(
+                        'Hours must be a whole number',
+                        code=ErrorCodes.VALIDATION_ERROR,
+                        status_code=status.HTTP_400_BAD_REQUEST
+                    )
                 
                 # If hours changed and handshake was already accepted (provisioned), 
                 # we need to adjust the provisioned amount
@@ -3323,7 +3341,7 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                             invalidate_transactions(str(receiver_locked.id))
                 
                 handshake.provisioned_hours = hours_decimal
-            except (ValueError, TypeError):
+            except (InvalidOperation, ValueError, TypeError):
                 return create_error_response(
                     'Invalid hours value',
                     code=ErrorCodes.VALIDATION_ERROR,
@@ -5160,8 +5178,8 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
         "id": "uuid",
         "user": {...},
         "transaction_type": "provision",
-        "amount": -2.5,
-        "balance_after": 7.5,
+        "amount": -2,
+        "balance_after": 8,
         "handshake": {...},
         "description": "Hours escrowed for 'Web Development Help'",
         "created_at": "2024-01-01T12:00:00Z"

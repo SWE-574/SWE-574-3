@@ -71,7 +71,7 @@ class LocationStrategyTestCase(TestCase):
             title='Ankara Service',
             description='A service in Ankara',
             type='Offer',
-            duration=Decimal('1.50'),
+            duration=Decimal('2.00'),
             location_type='In-Person',
             location_area='Ankara',
             location_lat=Decimal('39.9334'),

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Box, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
 import {
-  FiArrowLeft, FiMessageSquare, FiClock, FiMapPin, FiCalendar,
+  FiArrowLeft, FiClock, FiMapPin, FiCalendar,
   FiStar, FiCheckCircle, FiThumbsUp, FiUser, FiAlertCircle,
   FiZap, FiLayers, FiRepeat, FiAward,
 } from 'react-icons/fi'
@@ -13,16 +13,16 @@ import type { User, Service, BadgeProgress, ProfileReview } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
 import { groupHistoryItems, isOwnHistoryItem, type GroupedHistoryEntry } from '@/utils/historyGrouping'
 import {
-  GREEN, GREEN_LT,
+  GREEN, GREEN_LT, GREEN_DARK,
   AMBER, AMBER_LT,
-  BLUE, BLUE_LT,
+  BLUE, BLUE_LT, TEAL, ORANGE,
   PURPLE, PURPLE_LT,
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 
-const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
+const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, TEAL, ORANGE]
 const avatarBg    = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
 const getInitials = (f: string, l: string, e: string) =>
   f && l ? `${f[0]}${l[0]}`.toUpperCase() : (f || l || e || 'U')[0].toUpperCase()
@@ -274,7 +274,7 @@ const PublicProfile = () => {
   const bgColor     = avatarBg(displayName)
   const bannerBg = profileUser.banner_url
     ? { backgroundImage: `url(${profileUser.banner_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : { background: `linear-gradient(135deg, ${GREEN} 0%, #1a3a30 60%, ${AMBER}60 100%)` }
+    : { background: `linear-gradient(135deg, ${GREEN} 0%, ${GREEN_DARK} 60%, ${AMBER}60 100%)` }
 
   const offersCount = services.filter(s => s.type === 'Offer').length
   const needsCount  = services.filter(s => s.type === 'Need').length
@@ -334,7 +334,7 @@ const PublicProfile = () => {
             </Box>
           </Box>
 
-          {/* ── Name + meta + buttons — fully below banner ──────────────────── */}
+          {/* ── Name + meta — fully below banner ────────────────────────────── */}
           <Flex align="center" justify="space-between" gap={4} mb={5} wrap="wrap">
             <Box minW={0}>
               <Text fontSize="22px" fontWeight={800} color={GRAY800} lineHeight={1.25}
@@ -351,15 +351,6 @@ const PublicProfile = () => {
                 <Flex align="center" gap="4px" fontSize="12px" color={GREEN} fontWeight={600}><FiStar size={11} />{profileUser.karma_score ?? 0} karma</Flex>
               </Flex>
             </Box>
-            {currentUser && (
-              <Box as="button" px="16px" py="8px" borderRadius="8px" fontSize="13px" fontWeight={600} flexShrink={0}
-                style={{ background: GREEN, color: WHITE, border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '7px' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.filter = 'brightness(0.9)' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = 'none' }}
-                onClick={() => navigate('/messages')}>
-                <FiMessageSquare size={13} />Message
-              </Box>
-            )}
           </Flex>
 
           {/* ── Stats strip ──────────────────────────────────────────────────── */}

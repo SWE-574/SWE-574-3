@@ -39,7 +39,7 @@ class TestExpressInterestView:
     def test_express_interest_insufficient_balance(self):
         """Test expressing interest with insufficient balance"""
         provider = UserFactory()
-        requester = UserFactory(timebank_balance=Decimal('0.50'))
+        requester = UserFactory(timebank_balance=Decimal('1.00'))
         service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
         
         client = AuthenticatedAPIClient()
@@ -361,7 +361,7 @@ class TestInitiateApproveServiceOwnerModel:
     FUTURE = timezone.now() + timedelta(days=5)
     INITIATE_PAYLOAD = {
         'exact_location': 'Test Cafe, Beşiktaş',
-        'exact_duration': 1.5,
+        'exact_duration': 2,
         'scheduled_time': (timezone.now() + timedelta(days=5)).isoformat(),
     }
 
@@ -380,6 +380,24 @@ class TestInitiateApproveServiceOwnerModel:
         assert resp.status_code == status.HTTP_200_OK
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
+
+    def test_initiate_rejects_fractional_duration(self):
+        """Offer/Need handshake initiation must reject fractional exact_duration values."""
+        service_owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=service_owner, type='Offer', duration=Decimal('2.00'))
+        handshake = HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(service_owner)
+        resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', {
+            'exact_location': 'Test Cafe, Beşiktaş',
+            'exact_duration': 1.5,
+            'scheduled_time': (timezone.now() + timedelta(days=5)).isoformat(),
+        })
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert resp.data['error'] == 'Duration must be a whole number of hours'
 
     def test_offer_requester_cannot_initiate(self):
         """Requester cannot initiate an Offer handshake — only service owner can."""
@@ -488,6 +506,27 @@ class TestInitiateApproveServiceOwnerModel:
         assert resp.status_code == status.HTTP_200_OK
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
+
+    def test_confirm_rejects_fractional_hours_adjustment(self):
+        """Completion confirmation must reject fractional hour adjustments."""
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(timebank_balance=Decimal('3.00'))
+        service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='accepted',
+            provisioned_hours=Decimal('2.00'),
+            provider_initiated=True,
+            requester_initiated=True,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        resp = client.post(f'/api/handshakes/{handshake.id}/confirm/', {'hours': 1.5})
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert resp.data['error'] == 'Hours must be a whole number'
 
     def test_need_service_owner_cannot_approve_own_handshake(self):
         """Need service owner cannot approve — they are the initiator, not the approver."""
