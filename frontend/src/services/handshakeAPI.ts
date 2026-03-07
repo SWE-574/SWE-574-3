@@ -3,8 +3,11 @@ import apiClient from './api'
 export interface Handshake {
   id: string
   service: string | { id: string }
+  service_id?: string
   service_title: string
   service_type?: 'Offer' | 'Need' | 'Event'
+  schedule_type?: 'One-Time' | 'Recurrent'
+  max_participants?: number
   requester: string
   requester_name: string
   provider_name: string

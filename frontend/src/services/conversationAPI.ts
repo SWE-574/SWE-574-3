@@ -56,10 +56,13 @@ export interface ChatConversation {
   exact_location: string | null
   exact_duration: number | null
   scheduled_time: string | null
+  service_location_area?: string | null
+  service_scheduled_time?: string | null
   provisioned_hours: number | null
   user_has_reviewed: boolean
   max_participants: number
   schedule_type: string  // 'One-Time' | 'Recurrent'
+  service_member_count?: number
 }
 
 export interface GroupChatMessage {
@@ -70,6 +73,19 @@ export interface GroupChatMessage {
   sender_avatar_url: string | null
   body: string
   created_at: string
+}
+
+export interface GroupChatParticipant {
+  id: string
+  name: string
+  avatar_url: string | null
+}
+
+export interface GroupChatThreadData {
+  service_id: string
+  service_title: string
+  participants: GroupChatParticipant[]
+  messages: GroupChatMessage[]
 }
 
 interface MessagesResponse {
@@ -129,12 +145,17 @@ export const groupChatAPI = {
    * GET /api/group-chat/{serviceId}/ — last 50 messages for the private group chat.
    * Only accessible to users with an accepted handshake (or the service owner).
    */
-  getMessages: async (serviceId: string, signal?: AbortSignal): Promise<GroupChatMessage[]> => {
-    const res = await apiClient.get<{ service_id: string; messages: GroupChatMessage[] }>(
+  getMessages: async (serviceId: string, signal?: AbortSignal): Promise<GroupChatThreadData> => {
+    const res = await apiClient.get<GroupChatThreadData>(
       `/group-chat/${serviceId}/`,
       { signal },
     )
-    return res.data.messages ?? []
+    return {
+      service_id: res.data.service_id,
+      service_title: res.data.service_title,
+      participants: res.data.participants ?? [],
+      messages: res.data.messages ?? [],
+    }
   },
 
   /**
