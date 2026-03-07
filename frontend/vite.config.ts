@@ -5,13 +5,21 @@ import path from 'path'
 import type { IncomingMessage } from 'node:http'
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  // Load env from the monorepo root (.env) so backend + frontend share one file.
+  // Also loads frontend/.env if it exists (local overrides).
+  const rootDir = path.resolve(__dirname, '..')
+  const env = {
+    ...loadEnv(mode, rootDir, ''),
+    ...loadEnv(mode, process.cwd(), ''),
+  }
   // Backend origin for the Vite proxy — always localhost:8000 in local dev.
   // Override with VITE_BACKEND_URL if you run the backend on a different port.
   const backendOrigin = env.VITE_BACKEND_URL || 'http://localhost:8000'
 
   return {
     plugins: [react()],
+    // Read VITE_* vars from the monorepo root .env (and frontend/.env as override)
+    envDir: rootDir,
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

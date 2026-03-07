@@ -1,6 +1,10 @@
-.PHONY: help setup dev stop reset install test test-unit test-integration \
+.PHONY: help env setup setup-demo dev stop reset install test test-unit test-integration \
         test-docker coverage coverage-backend coverage-frontend coverage-report \
-        clean demo build up down logs docker-build
+        clean build \
+        infra-up infra-down infra-reset infra-demo \
+        docker-up docker-down docker-logs docker-build docker-reset docker-demo \
+        prod-up prod-down prod-logs prod-build prod-reset prod-demo
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 _log   = @printf '\033[1;34m→ %s\033[0m\n' $(1)
@@ -41,38 +45,53 @@ export POSTGIS_IMAGE
 help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
-	@echo 'Local development:'
-	@grep -E '^(setup|dev|stop|reset|install|demo|build|clean):.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo 'Local development (infra in Docker, backend/frontend native):'
+	@grep -E '^(env|setup|setup-demo|dev|stop|reset|install|build|clean):.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Infra only (PostGIS + Redis + MinIO containers):'
+	@grep -E '^infra-.*:.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Docker dev (full stack in containers):'
+	@grep -E '^docker-.*:.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Docker prod (production stack):'
+	@grep -E '^prod-.*:.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Testing (native):'
 	@grep -E '^(test|test-unit|test-integration|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo 'Docker:'
-	@grep -E '^(up|down|logs|docker-build|test-docker):.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo 'Docker testing:'
+	@grep -E '^test-docker:.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  LOCAL DEVELOPMENT  (infra via docker compose, backend/frontend natively)
 # ─────────────────────────────────────────────────────────────────────────────
 
-setup: _check_env ## One-time local setup: venv, deps, infra, migrate, demo data
-	$(call _log,"[1/6] Python virtual environment...")
+env: ## Interactive .env generator (prompts for API keys, DB creds, etc.)
+	@bash scripts/setup-env.sh
+
+setup: _check_env ## One-time local setup: venv, deps, infra, migrate
+	$(call _log,"[1/5] Python virtual environment...")
 	@test -d $(VENV) || $(PYTHON) -m venv $(VENV)
-	$(call _log,"[2/6] Installing backend dependencies...")
+	$(call _log,"[2/5] Installing backend dependencies...")
 	@$(PIP) install -q -r backend/requirements.txt
-	$(call _log,"[3/6] Starting infra (PostGIS + Redis)...")
+	$(call _log,"[3/5] Starting infra (PostGIS + Redis + MinIO)...")
 	@$(COMPOSE_INFRA) up -d
 	@echo "  Waiting for database to accept connections..."
 	@until docker compose -f docker-compose.infra.yml exec -T db pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
 	@sleep 2
-	$(call _log,"[4/6] Running Django migrations...")
+	$(call _log,"[4/5] Running Django migrations...")
 	@sh -c 'set -e; for i in 1 2 3 4 5; do cd "$(CURDIR)/backend" && "$(CURDIR)/$(VENV)/bin/python" manage.py migrate && exit 0; echo "  DB not ready yet (attempt $$i/5), retrying in 3s..."; sleep 3; done; echo "migrate failed after 5 attempts"; exit 1'
-	$(call _log,"[5/6] Installing frontend dependencies...")
+	$(call _log,"[5/5] Installing frontend dependencies...")
 	@cd frontend && npm install --silent
-	$(call _log,"[6/6] Seeding demo data...")
-	@cd backend && DJANGO_SETTINGS_MODULE=hive_project.settings $(PYEXEC) setup_demo.py
 	@echo ""
 	$(call _ok,"Setup complete! Run  make dev  to start.")
-	@echo "  Login: elif@demo.com / demo123"
+	@echo "  Tip: Run  make setup-demo  to also seed demo data."
+
+setup-demo: setup ## One-time local setup + seed demo data
+	$(call _log,"Seeding demo data...")
+	@cd backend && DJANGO_SETTINGS_MODULE=hive_project.settings $(PYEXEC) setup_demo.py
+	$(call _ok,"Demo data seeded. Login: elif@demo.com / demo123")
 
 dev: _check_env ## Start local dev: infra + backend (8000) + frontend (5173) in parallel
 	@for port in 8000 5173; do \
@@ -98,12 +117,12 @@ dev: _check_env ## Start local dev: infra + backend (8000) + frontend (5173) in 
 	   | awk '{print "\033[0;35m[frontend]\033[0m " $$0; fflush()}') & FRONTEND_PID=$$!; \
 	 wait
 
-stop: ## Stop local infra (PostGIS + Redis containers)
+stop: ## Stop local infra (PostGIS + Redis + MinIO containers)
 	$(call _log,"Stopping infra...")
 	@$(COMPOSE_INFRA) down
 	$(call _ok,"Infra stopped.")
 
-reset: ## Stop infra AND delete all Postgres + Redis data volumes (full reset)
+reset: ## Stop infra AND delete all data volumes (full reset)
 	$(call _warn,"This will permanently delete all local database and cache data.")
 	@printf "Continue? [y/N] " && read ans && [ "$${ans:-N}" = "y" ] || (echo "Aborted."; exit 1)
 	$(call _log,"Stopping infra and removing volumes...")
@@ -115,15 +134,6 @@ install: ## Install all dependencies
 	@cd backend && pip install -r requirements.txt
 	@cd frontend && npm install
 
-demo: _check_env ## Seed demo data (Docker stack)
-	$(call _log,"Starting Docker demo environment...")
-	@$(COMPOSE_DEV) up -d --build
-	$(call _log,"Running migrations...")
-	@sh -c 'set -e; for i in 1 2 3 4 5 6 7 8 9 10; do docker compose exec -T backend python manage.py migrate && exit 0; echo "migrate not ready yet (attempt $$i/10), retrying..."; sleep 2; done; echo "migrate failed after retries"; exit 1'
-	$(call _log,"Seeding demo data...")
-	@docker compose exec -T backend bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python setup_demo.py"
-	$(call _ok,"Demo ready: http://localhost:5173")
-
 build: ## Build the frontend for production
 	@cd frontend && npm run build
 
@@ -134,6 +144,35 @@ clean: ## Clean generated files and caches
 	@find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
 	@rm -rf backend/tests/reports frontend/tests/reports frontend/coverage
 	$(call _ok,"Cleaned.")
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  INFRA ONLY  (PostGIS + Redis + MinIO — for running backend/frontend natively)
+# ─────────────────────────────────────────────────────────────────────────────
+
+infra-up: _check_env ## Start infra containers (db, redis, minio)
+	$(call _log,"Starting infra...")
+	@$(COMPOSE_INFRA) up -d
+	@echo "  Waiting for database..."
+	@until docker compose -f docker-compose.infra.yml exec -T db pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	$(call _ok,"Infra running. db=localhost:5432  redis=localhost:6379  minio=localhost:9000")
+
+infra-down: ## Stop infra containers
+	$(call _log,"Stopping infra...")
+	@$(COMPOSE_INFRA) down
+	$(call _ok,"Infra stopped.")
+
+infra-reset: ## Stop infra AND delete all data volumes
+	$(call _warn,"This will permanently delete all infra volumes (database, redis, minio).")
+	@printf "Continue? [y/N] " && read ans && [ "$${ans:-N}" = "y" ] || (echo "Aborted."; exit 1)
+	@$(COMPOSE_INFRA) down -v --remove-orphans
+	$(call _ok,"Infra stopped and volumes deleted.")
+
+infra-demo: _check_env infra-up ## Start infra + seed demo data (native backend)
+	$(call _log,"Running migrations...")
+	@sh -c 'set -e; for i in 1 2 3 4 5; do cd "$(CURDIR)/backend" && "$(CURDIR)/$(VENV)/bin/python" manage.py migrate && exit 0; echo "  DB not ready yet (attempt $$i/5), retrying in 3s..."; sleep 3; done; echo "migrate failed after 5 attempts"; exit 1'
+	$(call _log,"Seeding demo data...")
+	@cd backend && DJANGO_SETTINGS_MODULE=hive_project.settings $(PYEXEC) setup_demo.py
+	$(call _ok,"Demo data seeded. Login: elif@demo.com / demo123")
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  TESTING (native — requires venv + node_modules already installed)
@@ -179,22 +218,76 @@ coverage-report: ## Open coverage reports in the default browser
 	 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  DOCKER  (full stack in containers)
+#  DOCKER DEV  (full stack in containers — docker-compose.yml)
 # ─────────────────────────────────────────────────────────────────────────────
 
-up: _check_env ## Start the full Docker dev stack
+docker-up: _check_env ## Start the full Docker dev stack
 	@$(COMPOSE_DEV) up -d
 	$(call _ok,"Docker dev stack running. http://localhost")
 
-down: ## Stop Docker containers
+docker-down: ## Stop Docker dev containers
 	@$(COMPOSE_DEV) down
 
-logs: ## Tail Docker logs
+docker-logs: ## Tail Docker dev logs
 	@$(COMPOSE_DEV) logs -f
 
-docker-build: ## Build Docker images
+docker-build: ## Build Docker dev images
 	@$(COMPOSE_DEV) build
 
-test-docker: _check_env ## Run backend tests inside Docker
+docker-reset: ## Stop Docker dev AND delete all data volumes
+	$(call _warn,"This will permanently delete all Docker dev volumes.")
+	@printf "Continue? [y/N] " && read ans && [ "$${ans:-N}" = "y" ] || (echo "Aborted."; exit 1)
+	@$(COMPOSE_DEV) down -v --remove-orphans
+	$(call _ok,"Docker dev stopped and volumes deleted.")
+
+docker-demo: _check_env ## Start Docker dev stack + seed demo data
+	$(call _log,"Starting Docker dev environment...")
+	@$(COMPOSE_DEV) up -d --build
+	$(call _log,"Waiting for backend to be healthy...")
+	@sh -c 'set -e; for i in 1 2 3 4 5 6 7 8 9 10; do docker compose exec -T backend python manage.py migrate && exit 0; echo "  Backend not ready yet (attempt $$i/10), retrying..."; sleep 3; done; echo "migrate failed after retries"; exit 1'
+	$(call _log,"Seeding demo data...")
+	@docker compose exec -T backend bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python setup_demo.py"
+	$(call _ok,"Docker dev + demo ready: http://localhost")
+	@echo "  Login: elif@demo.com / demo123"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  DOCKER PROD  (production stack — docker-compose.prod.yml)
+# ─────────────────────────────────────────────────────────────────────────────
+
+prod-up: _check_env ## Start the production Docker stack
+	$(call _log,"Starting production stack...")
+	@$(COMPOSE_PROD) up -d
+	$(call _ok,"Production stack running.")
+
+prod-down: ## Stop production Docker containers
+	@$(COMPOSE_PROD) down
+
+prod-logs: ## Tail production Docker logs
+	@$(COMPOSE_PROD) logs -f
+
+prod-build: _check_env ## Build production Docker images
+	@$(COMPOSE_PROD) build
+
+prod-reset: ## Stop production AND delete all data volumes
+	$(call _warn,"This will permanently delete all PRODUCTION volumes (database, redis, minio).")
+	@printf "Continue? [y/N] " && read ans && [ "$${ans:-N}" = "y" ] || (echo "Aborted."; exit 1)
+	@$(COMPOSE_PROD) down -v --remove-orphans
+	$(call _ok,"Production stopped and volumes deleted.")
+
+prod-demo: _check_env ## Start production stack + seed demo data
+	$(call _log,"Starting production environment...")
+	@$(COMPOSE_PROD) up -d --build
+	$(call _log,"Waiting for backend to be healthy...")
+	@sh -c 'set -e; for i in 1 2 3 4 5 6 7 8 9 10; do $(COMPOSE_PROD) exec -T backend python manage.py migrate && exit 0; echo "  Backend not ready yet (attempt $$i/10), retrying..."; sleep 3; done; echo "migrate failed after retries"; exit 1'
+	$(call _log,"Seeding demo data...")
+	@$(COMPOSE_PROD) exec -T backend bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python setup_demo.py"
+	$(call _ok,"Production + demo ready.")
+	@echo "  Login: elif@demo.com / demo123"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  DOCKER TESTING
+# ─────────────────────────────────────────────────────────────────────────────
+
+test-docker: _check_env ## Run backend tests inside Docker dev stack
 	@$(COMPOSE_DEV) up -d db redis backend
 	@docker compose exec -T backend pytest --cov=api --cov-report=term -q

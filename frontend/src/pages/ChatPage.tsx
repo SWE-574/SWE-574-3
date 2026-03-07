@@ -44,8 +44,8 @@ import {
   WHITE,
 } from '@/theme/tokens'
 
-const CONV_POLL_MS = 15_000
-const MSG_POLL_MS  = 5_000
+const CONV_POLL_MS = 30_000
+const MSG_POLL_MS  = 30_000
 const POLL_IN_DEV  = false // In dev, rely on WebSocket only to avoid hammering the API
 
 const ACTIVE_STATUSES = new Set(['pending', 'accepted'])

@@ -911,7 +911,7 @@ export default function ServiceDetailPage() {
               >
                 {images.length > 0 ? (
                   <>
-                    <img src={images[0].file_url} alt="Cover photo"
+                    <img src={images[0].file_url} alt="Cover photo" loading="lazy"
                       style={{
                         position: 'absolute', inset: 0, width: '100%', height: '100%',
                         objectFit: 'cover',
@@ -1114,7 +1114,7 @@ export default function ServiceDetailPage() {
                             setShowImageLightbox(true)
                           }}
                         >
-                          <img src={m.file_url} alt={`Photo ${i + 1}`}
+                          <img src={m.file_url} alt={`Photo ${i + 1}`} loading="lazy"
                             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                           {/* Cover badge on first image */}
                           {i === 0 && (
@@ -1972,6 +1972,7 @@ export default function ServiceDetailPage() {
                         <img
                           src={img.file_url}
                           alt={`Thumbnail ${i + 1}`}
+                          loading="lazy"
                           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                         />
                       </Box>

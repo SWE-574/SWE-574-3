@@ -29,6 +29,8 @@ import {
 
 type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 'audit'
 
+const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
+
 function asStatusCode(error: unknown): number | undefined {
   return (error as { response?: { status?: number } })?.response?.status
 }
@@ -1161,7 +1163,6 @@ const AdminDashboard = () => {
                 {(users?.results || []).map((user, idx) => {
                   const name = userDisplayName(user)
                   const initials = [user.first_name?.[0], user.last_name?.[0]].filter(Boolean).join('').toUpperCase() || user.email[0].toUpperCase()
-                  const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
                   const avatarColor = AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
                   const isSelf = currentUser?.id === user.id
                   const isLast = idx === (users?.results || []).length - 1
