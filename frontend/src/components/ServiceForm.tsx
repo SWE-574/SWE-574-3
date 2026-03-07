@@ -10,7 +10,7 @@ import { FiX, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCi
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
 import WikidataTagAutocomplete from './WikidataTagAutocomplete'
-import type { Service, Tag } from '@/types'
+import type { Service, ServiceMedia, Tag } from '@/types'
 
 import {
   GREEN, GREEN_LT,
@@ -34,6 +34,27 @@ const schema = z.object({
 })
 
 type FormValues = z.infer<typeof schema>
+
+interface EditableMediaItem {
+  key: string
+  preview: string
+  source: 'existing' | 'new'
+  mediaId?: string
+  file?: File
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+function imageMediaOnly(media: ServiceMedia[] | undefined): ServiceMedia[] {
+  return (media ?? []).filter((item) => item.media_type === 'image')
+}
 
 // ─── Mapbox geocoding types ───────────────────────────────────────────────────
 
@@ -393,6 +414,9 @@ export default function ServiceForm({
   const [mediaFiles, setMediaFiles]         = useState<File[]>([])
   const [mediaPreviews, setMediaPreviews]   = useState<string[]>([])
   const [primaryMediaIdx, setPrimaryMediaIdx] = useState(0)
+  const [editableMediaItems, setEditableMediaItems] = useState<EditableMediaItem[]>([])
+  const [unmanagedMediaIds, setUnmanagedMediaIds] = useState<string[]>([])
+  const [mediaDirty, setMediaDirty] = useState(false)
   const [submitting, setSubmitting]         = useState(false)
 
   // Event-specific date/time
@@ -454,7 +478,24 @@ export default function ServiceForm({
         setEventTime(`${hours}:${minutes}`)
       }
     }
-  }, [initialService, reset])
+
+    if (isEditMode) {
+      setEditableMediaItems(
+        imageMediaOnly(initialService.media).map((item) => ({
+          key: `existing-${item.id}`,
+          preview: item.file_url,
+          source: 'existing' as const,
+          mediaId: item.id,
+        })),
+      )
+      setUnmanagedMediaIds(
+        (initialService.media ?? [])
+          .filter((item) => item.media_type !== 'image')
+          .map((item) => item.id),
+      )
+      setMediaDirty(false)
+    }
+  }, [initialService, isEditMode, reset])
 
   // ── Media ────────────────────────────────────────────────────────────────
 
@@ -497,6 +538,55 @@ export default function ServiceForm({
     })
     setPrimaryMediaIdx(0)
   }
+
+  const handleEditMedia = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const remainingSlots = 5 - editableMediaItems.length
+    const incoming = Array.from(e.target.files ?? [])
+      .filter((file) => file.type.startsWith('image/'))
+      .slice(0, remainingSlots)
+
+    if (!incoming.length) {
+      e.target.value = ''
+      return
+    }
+
+    if (incoming.length < (e.target.files?.length ?? 0)) {
+      toast.error('You can keep up to 5 photos per service.')
+    }
+
+    try {
+      const nextItems = await Promise.all(
+        incoming.map(async (file) => ({
+          key: `new-${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          preview: await readFileAsDataUrl(file),
+          source: 'new' as const,
+          file,
+        })),
+      )
+      setEditableMediaItems((prev) => [...prev, ...nextItems])
+      setMediaDirty(true)
+    } catch {
+      toast.error('Could not load the selected photo.')
+    } finally {
+      e.target.value = ''
+    }
+  }, [editableMediaItems.length])
+
+  const removeEditableMedia = useCallback((key: string) => {
+    setEditableMediaItems((prev) => prev.filter((item) => item.key !== key))
+    setMediaDirty(true)
+  }, [])
+
+  const setEditablePrimary = useCallback((index: number) => {
+    setEditableMediaItems((prev) => {
+      if (index <= 0 || index >= prev.length) return prev
+      const next = [...prev]
+      const [selected] = next.splice(index, 1)
+      next.unshift(selected)
+      return next
+    })
+    setMediaDirty(true)
+  }, [])
 
   // ── Submit ───────────────────────────────────────────────────────────────
 
@@ -550,36 +640,46 @@ export default function ServiceForm({
       })
 
       if (isEditMode && serviceId) {
-        const payload: Record<string, unknown> = {
-          title: values.title,
-          description: values.description,
-          duration: values.duration,
-          location_type: values.location_type,
-          max_participants: values.max_participants,
-          schedule_type: type === 'Event' ? 'One-Time' : values.schedule_type,
-          schedule_details: values.schedule_details ?? '',
-          tag_ids: tagIds,
-          tag_names: tagNames,
-        }
-        if (Object.keys(wikidataLabelMap).length > 0) {
-          payload.wikidata_labels_json = JSON.stringify(wikidataLabelMap)
-        }
-
+        const fd = new FormData()
+        fd.append('title', values.title)
+        fd.append('description', values.description)
+        fd.append('duration', String(values.duration))
+        fd.append('location_type', values.location_type)
+        fd.append('max_participants', String(values.max_participants))
+        fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
+        fd.append('schedule_details', values.schedule_details ?? '')
         if (values.location_type === 'In-Person' && locationValue) {
-          payload.location_area = locationValue.label.slice(0, 100)
-          payload.location_lat = locationValue.lat.toFixed(6)
-          payload.location_lng = locationValue.lng.toFixed(6)
+          fd.append('location_area', locationValue.label.slice(0, 100))
+          fd.append('location_lat', locationValue.lat.toFixed(6))
+          fd.append('location_lng', locationValue.lng.toFixed(6))
         } else {
-          payload.location_area = null
-          payload.location_lat = null
-          payload.location_lng = null
+          fd.append('location_area', '')
         }
-
         if (type === 'Event' && eventDate && eventTime) {
-          payload.scheduled_time = new Date(`${eventDate}T${eventTime}:00`).toISOString()
+          fd.append('scheduled_time', new Date(`${eventDate}T${eventTime}:00`).toISOString())
         }
-
-        const updated = await serviceAPI.update(serviceId, payload as Partial<Service>)
+        tagIds.forEach((id) => fd.append('tag_ids', id))
+        tagNames.forEach((name) => fd.append('tag_names', name))
+        if (Object.keys(wikidataLabelMap).length > 0) {
+          fd.append('wikidata_labels_json', JSON.stringify(wikidataLabelMap))
+        }
+        if (mediaDirty) {
+          fd.append('replace_media', 'true')
+          let newMediaIdx = 0
+          editableMediaItems.forEach((item) => {
+            if (item.source === 'existing' && item.mediaId) {
+              fd.append('media_order', `existing:${item.mediaId}`)
+              return
+            }
+            if (item.file) {
+              fd.append('media_order', `new:${newMediaIdx}`)
+              fd.append('media', item.file)
+              newMediaIdx += 1
+            }
+          })
+          unmanagedMediaIds.forEach((mediaId) => fd.append('media_order', `existing:${mediaId}`))
+        }
+        const updated = await serviceAPI.update(serviceId, fd)
         toast.success(`${type} updated successfully!`)
         navigate(`/service-detail/${updated.id}`)
       } else {
@@ -995,6 +1095,150 @@ export default function ServiceForm({
                   First photo will be the cover image
                 </Text>
                 <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleMedia} />
+              </Box>
+            )}
+          </Box>
+        </Section>
+        )}
+
+        {isEditMode && (
+        <Section icon={<FiImage size={14} />} label="Photos">
+          <Box>
+            {editableMediaItems.length > 0 ? (
+              <Box mb={3}>
+                <Box position="relative" borderRadius="12px" overflow="hidden"
+                  border={`2px solid ${accent}`} mb={3}
+                  style={{ aspectRatio: '16/7' }}
+                >
+                  <img
+                    src={editableMediaItems[0].preview}
+                    alt="Cover photo"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                  />
+                  <Box
+                    position="absolute" top="8px" left="8px"
+                    px="8px" py="3px" borderRadius="full"
+                    bg="rgba(0,0,0,0.6)" color={WHITE}
+                    fontSize="11px" fontWeight={700}
+                    display="flex" alignItems="center" gap="4px"
+                    style={{ backdropFilter: 'blur(4px)' }}
+                  >
+                    <FiStar size={10} fill={WHITE} /> Cover Photo
+                  </Box>
+                  <Box
+                    as="button"
+                    position="absolute" top="8px" right="8px"
+                    w="24px" h="24px" borderRadius="full"
+                    bg="rgba(0,0,0,0.6)" color={WHITE}
+                    display="flex" alignItems="center" justifyContent="center"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      removeEditableMedia(editableMediaItems[0].key)
+                    }}
+                    style={{ border: 'none', cursor: 'pointer', backdropFilter: 'blur(4px)' }}
+                  >
+                    <FiX size={12} />
+                  </Box>
+                </Box>
+
+                {editableMediaItems.length > 1 && (
+                  <Box>
+                    <Text fontSize="11px" color={GRAY400} mb={2}>
+                      Click <FiStar size={9} style={{ display: 'inline', verticalAlign: 'middle' }} /> to set as cover
+                    </Text>
+                    <Flex gap={2} flexWrap="wrap">
+                      {editableMediaItems.map((item, index) => {
+                        if (index === 0) return null
+                        return (
+                          <Box
+                            key={item.key}
+                            position="relative"
+                            borderRadius="9px"
+                            overflow="hidden"
+                            border={`1px solid ${GRAY200}`}
+                            style={{ width: '80px', height: '80px', flexShrink: 0 }}
+                            cursor="pointer"
+                            onClick={() => setEditablePrimary(index)}
+                          >
+                            <img
+                              src={item.preview}
+                              alt={`Photo ${index + 1}`}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                            />
+                            <style>{`.edit-thumb-overlay:hover { background: rgba(0,0,0,0.5) !important; } .edit-thumb-overlay:hover .edit-thumb-label { opacity: 1 !important; }`}</style>
+                            <Box
+                              className="edit-thumb-overlay"
+                              position="absolute" inset={0}
+                              bg="rgba(0,0,0,0)"
+                              display="flex" alignItems="center" justifyContent="center"
+                              style={{ transition: 'background 0.15s' }}
+                            >
+                              <Box
+                                className="edit-thumb-label"
+                                color={WHITE} fontSize="9px" fontWeight={700}
+                                display="flex" flexDirection="column" alignItems="center" gap="2px"
+                                style={{ opacity: 0, transition: 'opacity 0.15s', pointerEvents: 'none' }}
+                              >
+                                <FiStar size={14} />
+                                Cover
+                              </Box>
+                            </Box>
+                            <Box
+                              as="button"
+                              position="absolute" top="4px" right="4px"
+                              w="18px" h="18px" borderRadius="full"
+                              bg="rgba(0,0,0,0.6)" color={WHITE}
+                              display="flex" alignItems="center" justifyContent="center"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                removeEditableMedia(item.key)
+                              }}
+                              style={{ border: 'none', cursor: 'pointer' }}
+                            >
+                              <FiX size={9} />
+                            </Box>
+                          </Box>
+                        )
+                      })}
+
+                      {editableMediaItems.length < 5 && (
+                        <Box
+                          as="label"
+                          display="flex" flexDirection="column" alignItems="center" justifyContent="center"
+                          gap={1} borderRadius="9px"
+                          border={`2px dashed ${GRAY200}`}
+                          cursor="pointer"
+                          style={{ width: '80px', height: '80px', flexShrink: 0 }}
+                          _hover={{ borderColor: GRAY300, bg: GRAY50 }}
+                        >
+                          <Box color={GRAY300}><FiImage size={18} /></Box>
+                          <Text fontSize="9px" color={GRAY400} fontWeight={500}>Add</Text>
+                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleEditMedia} />
+                        </Box>
+                      )}
+                    </Flex>
+                  </Box>
+                )}
+              </Box>
+            ) : (
+              <Box
+                as="label"
+                display="flex" flexDirection="column" alignItems="center" justifyContent="center"
+                gap={2} py={8} px={4}
+                border={`2px dashed ${GRAY200}`} borderRadius="12px"
+                cursor="pointer" textAlign="center"
+                transition="all 0.15s"
+                _hover={{ borderColor: GRAY300, bg: GRAY50 }}
+              >
+                <Box color={GRAY300}><FiImage size={28} /></Box>
+                <Text fontSize="13px" color={GRAY500} fontWeight={600}>
+                  Click to update photos
+                </Text>
+                <Text fontSize="11px" color={GRAY400}>
+                  Crop each photo before saving · up to 5 images total
+                </Text>
+                <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleEditMedia} />
               </Box>
             )}
           </Box>

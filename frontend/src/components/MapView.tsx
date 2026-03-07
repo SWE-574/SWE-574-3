@@ -19,7 +19,14 @@ import type { Feature, FeatureCollection, Point } from 'geojson'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 // Disable Mapbox telemetry to avoid CORS errors to events.mapbox.com
-mapboxgl.config.EVENTS_URL = ''
+
+const mapboxWithTelemetry = mapboxgl as typeof mapboxgl & {
+  setTelemetryEnabled?: (enabled: boolean) => void
+}
+
+if (typeof mapboxWithTelemetry.setTelemetryEnabled === 'function') {
+  mapboxWithTelemetry.setTelemetryEnabled(false)
+}
 
 import { GREEN, BLUE, AMBER, GRAY100, GRAY200, GRAY400, GRAY700, GRAY800, WHITE } from '@/theme/tokens'
 
