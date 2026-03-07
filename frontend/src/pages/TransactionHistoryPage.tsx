@@ -42,6 +42,7 @@ interface ExpectedAgreement {
   counterpart_avatar_url?: string | null
   status: Handshake['status']
   provisioned_hours: number
+  reserved_delta: number
   expected_delta: number
   note: string
 }
@@ -133,7 +134,8 @@ function toExpectedAgreement(handshake: Handshake, currentUserName?: string): Ex
   const counterpartName = handshakeCounterpartName(handshake, currentUserName)
   const counterpartEmail = handshake.counterpart?.email ?? ''
   const isProvider = handshake.is_current_user_provider === true
-  const expectedDelta = isProvider ? hours : -hours
+  const expectedDelta = isProvider ? hours : 0
+  const reservedDelta = isProvider ? 0 : -hours
 
   return {
     id: handshake.id,
@@ -145,10 +147,11 @@ function toExpectedAgreement(handshake: Handshake, currentUserName?: string): Ex
     counterpart_avatar_url: handshake.counterpart?.avatar_url ?? null,
     status: handshake.status,
     provisioned_hours: hours,
+    reserved_delta: reservedDelta,
     expected_delta: expectedDelta,
     note: isProvider
       ? `Time expected after completion`
-      : `Time expected to be deducted after completion`,
+      : `Already reserved at acceptance`,
   }
 }
 
@@ -574,7 +577,7 @@ const TransactionHistoryPage = () => {
                   Active Agreements
                 </Text>
                 <Text fontSize="12px" color={GRAY600}>
-                  Ongoing accepted exchanges. This shows how your available time is expected to change when these sessions are completed.
+                  Ongoing accepted exchanges. Reserved hours are already reflected in your available time; upcoming time only shows what will still change when these sessions are completed.
                 </Text>
               </Box>
               <Box px="10px" py="5px" borderRadius="999px" bg={WHITE} color={BLUE} fontSize="12px" fontWeight={700}>
@@ -631,6 +634,14 @@ const TransactionHistoryPage = () => {
                     flexShrink={0}
                   >
                     <Box textAlign={{ base: 'left', md: 'right' }}>
+                      {agreement.reserved_delta !== 0 && (
+                        <>
+                          <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase">Reserved now</Text>
+                          <Text fontSize="13px" fontWeight={800} color={RED}>
+                            {formatAmount(agreement.reserved_delta)}
+                          </Text>
+                        </>
+                      )}
                       <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase">Upcoming</Text>
                       <Text fontSize="13px" fontWeight={800} color={agreement.expected_delta > 0 ? GREEN : agreement.expected_delta < 0 ? RED : GRAY700}>
                         {agreement.expected_delta !== 0 ? formatAmount(agreement.expected_delta) : 'No change'}
