@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useForm, Controller, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -23,17 +23,25 @@ import {
 
 // ─── Zod schema ───────────────────────────────────────────────────────────────
 
-const schema = z.object({
-  title:            z.string().min(3, 'Title must be at least 3 characters').max(200),
-  description:      z.string().min(10, 'Description must be at least 10 characters').max(5000),
-  duration:         z.coerce.number().positive('Duration must be greater than 0').max(999),
-  location_type:    z.enum(['In-Person', 'Online']),
-  max_participants: z.coerce.number().int().positive('Must be at least 1').max(100),
-  schedule_type:    z.enum(['One-Time', 'Recurrent']),
-  schedule_details: z.string().max(500).optional(),
-})
+function getSchema(type: 'Offer' | 'Need' | 'Event') {
+  const durationValidation = (type === 'Offer' || type === 'Need')
+    ? z.coerce.number()
+        .int('Time credit must be a whole number.')
+        .min(1, 'Time credit must be at least 1 hour.')
+        .max(10, 'Time credit cannot exceed 10 hours.')
+    : z.coerce.number().positive('Duration must be greater than 0').max(999)
+  return z.object({
+    title:            z.string().min(3, 'Title must be at least 3 characters').max(200),
+    description:      z.string().min(10, 'Description must be at least 10 characters').max(5000),
+    duration:         durationValidation,
+    location_type:    z.enum(['In-Person', 'Online']),
+    max_participants: z.coerce.number().int().positive('Must be at least 1').max(100),
+    schedule_type:    z.enum(['One-Time', 'Recurrent']),
+    schedule_details: z.string().max(500).optional(),
+  })
+}
 
-type FormValues = z.infer<typeof schema>
+type FormValues = z.infer<ReturnType<typeof getSchema>>
 
 interface EditableMediaItem {
   key: string
@@ -424,7 +432,8 @@ export default function ServiceForm({
   const [eventTime, setEventTime]           = useState('')
   const [eventDateTimeError, setEventDateTimeError] = useState<string | undefined>()
 
-  const { register, handleSubmit, control, watch, reset, formState: { errors } } = useForm<FormValues>({
+  const schema = useMemo(() => getSchema(type), [type])
+  const { register, handleSubmit, control, watch, trigger, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: { location_type: 'In-Person', schedule_type: 'One-Time', max_participants: 1 },
   })
@@ -782,8 +791,15 @@ export default function ServiceForm({
               <Box>
                 <Label required>Duration (hours)</Label>
                 <Input
-                  type="number" min={0.5} step={0.5} placeholder="e.g. 1.5"
-                  {...register('duration')}
+                  type="number"
+                  min={type === 'Offer' || type === 'Need' ? 1 : 0.5}
+                  max={type === 'Offer' || type === 'Need' ? 10 : undefined}
+                  step={type === 'Offer' || type === 'Need' ? 1 : 0.5}
+                  placeholder={type === 'Offer' || type === 'Need' ? 'e.g. 1' : 'e.g. 1.5'}
+                  {...(type === 'Offer' || type === 'Need'
+                    ? register('duration', { onBlur: () => trigger('duration') })
+                    : register('duration')
+                  )}
                   style={inputStyle}
                   _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
                 />
