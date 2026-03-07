@@ -4,8 +4,10 @@ import {
   Button,
   Stack,
   Flex,
+  Link,
 } from '@chakra-ui/react'
 import { FiMapPin, FiClock, FiCalendar } from 'react-icons/fi'
+import { buildMapsUrl } from '@/utils/location'
 
 interface Props {
   isOpen: boolean
@@ -91,11 +93,32 @@ export function ProviderDetailsModal({
         </Text>
 
         <Stack gap={3}>
-          <DetailRow
-            icon={<FiMapPin size={16} />}
-            label="Location"
-            value={exactLocation}
-          />
+          <Flex align="flex-start" gap={3} p={3} bg="gray.50" borderRadius="10px">
+            <Box color="gray.400" mt="2px"><FiMapPin size={16} /></Box>
+            <Box flex={1}>
+              <Text fontSize="11px" color="gray.400" fontWeight={600} textTransform="uppercase" letterSpacing="0.05em">
+                Location
+              </Text>
+              <Text fontSize="14px" color="gray.800" fontWeight={600}>
+                {exactLocation}
+              </Text>
+              {exactLocation && (
+                <Link
+                  href={buildMapsUrl(exactLocation)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  fontSize="13px"
+                  fontWeight={600}
+                  color="#2D5C4E"
+                  mt={1}
+                  display="inline-block"
+                  _hover={{ textDecoration: 'underline' }}
+                >
+                  Open in Maps
+                </Link>
+              )}
+            </Box>
+          </Flex>
           <DetailRow
             icon={<FiClock size={16} />}
             label="Duration"

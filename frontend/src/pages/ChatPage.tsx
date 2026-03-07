@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { Box, Button, Flex, Text, Stack, Spinner } from '@chakra-ui/react'
+import { Box, Button, Flex, Text, Stack, Spinner, Link } from '@chakra-ui/react'
 import {
   FiSend,
   FiArrowLeft,
@@ -44,6 +44,7 @@ import {
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
+import { buildMapsUrl } from '@/utils/location'
 
 const CONV_POLL_MS = 30_000
 const MSG_POLL_MS  = 30_000
@@ -873,12 +874,25 @@ function ActionCard({
               {exact_location && (
                 <Box>
                   <Text fontSize="10px" color={GRAY400} fontWeight={600} mb="2px">LOCATION</Text>
-                  <Flex align="center" gap={1}>
+                  <Flex align="center" gap={1} flexWrap="wrap">
                     <FiMapPin size={12} color={GRAY500} />
                     <Text fontSize="13px" fontWeight={600} color={GRAY700}>
                       {exact_location}
                     </Text>
                   </Flex>
+                  <Link
+                    href={buildMapsUrl(exact_location)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    fontSize="12px"
+                    fontWeight={600}
+                    color={GREEN}
+                    mt="2px"
+                    display="inline-block"
+                    _hover={{ textDecoration: 'underline' }}
+                  >
+                    Open in Maps
+                  </Link>
                 </Box>
               )}
             </Flex>

@@ -99,7 +99,7 @@ function handshakeToEventCardService(handshake: EventHandshake): Service {
   }
 }
 
-type ServiceTab = 'offers' | 'needs' | 'events' | 'events' | 'history' | 'reviews' | 'settings'
+type ServiceTab = 'offers' | 'needs' | 'events' | 'history' | 'reviews' | 'settings'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const SectionCard = ({ children, mb = 5, overflow = 'hidden' }: { children: React.ReactNode; mb?: number; overflow?: string }) => (
