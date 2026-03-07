@@ -133,7 +133,7 @@ const OnboardingPage = () => {
                 {[
                   '🎯 Share your skills with neighbours',
                   '🤝 Exchange time — not money',
-                  '⏰ Start with 3 hours in your time bank',
+                  '⏰ Start with 3 hours of shared time',
                 ].map(item => (
                   <Text key={item} fontSize="sm" color={GRAY700}>{item}</Text>
                 ))}
@@ -142,7 +142,7 @@ const OnboardingPage = () => {
             <Box bg={WHITE} borderRadius="10px" px={5} py={3}
               border={`1px solid ${GRAY200}`} boxShadow="0 1px 4px rgba(0,0,0,0.06)">
               <Text fontSize="sm" color={GRAY700} fontWeight="600">
-                🕐 Your balance:{' '}
+                🕐 Your time available:{' '}
                 <span style={{ color: GREEN }}>{user?.timebank_balance ?? 3} hours</span>
               </Text>
             </Box>

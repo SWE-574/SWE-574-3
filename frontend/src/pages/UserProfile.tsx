@@ -36,6 +36,11 @@ const fmtDur      = (d: number | string) => `${Number(d)}h`
 
 type ServiceTab = 'offers' | 'needs' | 'history' | 'settings'
 
+function isOwnHistoryItem(item: UserHistoryItem) {
+  if (item.service_type === 'Need') return item.was_provider === false
+  return item.was_provider === true
+}
+
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const SectionCard = ({ children, mb = 5, overflow = 'hidden' }: { children: React.ReactNode; mb?: number; overflow?: string }) => (
   <Box bg={WHITE} borderRadius="12px" border={`1px solid ${GRAY200}`} overflow={overflow} mb={mb}
@@ -106,7 +111,7 @@ function ServiceCard({ service, onNav }: { service: Service; onNav: () => void }
 }
 
 // ── History row ───────────────────────────────────────────────────────────────
-function HistoryRow({ item, onClick }: { item: UserHistoryItem; onClick: () => void }) {
+function HistoryRow({ item, onClick, contextLabel }: { item: UserHistoryItem; onClick: () => void; contextLabel: string }) {
   const col = AVATAR_PALETTE[item.partner_name.charCodeAt(0) % AVATAR_PALETTE.length]
   const ini = item.partner_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
   return (
@@ -120,7 +125,7 @@ function HistoryRow({ item, onClick }: { item: UserHistoryItem; onClick: () => v
       }
       <Box flex={1} minW={0}>
         <Text fontSize="13px" fontWeight={600} color={GRAY800} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.service_title}</Text>
-        <Text fontSize="11px" color={GRAY500}>{item.was_provider ? 'Provided to' : 'Received from'} {item.partner_name}</Text>
+        <Text fontSize="11px" color={GRAY500}>{contextLabel} {item.partner_name}</Text>
       </Box>
       <Box textAlign="right" flexShrink={0}>
         <Text fontSize="12px" fontWeight={600} color={GREEN}>{fmtDur(item.duration)}</Text>
@@ -280,6 +285,7 @@ const UserProfile = () => {
 
   const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
   const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
+  const ownHistory = history.filter(isOwnHistoryItem)
 
   const handleSave = async () => {
     setSaving(true)
@@ -475,7 +481,7 @@ const UserProfile = () => {
             {([
               [offersTab.length,  'Offers',    GREEN,  GREEN_LT,  <FiZap    size={14} />],
               [needsTab.length,   'Needs',     BLUE,   BLUE_LT,   <FiLayers size={14} />],
-              [history.length,    'Exchanges', AMBER,  AMBER_LT,  <FiRepeat size={14} />],
+              [ownHistory.length, 'Exchanges', AMBER,  AMBER_LT,  <FiRepeat size={14} />],
               [badges.filter(b => b.earned).length, 'Badges', PURPLE, PURPLE_LT, <FiAward size={14} />],
             ] as [number, string, string, string, React.ReactNode][]).map(([val, label, color, bg, icon]) => (
               <Box key={label} bg={WHITE}
@@ -502,7 +508,7 @@ const UserProfile = () => {
           {balanceWarn && (
             <Box mb={4} px={4} py={3} borderRadius="10px" fontSize="13px" fontWeight={500}
               style={{ background: RED_LT, border: `1px solid ${RED}40`, color: RED }}>
-              Your TimeBank balance is <strong>{balance}h</strong> — consider spending it on services.
+              Your available time is <strong>{balance}h</strong> — consider sharing it through services in the community.
             </Box>
           )}
 
@@ -612,7 +618,7 @@ const UserProfile = () => {
                 <Flex px={4} pt={3} gap={0} borderBottom={`1px solid ${GRAY100}`} style={{ overflowX: 'auto' }}>
                   <TabBtn active={activeTab === 'offers'}   label={`Offers (${offersTab.length})`}  onClick={() => setActiveTab('offers')} />
                   <TabBtn active={activeTab === 'needs'}    label={`Needs (${needsTab.length})`}    onClick={() => setActiveTab('needs')} />
-                  <TabBtn active={activeTab === 'history'}  label={`History (${history.length})`}   onClick={() => setActiveTab('history')} />
+                  <TabBtn active={activeTab === 'history'}  label={`History (${ownHistory.length})`}   onClick={() => setActiveTab('history')} />
                   <TabBtn active={activeTab === 'settings'} label="Settings"                        onClick={() => setActiveTab('settings')} icon={<FiSettings size={12} />} />
                 </Flex>
 
@@ -653,15 +659,15 @@ const UserProfile = () => {
                 {/* ── History ── */}
                 {activeTab === 'history' && (historyLoading ? (
                   <Flex py={10} justify="center"><Spinner color={GREEN} /></Flex>
-                ) : history.length === 0 ? (
+                ) : ownHistory.length === 0 ? (
                   <Flex py={10} direction="column" align="center" gap={2}>
                     <FiRepeat size={22} color={GRAY300} />
-                    <Text fontSize="13px" color={GRAY400}>No completed exchanges yet</Text>
+                    <Text fontSize="13px" color={GRAY400}>No time activity on your own services yet</Text>
                   </Flex>
                 ) : (
                   <Box px={4}>
-                    {history.map((item, i) => (
-                      <HistoryRow key={i} item={item} onClick={() => navigate(`/public-profile/${item.partner_id}`)} />
+                    {ownHistory.map((item, i) => (
+                      <HistoryRow key={i} item={item} contextLabel="Own service with" onClick={() => navigate(`/public-profile/${item.partner_id}`)} />
                     ))}
                   </Box>
                 ))}
@@ -785,9 +791,9 @@ const UserProfile = () => {
             {/* Right: sidebar cards */}
             <Box w={{ base: '100%', lg: '272px' }} flexShrink={0}>
 
-              {/* TimeBank balance */}
+              {/* Your time */}
               <SectionCard>
-                <SectionHead label="TimeBank Balance" />
+                <SectionHead label="Your Time" />
                 <Box px={4} py={4} textAlign="center">
                   <Flex align="center" justify="center" gap={2} mb={1}>
                     <FiClock size={22} color={balanceWarn ? RED : GREEN} />
@@ -797,10 +803,10 @@ const UserProfile = () => {
                   <Flex justify="center" gap={2}>
                     <Box as="button" px="10px" py="6px" borderRadius="7px" fontSize="11px" fontWeight={600}
                       style={{ background: GRAY100, color: GRAY600, cursor: 'pointer' }}
-                      onClick={() => navigate('/transaction-history')}>View history</Box>
+                      onClick={() => navigate('/transaction-history')}>View activity</Box>
                     <Box as="button" px="10px" py="6px" borderRadius="7px" fontSize="11px" fontWeight={600}
                       style={{ background: GREEN_LT, color: GREEN, border: `1px solid ${GREEN}40`, cursor: 'pointer' }}
-                      onClick={() => navigate('/post-offer')}>Earn more</Box>
+                      onClick={() => navigate('/post-offer')}>Offer a service</Box>
                   </Flex>
                 </Box>
               </SectionCard>
@@ -813,7 +819,7 @@ const UserProfile = () => {
                     ['Post an Offer',       '/post-offer',            GREEN,  GREEN_LT],
                     ['Post a Need',         '/post-need',             BLUE,   BLUE_LT],
                     ['View Achievements',   '/achievements',          AMBER,  AMBER_LT],
-                    ['Transaction History', '/transaction-history',   PURPLE, PURPLE_LT],
+                    ['Time Activity', '/transaction-history',   PURPLE, PURPLE_LT],
                   ] as [string, string, string, string][]).map(([label, path, color]) => (
                     <Flex key={path} as="button" px={4} py="10px" align="center" justify="space-between"
                       borderBottom={`1px solid ${GRAY100}`} fontSize="12px" fontWeight={500} color={GRAY700}
