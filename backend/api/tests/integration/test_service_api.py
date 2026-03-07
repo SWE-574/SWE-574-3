@@ -379,3 +379,43 @@ class TestServiceRetrieveStatusVisibility:
         response = APIClient().get('/api/services/')
         assert response.status_code == status.HTTP_200_OK
         assert all(s['status'] == 'Active' for s in response.data['results'])
+
+    def test_need_service_max_participants_forced_to_one(self):
+        """Creating a Need service must force max_participants to 1."""
+        user = UserFactory()
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', {
+            'title': 'Need With Group',
+            'description': 'Trying to set max_participants on a Need',
+            'type': 'Need',
+            'duration': 1.0,
+            'location_type': 'Online',
+            'max_participants': 5,
+            'schedule_type': 'One-Time',
+        })
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data['max_participants'] == 1
+        service = Service.objects.get(id=response.data['id'])
+        assert service.max_participants == 1
+
+    def test_offer_service_respects_max_participants(self):
+        """Creating an Offer service must keep the requested max_participants value."""
+        user = UserFactory()
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', {
+            'title': 'Offer Group Session',
+            'description': 'Group session with multiple participants',
+            'type': 'Offer',
+            'duration': 2.0,
+            'location_type': 'Online',
+            'max_participants': 5,
+            'schedule_type': 'One-Time',
+        })
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data['max_participants'] == 5
+        service = Service.objects.get(id=response.data['id'])
+        assert service.max_participants == 5
