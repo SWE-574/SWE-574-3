@@ -22,7 +22,7 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
   await page.goto('/login')
   await page.locator('#email').fill(user.email)
   await page.locator('#password').fill(user.password)
-  await page.getByRole('button', { name: 'Log In' }).click()
+  await page.getByRole('button', { name: 'Sign in' }).click()
 
   // Wait until we have left the login page (redirected to dashboard or /)
   await expect(page).not.toHaveURL(/\/login/, { timeout: 20_000 })

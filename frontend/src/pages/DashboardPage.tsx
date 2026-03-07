@@ -46,7 +46,7 @@ const TRANSPARENT = 'transparent'
 
 const DEBOUNCE_SEARCH   = 400
 const DEBOUNCE_DISTANCE = 600
-const POLL_INTERVAL     = 30_000
+const POLL_INTERVAL     = 60_000
 const GEO_TIMEOUT       = 10_000
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ function Avatar({ u, size = 36 }: { u?: { first_name?: string; last_name?: strin
       fontSize={`${Math.round(size * 0.34)}px`} fontWeight={700}
     >
       {u?.avatar_url
-        ? <img src={u.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ? <img src={u.avatar_url} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         : initials(u)
       }
     </Box>
@@ -183,7 +183,7 @@ function CardHeader({ service, gradient }: { service: Service; gradient: [string
       style={{ background: thumb ? undefined : `linear-gradient(135deg, ${gradient[0]} 0%, ${gradient[1]} 100%)` }}
     >
       {thumb && (
-        <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <img src={thumb} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
       )}
       {/* Abstract decoration circles (only when no thumb) */}
       {!thumb && (
