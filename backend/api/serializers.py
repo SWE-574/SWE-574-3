@@ -252,7 +252,7 @@ class ServiceMediaSerializer(serializers.ModelSerializer):
                 'title': 'Web Development Help',
                 'description': 'I can help with React, Django, and database design',
                 'type': 'Offer',
-                'duration': 2.5,
+                'duration': 3.0,
                 'location_type': 'remote',
                 'location_area': 'San Francisco Bay Area',
                 'location_lat': None,
@@ -441,10 +441,20 @@ class ServiceSerializer(serializers.ModelSerializer):
         return value
     
     def validate_duration(self, value):
-        """Validate that duration is positive"""
+        """Validate duration: Offer/Need 1-10 whole hours; Event positive and <1000."""
+        service_type = self.initial_data.get('type')
+        if service_type in ('Offer', 'Need'):
+            if value != int(value):
+                raise serializers.ValidationError('Time credit must be a whole number.')
+            if value < 1:
+                raise serializers.ValidationError('Time credit must be at least 1 hour.')
+            if value > 10:
+                raise serializers.ValidationError('Time credit cannot exceed 10 hours.')
+            return value
+        # Event: existing behavior
         if value <= 0:
             raise serializers.ValidationError('Duration must be greater than 0')
-        if value > 1000:  # Reasonable upper limit
+        if value > 1000:
             raise serializers.ValidationError('Duration cannot exceed 1000 hours')
         return value
     
