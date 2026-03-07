@@ -10,7 +10,7 @@ import Map, { Source, Layer, NavigationControl } from 'react-map-gl/mapbox'
 import type { MapRef, LayerProps } from 'react-map-gl/mapbox'
 import mapboxgl from 'mapbox-gl'
 import type { MapMouseEvent } from 'mapbox-gl'
-import type { Feature, Point } from 'geojson'
+import type { Feature, FeatureCollection, Point } from 'geojson'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 const mapboxWithTelemetry = mapboxgl as typeof mapboxgl & { setTelemetryEnabled?: (enabled: boolean) => void }
@@ -135,7 +135,7 @@ export function LocationPickerMap({ value, onChange, height = '220px' }: Locatio
 
   const coords = useMemo(() => parseLatLng(value), [value])
 
-  const pinGeoJSON = useMemo((): GeoJSON.FeatureCollection<Point> => {
+  const pinGeoJSON = useMemo((): FeatureCollection<Point> => {
     if (!coords) return { type: 'FeatureCollection', features: [] }
     const feature: Feature<Point> = {
       type: 'Feature',
