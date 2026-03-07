@@ -109,53 +109,139 @@ def picsum_image(seed, width, height):
     return f"https://picsum.photos/seed/{seed}/{width}/{height}"
 
 
-def loremflickr_image(categories, lock, width, height):
-    return f"https://loremflickr.com/{width}/{height}/{categories}?lock={lock}"
+CURATED_MEDIA_LIBRARY = {
+    'cooking': [
+        'https://images.unsplash.com/photo-1752652012719-91c73fafdcb7',
+        'https://images.unsplash.com/photo-1683555500010-e2315045eef9',
+        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
+    ],
+    'coffee': [
+        'https://images.unsplash.com/photo-1742867113796-510f600e777f',
+        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
+        'https://images.unsplash.com/photo-1682490323164-f0bc834dab67',
+    ],
+    'music': [
+        'https://images.unsplash.com/photo-1758275557159-e83a257c52f4',
+        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
+        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
+    ],
+    'books': [
+        'https://images.unsplash.com/photo-1739015828099-29531aa4bd1a',
+        'https://images.unsplash.com/photo-1742867113796-510f600e777f',
+        'https://images.unsplash.com/photo-1682490323164-f0bc834dab67',
+    ],
+    'conversation': [
+        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
+        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
+        'https://images.unsplash.com/photo-1758275557159-e83a257c52f4',
+    ],
+    'history': [
+        'https://images.unsplash.com/photo-1769117619707-4b3446365845',
+        'https://images.unsplash.com/photo-1739015828099-29531aa4bd1a',
+        'https://images.unsplash.com/photo-1755302731296-0c92f76eb1ec',
+    ],
+    'garden': [
+        'https://images.unsplash.com/photo-1745415271518-e3844abfec58',
+        'https://images.unsplash.com/photo-1739015828099-29531aa4bd1a',
+        'https://images.unsplash.com/photo-1755302731296-0c92f76eb1ec',
+    ],
+    'art': [
+        'https://images.unsplash.com/photo-1753366394931-32dd91d99d78',
+        'https://images.unsplash.com/photo-1769117619707-4b3446365845',
+        'https://images.unsplash.com/photo-1742867113796-510f600e777f',
+    ],
+    'photography': [
+        'https://images.unsplash.com/photo-1755302731296-0c92f76eb1ec',
+        'https://images.unsplash.com/photo-1769117619707-4b3446365845',
+        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
+    ],
+    'walk': [
+        'https://images.unsplash.com/photo-1755302731296-0c92f76eb1ec',
+        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
+        'https://images.unsplash.com/photo-1769117619707-4b3446365845',
+    ],
+    'chess': [
+        'https://images.unsplash.com/photo-1682490323164-f0bc834dab67',
+        'https://images.unsplash.com/photo-1742867113796-510f600e777f',
+        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
+    ],
+    'technology': [
+        'https://images.unsplash.com/photo-1758686254007-a1aec378eca3',
+        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
+        'https://images.unsplash.com/photo-1739015828099-29531aa4bd1a',
+    ],
+    'community': [
+        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
+        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
+        'https://images.unsplash.com/photo-1758275557159-e83a257c52f4',
+    ],
+}
 
 
 SEMANTIC_MEDIA_OVERRIDES = [
-    (('manti', 'börek'), ('dumplings,food', 101)),
-    (('turkish coffee', 'coffee ritual', 'coffee'), ('coffee,cafe', 111)),
-    (('potluck', 'shared meal', 'recipe'), ('food,kitchen', 121)),
-    (('singalong', 'acoustic', 'guitar', 'song', 'music'), ('music,guitar', 201)),
-    (('reading circle', 'reading', 'book club', 'book', 'poem'), ('books,library', 301)),
-    (('language exchange', 'conversation exchange', 'conversation', 'language'), ('people,meeting', 321)),
-    (('family archive', 'genealogy', 'history', 'story', 'museum'), ('history,books', 341)),
-    (('garden', 'gardening', 'plant', 'balcony'), ('garden,plants', 401)),
-    (('watercolor', 'painting', 'postcard', 'art'), ('painting,art', 421)),
-    (('photo walk', 'photography', 'camera'), ('street,photography', 501)),
-    (('walk', 'walking', 'ferry', 'orientation', 'neighborhood'), ('city,street', 521)),
-    (('jog', 'jogging', 'running'), ('running,fitness', 541)),
-    (('chess', 'board game', 'board-game', 'game night'), ('chess,boardgame', 601)),
-    (('smartphone', 'phone basics', 'digital', 'app', 'tech'), ('technology,computer', 701)),
-    (('community', 'gathering', 'meetup', 'event'), ('people,community', 801)),
+    (('manti', 'börek', 'potluck', 'shared meal', 'recipe', 'kitchen', 'cooking'), 'cooking'),
+    (('turkish coffee', 'coffee ritual', 'coffee', 'cafe'), 'coffee'),
+    (('singalong', 'acoustic', 'guitar', 'song', 'music', 'lyrics'), 'music'),
+    (('reading circle', 'reading', 'book club', 'book', 'poem', 'library'), 'books'),
+    (('language exchange', 'conversation exchange', 'conversation', 'language', 'welcome guide'), 'conversation'),
+    (('family archive', 'genealogy', 'history', 'story', 'museum', 'memory'), 'history'),
+    (('garden', 'gardening', 'plant', 'balcony', 'flowers'), 'garden'),
+    (('watercolor', 'painting', 'postcard', 'art', 'illustration'), 'art'),
+    (('photo walk', 'photography', 'camera'), 'photography'),
+    (('walk', 'walking', 'ferry', 'orientation', 'neighborhood', 'sunrise'), 'walk'),
+    (('jog', 'jogging', 'running'), 'walk'),
+    (('chess', 'board game', 'board-game', 'game night', 'study session'), 'chess'),
+    (('smartphone', 'phone basics', 'digital', 'app', 'tech'), 'technology'),
+    (('community', 'gathering', 'meetup', 'event', 'neighbors'), 'community'),
 ]
+
+
+def curated_unsplash_image(base_url, width, height):
+    return (
+        f"{base_url}?auto=format&fit=crop&crop=entropy"
+        f"&w={width}&h={height}&q=80"
+    )
 
 
 def semantic_media_theme(text):
     normalized = text.lower()
-    for keywords, preset in SEMANTIC_MEDIA_OVERRIDES:
+    for keywords, theme in SEMANTIC_MEDIA_OVERRIDES:
         if any(keyword in normalized for keyword in keywords):
-            return preset
-    return ('people,community', 1199)
+            return theme
+    return 'community'
+
+
+def semantic_media_urls(text):
+    theme = semantic_media_theme(text)
+    return CURATED_MEDIA_LIBRARY.get(theme, CURATED_MEDIA_LIBRARY['community'])
+
+
+def text_rotation_seed(text):
+    return sum(ord(char) for char in text.lower())
 
 
 def semantic_service_image(service, width=800, height=600):
-    category, lock = semantic_media_theme(f"{service.title} {service.description}")
-    return loremflickr_image(category, lock, width, height)
+    text = f"{service.title} {service.description}"
+    urls = semantic_media_urls(text)
+    return curated_unsplash_image(urls[text_rotation_seed(text) % len(urls)], width, height)
 
 
 def semantic_gallery_images(text, count, width=800, height=600, start_offset=0):
-    category, base_lock = semantic_media_theme(text)
+    urls = semantic_media_urls(text)
+    base_index = text_rotation_seed(text) + start_offset
     return [
-        loremflickr_image(category, base_lock + start_offset + index, width, height)
+        curated_unsplash_image(urls[(base_index + index) % len(urls)], width, height)
         for index in range(count)
     ]
 
 
 def semantic_banner_image(text, width=1200, height=400, start_offset=40):
-    category, base_lock = semantic_media_theme(text)
-    return loremflickr_image(category, base_lock + start_offset, width, height)
+    urls = semantic_media_urls(text)
+    return curated_unsplash_image(
+        urls[(text_rotation_seed(text) + start_offset) % len(urls)],
+        width,
+        height,
+    )
 
 
 def is_fixed_group_offer(service):
