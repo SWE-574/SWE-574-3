@@ -6,6 +6,7 @@ MODE="${1:-quick}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND="$ROOT/backend"
 FRONTEND="$ROOT/frontend"
+QUICK_CI_ENV="$ROOT/.env.quick-ci"
 
 log() {
   printf '\n\033[1;34m==> %s\033[0m\n' "$1"
@@ -44,11 +45,16 @@ wait_for_http() {
 wait_for_compose_health() {
   local compose_file="$1"
   local attempts="${2:-30}"
+  local env_args=()
+
+  if [ -n "${COMPOSE_ENV_FILE:-}" ]; then
+    env_args=(--env-file "$COMPOSE_ENV_FILE")
+  fi
 
   for i in $(seq 1 "$attempts"); do
     local unhealthy
     unhealthy="$(
-      docker compose -f "$compose_file" ps --format json \
+      docker compose "${env_args[@]}" -f "$compose_file" ps --format json \
         | python3 -c '
 import sys, json
 rows = [json.loads(line) for line in sys.stdin if line.strip()]
@@ -67,7 +73,7 @@ print("\n".join(bad))
   done
 
   echo "Containers did not become healthy in time." >&2
-  docker compose -f "$compose_file" ps || true
+  docker compose "${env_args[@]}" -f "$compose_file" ps || true
   return 1
 }
 
@@ -174,9 +180,9 @@ run_frontend_quick() {
 }
 
 prepare_root_env_for_docker() {
-  log "Writing root .env for docker"
-  cp "$ROOT/.env.example" "$ROOT/.env"
-  python3 - "$ROOT/.env" <<'PY'
+  log "Writing temporary quick CI env file"
+  cp "$ROOT/.env.example" "$QUICK_CI_ENV"
+  python3 - "$QUICK_CI_ENV" <<'PY'
 from pathlib import Path
 import sys
 
@@ -219,13 +225,13 @@ run_e2e_like_workflow() {
   log "Starting full stack"
   (
     cd "$ROOT"
-    DJANGO_E2E=1 VITE_E2E=1 docker compose up -d --build
+    DJANGO_E2E=1 VITE_E2E=1 docker compose --env-file "$QUICK_CI_ENV" up -d --build
   )
 
-  trap 'cd "$ROOT" && docker compose down -v || true' EXIT
+  trap 'cd "$ROOT" && docker compose --env-file "$QUICK_CI_ENV" down -v || true; rm -f "$QUICK_CI_ENV"' EXIT
 
   log "Waiting for containers"
-  wait_for_compose_health "$ROOT/docker-compose.yml" 24
+  COMPOSE_ENV_FILE="$QUICK_CI_ENV" wait_for_compose_health "$ROOT/docker-compose.yml" 24
 
   log "Smoke API"
   wait_for_http "http://localhost/api/health/" "API health" 20
@@ -236,14 +242,13 @@ run_e2e_like_workflow() {
   log "Seed demo data"
   (
     cd "$ROOT"
-    DJANGO_E2E=1 docker compose exec -T backend \
+    DJANGO_E2E=1 docker compose --env-file "$QUICK_CI_ENV" exec -T backend \
       bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python setup_demo.py"
   )
 
   log "Frontend install for Playwright"
   (
     cd "$FRONTEND"
-    sudo rm -rf node_modules
     npm ci
     npx playwright install --with-deps chromium
   )
