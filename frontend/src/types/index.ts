@@ -228,6 +228,8 @@ export type NotificationType =
   | 'handshake_request'
   | 'handshake_accepted'
   | 'handshake_denied'
+  | 'handshake_cancellation_requested'
+  | 'handshake_cancellation_rejected'
   | 'handshake_cancelled'
   | 'service_updated'
   | 'chat_message'

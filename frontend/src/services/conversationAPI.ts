@@ -63,6 +63,12 @@ export interface ChatConversation {
   max_participants: number
   schedule_type: string  // 'One-Time' | 'Recurrent'
   service_member_count?: number
+  cancellation_requested_by_id?: string | null
+  cancellation_requested_by_name?: string | null
+  cancellation_requested_at?: string | null
+  cancellation_reason?: string | null
+  can_request_cancellation?: boolean
+  can_respond_to_cancellation?: boolean
 }
 
 export interface GroupChatMessage {

@@ -35,6 +35,12 @@ export interface Handshake {
   exact_location?: string | null
   exact_duration?: number | null
   scheduled_time?: string | null
+  cancellation_requested_by_id?: string | null
+  cancellation_requested_by_name?: string | null
+  cancellation_requested_at?: string | null
+  cancellation_reason?: string | null
+  can_request_cancellation?: boolean
+  can_respond_to_cancellation?: boolean
   created_at: string
   updated_at: string
 }
@@ -70,6 +76,23 @@ export const handshakeAPI = {
 
   cancel: async (id: string): Promise<Handshake> => {
     const res = await apiClient.post<Handshake>(`/handshakes/${id}/cancel/`, {})
+    return res.data
+  },
+
+  requestCancellation: async (id: string, reason?: string): Promise<Handshake> => {
+    const res = await apiClient.post<Handshake>(`/handshakes/${id}/cancel-request/`, {
+      ...(reason ? { reason } : {}),
+    })
+    return res.data
+  },
+
+  approveCancellation: async (id: string): Promise<Handshake> => {
+    const res = await apiClient.post<Handshake>(`/handshakes/${id}/cancel-request/approve/`, {})
+    return res.data
+  },
+
+  rejectCancellation: async (id: string): Promise<Handshake> => {
+    const res = await apiClient.post<Handshake>(`/handshakes/${id}/cancel-request/reject/`, {})
     return res.data
   },
 
