@@ -54,7 +54,7 @@ const NotFoundPage = () => {
               <FiCompass size={42} color={GREEN} />
             </Flex>
 
-            <Text fontSize={{ base: '34px', md: '42px' }} fontWeight={900} color={GRAY800} lineHeight={1} mb={3}>
+            <Text as="h1" fontSize={{ base: '34px', md: '42px' }} fontWeight={900} color={GRAY800} lineHeight={1} mb={3}>
               Page Not Found
             </Text>
             <Text fontSize="15px" color={GRAY600} lineHeight={1.7} mb={7}>
