@@ -406,10 +406,12 @@ const UserProfile = () => {
   const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
   const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
   const eventServices = services.filter(s => s.type === 'Event' && s.status === 'Active')
+  const createdEventIds = new Set(eventServices.map((event) => String(event.id)))
   const nowTs = Date.now()
   const createdUpcoming = eventServices.filter((event) => event.status === 'Active' && ((eventTs(event.scheduled_time) ?? nowTs + 1) >= nowTs))
   const joinedUpcoming = eventHandshakes.filter((handshake) => {
     if (!['accepted', 'checked_in', 'attended'].includes(handshake.status)) return false
+    if (createdEventIds.has(getHandshakeServiceId(handshake))) return false
     const joinedService = joinedEventServicesById[getHandshakeServiceId(handshake)]
     return joinedService ? joinedService.status === 'Active' : true
   })
