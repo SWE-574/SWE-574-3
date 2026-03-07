@@ -958,6 +958,14 @@ export default function ServiceDetailPage() {
                       </Box>
                     )}
                   </Flex>
+                  {service.is_pinned && isEvent && (
+                    <Flex align="center" gap="4px" px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
+                      bg="rgba(16,185,129,0.25)" color={WHITE}
+                      style={{ backdropFilter: 'blur(8px)' }}
+                    >
+                      <FiMapPin size={10} /> Featured Event
+                    </Flex>
+                  )}
                   <Text fontSize="22px" fontWeight={800} color={WHITE} lineHeight={1.2}
                     style={{ textShadow: '0 1px 6px rgba(0,0,0,0.3)' }}
                   >
@@ -1544,6 +1552,29 @@ export default function ServiceDetailPage() {
                     >
                       <FiFlag size={12} />
                       {alreadyReported ? 'Already Reported' : 'Report this listing'}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Admin: Pin / Unpin Event */}
+                {isAuthenticated && isEvent && user?.role === 'admin' && (
+                  <Box textAlign="center" mt={3} pt={3} borderTop={`1px solid ${GRAY100}`}>
+                    <Box
+                      as="button"
+                      display="inline-flex" alignItems="center" gap={2}
+                      fontSize="12px" fontWeight={600}
+                      color={service.is_pinned ? AMBER : GREEN}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.15s' }}
+                      onClick={async () => {
+                        try {
+                          const res = await serviceAPI.pinEvent(service.id)
+                          setService((prev) => prev ? { ...prev, is_pinned: res.is_pinned } : prev)
+                          toast.success(res.is_pinned ? 'Event pinned to feed' : 'Event unpinned')
+                        } catch { toast.error('Failed to update pin status') }
+                      }}
+                    >
+                      <FiMapPin size={12} />
+                      {service.is_pinned ? 'Unpin Event' : 'Pin Event'}
                     </Box>
                   </Box>
                 )}
