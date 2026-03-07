@@ -10,6 +10,7 @@ from .models import (
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from decimal import Decimal
 import bleach
 import re
@@ -475,10 +476,37 @@ class ServiceSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        """Object-level validation: enforce max_participants=1 for Need services."""
+        """Object-level validation for group offers and Need capacity."""
         data = super().validate(data)
-        if data.get('type') == 'Need':
+        instance = self.instance
+        service_type = data.get('type', getattr(instance, 'type', None))
+        schedule_type = data.get('schedule_type', getattr(instance, 'schedule_type', None))
+        max_participants = data.get('max_participants', getattr(instance, 'max_participants', 1))
+        location_area = data.get('location_area', getattr(instance, 'location_area', ''))
+        scheduled_time = data.get('scheduled_time', getattr(instance, 'scheduled_time', None))
+
+        if service_type == 'Need':
             data['max_participants'] = 1
+            max_participants = 1
+
+        is_fixed_group_offer = (
+            service_type == 'Offer'
+            and schedule_type == 'One-Time'
+            and max_participants > 1
+        )
+        if is_fixed_group_offer:
+            if not (location_area or '').strip():
+                raise serializers.ValidationError({
+                    'location_area': 'One-time group offers require an exact meeting location or link.',
+                })
+            if scheduled_time is None:
+                raise serializers.ValidationError({
+                    'scheduled_time': 'One-time group offers require a scheduled date and time.',
+                })
+            if scheduled_time <= timezone.now():
+                raise serializers.ValidationError({
+                    'scheduled_time': 'One-time group offers must be scheduled in the future.',
+                })
         return data
 
     @extend_schema_field(UserSummarySerializer)
@@ -1250,8 +1278,11 @@ class PublicUserProfileSerializer(serializers.ModelSerializer):
     ]
 )
 class HandshakeSerializer(serializers.ModelSerializer):
+    service_id = serializers.UUIDField(source='service.id', read_only=True)
     service_title = serializers.CharField(source='service.title', read_only=True)
     service_type = serializers.CharField(source='service.type', read_only=True)
+    schedule_type = serializers.CharField(source='service.schedule_type', read_only=True)
+    max_participants = serializers.IntegerField(source='service.max_participants', read_only=True)
     requester_name = serializers.SerializerMethodField()
     provider_name = serializers.SerializerMethodField()
     counterpart = serializers.SerializerMethodField()
@@ -1261,8 +1292,8 @@ class HandshakeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Handshake
         fields = [
-            'id', 'service', 'service_title', 'requester', 'requester_name',
-            'provider_name', 'service_type',
+            'id', 'service', 'service_id', 'service_title', 'requester', 'requester_name',
+            'provider_name', 'service_type', 'schedule_type', 'max_participants',
             'counterpart', 'is_current_user_provider',
             'status', 'provisioned_hours',
             'provider_confirmed_complete', 'receiver_confirmed_complete',
@@ -1750,20 +1781,31 @@ class ReportSerializer(serializers.ModelSerializer):
     ]
 )
 class TransactionHistorySerializer(serializers.ModelSerializer):
+    handshake_id = serializers.UUIDField(source='handshake.id', read_only=True)
+    service_id = serializers.SerializerMethodField()
     transaction_type_display = serializers.CharField(source='get_transaction_type_display', read_only=True)
     service_title = serializers.SerializerMethodField()
     service_type = serializers.SerializerMethodField()
+    schedule_type = serializers.SerializerMethodField()
+    max_participants = serializers.SerializerMethodField()
     is_current_user_provider = serializers.SerializerMethodField()
     counterpart = serializers.SerializerMethodField()
 
     class Meta:
         model = TransactionHistory
         fields = [
-            'id', 'transaction_type', 'transaction_type_display', 'amount',
-            'balance_after', 'description', 'service_title', 'service_type',
-            'is_current_user_provider', 'counterpart', 'created_at'
+            'id', 'handshake_id', 'service_id', 'transaction_type', 'transaction_type_display',
+            'amount', 'balance_after', 'description', 'service_title', 'service_type',
+            'schedule_type', 'max_participants', 'is_current_user_provider',
+            'counterpart', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
+
+    @extend_schema_field(OpenApiTypes.UUID)
+    def get_service_id(self, obj):
+        if obj.handshake and obj.handshake.service:
+            return str(obj.handshake.service.id)
+        return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_service_title(self, obj):
@@ -1775,6 +1817,18 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
     def get_service_type(self, obj):
         if obj.handshake and obj.handshake.service:
             return obj.handshake.service.type
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_schedule_type(self, obj):
+        if obj.handshake and obj.handshake.service:
+            return obj.handshake.service.schedule_type
+        return None
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_max_participants(self, obj):
+        if obj.handshake and obj.handshake.service:
+            return obj.handshake.service.max_participants
         return None
 
     @extend_schema_field(serializers.BooleanField())
@@ -1925,6 +1979,21 @@ class ServiceGroupChatMessageSerializer(serializers.ModelSerializer):
 
     def get_sender_avatar_url(self, obj):
         return obj.sender.avatar_url
+
+
+class GroupChatParticipantSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ['id', 'name', 'avatar_url']
+
+    def get_name(self, obj):
+        return f"{obj.first_name} {obj.last_name}".strip()
+
+    def get_avatar_url(self, obj):
+        return obj.avatar_url
 
 
 # Comment Serializers
@@ -2230,8 +2299,11 @@ class NegativeRepSerializer(serializers.ModelSerializer):
 )
 class UserHistorySerializer(serializers.Serializer):
     """Serializer for user's completed transaction history"""
+    service_id = serializers.UUIDField()
     service_title = serializers.CharField()
     service_type = serializers.CharField()
+    schedule_type = serializers.CharField()
+    max_participants = serializers.IntegerField()
     duration = serializers.DecimalField(max_digits=5, decimal_places=2)
     partner_name = serializers.CharField()
     partner_id = serializers.UUIDField()

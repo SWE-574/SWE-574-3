@@ -62,6 +62,15 @@ class HandshakeService:
         # Check if service exists and is active
         if service.status != 'Active':
             return False, 'Service is not active'
+
+        if (
+            service.type == 'Offer'
+            and service.schedule_type == 'One-Time'
+            and service.max_participants > 1
+            and service.scheduled_time is not None
+            and service.scheduled_time <= timezone.now()
+        ):
+            return False, 'This group offer has already started or expired'
         
         # Check if user is trying to express interest in their own service
         if service.user == user:
@@ -142,6 +151,15 @@ class HandshakeService:
             # Validate service exists and is active (inside transaction)
             if service.status != 'Active':
                 raise ValueError('Service is not active')
+
+            if (
+                service.type == 'Offer'
+                and service.schedule_type == 'One-Time'
+                and service.max_participants > 1
+                and service.scheduled_time is not None
+                and service.scheduled_time <= timezone.now()
+            ):
+                raise ValueError('This group offer has already started or expired')
             
             # Check if user is trying to express interest in their own service
             # Use locked service_owner for comparison
