@@ -339,6 +339,12 @@ class ServiceSerializer(serializers.ModelSerializer):
         required=False
     )
     wikidata_labels_json = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    media_order = ListOrSingleValueField(
+        child=serializers.CharField(),
+        write_only=True,
+        required=False
+    )
+    replace_media = serializers.BooleanField(write_only=True, required=False, default=False)
     media = ServiceMediaSerializer(many=True, required=False, read_only=True)
     
     user = serializers.SerializerMethodField()
@@ -358,7 +364,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             'location_type', 'location_area', 'location_lat', 'location_lng',
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
-            'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'comment_count', 'hot_score',
+            'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'media', 'participant_count', 'event_evaluation_summary',
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
@@ -558,6 +564,8 @@ class ServiceSerializer(serializers.ModelSerializer):
         tag_ids = validated_data.pop('tag_ids', [])
         tag_names = validated_data.pop('tag_names', [])
         wikidata_labels_json = validated_data.pop('wikidata_labels_json', '')
+        validated_data.pop('media_order', [])
+        validated_data.pop('replace_media', False)
 
         wikidata_labels = {}
         if wikidata_labels_json:
@@ -819,7 +827,69 @@ class ServiceSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         # Description is already sanitized in validate_description
         # No need to sanitize again here
-        return super().update(instance, validated_data)
+        tag_ids = validated_data.pop('tag_ids', None)
+        tag_names = validated_data.pop('tag_names', None)
+        validated_data.pop('wikidata_labels_json', '')
+        media_order = validated_data.pop('media_order', [])
+        replace_media = validated_data.pop('replace_media', False)
+
+        service = super().update(instance, validated_data)
+
+        if tag_ids is not None or tag_names is not None:
+            tags_to_set = []
+            if tag_ids:
+                existing_tags = {tag.id: tag for tag in Tag.objects.filter(id__in=tag_ids)}
+                tags_to_set.extend(existing_tags.values())
+
+            if tag_names:
+                for tag_name in tag_names:
+                    if not tag_name or not tag_name.strip():
+                        continue
+                    tag_name_clean = tag_name.strip()
+                    try:
+                        tag = Tag.objects.get(name__iexact=tag_name_clean)
+                    except Tag.DoesNotExist:
+                        import uuid as _uuid
+                        tag_id = tag_name_clean.lower().replace(' ', '_').replace('-', '_')[:200]
+                        if Tag.objects.filter(id=tag_id).exists():
+                            tag_id = f"{tag_id}_{str(_uuid.uuid4())[:8]}"
+                        tag = Tag.objects.create(id=tag_id, name=tag_name_clean)
+                    if tag not in tags_to_set:
+                        tags_to_set.append(tag)
+            service.tags.set(tags_to_set)
+
+        if replace_media:
+            request = self.context.get('request')
+            uploaded_files = list(request.FILES.getlist('media') or []) if request is not None and hasattr(request, 'FILES') else []
+            existing_media = {str(item.id): item for item in service.media.all()}
+            kept_media_ids = set()
+
+            for order_idx, raw_item in enumerate(media_order):
+                item = str(raw_item)
+                if item.startswith('existing:'):
+                    media_id = item.split(':', 1)[1]
+                    media_obj = existing_media.get(media_id)
+                    if media_obj:
+                        media_obj.display_order = order_idx
+                        media_obj.save(update_fields=['display_order'])
+                        kept_media_ids.add(str(media_obj.id))
+                elif item.startswith('new:'):
+                    try:
+                        file_index = int(item.split(':', 1)[1])
+                    except (TypeError, ValueError):
+                        continue
+                    if 0 <= file_index < len(uploaded_files):
+                        created_media = ServiceMedia.objects.create(
+                            service=service,
+                            media_type='image',
+                            file=uploaded_files[file_index],
+                            display_order=order_idx,
+                        )
+                        kept_media_ids.add(str(created_media.id))
+
+            ServiceMedia.objects.filter(service=service).exclude(id__in=kept_media_ids).delete()
+
+        return service
 
 @extend_schema_serializer(
     examples=[
