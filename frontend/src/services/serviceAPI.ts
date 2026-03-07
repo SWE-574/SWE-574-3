@@ -86,6 +86,11 @@ export const serviceAPI = {
 
   // ─── Event actions ────────────────────────────────────────────────────────
 
+  pinEvent: async (serviceId: string): Promise<Service> => {
+    const res = await apiClient.post<Service>(`/services/${serviceId}/pin-event/`)
+    return res.data
+  },
+
   completeEvent: async (serviceId: string): Promise<void> => {
     await apiClient.post(`/services/${serviceId}/complete-event/`, {})
   },

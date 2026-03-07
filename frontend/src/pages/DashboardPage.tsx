@@ -262,6 +262,11 @@ function ServiceCard({
           </Flex>
           {/* Badges — never shrink or wrap */}
           <Flex gap="3px" align="center" flexShrink={0} flexWrap="nowrap">
+            {service.is_pinned && (
+              <Flex align="center" gap="3px" bg={GREEN_LT} color={GREEN} borderRadius="6px" px="6px" py="2px" fontSize="10px" fontWeight={700} flexShrink={0}>
+                <FiMapPin size={9} /> Featured
+              </Flex>
+            )}
             <Pill
               label={isOffer ? 'Offer' : service.type === 'Event' ? 'Event' : 'Want'}
               bg={isOffer ? GREEN_LT : service.type === 'Event' ? AMBER_LT : BLUE_LT}
@@ -349,6 +354,7 @@ const DashboardPage = () => {
   const [searchQuery, setSearchQuery]               = useState('')
   const [debouncedSearch, setDebouncedSearch]       = useState('')
   const [services, setServices]                     = useState<Service[]>([])
+  const [allActiveServices, setAllActiveServices]   = useState<Service[]>([])
   const [mapOpen, setMapOpen]                       = useState(true)
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
@@ -393,6 +399,7 @@ const DashboardPage = () => {
     }
     const active = raw.filter((s) => s.status === 'Active')
     const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
+    setAllActiveServices(unique)
     let filtered = unique
     if (activeFilter === 'online')    filtered = filtered.filter((s) => s.location_type === 'Online')
     if (activeFilter === 'recurrent') filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
@@ -406,13 +413,19 @@ const DashboardPage = () => {
         s.tags?.some((t) => t.name.toLowerCase().includes(q)),
       )
     }
+    // Float pinned services to the top
+    filtered.sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
     setServices(filtered)
   }, [activeFilter, debouncedSearch, locationEnabled, userLocation, debouncedDistance])
 
   const { isLoading, error: fetchError } = usePolling(fetchServices, [fetchServices], { interval: POLL_INTERVAL })
 
   const fetchHandshakes = useCallback(async (signal: AbortSignal) => {
-    if (!isAuthenticated) { setHandshakeMap(new Map()); setIncomingMap(new Map()); return }
+    if (!isAuthenticated) {
+      setHandshakeMap(new Map())
+      setIncomingMap(new Map())
+      return
+    }
     const list = await handshakeAPI.list(signal)
     const out  = new Map<string, Handshake>()
     const inc  = new Map<string, Handshake[]>()
@@ -424,7 +437,8 @@ const DashboardPage = () => {
       if (h.requester === user?.id) { out.set(svcId, h) }
       else { const arr = inc.get(svcId) ?? []; arr.push(h); inc.set(svcId, arr) }
     })
-    setHandshakeMap(out); setIncomingMap(inc)
+    setHandshakeMap(out)
+    setIncomingMap(inc)
   }, [isAuthenticated, user?.id])
 
   usePolling(fetchHandshakes, [fetchHandshakes], { interval: POLL_INTERVAL, enabled: isAuthenticated })
@@ -462,11 +476,14 @@ const DashboardPage = () => {
   }, [locationEnabled, userLocation, requestLocation])
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const allHs              = Array.from(handshakeMap.values())
-  const myServices         = services.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id })
-  const pendingHs          = allHs.filter((h) => h.status === 'pending').length
-  const acceptedHs         = allHs.filter((h) => h.status === 'accepted').length
-  const completedHs        = allHs.filter((h) => h.status === 'completed').length
+  const ownServiceHandshakes = Array.from(incomingMap.values()).flat()
+  const myServices         = allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id })
+  const pendingHs          = myServices.filter((service) => {
+    const incoming = incomingMap.get(service.id) ?? []
+    return incoming.some((h) => h.status === 'pending')
+  }).length
+  const acceptedHs         = myServices.length
+  const completedHs        = ownServiceHandshakes.filter((h) => h.status === 'completed').length
   const distanceLabel      = distanceKm <= 5 ? 'Nearby' : distanceKm <= 15 ? 'Local' : distanceKm <= 30 ? 'Wider' : 'City-wide'
 
   const sidebarProps = {

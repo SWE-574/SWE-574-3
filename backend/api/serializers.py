@@ -1174,15 +1174,20 @@ class PublicUserProfileSerializer(serializers.ModelSerializer):
 )
 class HandshakeSerializer(serializers.ModelSerializer):
     service_title = serializers.CharField(source='service.title', read_only=True)
+    service_type = serializers.CharField(source='service.type', read_only=True)
     requester_name = serializers.SerializerMethodField()
     provider_name = serializers.SerializerMethodField()
+    counterpart = serializers.SerializerMethodField()
+    is_current_user_provider = serializers.SerializerMethodField()
     user_has_reviewed = serializers.SerializerMethodField()
 
     class Meta:
         model = Handshake
         fields = [
             'id', 'service', 'service_title', 'requester', 'requester_name',
-            'provider_name', 'status', 'provisioned_hours',
+            'provider_name', 'service_type',
+            'counterpart', 'is_current_user_provider',
+            'status', 'provisioned_hours',
             'provider_confirmed_complete', 'receiver_confirmed_complete',
             'exact_location', 'exact_duration', 'scheduled_time',
             'provider_initiated', 'requester_initiated',
@@ -1200,6 +1205,35 @@ class HandshakeSerializer(serializers.ModelSerializer):
         from .utils import get_provider_and_receiver
         provider, _ = get_provider_and_receiver(obj)
         return f"{provider.first_name} {provider.last_name}".strip()
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_counterpart(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+
+        from .utils import get_provider_and_receiver
+        provider, receiver = get_provider_and_receiver(obj)
+        current_user = request.user
+        counterpart = receiver if str(provider.id) == str(current_user.id) else provider
+
+        return {
+            'id': str(counterpart.id),
+            'first_name': counterpart.first_name,
+            'last_name': counterpart.last_name,
+            'email': counterpart.email,
+            'avatar_url': counterpart.avatar_url,
+        }
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_is_current_user_provider(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+
+        from .utils import get_provider_and_receiver
+        provider, _ = get_provider_and_receiver(obj)
+        return str(provider.id) == str(request.user.id)
 
     @extend_schema_field(serializers.BooleanField())
     def get_user_has_reviewed(self, obj):
@@ -1641,12 +1675,16 @@ class ReportSerializer(serializers.ModelSerializer):
 class TransactionHistorySerializer(serializers.ModelSerializer):
     transaction_type_display = serializers.CharField(source='get_transaction_type_display', read_only=True)
     service_title = serializers.SerializerMethodField()
+    service_type = serializers.SerializerMethodField()
+    is_current_user_provider = serializers.SerializerMethodField()
+    counterpart = serializers.SerializerMethodField()
 
     class Meta:
         model = TransactionHistory
         fields = [
             'id', 'transaction_type', 'transaction_type_display', 'amount',
-            'balance_after', 'description', 'service_title', 'created_at'
+            'balance_after', 'description', 'service_title', 'service_type',
+            'is_current_user_provider', 'counterpart', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
 
@@ -1655,6 +1693,52 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
         if obj.handshake and obj.handshake.service:
             return obj.handshake.service.title
         return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_service_type(self, obj):
+        if obj.handshake and obj.handshake.service:
+            return obj.handshake.service.type
+        return None
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_is_current_user_provider(self, obj):
+        handshake = obj.handshake
+        if not handshake or not handshake.service:
+            return False
+
+        service = handshake.service
+        if service.type == 'Offer':
+            provider = service.user
+        else:
+            provider = handshake.requester
+
+        return str(provider.id) == str(obj.user_id)
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_counterpart(self, obj):
+        handshake = obj.handshake
+        if not handshake or not handshake.service:
+            return None
+
+        service = handshake.service
+        if service.type == 'Offer':
+            provider = service.user
+            receiver = handshake.requester
+        else:
+            provider = handshake.requester
+            receiver = service.user
+
+        counterpart = receiver if str(provider.id) == str(obj.user_id) else provider
+        if not counterpart:
+            return None
+
+        return {
+            'id': str(counterpart.id),
+            'first_name': counterpart.first_name,
+            'last_name': counterpart.last_name,
+            'email': counterpart.email,
+            'avatar_url': counterpart.avatar_url,
+        }
 
 
 class AdminAuditLogSerializer(serializers.ModelSerializer):

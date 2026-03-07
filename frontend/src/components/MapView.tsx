@@ -13,9 +13,13 @@ import Map, {
   Source, Layer, Popup, NavigationControl,
 } from 'react-map-gl/mapbox'
 import type { MapRef, LayerProps } from 'react-map-gl/mapbox'
+import mapboxgl from 'mapbox-gl'
 import type { MapMouseEvent } from 'mapbox-gl'
 import type { Feature, FeatureCollection, Point } from 'geojson'
 import 'mapbox-gl/dist/mapbox-gl.css'
+
+// Disable Mapbox telemetry to avoid CORS errors to events.mapbox.com
+mapboxgl.config.EVENTS_URL = ''
 
 import { GREEN, BLUE, AMBER, GRAY100, GRAY200, GRAY400, GRAY700, GRAY800, WHITE } from '@/theme/tokens'
 
@@ -414,6 +418,21 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
 
   const geojsonData   = useMemo(() => buildGeoJSON(services),       [services])
   const circleData    = useMemo(() => buildCircleGeoJSON(services),  [services])
+
+  // Recover from WebGL context loss (browser reclaims GPU resources)
+  useEffect(() => {
+    const map = mapRef.current?.getMap()
+    if (!map) return
+    const canvas = map.getCanvas()
+    const onLost  = (e: Event) => { e.preventDefault() }
+    const onRestored = () => { map.triggerRepaint() }
+    canvas.addEventListener('webglcontextlost', onLost)
+    canvas.addEventListener('webglcontextrestored', onRestored)
+    return () => {
+      canvas.removeEventListener('webglcontextlost', onLost)
+      canvas.removeEventListener('webglcontextrestored', onRestored)
+    }
+  })
 
   // Fly to user location only on the FIRST time it becomes available
   const didFlyToUser = useRef(false)
