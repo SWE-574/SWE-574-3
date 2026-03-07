@@ -5,11 +5,13 @@ import pytest
 from decimal import Decimal
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
+from django.utils.datastructures import MultiValueDict
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.exceptions import ValidationError
 
 from rest_framework.test import APIRequestFactory
 
-from api.models import Service, Tag, Handshake, Comment, ReputationRep
+from api.models import Service, Tag, Handshake, Comment, ReputationRep, ServiceMedia
 from api.serializers import (
     ServiceSerializer, UserProfileSerializer, PublicUserProfileSerializer,
     CommentSerializer, HandshakeSerializer, TransactionHistorySerializer
@@ -165,6 +167,69 @@ class TestServiceSerializer:
         service = serializer.save(user=user)
         tag = service.tags.get(id='Q17195715')
         assert tag.name == 'Yoga'
+
+    def test_service_update_replaces_and_reorders_media(self):
+        """Test edit flow can keep one media item, remove one, and append a new upload."""
+        user = UserFactory()
+        service = ServiceFactory(user=user)
+        media_keep = ServiceMedia.objects.create(
+            service=service,
+            media_type='image',
+            file_url='https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg',
+            display_order=0,
+        )
+        ServiceMedia.objects.create(
+            service=service,
+            media_type='image',
+            file_url='https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg',
+            display_order=1,
+        )
+
+        upload = SimpleUploadedFile('fresh.jpg', b'fresh-image-bytes', content_type='image/jpeg')
+        factory = APIRequestFactory()
+        request = factory.patch(
+            f'/api/services/{service.id}/',
+            {
+                'title': service.title,
+                'description': service.description,
+                'duration': str(service.duration),
+                'location_type': service.location_type,
+                'max_participants': str(service.max_participants),
+                'schedule_type': service.schedule_type,
+                'replace_media': 'true',
+                'media_order': [f'existing:{media_keep.id}', 'new:0'],
+                'media': [upload],
+            },
+            format='multipart',
+        )
+        request.user = user
+        request._files = MultiValueDict({'media': [upload]})
+
+        serializer = ServiceSerializer(
+            service,
+            data={
+                'title': service.title,
+                'description': service.description,
+                'duration': service.duration,
+                'location_type': service.location_type,
+                'max_participants': service.max_participants,
+                'schedule_type': service.schedule_type,
+                'replace_media': True,
+                'media_order': [f'existing:{media_keep.id}', 'new:0'],
+            },
+            partial=True,
+            context={'request': request},
+        )
+
+        assert serializer.is_valid(), serializer.errors
+        serializer.save()
+
+        media = list(service.media.order_by('display_order', 'created_at'))
+        assert len(media) == 2
+        assert str(media[0].id) == str(media_keep.id)
+        assert media[0].display_order == 0
+        assert media[1].display_order == 1
+        assert media[1].file
 
 
 @pytest.mark.django_db

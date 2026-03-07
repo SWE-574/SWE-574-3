@@ -53,8 +53,11 @@ export const serviceAPI = {
     return res.data
   },
 
-  update: async (id: string, data: Partial<Service>): Promise<Service> => {
-    const res = await apiClient.patch<Service>(`/services/${id}/`, data)
+  update: async (id: string, data: FormData | Partial<Service>): Promise<Service> => {
+    const isFormData = data instanceof FormData
+    const res = await apiClient.patch<Service>(`/services/${id}/`, data, {
+      headers: isFormData ? { 'Content-Type': 'multipart/form-data' } : {},
+    })
     return res.data
   },
 
