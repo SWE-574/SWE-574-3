@@ -153,6 +153,7 @@ export interface Service {
   updated_at: string
   interest_count?: number
   is_visible?: boolean
+  is_pinned?: boolean
   comment_count?: number
   hot_score?: number
 }

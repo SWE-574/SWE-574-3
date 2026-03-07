@@ -262,6 +262,11 @@ function ServiceCard({
           </Flex>
           {/* Badges — never shrink or wrap */}
           <Flex gap="3px" align="center" flexShrink={0} flexWrap="nowrap">
+            {service.is_pinned && (
+              <Flex align="center" gap="3px" bg={GREEN_LT} color={GREEN} borderRadius="6px" px="6px" py="2px" fontSize="10px" fontWeight={700} flexShrink={0}>
+                <FiMapPin size={9} /> Featured
+              </Flex>
+            )}
             <Pill
               label={isOffer ? 'Offer' : service.type === 'Event' ? 'Event' : 'Want'}
               bg={isOffer ? GREEN_LT : service.type === 'Event' ? AMBER_LT : BLUE_LT}
@@ -406,6 +411,8 @@ const DashboardPage = () => {
         s.tags?.some((t) => t.name.toLowerCase().includes(q)),
       )
     }
+    // Float pinned services to the top
+    filtered.sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
     setServices(filtered)
   }, [activeFilter, debouncedSearch, locationEnabled, userLocation, debouncedDistance])
 
