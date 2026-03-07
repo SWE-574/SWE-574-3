@@ -13,8 +13,7 @@ import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { MapView } from '@/components/MapView'
-import EventRosterModal from '@/components/EventRosterModal'
-import EventChatModal from '@/components/EventChatModal'
+import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
@@ -457,8 +456,8 @@ export default function ServiceDetailPage() {
   const [checkinLoading, setCheckinLoading] = useState(false)
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [removeLoading, setRemoveLoading]   = useState(false)
-  const [showRoster, setShowRoster]         = useState(false)
-  const [showEventChat, setShowEventChat]   = useState(false)
+  const [isEventDetailModalOpen, setIsEventDetailModalOpen] = useState(false)
+  const [eventDetailModalTab, setEventDetailModalTab] = useState<EventDetailModalTab>('details')
   const [completing, setCompleting]         = useState(false)
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null)
   const [reportingEventIssue, setReportingEventIssue] = useState(false)
@@ -525,6 +524,16 @@ export default function ServiceDetailPage() {
     && (service.participant_count ?? 0) >= service.max_participants
   const isOffer    = service?.type === 'Offer'
   const isEvent    = service?.type === 'Event'
+
+  const openEventDetailModal = (tab: EventDetailModalTab = 'details') => {
+    setEventDetailModalTab(tab)
+    setIsEventDetailModalOpen(true)
+  }
+
+  const closeEventDetailModal = () => {
+    setIsEventDetailModalOpen(false)
+    setEventDetailModalTab('details')
+  }
 
   const exId = (val: unknown): string | undefined => {
     if (!val) return undefined
@@ -712,7 +721,7 @@ export default function ServiceDetailPage() {
     try {
       await serviceAPI.completeEvent(service.id)
       toast.success('Event marked complete!')
-      setShowRoster(false)
+      closeEventDetailModal()
       const updated = await serviceAPI.get(service.id)
       setService(updated)
       setHandshakes(await handshakeAPI.list())
@@ -1401,7 +1410,7 @@ export default function ServiceDetailPage() {
                     <Box as="button" w="full" py="11px" borderRadius="10px"
                       bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
                       display="flex" alignItems="center" justifyContent="center" gap="7px"
-                      onClick={() => navigate(`/messages?group=${service.id}`)}
+                      onClick={() => openEventDetailModal('chat')}
                       style={{ border: 'none', cursor: 'pointer' }}
                     >
                       <FiMessageSquare size={14} /> Event Chat
@@ -1410,7 +1419,7 @@ export default function ServiceDetailPage() {
                     <Box as="button" w="full" py="11px" borderRadius="10px"
                       bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
                       display="flex" alignItems="center" justifyContent="center" gap="7px"
-                      onClick={() => setShowRoster(true)}
+                      onClick={() => openEventDetailModal('roster')}
                       style={{ border: 'none', cursor: 'pointer' }}
                     >
                       <FiCheckCircle size={14} /> Complete Event
@@ -1464,7 +1473,7 @@ export default function ServiceDetailPage() {
                       <Box as="button" w="full" py="11px" borderRadius="10px"
                         bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
                         display="flex" alignItems="center" justifyContent="center" gap="7px"
-                        onClick={() => navigate(`/messages?group=${service.id}`)}
+                        onClick={() => openEventDetailModal('chat')}
                         style={{ border: 'none', cursor: 'pointer' }}
                       >
                         <FiMessageSquare size={14} /> Event Chat
@@ -1486,7 +1495,7 @@ export default function ServiceDetailPage() {
                       <Box as="button" w="full" py="11px" borderRadius="10px"
                         bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
                         display="flex" alignItems="center" justifyContent="center" gap="7px"
-                        onClick={() => navigate(`/messages?group=${service.id}`)}
+                        onClick={() => openEventDetailModal('chat')}
                         style={{ border: 'none', cursor: 'pointer' }}
                       >
                         <FiMessageSquare size={14} /> Event Chat
@@ -1526,7 +1535,7 @@ export default function ServiceDetailPage() {
                       <Box as="button" w="full" py="11px" borderRadius="10px"
                         bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
                         display="flex" alignItems="center" justifyContent="center" gap="7px"
-                        onClick={() => navigate(`/messages?group=${service.id}`)}
+                        onClick={() => openEventDetailModal('chat')}
                         style={{ border: 'none', cursor: 'pointer' }}
                       >
                         <FiMessageSquare size={14} /> Event Chat
@@ -2089,20 +2098,6 @@ export default function ServiceDetailPage() {
         />
       )}
 
-      {showRoster && service && (
-        <EventRosterModal
-          isOpen={showRoster}
-          onClose={() => setShowRoster(false)}
-          service={service}
-          handshakes={eventIncomingParticipants}
-          onComplete={handleCompleteEvent}
-          onMarkAttended={handleMarkAttended}
-          onReportParticipant={handleReportParticipantBehavior}
-          markingHandshakeId={markingAttendedId}
-          reportingIssue={reportingEventIssue}
-          completing={completing}
-        />
-      )}
       {evaluationHandshake && (
         <ServiceEvaluationModal
           isOpen={showEvaluationModal}
@@ -2113,13 +2108,21 @@ export default function ServiceDetailPage() {
         />
       )}
 
-      {showEventChat && service && (
-        <EventChatModal
-          isOpen={showEventChat}
-          onClose={() => setShowEventChat(false)}
+      {isEventDetailModalOpen && service && isEvent && (
+        <EventDetailModal
+          isOpen={isEventDetailModalOpen}
+          activeTab={eventDetailModalTab}
+          onTabChange={setEventDetailModalTab}
+          onClose={closeEventDetailModal}
           service={service}
+          handshakes={eventIncomingParticipants}
+          onComplete={handleCompleteEvent}
+          onMarkAttended={handleMarkAttended}
           onReportUser={handleReportEventChatUser}
+          markingHandshakeId={markingAttendedId}
           reportingIssue={reportingEventIssue}
+          completing={completing}
+          isOwner={isOwn}
         />
       )}
 

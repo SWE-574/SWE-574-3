@@ -462,6 +462,13 @@ class ServiceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Max participants cannot exceed 100')
         return value
 
+    def validate(self, data):
+        """Object-level validation: enforce max_participants=1 for Need services."""
+        data = super().validate(data)
+        if data.get('type') == 'Need':
+            data['max_participants'] = 1
+        return data
+
     @extend_schema_field(UserSummarySerializer)
     def get_user(self, obj):
         """Return user details without nested services to avoid circular reference"""

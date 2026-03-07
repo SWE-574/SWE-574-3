@@ -645,7 +645,7 @@ export default function ServiceForm({
         fd.append('description', values.description)
         fd.append('duration', String(values.duration))
         fd.append('location_type', values.location_type)
-        fd.append('max_participants', String(values.max_participants))
+        fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
         fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
         fd.append('schedule_details', values.schedule_details ?? '')
         if (values.location_type === 'In-Person' && locationValue) {
@@ -696,7 +696,7 @@ export default function ServiceForm({
           fd.append('location_lat',  locationValue.lat.toFixed(6))
           fd.append('location_lng',  locationValue.lng.toFixed(6))
         }
-        fd.append('max_participants', String(values.max_participants))
+        fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
         fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
         if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
         if (type === 'Event' && eventDate && eventTime) {
@@ -789,7 +789,7 @@ export default function ServiceForm({
                 />
                 <ErrTxt msg={errors.duration?.message} />
               </Box>
-              {type === 'Event' && (
+              {type !== 'Need' && (
               <Box>
                 <Label required>Max participants</Label>
                 <Input

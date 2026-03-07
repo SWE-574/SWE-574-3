@@ -16,8 +16,6 @@ import {
   WHITE,
 } from '@/theme/tokens'
 
-// ─── Avatar ───────────────────────────────────────────────────────────────────
-
 function Avatar({ name, size = 30, bg = AMBER }: { name: string; size?: number; bg?: string }) {
   const initials = name.split(' ').map((n) => n[0] ?? '').join('').toUpperCase().slice(0, 2)
   return (
@@ -30,25 +28,29 @@ function Avatar({ name, size = 30, bg = AMBER }: { name: string; size?: number; 
   )
 }
 
-// ─── Props ────────────────────────────────────────────────────────────────────
-
-interface Props {
-  isOpen: boolean
-  onClose: () => void
+interface EventChatPanelProps {
   service: Service
   onReportUser?: (userId: string, userName: string) => void
   reportingIssue?: boolean
+  autoFocus?: boolean
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+interface EventChatModalProps extends EventChatPanelProps {
+  isOpen: boolean
+  onClose: () => void
+}
 
-export default function EventChatModal({
-  isOpen,
-  onClose,
+function appendUniqueMessage(messages: PublicChatMessage[], incoming: PublicChatMessage) {
+  if (messages.some((message) => message.id === incoming.id)) return messages
+  return [...messages, incoming]
+}
+
+export function EventChatPanel({
   service,
   onReportUser,
   reportingIssue = false,
-}: Props) {
+  autoFocus = true,
+}: EventChatPanelProps) {
   const { user } = useAuthStore()
   const [messages, setMessages] = useState<PublicChatMessage[]>([])
   const [roomId, setRoomId] = useState<string | null>(null)
@@ -58,23 +60,17 @@ export default function EventChatModal({
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const isLoading = isOpen && !fetchDone
   const organizerId = service.user?.id ?? (service as unknown as { provider?: { id: string } }).provider?.id
 
-  // ── Fetch messages on open ────────────────────────────────────────────────
-
   useEffect(() => {
-    if (!isOpen) {
-      // Cleanup runs async (after render), so this is safe
-      return () => { setFetchDone(false) }
-    }
     const ac = new AbortController()
     let cancelled = false
+
     eventChatAPI.getMessages(service.id, ac.signal)
-      .then(({ room, messages: msgs }) => {
+      .then(({ room, messages: fetchedMessages }) => {
         if (cancelled) return
         setRoomId(room.id)
-        setMessages(msgs.slice().reverse()) // API returns newest-first; we want chronological
+        setMessages(fetchedMessages.slice().reverse())
       })
       .catch((err) => {
         if (!ac.signal.aborted) {
@@ -82,32 +78,31 @@ export default function EventChatModal({
           toast.error('Failed to load event chat')
         }
       })
-      .finally(() => { if (!cancelled) setFetchDone(true) })
-    return () => { cancelled = true; ac.abort() }
-  }, [isOpen, service.id])
+      .finally(() => {
+        if (!cancelled) setFetchDone(true)
+      })
 
-  // ── WebSocket ─────────────────────────────────────────────────────────────
+    return () => {
+      cancelled = true
+      ac.abort()
+    }
+  }, [service.id])
 
-  const handleWsMessage = useCallback((msg: PublicChatMessage) => {
-    setMessages((prev: PublicChatMessage[]) => {
-      // Deduplicate by id
-      if (prev.some((m: PublicChatMessage) => m.id === msg.id)) return prev
-      return [...prev, msg]
-    })
+  const handleWsMessage = useCallback((message: PublicChatMessage) => {
+    setMessages((prev) => appendUniqueMessage(prev, message))
   }, [])
 
   const wsUrl = roomId ? buildEventChatWsUrl(roomId) : ''
   const { isConnected, sendMessage: wsSend } = useWebSocket({
     url: wsUrl,
     onMessage: handleWsMessage,
-    enabled: isOpen && !!roomId,
+    enabled: !!roomId,
   })
-
-  // ── Auto-scroll ───────────────────────────────────────────────────────────
 
   useEffect(() => {
     const el = bottomRef.current
     if (!el) return
+
     let node: HTMLElement | null = el.parentElement
     while (node) {
       if (node.scrollHeight > node.clientHeight) {
@@ -118,48 +113,193 @@ export default function EventChatModal({
     }
   }, [messages])
 
-  // Focus input when modal opens
   useEffect(() => {
-    if (isOpen && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 200)
-    }
-  }, [isOpen, roomId])
-
-  // ── Send message ──────────────────────────────────────────────────────────
+    if (!autoFocus || !inputRef.current) return
+    const timeout = setTimeout(() => inputRef.current?.focus(), 100)
+    return () => clearTimeout(timeout)
+  }, [autoFocus, roomId])
 
   const handleSend = async () => {
     const body = draft.trim()
     if (!body || isSending) return
+
     setDraft('')
     setIsSending(true)
 
-    // Try WebSocket first
     const sent = wsSend(body)
     if (!sent) {
-      // Fallback to REST
       try {
-        const msg = await eventChatAPI.sendMessage(service.id, body)
-        setMessages((prev: PublicChatMessage[]) => {
-          if (prev.some((m: PublicChatMessage) => m.id === msg.id)) return prev
-          return [...prev, msg]
-        })
+        const message = await eventChatAPI.sendMessage(service.id, body)
+        setMessages((prev) => appendUniqueMessage(prev, message))
       } catch {
         toast.error('Failed to send message')
         setDraft(body)
       }
     }
+
     setIsSending(false)
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <Flex direction="column" h="100%" minH={0}>
+      <Flex align="center" justify="space-between" gap={3} px={5} py={3} bg={GRAY50}
+        borderBottom={`1px solid ${GRAY100}`}
+      >
+        <Flex align="center" gap={2} minW={0}>
+          <FiUsers size={12} color={GRAY400} />
+          <Text fontSize="11px" color={GRAY500}
+            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
+            {service.participant_count ?? 0}/{service.max_participants} participants · Organizer &amp; participants can chat here
+          </Text>
+        </Flex>
+        <Flex align="center" gap={2} color={isConnected ? GREEN : GRAY400} flexShrink={0}
+          title={isConnected ? 'Connected' : 'Connecting…'}
+        >
+          {isConnected ? <FiWifi size={14} /> : <FiWifiOff size={14} />}
+          <Text fontSize="11px" fontWeight={700}>{isConnected ? 'Live' : 'Retrying'}</Text>
+        </Flex>
+      </Flex>
 
+      <Box flex={1} minH={0} overflowY="auto" px={5} py={4}>
+        {!fetchDone ? (
+          <Flex align="center" justify="center" h="100%">
+            <Text fontSize="13px" color={GRAY400}>Loading messages…</Text>
+          </Flex>
+        ) : messages.length === 0 ? (
+          <Flex direction="column" align="center" justify="center" h="100%" gap={3}>
+            <Box w="48px" h="48px" borderRadius="full" bg={AMBER_LT}
+              display="flex" alignItems="center" justifyContent="center"
+              color={AMBER} fontSize="22px"
+            >
+              <FiMessageSquare />
+            </Box>
+            <Text fontSize="13px" color={GRAY400} textAlign="center">
+              No messages yet. Start the conversation!
+            </Text>
+          </Flex>
+        ) : (
+          <Stack gap={1}>
+            {messages.map((message) => {
+              const isMe = message.sender_id === user?.id
+              const isOrganizer = message.sender_id === organizerId
+              const canReportSender = !isMe && !!onReportUser && !!message.sender_id
+
+              return (
+                <Box
+                  key={message.id}
+                  display="flex"
+                  flexDirection={isMe ? 'row-reverse' : 'row'}
+                  alignItems="flex-end"
+                  gap={2}
+                  mb={1}
+                >
+                  {!isMe && (
+                    <Avatar name={message.sender_name || '?'} size={28} bg={isOrganizer ? AMBER : GRAY400} />
+                  )}
+                  <Box maxW="75%">
+                    {!isMe && (
+                      <Flex align="center" gap={2} mb="2px" ml="2px">
+                        <Text fontSize="11px" fontWeight={600} color={isOrganizer ? AMBER : GRAY700}>
+                          {message.sender_name}
+                        </Text>
+                        {isOrganizer && (
+                          <Box px="5px" py="1px" borderRadius="full"
+                            fontSize="9px" fontWeight={700}
+                            bg={AMBER_LT} color={AMBER}
+                            border={`1px solid ${AMBER}30`}
+                          >
+                            Organizer
+                          </Box>
+                        )}
+                      </Flex>
+                    )}
+                    <Box
+                      px={3}
+                      py={2}
+                      borderRadius="16px"
+                      bg={isMe ? AMBER : GRAY50}
+                      color={isMe ? WHITE : GRAY800}
+                      border={isMe ? 'none' : `1px solid ${GRAY100}`}
+                    >
+                      <Text fontSize="13px" lineHeight={1.45} whiteSpace="pre-wrap">{message.body}</Text>
+                    </Box>
+                    <Flex align="center" justify={isMe ? 'flex-end' : 'space-between'} mt="3px" px="4px" gap={3}>
+                      <Text fontSize="10px" color={GRAY400}>
+                        {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                      {!isMe && canReportSender && (
+                        <Box
+                          as="button"
+                          display="inline-flex"
+                          alignItems="center"
+                          gap={1}
+                          fontSize="10px"
+                          fontWeight={600}
+                          color={reportingIssue ? GRAY400 : RED}
+                          onClick={() => {
+                            if (!reportingIssue) onReportUser?.(message.sender_id, message.sender_name)
+                          }}
+                          style={{ background: 'none', border: 'none', cursor: reportingIssue ? 'not-allowed' : 'pointer', opacity: reportingIssue ? 0.6 : 1 }}
+                        >
+                          <FiFlag size={10} />
+                          Report
+                        </Box>
+                      )}
+                    </Flex>
+                  </Box>
+                </Box>
+              )
+            })}
+            <div ref={bottomRef} />
+          </Stack>
+        )}
+      </Box>
+
+      <Box px={5} py={4} borderTop={`1px solid ${GRAY100}`}>
+        <Flex gap={3} align="flex-end">
+          <Textarea
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Message the event…"
+            resize="none"
+            minH="96px"
+            bg={WHITE}
+            borderColor={GRAY200}
+            _focusVisible={{ borderColor: AMBER, boxShadow: `0 0 0 1px ${AMBER}` }}
+          />
+          <Box
+            as="button"
+            w="44px"
+            h="44px"
+            borderRadius="12px"
+            bg={draft.trim() ? AMBER : GRAY100}
+            color={draft.trim() ? WHITE : GRAY400}
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            onClick={() => { void handleSend() }}
+            aria-label="Send event message"
+            style={{ border: 'none', cursor: draft.trim() && !isSending ? 'pointer' : 'not-allowed', opacity: isSending ? 0.7 : 1, flexShrink: 0 }}
+          >
+            <FiSend size={16} />
+          </Box>
+        </Flex>
+      </Box>
+    </Flex>
+  )
+}
+
+export default function EventChatModal({ isOpen, onClose, service, onReportUser, reportingIssue = false }: EventChatModalProps) {
   if (!isOpen) return null
 
   return (
@@ -176,7 +316,6 @@ export default function EventChatModal({
         onClick={(e: MouseEvent) => e.stopPropagation()}
         h="min(85vh, 700px)" display="flex" flexDirection="column"
       >
-        {/* Header */}
         <Flex align="center" justify="space-between" px={6} py={4}
           borderBottom={`1px solid ${GRAY100}`}
           bg={AMBER_LT} borderTopRadius="20px"
@@ -196,190 +335,19 @@ export default function EventChatModal({
               </Text>
             </Box>
           </Flex>
-          <Flex align="center" gap={3}>
-            {/* Connection indicator */}
-            <Box color={isConnected ? GREEN : GRAY400} title={isConnected ? 'Connected' : 'Connecting…'}>
-              {isConnected ? <FiWifi size={14} /> : <FiWifiOff size={14} />}
-            </Box>
-            <Box
-              as="button" onClick={onClose}
-              w="30px" h="30px" borderRadius="8px" bg={WHITE}
-              display="flex" alignItems="center" justifyContent="center"
-              style={{ border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
-            >
-              <FiX size={14} color={GRAY500} />
-            </Box>
-          </Flex>
-        </Flex>
-
-        {/* Participant hint */}
-        <Flex align="center" gap={2} px={6} py="8px" bg={GRAY50}
-          borderBottom={`1px solid ${GRAY100}`}
-        >
-          <FiUsers size={11} color={GRAY400} />
-          <Text fontSize="11px" color={GRAY500}>
-            {service.participant_count ?? 0}/{service.max_participants} participants
-            {' · '}Organizer &amp; participants can chat here
-          </Text>
-        </Flex>
-
-        {/* Messages area */}
-        <Box flex={1} overflowY="auto" px={5} py={4}>
-          {isLoading ? (
-            <Flex align="center" justify="center" h="full">
-              <Text fontSize="13px" color={GRAY400}>Loading messages…</Text>
-            </Flex>
-          ) : messages.length === 0 ? (
-            <Flex direction="column" align="center" justify="center" h="full" gap={3}>
-              <Box w="48px" h="48px" borderRadius="full" bg={AMBER_LT}
-                display="flex" alignItems="center" justifyContent="center"
-                color={AMBER} fontSize="22px"
-              >
-                <FiMessageSquare />
-              </Box>
-              <Text fontSize="13px" color={GRAY400} textAlign="center">
-                No messages yet. Start the conversation!
-              </Text>
-            </Flex>
-          ) : (
-            <Stack gap={1}>
-              {messages.map((msg: PublicChatMessage) => {
-                const isMe = msg.sender_id === user?.id
-                const isOrganizer = msg.sender_id === organizerId
-                const canReportSender = !isMe && !!onReportUser && !!msg.sender_id
-                return (
-                  <Box
-                    key={msg.id}
-                    display="flex"
-                    flexDirection={isMe ? 'row-reverse' : 'row'}
-                    alignItems="flex-end"
-                    gap={2}
-                    mb={1}
-                  >
-                    {!isMe && (
-                      <Avatar
-                        name={msg.sender_name || '?'}
-                        size={28}
-                        bg={isOrganizer ? AMBER : GRAY400}
-                      />
-                    )}
-                    <Box maxW="75%">
-                      {!isMe && (
-                        <Flex align="center" gap={2} mb="2px" ml="2px">
-                          <Text fontSize="11px" fontWeight={600}
-                            color={isOrganizer ? AMBER : GRAY700}
-                          >
-                            {msg.sender_name}
-                          </Text>
-                          {isOrganizer && (
-                            <Box px="5px" py="1px" borderRadius="full"
-                              fontSize="9px" fontWeight={700}
-                              bg={AMBER_LT} color={AMBER}
-                              border={`1px solid ${AMBER}30`}
-                            >
-                              Organizer
-                            </Box>
-                          )}
-                          {canReportSender && (
-                            <Box
-                              as="button"
-                              display="inline-flex"
-                              alignItems="center"
-                              gap={1}
-                              fontSize="10px"
-                              fontWeight={600}
-                              color={reportingIssue ? GRAY400 : GRAY500}
-                              onClick={() => {
-                                if (!reportingIssue && onReportUser) {
-                                  onReportUser(msg.sender_id, msg.sender_name || 'this user')
-                                }
-                              }}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                cursor: reportingIssue ? 'not-allowed' : 'pointer',
-                                opacity: reportingIssue ? 0.7 : 1,
-                              }}
-                              onMouseEnter={(e) => {
-                                if (!reportingIssue) {
-                                  (e.currentTarget as unknown as HTMLButtonElement).style.color = RED
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                (e.currentTarget as unknown as HTMLButtonElement).style.color = reportingIssue ? GRAY400 : GRAY500
-                              }}
-                            >
-                              <FiFlag size={10} />
-                              {'Report user'}
-                            </Box>
-                          )}
-                        </Flex>
-                      )}
-                      <Box
-                        px="12px" py="8px"
-                        borderRadius={isMe ? '14px 14px 4px 14px' : '14px 14px 14px 4px'}
-                        bg={isMe ? AMBER : GRAY100}
-                        color={isMe ? WHITE : GRAY800}
-                        fontSize="13px"
-                        lineHeight={1.5}
-                        style={{ wordBreak: 'break-word' }}
-                      >
-                        {msg.body}
-                      </Box>
-                      <Text
-                        fontSize="10px" color={GRAY400} mt="2px"
-                        textAlign={isMe ? 'right' : 'left'}
-                        px="4px"
-                      >
-                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </Text>
-                    </Box>
-                  </Box>
-                )
-              })}
-              <Box ref={bottomRef} />
-            </Stack>
-          )}
-        </Box>
-
-        {/* Input area */}
-        <Flex gap={2} px={5} py={4} borderTop={`1px solid ${GRAY100}`} bg={GRAY50}
-          borderBottomRadius="20px" align="flex-end"
-        >
-          <Textarea
-            ref={inputRef}
-            value={draft}
-            onChange={(e: { target: { value: string } }) => setDraft(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message…"
-            rows={1}
-            resize="none"
-            fontSize="13px"
-            bg={WHITE}
-            border={`1px solid ${GRAY200}`}
-            borderRadius="12px"
-            px="14px" py="10px"
-            _focus={{ borderColor: AMBER, boxShadow: `0 0 0 2px ${AMBER}18` }}
-            style={{ minHeight: '42px', maxHeight: '100px' }}
-          />
           <Box
-            as="button"
-            w="42px" h="42px" minW="42px"
-            borderRadius="12px"
-            bg={draft.trim() ? AMBER : GRAY200}
-            color={draft.trim() ? WHITE : GRAY400}
+            as="button" onClick={onClose}
+            w="30px" h="30px" borderRadius="8px" bg={WHITE}
             display="flex" alignItems="center" justifyContent="center"
-            onClick={handleSend}
-            style={{
-              border: 'none',
-              cursor: draft.trim() && !isSending ? 'pointer' : 'not-allowed',
-              opacity: isSending ? 0.7 : 1,
-              transition: 'background 0.15s, opacity 0.15s',
-            }}
+            style={{ border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
           >
-            <FiSend size={16} />
+            <FiX size={14} color={GRAY500} />
           </Box>
         </Flex>
+
+        <Box flex={1} minH={0}>
+          <EventChatPanel key={service.id} service={service} onReportUser={onReportUser} reportingIssue={reportingIssue} />
+        </Box>
       </Box>
     </Box>
   )
