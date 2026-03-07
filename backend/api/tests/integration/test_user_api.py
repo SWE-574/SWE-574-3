@@ -28,6 +28,42 @@ class TestUserProfileView:
         assert response.data['email'] == user.email
         assert response.data['first_name'] == user.first_name
         assert 'achievements' in response.data
+
+    def test_get_current_user_profile_includes_event_sections(self):
+        user = UserFactory()
+        created_event = ServiceFactory(user=user, type='Event', status='Active')
+
+        joined_event = ServiceFactory(type='Event', status='Active')
+        joined_handshake = HandshakeFactory(
+            service=joined_event,
+            requester=user,
+            status='accepted',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        invited_event = ServiceFactory(type='Event', status='Active')
+        invited_handshake = HandshakeFactory(
+            service=invited_event,
+            requester=user,
+            status='pending',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        response = client.get('/api/users/me/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert 'created_events' in response.data
+        assert 'joined_events' in response.data
+        assert 'invited_events' in response.data
+
+        created_ids = {event['id'] for event in response.data['created_events']}
+        joined_ids = {event['id'] for event in response.data['joined_events']}
+        invited_ids = {event['id'] for event in response.data['invited_events']}
+
+        assert str(created_event.id) in created_ids
+        assert str(joined_handshake.id) in joined_ids
+        assert str(invited_handshake.id) in invited_ids
     
     def test_update_user_profile(self):
         """Test updating user profile"""
@@ -90,6 +126,95 @@ class TestUserHistoryView:
         response = client.get(f'/api/users/{user.id}/history/')
         assert response.status_code == status.HTTP_200_OK
         assert response.data == []
+
+    def test_get_user_history_includes_completed_event_attendance(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            duration=Decimal('2.50'),
+        )
+        HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.get(f'/api/users/{participant.id}/history/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]['service_type'] == 'Event'
+        assert Decimal(str(response.data[0]['duration'])) == Decimal('2.50')
+
+    def test_get_user_history_includes_attended_event_before_service_completion(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            duration=Decimal('2.00'),
+        )
+        HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.get(f'/api/users/{participant.id}/history/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]['service_type'] == 'Event'
+
+    def test_get_user_history_includes_completed_event_for_organizer(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            duration=Decimal('1.50'),
+        )
+        HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+        response = client.get(f'/api/users/{organizer.id}/history/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]['service_type'] == 'Event'
+        assert response.data[0]['was_provider'] is True
+
+    def test_get_user_history_includes_completed_owned_event_without_handshake(self):
+        organizer = UserFactory()
+        ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            duration=Decimal('3.00'),
+            event_completed_at=timezone.now() - timedelta(hours=2),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+        response = client.get(f'/api/users/{organizer.id}/history/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]['service_type'] == 'Event'
+        assert response.data[0]['was_provider'] is True
 
 
 @pytest.mark.django_db
@@ -368,6 +493,39 @@ class TestPublicUserProfile:
         assert response.status_code == status.HTTP_200_OK
         assert 'email' not in response.data
         assert 'timebank_balance' not in response.data
+
+    def test_public_profile_includes_created_and_joined_events(self):
+        viewer = UserFactory()
+        profile_user = UserFactory()
+
+        created_event = ServiceFactory(user=profile_user, type='Event', status='Active')
+        joined_event = ServiceFactory(type='Event', status='Active')
+        joined_handshake = HandshakeFactory(
+            service=joined_event,
+            requester=profile_user,
+            status='accepted',
+            provisioned_hours=Decimal('0.00'),
+        )
+        HandshakeFactory(
+            service=ServiceFactory(type='Event', status='Active'),
+            requester=profile_user,
+            status='pending',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(viewer)
+        response = client.get(f'/api/users/{profile_user.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert 'created_events' in response.data
+        assert 'joined_events' in response.data
+        assert 'invited_events' not in response.data
+
+        created_ids = {event['id'] for event in response.data['created_events']}
+        joined_ids = {event['id'] for event in response.data['joined_events']}
+
+        assert str(created_event.id) in created_ids
+        assert str(joined_handshake.id) in joined_ids
 
 
 @pytest.mark.django_db

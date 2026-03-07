@@ -1078,6 +1078,17 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             'badges',
             queryset=UserBadge.objects.select_related('badge')
         )
+        event_handshake_prefetch = Prefetch(
+            'requested_handshakes',
+            queryset=(
+                Handshake.objects
+                .filter(service__type='Event')
+                .select_related('service', 'service__user')
+                .prefetch_related('service__tags')
+                .order_by('-updated_at')
+            ),
+            to_attr='_profile_event_handshakes',
+        )
         
         # Filter services by visibility - admins can see all, others only visible
         is_admin = self.request.user.is_authenticated and self.request.user.role == 'admin'
@@ -1091,7 +1102,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
 
         return (
             User.objects
-            .prefetch_related(services_prefetch, badge_prefetch)
+            .prefetch_related(services_prefetch, badge_prefetch, event_handshake_prefetch)
             .annotate(
                 punctual_count=Count('received_reps', filter=Q(received_reps__is_punctual=True)),
                 helpful_count=Count('received_reps', filter=Q(received_reps__is_helpful=True)),
@@ -1202,7 +1213,8 @@ class UserHistoryView(APIView):
         # Get completed handshakes where this user participated
         # User could be service owner OR requester
         completed_handshakes = Handshake.objects.filter(
-            status='completed'
+            Q(status='completed') |
+            Q(service__type='Event', status__in=['attended', 'no_show'])
         ).filter(
             Q(service__user=target_user) | Q(requester=target_user)
         ).select_related(
@@ -1212,7 +1224,12 @@ class UserHistoryView(APIView):
         history = []
         for handshake in completed_handshakes:
             provider, receiver = get_provider_and_receiver(handshake)
-            was_provider = provider.id == target_user.id
+            # Events are organizer-centric on profile history, so treat the
+            # service owner as the "own side" regardless of Offer/Need role logic.
+            if handshake.service.type == 'Event':
+                was_provider = handshake.service.user_id == target_user.id
+            else:
+                was_provider = provider.id == target_user.id
             
             # Determine partner (the other party)
             if was_provider:
@@ -1220,19 +1237,54 @@ class UserHistoryView(APIView):
             else:
                 partner = provider
             
+            duration_value = handshake.provisioned_hours
+            if handshake.service.type == 'Event' and duration_value == 0:
+                duration_value = handshake.service.duration
+
             history.append({
                 'service_id': handshake.service.id,
                 'service_title': handshake.service.title,
                 'service_type': handshake.service.type,
                 'schedule_type': handshake.service.schedule_type,
                 'max_participants': handshake.service.max_participants,
-                'duration': handshake.provisioned_hours,
+                'duration': duration_value,
                 'partner_name': f"{partner.first_name} {partner.last_name}".strip(),
                 'partner_id': partner.id,
                 'partner_avatar_url': partner.avatar_url,
                 'completed_date': handshake.updated_at,
                 'was_provider': was_provider
             })
+
+        # Include owner-completed events that currently have no qualifying
+        # history handshakes so organizers can still see completion in history.
+        owner_event_ids_with_history = {
+            handshake.service_id
+            for handshake in completed_handshakes
+            if handshake.service.type == 'Event' and handshake.service.user_id == target_user.id
+        }
+        completed_owned_events = Service.objects.filter(
+            user=target_user,
+            type='Event',
+            status='Completed',
+        ).exclude(id__in=owner_event_ids_with_history)
+
+        for event in completed_owned_events:
+            owner_name = f"{target_user.first_name} {target_user.last_name}".strip() or target_user.email
+            history.append({
+                'service_id': event.id,
+                'service_title': event.title,
+                'service_type': event.type,
+                'schedule_type': event.schedule_type,
+                'max_participants': event.max_participants,
+                'duration': event.duration,
+                'partner_name': owner_name,
+                'partner_id': target_user.id,
+                'partner_avatar_url': target_user.avatar_url,
+                'completed_date': event.event_completed_at or event.updated_at,
+                'was_provider': True,
+            })
+
+        history.sort(key=lambda item: item['completed_date'], reverse=True)
         
         serializer = UserHistorySerializer(history, many=True)
         return Response(serializer.data)

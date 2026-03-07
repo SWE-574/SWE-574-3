@@ -992,8 +992,69 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         validated_data.setdefault('timebank_balance', Decimal('3.00'))
         return super().create(validated_data)
 
-class UserProfileSerializer(serializers.ModelSerializer):
+
+class ProfileEventFieldsMixin:
+    """Shared helpers for serializing profile-related event sections."""
+
+    EVENT_JOINED_STATUSES = {'accepted', 'checked_in', 'attended', 'no_show'}
+
+    def _event_handshakes_for_user(self, obj):
+        prefetched = getattr(obj, '_profile_event_handshakes', None)
+        if prefetched is not None:
+            return prefetched
+        return list(
+            obj.requested_handshakes
+            .filter(service__type='Event')
+            .select_related('service', 'service__user')
+            .prefetch_related('service__tags')
+            .order_by('-updated_at')
+        )
+
+    def _serialize_services(self, services):
+        serializer = ServiceSerializer(services, many=True, context=self.context)
+        return serializer.data
+
+    def _serialize_handshakes(self, handshakes):
+        serializer = HandshakeSerializer(handshakes, many=True, context=self.context)
+        return serializer.data
+
+    def get_created_events(self, obj):
+        # Reuse prefetched profile services when available.
+        prefetched_services = (
+            obj._prefetched_objects_cache.get('services')
+            if hasattr(obj, '_prefetched_objects_cache')
+            else None
+        )
+        if prefetched_services is not None:
+            created = [service for service in prefetched_services if service.type == 'Event']
+            created.sort(key=lambda service: service.created_at, reverse=True)
+            return self._serialize_services(created)
+
+        created_qs = obj.services.filter(type='Event').order_by('-created_at')
+        return self._serialize_services(created_qs)
+
+    def get_joined_events(self, obj):
+        joined = [
+            handshake
+            for handshake in self._event_handshakes_for_user(obj)
+            if handshake.status in self.EVENT_JOINED_STATUSES
+        ]
+        return self._serialize_handshakes(joined)
+
+    def get_invited_events(self, obj):
+        invited = [
+            handshake
+            for handshake in self._event_handshakes_for_user(obj)
+            if handshake.status == 'pending'
+        ]
+        return self._serialize_handshakes(invited)
+
+
+class UserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
+    created_events = serializers.SerializerMethodField()
+    joined_events = serializers.SerializerMethodField()
+    invited_events = serializers.SerializerMethodField()
     
     punctual_count = serializers.IntegerField(read_only=True)
     helpful_count = serializers.IntegerField(read_only=True)
@@ -1022,6 +1083,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'email', 'first_name', 'last_name', 'bio', 'location',
             'avatar_url', 'banner_url', 'timebank_balance', 'karma_score', 'role', 'services',
+            'created_events', 'joined_events', 'invited_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file', 'video_intro_file_url',
             'portfolio_images', 'show_history', 'featured_achievement_id',
@@ -1030,6 +1092,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id', 'email', 'timebank_balance', 'karma_score', 'role', 'services',
+            'created_events', 'joined_events', 'invited_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_file_url', 'featured_achievement_id', 'is_verified',
             'skills',
@@ -1192,8 +1255,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
             instance.skills.set(tags_to_set)
         return instance
 
-class PublicUserProfileSerializer(serializers.ModelSerializer):
+class PublicUserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
+    created_events = serializers.SerializerMethodField()
+    joined_events = serializers.SerializerMethodField()
     punctual_count = serializers.IntegerField(read_only=True)
     helpful_count = serializers.IntegerField(read_only=True)
     kind_count = serializers.IntegerField(read_only=True)
@@ -1207,12 +1272,14 @@ class PublicUserProfileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
             'banner_url', 'karma_score', 'services',
+            'created_events', 'joined_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
         ]
         read_only_fields = [
             'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
             'banner_url', 'karma_score', 'services',
+            'created_events', 'joined_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
         ]
