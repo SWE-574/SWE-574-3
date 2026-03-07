@@ -25,8 +25,8 @@ const EMPTY_SUMMARY: TransactionSummary = {
 
 const FILTERS: { key: TransactionDirection; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'credit', label: 'Credit' },
-  { key: 'debit', label: 'Debit' },
+  { key: 'credit', label: 'Received' },
+  { key: 'debit', label: 'Shared' },
 ]
 
 const ACTIVE_HANDSHAKE_STATUSES = new Set(['accepted', 'checked_in', 'attended'])
@@ -117,8 +117,8 @@ function toExpectedAgreement(handshake: Handshake, currentUserName?: string): Ex
     provisioned_hours: hours,
     expected_delta: isProvider ? hours : 0,
     note: isProvider
-      ? `Expected credit after completion`
-      : `Hours already reserved from your balance`,
+      ? `Time expected after completion`
+      : `Hours already reflected in your available time`,
   }
 }
 
@@ -164,8 +164,8 @@ function transactionAccent(transaction: Transaction) {
       return { icon: FiZap, color: GRAY600, bg: GRAY100, stateLabel: 'Adjusted' }
     default:
       return transaction.amount >= 0
-        ? { ...roleBasedAccent, stateLabel: 'Credit' }
-        : { ...roleBasedAccent, stateLabel: 'Debit' }
+        ? { ...roleBasedAccent, stateLabel: 'Received' }
+        : { ...roleBasedAccent, stateLabel: 'Shared' }
   }
 }
 
@@ -226,14 +226,14 @@ function EmptyLedgerIllustration() {
           +0h
         </Box>
         <Box position="absolute" bottom="10px" left="0" px="8px" py="4px" borderRadius="999px" bg={BLUE_LT} color={BLUE} fontSize="11px" fontWeight={700}>
-          Ledger
+          Your Time
         </Box>
       </Box>
       <Text fontSize="18px" fontWeight={800} color={GRAY800} mb={2}>
-        No transactions yet
+        No time activity yet
       </Text>
       <Text maxW="420px" fontSize="14px" color={GRAY500}>
-        Your TimeBank credits and debits will appear here after you start completing exchanges with other members.
+        Your shared time activity will appear here once you start completing exchanges with other members.
       </Text>
     </Flex>
   )
@@ -414,10 +414,10 @@ const TransactionHistoryPage = () => {
               </Flex>
             </Box>
             <Text fontSize={{ base: '24px', md: '28px' }} fontWeight={800} color={GRAY900} mb={2}>
-              Transaction History
+              Time Activity
             </Text>
             <Text fontSize="14px" color={GRAY500}>
-              Complete ledger of your TimeBank credits and debits.
+              A shared record of the time you have received and shared with the community.
             </Text>
           </Box>
 
@@ -446,10 +446,10 @@ const TransactionHistoryPage = () => {
         </Flex>
 
         <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)', xl: 'repeat(4, 1fr)' }} gap={4} mb={6}>
-          <SummaryCard label="Current Balance" value={summary.current_balance} color={PURPLE} bg={PURPLE_LT} />
-          <SummaryCard label="Expected Balance" value={expectedBalance} color={BLUE} bg={BLUE_LT} />
-          <SummaryCard label="Total Earned" value={summary.total_earned} color={GREEN} bg={GREEN_LT} />
-          <SummaryCard label="Total Spent" value={summary.total_spent} color={RED} bg={RED_LT} />
+          <SummaryCard label="Time Available" value={summary.current_balance} color={PURPLE} bg={PURPLE_LT} />
+          <SummaryCard label="Upcoming Time" value={expectedBalance} color={BLUE} bg={BLUE_LT} />
+          <SummaryCard label="Time Received" value={summary.total_earned} color={GREEN} bg={GREEN_LT} />
+          <SummaryCard label="Time Shared" value={summary.total_spent} color={RED} bg={RED_LT} />
         </Grid>
 
         {activeAgreements.length > 0 && (
@@ -469,13 +469,13 @@ const TransactionHistoryPage = () => {
                   Active Agreements
                 </Text>
                 <Text fontSize="12px" color={GRAY600}>
-                  Ongoing accepted exchanges. Reserved hours are already reflected in your current balance; only pending incoming credits increase the expected balance.
+                  Ongoing accepted exchanges. Reserved hours are already reflected in your available time; only pending incoming time increases your upcoming time.
                 </Text>
               </Box>
               <Box px="10px" py="5px" borderRadius="999px" bg={WHITE} color={BLUE} fontSize="12px" fontWeight={700}>
                 {activeAgreements.reduce((sum, item) => sum + item.expected_delta, 0) > 0
-                  ? `Expected +${formatHours(activeAgreements.reduce((sum, item) => sum + item.expected_delta, 0))}`
-                  : 'No pending credit'}
+                  ? `Upcoming +${formatHours(activeAgreements.reduce((sum, item) => sum + item.expected_delta, 0))}`
+                  : 'No upcoming time'}
               </Box>
             </Flex>
 
@@ -528,7 +528,7 @@ const TransactionHistoryPage = () => {
                     flexShrink={0}
                   >
                     <Box textAlign={{ base: 'left', md: 'right' }}>
-                      <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase">Expected</Text>
+                      <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase">Upcoming</Text>
                       <Text fontSize="13px" fontWeight={800} color={agreement.expected_delta > 0 ? GREEN : GRAY700}>
                         {agreement.expected_delta > 0 ? formatAmount(agreement.expected_delta) : 'No additional change'}
                       </Text>
@@ -582,11 +582,11 @@ const TransactionHistoryPage = () => {
         {isLoading ? (
           <Flex direction="column" align="center" justify="center" py={{ base: 16, md: 24 }} gap={3}>
             <Spinner color={GREEN} size="lg" />
-            <Text fontSize="14px" color={GRAY500}>Loading transaction history…</Text>
+            <Text fontSize="14px" color={GRAY500}>Loading time activity…</Text>
           </Flex>
         ) : error ? (
           <Box borderRadius="20px" border={`1px solid ${RED}22`} bg={RED_LT} p={{ base: 5, md: 6 }}>
-            <Text fontSize="16px" fontWeight={700} color={RED} mb={2}>Could not load transactions</Text>
+            <Text fontSize="16px" fontWeight={700} color={RED} mb={2}>Could not load time activity</Text>
             <Text fontSize="14px" color={GRAY700} mb={4}>{error}</Text>
             <Box
               as="button"
@@ -615,7 +615,7 @@ const TransactionHistoryPage = () => {
           <Box borderRadius="24px" border={`1px solid ${GRAY200}`} bg={WHITE} overflow="hidden">
             <Box display={{ base: 'none', md: 'block' }} px={6} py={4} bg={GRAY50} borderBottom={`1px solid ${GRAY200}`}>
               <Grid templateColumns="180px 220px minmax(220px, 1fr) 140px 140px" gap={4}>
-                {['Date', 'Counterpart', 'Service', 'Amount', 'Running Balance'].map((label) => (
+                {['Date', 'Counterpart', 'Service', 'Time', 'Time Available'].map((label) => (
                   <Text key={label} fontSize="11px" fontWeight={800} color={GRAY500} textTransform="uppercase" letterSpacing="0.08em">
                     {label}
                   </Text>
@@ -671,7 +671,7 @@ const TransactionHistoryPage = () => {
                           </Flex>
                         </Box>
                         <Box>
-                          <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase" mb={1}>Running Balance</Text>
+                          <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase" mb={1}>Time Available</Text>
                           <Text fontSize="13px" fontWeight={700} color={GRAY800}>{formatHours(transaction.balance_after)}</Text>
                         </Box>
                       </Grid>
