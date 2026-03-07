@@ -65,12 +65,9 @@ test.describe('Service Detail Page', () => {
     // Wait for page to fully render
     await page.waitForTimeout(2_000)
 
-    // Check for any images with loading="lazy" attribute
-    const lazyImages = page.locator('img[loading="lazy"]')
-    const count = await lazyImages.count()
-    // If there are images, they should be lazy-loaded
-    // (Demo services may or may not have uploaded photos)
-    expect(count).toBeGreaterThanOrEqual(0)
+    // All rendered images should use loading="lazy" (passes even with zero images)
+    const nonLazyImages = page.locator('img:not([loading="lazy"])')
+    await expect(nonLazyImages).toHaveCount(0)
   })
 
   test('service creator info is displayed', async ({ page }) => {

@@ -32,7 +32,7 @@ prompt() {
   fi
   read -r value
   value="${value:-$default}"
-  eval "$var=\"\$value\""
+  printf -v "$var" '%s' "$value"
 }
 
 echo ""
