@@ -727,7 +727,21 @@ function HsStepBar({ conv }: { conv: ChatConversation }) {
 // ─── Action Card ──────────────────────────────────────────────────────────────
 
 function ActionCard({
-  conv, onInitiate, onShowApprove, onConfirm, onCancel, isCancelling, onOpenEvaluation, onReportNoShow, isReportingNoShow,
+  conv,
+  onInitiate,
+  onShowApprove,
+  onConfirm,
+  onCancel,
+  isCancelling,
+  onRequestCancellation,
+  onApproveCancellation,
+  onRejectCancellation,
+  isRequestingCancellation,
+  isApprovingCancellation,
+  isRejectingCancellation,
+  onOpenEvaluation,
+  onReportNoShow,
+  isReportingNoShow,
 }: {
   conv: ChatConversation
   onInitiate: () => void
@@ -735,6 +749,12 @@ function ActionCard({
   onConfirm: () => void
   onCancel: () => Promise<void>
   isCancelling: boolean
+  onRequestCancellation: () => Promise<void>
+  onApproveCancellation: () => Promise<void>
+  onRejectCancellation: () => Promise<void>
+  isRequestingCancellation: boolean
+  isApprovingCancellation: boolean
+  isRejectingCancellation: boolean
   onOpenEvaluation: () => void
   onReportNoShow: () => Promise<void>
   isReportingNoShow: boolean
@@ -795,6 +815,10 @@ function ActionCard({
 
   if (status === 'accepted') {
     const hasDetails = provisioned_hours != null || scheduled_time || exact_location || exact_duration
+    const hasCancellationRequest = Boolean(conv.cancellation_requested_by_id)
+    const canRespondToCancellation = conv.can_respond_to_cancellation === true
+    const cancellationReason = conv.cancellation_reason?.trim()
+    const cancellationRequesterName = conv.cancellation_requested_by_name ?? conv.other_user.name
 
     return (
       <Box mx={4} my="10px" borderRadius="14px" overflow="hidden"
@@ -861,33 +885,91 @@ function ActionCard({
           </Box>
         )}
 
-        {/* Confirm strip */}
-        <Flex
-          align="center" justify="space-between" gap={3}
-          px={4} py="12px"
-          bg={myConfirmed ? GREEN_LT : AMBER_LT}
-          flexWrap="wrap"
-        >
-          <Box>
-            {myConfirmed ? (
-              <Text fontSize="13px" fontWeight={700} color={GREEN}>✓ You confirmed completion</Text>
+        {hasCancellationRequest ? (
+          <Flex
+            align="center" justify="space-between" gap={3}
+            px={4} py="12px"
+            bg={RED_LT}
+            borderTop={`1px solid ${GRAY100}`}
+            flexWrap="wrap"
+          >
+            <Box>
+              <Text fontSize="13px" fontWeight={700} color={RED}>
+                {canRespondToCancellation ? 'Cancellation approval needed' : 'Cancellation request pending'}
+              </Text>
+              <Text fontSize="12px" color={GRAY500} mt="1px">
+                {canRespondToCancellation
+                  ? `${cancellationRequesterName} wants to cancel this handshake.`
+                  : `Waiting for ${conv.other_user.name} to respond to the cancellation request.`}
+              </Text>
+              {cancellationReason && (
+                <Text fontSize="11px" color={GRAY600} mt="4px">
+                  Reason: {cancellationReason}
+                </Text>
+              )}
+            </Box>
+            {canRespondToCancellation ? (
+              <Flex align="center" gap={2}>
+                <Button
+                  px="12px"
+                  h="34px"
+                  borderRadius="9px"
+                  bg={RED}
+                  color={WHITE}
+                  fontSize="12px"
+                  fontWeight={700}
+                  disabled={isApprovingCancellation || isRejectingCancellation}
+                  onClick={() => { void onApproveCancellation() }}
+                >
+                  {isApprovingCancellation ? 'Approving...' : 'Approve Cancellation'}
+                </Button>
+                <Button
+                  px="12px"
+                  h="34px"
+                  borderRadius="9px"
+                  border={`1px solid ${GRAY300}`}
+                  bg={WHITE}
+                  color={GRAY700}
+                  fontSize="12px"
+                  fontWeight={700}
+                  disabled={isApprovingCancellation || isRejectingCancellation}
+                  onClick={() => { void onRejectCancellation() }}
+                >
+                  {isRejectingCancellation ? 'Keeping...' : 'Keep Handshake'}
+                </Button>
+              </Flex>
             ) : (
-              <Text fontSize="13px" fontWeight={700} color={AMBER}>Confirm the service is done</Text>
+              <Text fontSize="12px" fontWeight={700} color={RED}>
+                Awaiting response
+              </Text>
             )}
-            <Text fontSize="12px" color={GRAY500} mt="1px">
-              {myConfirmed
-                ? otherConfirmed
-                  ? 'Both confirmed — completing transfer…'
-                  : `Waiting for ${conv.other_user.name} to confirm`
-                : otherConfirmed
-                  ? `${conv.other_user.name} already confirmed — your turn!`
-                  : 'Both sides must confirm to release TimeBank hours'
-              }
-            </Text>
-          </Box>
-          <Flex align="center" gap={2}>
-            {!myConfirmed && <CTA label="Confirm Completion" bg={AMBER} onClick={onConfirm} />}
-            {!myConfirmed && (
+          </Flex>
+        ) : (
+          <Flex
+            align="center" justify="space-between" gap={3}
+            px={4} py="12px"
+            bg={myConfirmed ? GREEN_LT : AMBER_LT}
+            flexWrap="wrap"
+          >
+            <Box>
+              {myConfirmed ? (
+                <Text fontSize="13px" fontWeight={700} color={GREEN}>✓ You confirmed completion</Text>
+              ) : (
+                <Text fontSize="13px" fontWeight={700} color={AMBER}>Confirm the service is done</Text>
+              )}
+              <Text fontSize="12px" color={GRAY500} mt="1px">
+                {myConfirmed
+                  ? otherConfirmed
+                    ? 'Both confirmed — completing transfer…'
+                    : `Waiting for ${conv.other_user.name} to confirm`
+                  : otherConfirmed
+                    ? `${conv.other_user.name} already confirmed — your turn!`
+                    : 'Both sides must confirm to release TimeBank hours'
+                }
+              </Text>
+            </Box>
+            <Flex align="center" gap={2} flexWrap="wrap">
+              {!myConfirmed && <CTA label="Confirm Completion" bg={AMBER} onClick={onConfirm} />}
               <Button
                 px="12px"
                 h="34px"
@@ -897,14 +979,30 @@ function ActionCard({
                 bg={RED_LT}
                 fontSize="12px"
                 fontWeight={700}
-                disabled={isReportingNoShow}
-                onClick={() => { void onReportNoShow() }}
+                disabled={isRequestingCancellation || isReportingNoShow}
+                onClick={() => { void onRequestCancellation() }}
               >
-                {isReportingNoShow ? 'Reporting...' : 'Report No-Show'}
+                {isRequestingCancellation ? 'Requesting...' : 'Request Cancellation'}
               </Button>
-            )}
+              {!myConfirmed && (
+                <Button
+                  px="12px"
+                  h="34px"
+                  borderRadius="9px"
+                  border={`1px solid ${RED}`}
+                  color={RED}
+                  bg={RED_LT}
+                  fontSize="12px"
+                  fontWeight={700}
+                  disabled={isReportingNoShow || isRequestingCancellation}
+                  onClick={() => { void onReportNoShow() }}
+                >
+                  {isReportingNoShow ? 'Reporting...' : 'Report No-Show'}
+                </Button>
+              )}
+            </Flex>
           </Flex>
-        </Flex>
+        )}
       </Box>
     )
   }
@@ -1348,6 +1446,9 @@ export default function ChatPage() {
   const [isSending,            setIsSending]            = useState(false)
   const [sendError,            setSendError]            = useState<string | null>(null)
   const [isCancelling,         setIsCancelling]         = useState(false)
+  const [isRequestingCancellation, setIsRequestingCancellation] = useState(false)
+  const [isApprovingCancellation, setIsApprovingCancellation] = useState(false)
+  const [isRejectingCancellation, setIsRejectingCancellation] = useState(false)
   const [isReportingNoShow,    setIsReportingNoShow]    = useState(false)
   const [isApproving,          setIsApproving]          = useState(false)
   const [isDeclining,          setIsDeclining]          = useState(false)
@@ -1611,6 +1712,8 @@ export default function ChatPage() {
       const detail = err?.response?.data?.detail ?? ''
       if (detail.toLowerCase().includes('only the service provider')) {
         toast.error('Only the service provider can cancel this handshake.')
+      } else if (detail.toLowerCase().includes('cancellation request')) {
+        toast.error('Accepted handshakes now require a cancellation request.')
       } else if (detail.toLowerCase().includes('only cancel accepted') || detail.toLowerCase().includes('can only cancel')) {
         toast.error('Only accepted handshakes can be cancelled.')
       } else {
@@ -1620,6 +1723,58 @@ export default function ChatPage() {
       setIsCancelling(false)
     }
   }, [selectedId, isCancelling, refreshConversations])
+
+  const handleRequestCancellation = useCallback(async () => {
+    if (!selectedId || isRequestingCancellation) return
+
+    const reason = window.prompt(
+      'Optional: why do you want to cancel this handshake?',
+      'Something changed and I would like to cancel this handshake.',
+    )
+    if (reason === null) return
+
+    setIsRequestingCancellation(true)
+    try {
+      await handshakeAPI.requestCancellation(selectedId, reason.trim() || undefined)
+      toast.success('Cancellation request sent.')
+      refreshConversations()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(err?.response?.data?.detail ?? err?.message ?? 'Failed to request cancellation.')
+    } finally {
+      setIsRequestingCancellation(false)
+    }
+  }, [isRequestingCancellation, refreshConversations, selectedId])
+
+  const handleApproveCancellation = useCallback(async () => {
+    if (!selectedId || isApprovingCancellation) return
+    setIsApprovingCancellation(true)
+    try {
+      await handshakeAPI.approveCancellation(selectedId)
+      toast.success('Handshake cancelled and reserved hours refunded.')
+      refreshConversations()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(err?.response?.data?.detail ?? err?.message ?? 'Failed to approve cancellation.')
+    } finally {
+      setIsApprovingCancellation(false)
+    }
+  }, [isApprovingCancellation, refreshConversations, selectedId])
+
+  const handleRejectCancellation = useCallback(async () => {
+    if (!selectedId || isRejectingCancellation) return
+    setIsRejectingCancellation(true)
+    try {
+      await handshakeAPI.rejectCancellation(selectedId)
+      toast.success('Cancellation request declined. The handshake remains active.')
+      refreshConversations()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(err?.response?.data?.detail ?? err?.message ?? 'Failed to keep handshake active.')
+    } finally {
+      setIsRejectingCancellation(false)
+    }
+  }, [isRejectingCancellation, refreshConversations, selectedId])
 
   const handleReportNoShow = useCallback(async () => {
     if (!selectedId || isReportingNoShow) return
@@ -1790,6 +1945,12 @@ export default function ChatPage() {
                 onConfirm={() => setShowConfirmModal(true)}
                 onCancel={handleCancel}
                 isCancelling={isCancelling}
+                onRequestCancellation={handleRequestCancellation}
+                onApproveCancellation={handleApproveCancellation}
+                onRejectCancellation={handleRejectCancellation}
+                isRequestingCancellation={isRequestingCancellation}
+                isApprovingCancellation={isApprovingCancellation}
+                isRejectingCancellation={isRejectingCancellation}
                 onOpenEvaluation={() => setShowEvaluationModal(true)}
                 onReportNoShow={handleReportNoShow}
                 isReportingNoShow={isReportingNoShow}

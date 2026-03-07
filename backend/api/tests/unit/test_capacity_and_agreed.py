@@ -385,12 +385,16 @@ class TestAgreedStatusTransitions:
 
         client = APIClient()
         client.force_authenticate(user=provider)
-        resp = client.post(f'/api/handshakes/{h.id}/cancel/')
+        request_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/')
+        assert request_resp.status_code == 200, request_resp.data
+
+        client.force_authenticate(user=requester)
+        resp = client.post(f'/api/handshakes/{h.id}/cancel-request/approve/')
         assert resp.status_code == 200, resp.data
 
         svc.refresh_from_db()
         assert svc.status == 'Active', (
-            f"Cancelling accepted handshake should revert Agreed → Active, got {svc.status}"
+            f"Approving cancellation for accepted handshake should revert Agreed → Active, got {svc.status}"
         )
 
     def test_agreed_service_hidden_from_public_list(self):

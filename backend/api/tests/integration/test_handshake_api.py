@@ -245,8 +245,8 @@ class TestHandshakeViewSet:
         provider.refresh_from_db()
         assert provider.timebank_balance > Decimal('5.00')
     
-    def test_cancel_handshake(self):
-        """Test canceling a handshake"""
+    def test_request_and_approve_cancellation(self):
+        """Accepted Offer/Need handshakes require a mutual cancellation approval."""
         provider = UserFactory()
         requester = UserFactory(timebank_balance=Decimal('1.00'))
         service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
@@ -259,8 +259,19 @@ class TestHandshakeViewSet:
         
         client = AuthenticatedAPIClient()
         client.authenticate_user(provider)
-        
-        response = client.post(f'/api/handshakes/{handshake.id}/cancel/')
+
+        request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
+            'reason': 'Unexpected conflict',
+        })
+        assert request_response.status_code == status.HTTP_200_OK
+
+        handshake.refresh_from_db()
+        assert handshake.status == 'accepted'
+        assert handshake.cancellation_requested_by == provider
+        assert handshake.cancellation_reason == 'Unexpected conflict'
+
+        client.authenticate_user(requester)
+        response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
         assert response.status_code == status.HTTP_200_OK
         
         handshake.refresh_from_db()
@@ -268,6 +279,71 @@ class TestHandshakeViewSet:
         
         requester.refresh_from_db()
         assert requester.timebank_balance == Decimal('3.00')
+
+    def test_reject_cancellation_request_keeps_handshake_active(self):
+        provider = UserFactory()
+        requester = UserFactory(timebank_balance=Decimal('4.00'))
+        service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='accepted',
+            provisioned_hours=Decimal('2.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
+            'reason': 'Need to reschedule instead',
+        })
+        assert request_response.status_code == status.HTTP_200_OK
+
+        client.authenticate_user(requester)
+        reject_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/reject/')
+        assert reject_response.status_code == status.HTTP_200_OK
+
+        handshake.refresh_from_db()
+        requester.refresh_from_db()
+        assert handshake.status == 'accepted'
+        assert handshake.cancellation_requested_by is None
+        assert handshake.cancellation_requested_at is None
+        assert handshake.cancellation_reason == ''
+        assert requester.timebank_balance == Decimal('4.00')
+
+    def test_requester_cannot_approve_own_cancellation_request(self):
+        provider = UserFactory()
+        requester = UserFactory(timebank_balance=Decimal('4.00'))
+        service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='accepted',
+            provisioned_hours=Decimal('2.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+        request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/')
+        assert request_response.status_code == status.HTTP_200_OK
+
+        approve_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
+        assert approve_response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_event_handshake_cannot_use_cancellation_request(self):
+        organizer = UserFactory()
+        attendee = UserFactory()
+        service = ServiceFactory(user=organizer, type='Event')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=attendee,
+            status='accepted',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(organizer)
+        response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 # ── Tests: initiate/approve permission changes (service-owner-first model) ────
@@ -651,7 +727,10 @@ class TestAgreedStatusIntegration:
 
         client = AuthenticatedAPIClient()
         client.authenticate_user(provider)
-        resp = client.post(f'/api/handshakes/{h.id}/cancel/')
+        request_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/')
+        assert request_resp.status_code == status.HTTP_200_OK
+        client.authenticate_user(requester)
+        resp = client.post(f'/api/handshakes/{h.id}/cancel-request/approve/')
         assert resp.status_code == status.HTTP_200_OK
 
         svc.refresh_from_db()
@@ -670,7 +749,11 @@ class TestAgreedStatusIntegration:
 
         client = AuthenticatedAPIClient()
         client.authenticate_user(provider)
-        client.post(f'/api/handshakes/{h.id}/cancel/')
+        request_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/')
+        assert request_resp.status_code == status.HTTP_200_OK
+        client.authenticate_user(requester)
+        approve_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/approve/')
+        assert approve_resp.status_code == status.HTTP_200_OK
 
         viewer = UserFactory()
         client.authenticate_user(viewer)

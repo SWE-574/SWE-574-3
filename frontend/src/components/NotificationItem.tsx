@@ -16,6 +16,8 @@ const ICON_MAP: Record<NotificationType, React.ElementType> = {
   handshake_request: FiRefreshCw,
   handshake_accepted: FiCheckCircle,
   handshake_denied: FiRefreshCw,
+  handshake_cancellation_requested: FiClock,
+  handshake_cancellation_rejected: FiAlertTriangle,
   handshake_cancelled: FiRefreshCw,
   service_updated: FiRefreshCw,
   chat_message: FiMessageSquare,
