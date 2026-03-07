@@ -1547,8 +1547,8 @@ export default function ChatPage() {
     if (!selectedId || isDeclining) return
     setIsDeclining(true)
     try {
-      await handshakeAPI.cancel(selectedId)
-      toast.success('Handshake declined.')
+      await handshakeAPI.requestChanges(selectedId)
+      toast.success('Session details declined. The owner can propose new session details.')
       setShowApproveModal(false)
       refreshConversations()
     } catch (e: unknown) {
