@@ -7,7 +7,7 @@ import logging
 from decimal import Decimal
 from contextlib import nullcontext
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 
 from .models import Handshake, Notification, Service, User, TransactionHistory
 
@@ -39,6 +39,47 @@ def get_provider_and_receiver(handshake: Handshake) -> tuple[User, User]:
         provider = handshake.requester
         receiver = service.user
     return provider, receiver
+
+
+def get_verified_reviews_role_filter(target_user, role: str):
+    """
+    Return a Q object to filter Comment querysets for verified reviews where the
+    reviewed user (profile owner) had the given role in the handshake.
+    
+    - target_user: User instance or user id (UUID).
+    - role: 'provider' or 'receiver'.
+    
+    Offer: provider = service.user, receiver = requester.
+    Need: provider = requester, receiver = service.user.
+    """
+    target_id = target_user.pk if hasattr(target_user, 'pk') else target_user
+    if role == 'provider':
+        return (
+            Q(
+                related_handshake__service__type='Offer',
+                service__user_id=target_id,
+                related_handshake__requester=F('user'),
+            )
+            | Q(
+                related_handshake__service__type='Need',
+                related_handshake__requester_id=target_id,
+                service__user=F('user'),
+            )
+        )
+    if role == 'receiver':
+        return (
+            Q(
+                related_handshake__service__type='Offer',
+                related_handshake__requester_id=target_id,
+                service__user=F('user'),
+            )
+            | Q(
+                related_handshake__service__type='Need',
+                service__user_id=target_id,
+                related_handshake__requester=F('user'),
+            )
+        )
+    return Q()
 
 
 def provision_timebank(handshake: Handshake) -> bool:

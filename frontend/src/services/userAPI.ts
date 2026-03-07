@@ -1,5 +1,5 @@
 import apiClient from './api'
-import type { User, BadgeProgress, AchievementProgressItem } from '@/types'
+import type { User, BadgeProgress, AchievementProgressItem, ProfileReviewsResponse } from '@/types'
 
 export interface UserHistoryItem {
   service_id: string
@@ -172,5 +172,27 @@ export const userAPI = {
       { signal },
     )
     return normalizeAchievementProgress(res.data)
+  },
+
+  /**
+   * Get verified reviews for a user profile. Optionally filter by the reviewed user's role
+   * in the handshake (provider vs receiver/taker).
+   */
+  getVerifiedReviews: async (
+    userId: string,
+    options?: { role?: 'provider' | 'receiver'; signal?: AbortSignal },
+  ): Promise<ProfileReviewsResponse> => {
+    const params = options?.role ? { role: options.role } : {}
+    const res = await apiClient.get<ProfileReviewsResponse>(
+      `/users/${userId}/verified-reviews/`,
+      { params, signal: options?.signal },
+    )
+    const data = res.data
+    return {
+      count: data.count ?? data.results?.length ?? 0,
+      results: data.results ?? [],
+      next: data.next ?? null,
+      previous: data.previous ?? null,
+    }
   },
 }
