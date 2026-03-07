@@ -564,6 +564,8 @@ class ServiceSerializer(serializers.ModelSerializer):
         tag_ids = validated_data.pop('tag_ids', [])
         tag_names = validated_data.pop('tag_names', [])
         wikidata_labels_json = validated_data.pop('wikidata_labels_json', '')
+        validated_data.pop('media_order', [])
+        validated_data.pop('replace_media', False)
 
         wikidata_labels = {}
         if wikidata_labels_json:
