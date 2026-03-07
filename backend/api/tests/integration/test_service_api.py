@@ -183,11 +183,11 @@ class TestServiceViewSet:
             related_service=service,
         ).exists()
 
-    def test_update_offer_blocked_after_completed_session(self):
-        """Offer owner cannot edit after a completed (approved + finished) session exists."""
+    def test_update_offer_allowed_after_completed_session(self):
+        """One-time offer owner can edit again once the approved session is completed."""
         owner = UserFactory()
         applicant = UserFactory()
-        service = ServiceFactory(user=owner, type='Offer')
+        service = ServiceFactory(user=owner, type='Offer', schedule_type='One-Time')
         HandshakeFactory(
             service=service,
             requester=applicant,
@@ -199,11 +199,53 @@ class TestServiceViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(owner)
 
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Completed Updated'})
+        assert response.status_code == status.HTTP_200_OK
+
+        service.refresh_from_db()
+        assert service.title == 'Completed Updated'
+
+    def test_update_offer_blocked_after_accepted_session(self):
+        """One-time offer owner cannot edit once a session is approved (accepted)."""
+        owner = UserFactory()
+        applicant = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', schedule_type='One-Time')
+        HandshakeFactory(
+            service=service,
+            requester=applicant,
+            status='accepted',
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Should Fail'})
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
         service.refresh_from_db()
         assert service.title != 'Should Fail'
+
+    def test_update_recurrent_offer_allowed_after_completed_session(self):
+        """Recurring offers stay editable after completed sessions for future cycles."""
+        owner = UserFactory()
+        applicant = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', schedule_type='Recurrent')
+        HandshakeFactory(
+            service=service,
+            requester=applicant,
+            status='completed',
+            provider_confirmed_complete=True,
+            receiver_confirmed_complete=True,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Recurring Updated'})
+        assert response.status_code == status.HTTP_200_OK
+
+        service.refresh_from_db()
+        assert service.title == 'Recurring Updated'
 
     def test_update_event_notifies_joined_and_checked_in_participants(self):
         """Event edits notify active event participants (joined/check-in) only."""

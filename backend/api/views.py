@@ -1722,14 +1722,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 'Cannot edit event details within 24 hours of the scheduled start time.'
             )
 
-        # Once a completed Offer/Need session exists, the listing is immutable for owners.
+        # Lock one-time Offer/Need listings while an approved session is still active.
+        # Recurrent listings stay editable for future cycles.
         if (
             service.type in ('Offer', 'Need')
             and not is_admin
-            and service.handshakes.filter(status='completed').exists()
+            and service.schedule_type != 'Recurrent'
+            and service.handshakes.filter(status__in=['accepted', 'reported', 'paused']).exists()
         ):
             raise PermissionDenied(
-                'Cannot edit this service because an approved session has already been completed.'
+                'Cannot edit this service while an approved session is still active.'
             )
 
         changed_fields = self._changed_service_fields(service, serializer)

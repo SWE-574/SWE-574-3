@@ -869,20 +869,22 @@ function ActionCard({
           </Box>
           <Flex align="center" gap={2}>
             {!myConfirmed && <CTA label="Confirm Completion" bg={AMBER} onClick={onConfirm} />}
-            <Button
-              px="12px"
-              h="34px"
-              borderRadius="9px"
-              border={`1px solid ${RED}`}
-              color={RED}
-              bg={RED_LT}
-              fontSize="12px"
-              fontWeight={700}
-              disabled={isReportingNoShow}
-              onClick={() => { void onReportNoShow() }}
-            >
-              {isReportingNoShow ? 'Reporting...' : 'Report No-Show'}
-            </Button>
+            {!myConfirmed && (
+              <Button
+                px="12px"
+                h="34px"
+                borderRadius="9px"
+                border={`1px solid ${RED}`}
+                color={RED}
+                bg={RED_LT}
+                fontSize="12px"
+                fontWeight={700}
+                disabled={isReportingNoShow}
+                onClick={() => { void onReportNoShow() }}
+              >
+                {isReportingNoShow ? 'Reporting...' : 'Report No-Show'}
+              </Button>
+            )}
           </Flex>
         </Flex>
       </Box>
