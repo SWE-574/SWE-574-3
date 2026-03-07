@@ -62,13 +62,16 @@ export function EventChatPanel({
 
   const organizerId = service.user?.id ?? (service as unknown as { provider?: { id: string } }).provider?.id
 
+    // Reset chat state when service.id changes
+    useEffect(() => {
+      setFetchDone(false)
+      setRoomId(null)
+      setMessages([])
+    }, [service.id])
+
   useEffect(() => {
     const ac = new AbortController()
     let cancelled = false
-
-    setFetchDone(false)
-    setRoomId(null)
-    setMessages([])
 
     eventChatAPI.getMessages(service.id, ac.signal)
       .then(({ room, messages: fetchedMessages }) => {
