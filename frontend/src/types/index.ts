@@ -274,6 +274,37 @@ export interface Transaction {
   created_at: string
 }
 
+// ─── Profile review (verified reviews on user profile) ───────────────────────
+
+export interface ProfileReview {
+  id: string
+  service: string
+  service_title?: string
+  user_id: string
+  user_name: string
+  user_avatar_url?: string
+  user_karma_score?: number
+  user_badges?: string[]
+  user_featured_achievement_id?: string | null
+  body: string
+  is_verified_review: boolean
+  handshake_hours?: number
+  handshake_completed_at?: string
+  /** Role the reviewed user had in the handshake: 'provider' or 'receiver' */
+  reviewed_user_role?: 'provider' | 'receiver' | null
+  reply_count: number
+  replies: unknown[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ProfileReviewsResponse {
+  count: number
+  results: ProfileReview[]
+  next?: string | null
+  previous?: string | null
+}
+
 // ─── Reputation Types ─────────────────────────────────────────────────────────
 
 export interface ReputationData {

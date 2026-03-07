@@ -73,7 +73,7 @@ from .serializers import (
 from .achievement_utils import get_achievement_progress
 from .utils import (
     can_user_post_offer, provision_timebank, complete_timebank_transfer,
-    cancel_timebank_transfer, create_notification
+    cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
 )
 from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
@@ -1297,6 +1297,9 @@ class UserVerifiedReviewsView(APIView):
     
     **GET /api/users/{id}/verified-reviews/** - Get user's verified reviews
     
+    **Query params:** Optional `role=provider` or `role=receiver` to filter by the
+    reviewed user's role in the handshake (provider vs taker/receiver).
+    
     **Response Format:**
     ```json
     {
@@ -1336,14 +1339,20 @@ class UserVerifiedReviewsView(APIView):
         # - Reviews about the requester: handshake.requester == target_user AND comment.user == service.owner
         from django.db.models import F, Q
         from .models import Comment
+        base_filter = (
+            Q(service__user=target_user, related_handshake__requester=F('user'))
+            | Q(related_handshake__requester=target_user, service__user=F('user'))
+        )
+        role_param = (request.query_params.get('role') or '').strip().lower()
+        if role_param in ('provider', 'receiver'):
+            base_filter = base_filter & get_verified_reviews_role_filter(target_user, role_param)
         comments = Comment.objects.filter(
             is_verified_review=True,
             is_deleted=False,
             related_handshake__isnull=False,
-        ).filter(
-            Q(service__user=target_user, related_handshake__requester=F('user'))
-            | Q(related_handshake__requester=target_user, service__user=F('user'))
-        ).select_related('user', 'service', 'related_handshake').prefetch_related(
+        ).filter(base_filter).select_related(
+            'user', 'service', 'related_handshake', 'related_handshake__service'
+        ).prefetch_related(
             Prefetch(
                 'user__badges',
                 queryset=UserBadge.objects.select_related('badge')

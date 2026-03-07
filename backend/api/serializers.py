@@ -20,6 +20,8 @@ import json
 from drf_spectacular.utils import extend_schema_field, extend_schema_serializer, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
+from .utils import get_provider_and_receiver
+
 logger = logging.getLogger(__name__)
 
 
@@ -2058,6 +2060,7 @@ class CommentSerializer(serializers.ModelSerializer):
     replies = serializers.SerializerMethodField()
     handshake_hours = serializers.SerializerMethodField()
     handshake_completed_at = serializers.SerializerMethodField()
+    reviewed_user_role = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
@@ -2066,6 +2069,7 @@ class CommentSerializer(serializers.ModelSerializer):
             'user_karma_score', 'user_badges', 'user_featured_achievement_id',
             'parent', 'parent_id', 'body', 'is_deleted', 'is_verified_review',
             'handshake_id', 'handshake_hours', 'handshake_completed_at',
+            'reviewed_user_role',
             'reply_count', 'replies', 'created_at', 'updated_at'
         ]
         read_only_fields = [
@@ -2123,6 +2127,20 @@ class CommentSerializer(serializers.ModelSerializer):
         if obj.is_verified_review and obj.related_handshake:
             return obj.related_handshake.updated_at
         return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_reviewed_user_role(self, obj):
+        """For verified reviews: role the reviewed user had in the handshake ('provider' or 'receiver')."""
+        if not obj.is_verified_review or not obj.related_handshake:
+            return None
+        handshake = obj.related_handshake
+        service = getattr(handshake, 'service', None) or getattr(obj, 'service', None)
+        if not service or service.type not in ('Offer', 'Need'):
+            return None
+        provider, receiver = get_provider_and_receiver(handshake)
+        if obj.user_id == provider.id:
+            return 'receiver'
+        return 'provider'
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_reply_count(self, obj):
