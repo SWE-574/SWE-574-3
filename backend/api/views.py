@@ -62,6 +62,7 @@ from .serializers import (
     ChatRoomSerializer,
     PublicChatMessageSerializer,
     ServiceGroupChatMessageSerializer,
+    GroupChatParticipantSerializer,
     CommentSerializer,
     NegativeRepSerializer,
     ForumCategorySerializer,
@@ -1220,8 +1221,11 @@ class UserHistoryView(APIView):
                 partner = provider
             
             history.append({
+                'service_id': handshake.service.id,
                 'service_title': handshake.service.title,
                 'service_type': handshake.service.type,
+                'schedule_type': handshake.service.schedule_type,
+                'max_participants': handshake.service.max_participants,
                 'duration': handshake.provisioned_hours,
                 'partner_name': f"{partner.first_name} {partner.last_name}".strip(),
                 'partner_id': partner.id,
@@ -1520,10 +1524,18 @@ class ServiceViewSet(viewsets.ModelViewSet):
         
         queryset = search_engine.search(queryset, search_params)
 
-        # Filter by owner user (for profile pages)
         user_param = self.request.query_params.get('user')
+        # Filter by owner user (for profile pages)
         if user_param:
             queryset = queryset.filter(user_id=user_param)
+        else:
+            queryset = queryset.exclude(
+                type='Offer',
+                schedule_type='One-Time',
+                max_participants__gt=1,
+                scheduled_time__isnull=False,
+                scheduled_time__lte=timezone.now(),
+            )
         
         # Apply ordering based on sort parameter
         # Must validate that lat/lng are valid numbers, not just truthy strings
@@ -2451,6 +2463,44 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 code=ErrorCodes.ALREADY_EXISTS,
                 status_code=status.HTTP_400_BAD_REQUEST
             )
+
+        service = handshake.service
+        is_fixed_group_offer = (
+            service.type == 'Offer'
+            and service.schedule_type == 'One-Time'
+            and service.max_participants > 1
+        )
+
+        if is_fixed_group_offer:
+            if not service.location_area or not service.scheduled_time:
+                return create_error_response(
+                    'This group offer is missing its fixed meeting details.',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            handshake.provider_initiated = True
+            handshake.exact_location = service.location_area
+            handshake.exact_duration = service.duration
+            handshake.scheduled_time = service.scheduled_time
+            handshake.save()
+
+            service_owner = handshake.service.user
+            other_party = handshake.requester
+            invalidate_conversations(str(service_owner.id))
+            invalidate_conversations(str(other_party.id))
+
+            create_notification(
+                user=other_party,
+                notification_type='handshake_request',
+                title='Group Offer Details Shared',
+                message=f"{user.first_name} shared the fixed session details for '{handshake.service.title}'. Please review and approve.",
+                handshake=handshake,
+                service=handshake.service
+            )
+
+            serializer = self.get_serializer(handshake)
+            return Response(serializer.data, status=200)
 
         # Require all details from provider
         exact_location = request.data.get('exact_location', '').strip()
@@ -3473,7 +3523,7 @@ class ChatViewSet(viewsets.ViewSet):
     @track_performance
     def list(self, request):
         """Get all conversations for the user"""
-        from django.db.models import Q, Prefetch, Subquery, OuterRef
+        from django.db.models import Q, Prefetch, Subquery, OuterRef, Count
         from .cache_utils import get_cached_conversations, cache_conversations
         user = request.user
         
@@ -3519,6 +3569,29 @@ class ChatViewSet(viewsets.ViewSet):
             last_message_prefetch,
             reputation_prefetch
         ).order_by('-updated_at')
+
+        service_ids = list({handshake.service_id for handshake in handshakes})
+        active_member_counts_by_service = {}
+        if service_ids:
+            candidate_rows = Handshake.objects.filter(
+                service_id__in=service_ids,
+                status__in=['accepted', 'checked_in', 'attended'],
+            ).values('service_id', 'service__type', 'status').annotate(
+                member_count=Count('requester_id', distinct=True)
+            )
+
+            for row in candidate_rows:
+                service_id = row['service_id']
+                service_type = row['service__type']
+                status_value = row['status']
+                if service_type == 'Event':
+                    active_member_counts_by_service[service_id] = (
+                        active_member_counts_by_service.get(service_id, 0) + row['member_count']
+                    )
+                elif status_value == 'accepted':
+                    active_member_counts_by_service[service_id] = (
+                        active_member_counts_by_service.get(service_id, 0) + row['member_count']
+                    )
 
         conversations = []
         for handshake in handshakes:
@@ -3570,10 +3643,13 @@ class ChatViewSet(viewsets.ViewSet):
                 'exact_location': handshake.exact_location,
                 'exact_duration': float(handshake.exact_duration) if handshake.exact_duration else None,
                 'scheduled_time': handshake.scheduled_time.isoformat() if handshake.scheduled_time else None,
+                'service_location_area': handshake.service.location_area,
+                'service_scheduled_time': handshake.service.scheduled_time.isoformat() if handshake.service.scheduled_time else None,
                 'provisioned_hours': float(handshake.provisioned_hours) if handshake.provisioned_hours else None,
                 'user_has_reviewed': user_has_reviewed,
                 'max_participants': handshake.service.max_participants,
                 'schedule_type': handshake.service.schedule_type,
+                'service_member_count': 1 + active_member_counts_by_service.get(handshake.service_id, 0),
             })
 
         page = paginator.paginate_queryset(conversations, request)
@@ -5148,6 +5224,14 @@ class GroupChatViewSet(viewsets.ViewSet):
     """
     permission_classes = [permissions.IsAuthenticated]
 
+    def _active_statuses_for_group_chat(self, service):
+        is_event = service.type == 'Event'
+        return (
+            ['accepted', 'checked_in', 'attended']
+            if is_event
+            else ['accepted']
+        )
+
     def _get_service_or_403(self, request, pk):
         """Return the service if eligible and the user has access; raise otherwise."""
         try:
@@ -5167,7 +5251,7 @@ class GroupChatViewSet(viewsets.ViewSet):
 
         user = request.user
         is_owner = service.user == user
-        active_statuses = ['accepted', 'checked_in', 'attended'] if is_event else ['accepted']
+        active_statuses = self._active_statuses_for_group_chat(service)
         has_access = Handshake.objects.filter(
             service=service, requester=user, status__in=active_statuses
         ).exists()
@@ -5182,6 +5266,17 @@ class GroupChatViewSet(viewsets.ViewSet):
     def retrieve(self, request, pk=None):
         """Get the last 50 messages for the group chat."""
         service = self._get_service_or_403(request, pk)
+        active_statuses = self._active_statuses_for_group_chat(service)
+        participant_users = [service.user]
+        accepted_participants = list(
+            User.objects.filter(
+                id__in=Handshake.objects.filter(service=service, status__in=active_statuses)
+                .values_list('requester_id', flat=True)
+            ).distinct()
+        )
+        participant_users.extend(
+            user for user in accepted_participants if user.id != service.user_id
+        )
         msgs = (
             ServiceGroupChatMessage.objects
             .filter(service=service)
@@ -5189,7 +5284,13 @@ class GroupChatViewSet(viewsets.ViewSet):
             .order_by('-created_at')[:50]
         )
         serializer = ServiceGroupChatMessageSerializer(list(reversed(list(msgs))), many=True)
-        return Response({'service_id': str(service.id), 'messages': serializer.data})
+        participants_serializer = GroupChatParticipantSerializer(participant_users, many=True)
+        return Response({
+            'service_id': str(service.id),
+            'service_title': service.title,
+            'participants': participants_serializer.data,
+            'messages': serializer.data,
+        })
 
     @track_performance
     def create(self, request, pk=None):

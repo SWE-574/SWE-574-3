@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Box, Flex, Text, Input, Textarea, Spinner, Stack } from '@chakra-ui/react'
 import {
@@ -15,6 +15,7 @@ import type { Service, BadgeProgress, Tag } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
 import WikidataTagAutocomplete from '@/components/WikidataTagAutocomplete'
 import { tagAPI } from '@/services/tagAPI'
+import { groupHistoryItems, isOwnHistoryItem, type GroupedHistoryEntry } from '@/utils/historyGrouping'
 import {
   GREEN, GREEN_LT,
   AMBER, AMBER_LT,
@@ -25,6 +26,7 @@ import {
 } from '@/theme/tokens'
 import { getErrorMessage } from '@/services/api'
 import ImageCropModal from '@/components/ImageCropModal'
+import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
 const avatarBg   = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
@@ -35,11 +37,6 @@ const fmtDate     = (d: string)  => new Date(d).toLocaleDateString('en-GB', { da
 const fmtDur      = (d: number | string) => `${Number(d)}h`
 
 type ServiceTab = 'offers' | 'needs' | 'history' | 'settings'
-
-function isOwnHistoryItem(item: UserHistoryItem) {
-  if (item.service_type === 'Need') return item.was_provider === false
-  return item.was_provider === true
-}
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const SectionCard = ({ children, mb = 5, overflow = 'hidden' }: { children: React.ReactNode; mb?: number; overflow?: string }) => (
@@ -111,25 +108,40 @@ function ServiceCard({ service, onNav }: { service: Service; onNav: () => void }
 }
 
 // ── History row ───────────────────────────────────────────────────────────────
-function HistoryRow({ item, onClick, contextLabel }: { item: UserHistoryItem; onClick: () => void; contextLabel: string }) {
-  const col = AVATAR_PALETTE[item.partner_name.charCodeAt(0) % AVATAR_PALETTE.length]
-  const ini = item.partner_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+function HistoryRow({
+  item,
+  onNavigate,
+  onOpenDetails,
+  contextLabel,
+}: {
+  item: GroupedHistoryEntry
+  onNavigate: () => void
+  onOpenDetails: () => void
+  contextLabel: string
+}) {
+  const displayPartner = item.isMultiUse ? `${item.useCount} members` : item.partnerName
+  const col = AVATAR_PALETTE[displayPartner.charCodeAt(0) % AVATAR_PALETTE.length]
+  const ini = displayPartner.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+  const handleClick = item.isMultiUse ? onOpenDetails : onNavigate
+
   return (
     <Flex align="center" gap={3} py="10px" borderBottom={`1px solid ${GRAY100}`} style={{ cursor: 'pointer' }}
       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = GRAY50 }}
       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '' }}
-      onClick={onClick}>
-      {item.partner_avatar_url
-        ? <Box w="32px" h="32px" borderRadius="full" flexShrink={0} style={{ backgroundImage: `url(${item.partner_avatar_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+      onClick={handleClick}>
+      {item.partnerAvatarUrl
+        ? <Box w="32px" h="32px" borderRadius="full" flexShrink={0} style={{ backgroundImage: `url(${item.partnerAvatarUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
         : <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center" style={{ background: col, color: WHITE, fontSize: '11px', fontWeight: 700 }}>{ini}</Flex>
       }
       <Box flex={1} minW={0}>
-        <Text fontSize="13px" fontWeight={600} color={GRAY800} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.service_title}</Text>
-        <Text fontSize="11px" color={GRAY500}>{contextLabel} {item.partner_name}</Text>
+        <Text fontSize="13px" fontWeight={600} color={GRAY800} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.serviceTitle}</Text>
+        <Text fontSize="11px" color={GRAY500}>
+          {item.isMultiUse ? `${item.useCount} participants in this one-time session` : `${contextLabel} ${item.partnerName}`}
+        </Text>
       </Box>
       <Box textAlign="right" flexShrink={0}>
         <Text fontSize="12px" fontWeight={600} color={GREEN}>{fmtDur(item.duration)}</Text>
-        <Text fontSize="10px" color={GRAY400}>{fmtDate(item.completed_date)}</Text>
+        <Text fontSize="10px" color={GRAY400}>{fmtDate(item.completedDate)}</Text>
       </Box>
     </Flex>
   )
@@ -206,6 +218,7 @@ const UserProfile = () => {
   const [servicesLoading, setServicesLoading] = useState(true)
   const [historyLoading, setHistoryLoading]   = useState(true)
   const [activeTab, setActiveTab]         = useState<ServiceTab>('offers')
+  const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
 
   // ── Settings / password-change state ─────────────────────────────────────────
   const [pwCurrent, setPwCurrent]       = useState('')
@@ -273,6 +286,9 @@ const UserProfile = () => {
     setCropModal(m => ({ ...m, open: false }))
   }, [])
 
+  const ownHistory = history.filter(isOwnHistoryItem)
+  const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
+
   if (!user) {
     return <Flex h="calc(100vh - 64px)" align="center" justify="center"><Spinner color={GREEN} size="lg" /></Flex>
   }
@@ -285,7 +301,6 @@ const UserProfile = () => {
 
   const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
   const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
-  const ownHistory = history.filter(isOwnHistoryItem)
 
   const handleSave = async () => {
     setSaving(true)
@@ -481,7 +496,7 @@ const UserProfile = () => {
             {([
               [offersTab.length,  'Offers',    GREEN,  GREEN_LT,  <FiZap    size={14} />],
               [needsTab.length,   'Needs',     BLUE,   BLUE_LT,   <FiLayers size={14} />],
-              [ownHistory.length, 'Exchanges', AMBER,  AMBER_LT,  <FiRepeat size={14} />],
+              [groupedOwnHistory.length, 'Exchanges', AMBER,  AMBER_LT,  <FiRepeat size={14} />],
               [badges.filter(b => b.earned).length, 'Badges', PURPLE, PURPLE_LT, <FiAward size={14} />],
             ] as [number, string, string, string, React.ReactNode][]).map(([val, label, color, bg, icon]) => (
               <Box key={label} bg={WHITE}
@@ -618,7 +633,7 @@ const UserProfile = () => {
                 <Flex px={4} pt={3} gap={0} borderBottom={`1px solid ${GRAY100}`} style={{ overflowX: 'auto' }}>
                   <TabBtn active={activeTab === 'offers'}   label={`Offers (${offersTab.length})`}  onClick={() => setActiveTab('offers')} />
                   <TabBtn active={activeTab === 'needs'}    label={`Needs (${needsTab.length})`}    onClick={() => setActiveTab('needs')} />
-                  <TabBtn active={activeTab === 'history'}  label={`History (${ownHistory.length})`}   onClick={() => setActiveTab('history')} />
+                  <TabBtn active={activeTab === 'history'}  label={`History (${groupedOwnHistory.length})`}   onClick={() => setActiveTab('history')} />
                   <TabBtn active={activeTab === 'settings'} label="Settings"                        onClick={() => setActiveTab('settings')} icon={<FiSettings size={12} />} />
                 </Flex>
 
@@ -659,15 +674,21 @@ const UserProfile = () => {
                 {/* ── History ── */}
                 {activeTab === 'history' && (historyLoading ? (
                   <Flex py={10} justify="center"><Spinner color={GREEN} /></Flex>
-                ) : ownHistory.length === 0 ? (
+                ) : groupedOwnHistory.length === 0 ? (
                   <Flex py={10} direction="column" align="center" gap={2}>
                     <FiRepeat size={22} color={GRAY300} />
                     <Text fontSize="13px" color={GRAY400}>No time activity on your own services yet</Text>
                   </Flex>
                 ) : (
                   <Box px={4}>
-                    {ownHistory.map((item, i) => (
-                      <HistoryRow key={i} item={item} contextLabel="Own service with" onClick={() => navigate(`/public-profile/${item.partner_id}`)} />
+                    {groupedOwnHistory.map((item) => (
+                      <HistoryRow
+                        key={item.key}
+                        item={item}
+                        contextLabel="Own service with"
+                        onNavigate={() => navigate(`/public-profile/${item.partnerId}`)}
+                        onOpenDetails={() => setSelectedHistoryGroup(item)}
+                      />
                     ))}
                   </Box>
                 ))}
@@ -865,6 +886,27 @@ const UserProfile = () => {
         title={cropModal.type === 'avatar' ? 'Crop Profile Photo' : 'Crop Banner Image'}
         onConfirm={handleCropConfirm}
         onCancel={handleCropCancel}
+      />
+
+      <MultiUseDetailsModal
+        isOpen={!!selectedHistoryGroup}
+        title={selectedHistoryGroup?.serviceTitle ?? 'Session details'}
+        subtitle={selectedHistoryGroup
+          ? `${selectedHistoryGroup.useCount} participants completed this one-time session.`
+          : undefined}
+        onClose={() => setSelectedHistoryGroup(null)}
+        items={(selectedHistoryGroup?.items ?? []).map((item) => ({
+          id: `${item.service_id}:${item.partner_id}:${item.completed_date}`,
+          title: item.partner_name,
+          subtitle: 'Joined this session',
+          meta: fmtDate(item.completed_date),
+          value: fmtDur(item.duration),
+          avatarUrl: item.partner_avatar_url,
+          onClick: () => {
+            setSelectedHistoryGroup(null)
+            navigate(`/public-profile/${item.partner_id}`)
+          },
+        }))}
       />
     </Box>
   )

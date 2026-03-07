@@ -124,6 +124,50 @@ class TestCompleteTimebankTransfer:
             amount=Decimal('2.00')
         ).exists()
 
+    def test_group_one_time_offer_transfers_only_once_and_all_receivers_pay(self):
+        provider = UserFactory(timebank_balance=Decimal('0.00'))
+        receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('3.00'),
+            schedule_type='One-Time',
+            max_participants=2,
+        )
+        handshake1 = HandshakeFactory(service=service, requester=receiver1, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake2 = HandshakeFactory(service=service, requester=receiver2, status='accepted', provisioned_hours=Decimal('3.00'))
+
+        provision_timebank(handshake1)
+        provision_timebank(handshake2)
+
+        with transaction.atomic():
+            complete_timebank_transfer(handshake1)
+
+        provider.refresh_from_db()
+        receiver1.refresh_from_db()
+        receiver2.refresh_from_db()
+
+        assert provider.timebank_balance == Decimal('0.00')
+        assert receiver1.timebank_balance == Decimal('2.00')
+        assert receiver2.timebank_balance == Decimal('2.00')
+
+        with transaction.atomic():
+            complete_timebank_transfer(handshake2)
+
+        provider.refresh_from_db()
+        receiver1.refresh_from_db()
+        receiver2.refresh_from_db()
+
+        assert provider.timebank_balance == Decimal('3.00')
+        assert receiver1.timebank_balance == Decimal('2.00')
+        assert receiver2.timebank_balance == Decimal('2.00')
+        assert TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).count() == 1
+
 
 @pytest.mark.django_db
 @pytest.mark.unit

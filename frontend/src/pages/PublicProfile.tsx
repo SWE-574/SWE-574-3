@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Box, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
 import {
@@ -11,6 +11,7 @@ import { userAPI } from '@/services/userAPI'
 import { serviceAPI } from '@/services/serviceAPI'
 import type { User, Service, BadgeProgress } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
+import { groupHistoryItems, isOwnHistoryItem, type GroupedHistoryEntry } from '@/utils/historyGrouping'
 import {
   GREEN, GREEN_LT,
   AMBER, AMBER_LT,
@@ -19,6 +20,7 @@ import {
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
+import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
 const avatarBg    = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
@@ -27,11 +29,6 @@ const getInitials = (f: string, l: string, e: string) =>
 const joinedYear  = (d?: string) => d ? new Date(d).getFullYear() : null
 const fmtDate     = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 const fmtDur      = (d: number | string) => `${Number(d)}h`
-
-function isOwnHistoryItem(item: UserHistoryItem) {
-  if (item.service_type === 'Need') return item.was_provider === false
-  return item.was_provider === true
-}
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const SectionCard = ({ children, mb = 5 }: { children: React.ReactNode; mb?: number }) => (
@@ -90,26 +87,42 @@ function ServiceCard({ service, onNav }: { service: Service; onNav: () => void }
 }
 
 // ── History row ───────────────────────────────────────────────────────────────
-function HistoryRow({ item, canClick, onClick, contextLabel }: { item: UserHistoryItem; canClick: boolean; onClick: () => void; contextLabel: string }) {
-  const col = AVATAR_PALETTE[item.partner_name.charCodeAt(0) % AVATAR_PALETTE.length]
-  const ini = item.partner_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+function HistoryRow({
+  item,
+  canClick,
+  onClick,
+  onOpenDetails,
+  contextLabel,
+}: {
+  item: GroupedHistoryEntry
+  canClick: boolean
+  onClick: () => void
+  onOpenDetails: () => void
+  contextLabel: string
+}) {
+  const displayPartner = item.isMultiUse ? `${item.useCount} members` : item.partnerName
+  const col = AVATAR_PALETTE[displayPartner.charCodeAt(0) % AVATAR_PALETTE.length]
+  const ini = displayPartner.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+  const handleClick = item.isMultiUse ? onOpenDetails : onClick
   return (
     <Flex align="center" gap={3} py="10px" borderBottom={`1px solid ${GRAY100}`}
       style={{ cursor: canClick ? 'pointer' : 'default' }}
       onMouseEnter={e => { if (canClick) (e.currentTarget as HTMLElement).style.background = GRAY50 }}
       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '' }}
-      onClick={canClick ? onClick : undefined}>
-      {item.partner_avatar_url
-        ? <Box w="32px" h="32px" borderRadius="full" flexShrink={0} style={{ backgroundImage: `url(${item.partner_avatar_url})`, backgroundSize: 'cover' }} />
+      onClick={canClick ? handleClick : undefined}>
+      {item.partnerAvatarUrl
+        ? <Box w="32px" h="32px" borderRadius="full" flexShrink={0} style={{ backgroundImage: `url(${item.partnerAvatarUrl})`, backgroundSize: 'cover' }} />
         : <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center" style={{ background: col, color: WHITE, fontSize: '11px', fontWeight: 700 }}>{ini}</Flex>
       }
       <Box flex={1} minW={0}>
-        <Text fontSize="13px" fontWeight={600} color={GRAY800} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.service_title}</Text>
-        <Text fontSize="11px" color={GRAY500}>{contextLabel} {item.partner_name}</Text>
+        <Text fontSize="13px" fontWeight={600} color={GRAY800} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.serviceTitle}</Text>
+        <Text fontSize="11px" color={GRAY500}>
+          {item.isMultiUse ? `${item.useCount} participants in this one-time session` : `${contextLabel} ${item.partnerName}`}
+        </Text>
       </Box>
       <Box textAlign="right" flexShrink={0}>
         <Text fontSize="12px" fontWeight={600} color={GREEN}>{fmtDur(item.duration)}</Text>
-        <Text fontSize="10px" color={GRAY400}>{fmtDate(item.completed_date)}</Text>
+        <Text fontSize="10px" color={GRAY400}>{fmtDate(item.completedDate)}</Text>
       </Box>
     </Flex>
   )
@@ -166,6 +179,7 @@ const PublicProfile = () => {
   const [badges, setBadges]           = useState<BadgeProgress[]>([])
   const [loading, setLoading]         = useState(true)
   const [notFound, setNotFound]       = useState(false)
+  const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
 
   useEffect(() => {
     if (!userId) return
@@ -201,6 +215,9 @@ const PublicProfile = () => {
     return () => ac.abort()
   }, [userId, currentUser, navigate])
 
+  const ownHistory = history.filter(isOwnHistoryItem)
+  const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
+
   if (loading || (!notFound && !profileUser)) {
     return <Flex h="calc(100vh - 64px)" align="center" justify="center"><Spinner color={GREEN} size="lg" /></Flex>
   }
@@ -216,7 +233,6 @@ const PublicProfile = () => {
   const offersCount = services.filter(s => s.type === 'Offer').length
   const needsCount  = services.filter(s => s.type === 'Need').length
   const earnedBadges = badges.filter(b => b.earned)
-  const ownHistory = history.filter(isOwnHistoryItem)
   const punctual    = profileUser.punctual_count ?? 0
   const helpful     = profileUser.helpful_count  ?? 0
   const kind        = profileUser.kind_count     ?? 0
@@ -305,7 +321,7 @@ const PublicProfile = () => {
             {([
               [offersCount,         'Offers',    GREEN,  GREEN_LT,  <FiZap    size={14} />],
               [needsCount,          'Needs',     BLUE,   BLUE_LT,   <FiLayers size={14} />],
-              [ownHistory.length,   'Exchanges', AMBER,  AMBER_LT,  <FiRepeat size={14} />],
+              [groupedOwnHistory.length,   'Exchanges', AMBER,  AMBER_LT,  <FiRepeat size={14} />],
               [earnedBadges.length, 'Badges',    PURPLE, PURPLE_LT, <FiAward  size={14} />],
             ] as [number, string, string, string, React.ReactNode][]).map(([val, label, color, bg, icon]) => (
               <Box key={label} bg={WHITE}
@@ -354,17 +370,23 @@ const PublicProfile = () => {
 
               {profileUser.show_history && (
                 <SectionCard mb={0}>
-                  <SectionHead label={`Time Activity (${ownHistory.length})`} />
-                  {ownHistory.length === 0 ? (
+                  <SectionHead label={`Time Activity (${groupedOwnHistory.length})`} />
+                  {groupedOwnHistory.length === 0 ? (
                     <Flex py={8} direction="column" align="center" gap={2}>
                       <FiCheckCircle size={18} color={GRAY300} />
                       <Text fontSize="13px" color={GRAY400}>No time activity on this user&apos;s own services yet</Text>
                     </Flex>
                   ) : (
                     <Box px={4}>
-                      {ownHistory.map((item, i) => (
-                        <HistoryRow key={i} item={item} canClick={!!currentUser} contextLabel="Own service with"
-                          onClick={() => navigate(`/public-profile/${item.partner_id}`)} />
+                      {groupedOwnHistory.map((item) => (
+                        <HistoryRow
+                          key={item.key}
+                          item={item}
+                          canClick={!!currentUser}
+                          contextLabel="Own service with"
+                          onClick={() => navigate(`/public-profile/${item.partnerId}`)}
+                          onOpenDetails={() => setSelectedHistoryGroup(item)}
+                        />
                       ))}
                     </Box>
                   )}
@@ -408,6 +430,27 @@ const PublicProfile = () => {
           </Flex>
         </Box>
       </Box>
+
+      <MultiUseDetailsModal
+        isOpen={!!selectedHistoryGroup}
+        title={selectedHistoryGroup?.serviceTitle ?? 'Session details'}
+        subtitle={selectedHistoryGroup
+          ? `${selectedHistoryGroup.useCount} participants completed this one-time session.`
+          : undefined}
+        onClose={() => setSelectedHistoryGroup(null)}
+        items={(selectedHistoryGroup?.items ?? []).map((item) => ({
+          id: `${item.service_id}:${item.partner_id}:${item.completed_date}`,
+          title: item.partner_name,
+          subtitle: 'Joined this session',
+          meta: fmtDate(item.completed_date),
+          value: fmtDur(item.duration),
+          avatarUrl: item.partner_avatar_url,
+          onClick: currentUser ? () => {
+            setSelectedHistoryGroup(null)
+            navigate(`/public-profile/${item.partner_id}`)
+          } : undefined,
+        }))}
+      />
     </Box>
   )
 }

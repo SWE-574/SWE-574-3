@@ -9,6 +9,7 @@ import { transactionAPI, type TransactionDirection } from '@/services/transactio
 import { handshakeAPI, type Handshake } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Transaction, TransactionSummary } from '@/types'
+import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 import {
   AMBER, AMBER_LT, BLUE, BLUE_LT, GRAY100, GRAY200, GRAY400,
   GRAY50, GRAY500, GRAY600, GRAY700, GRAY800, GRAY900, GREEN, GREEN_LT,
@@ -41,8 +42,23 @@ interface ExpectedAgreement {
   counterpart_avatar_url?: string | null
   status: Handshake['status']
   provisioned_hours: number
+  reserved_delta: number
   expected_delta: number
   note: string
+}
+
+interface GroupedTransactionRow {
+  key: string
+  serviceId?: string | null
+  primary: Transaction
+  items: Transaction[]
+  amount: number
+  balanceAfter: number
+  createdAt: string
+  counterpartLabel: string
+  counterpartAvatarUrl?: string | null
+  description: string
+  isMultiUse: boolean
 }
 
 function formatHours(value: number): string {
@@ -78,6 +94,20 @@ function counterpartName(transaction: Transaction): string {
   return fullName || counterpart.email || 'Unknown user'
 }
 
+function isMultiUseHandshake(handshake: Handshake) {
+  return handshake.schedule_type === 'One-Time' && (handshake.max_participants ?? 0) > 1
+}
+
+function isMultiUseTransaction(transaction: Transaction, completedCount: number) {
+  return (
+    transaction.transaction_type === 'transfer'
+    && transaction.is_current_user_provider === true
+    && transaction.schedule_type === 'One-Time'
+    && (transaction.max_participants ?? 0) > 1
+    && completedCount > 1
+  )
+}
+
 function handshakeCounterpartName(handshake: Handshake, currentUserName?: string): string {
   const counterpart = handshake.counterpart
   const fullName = counterpart
@@ -104,6 +134,8 @@ function toExpectedAgreement(handshake: Handshake, currentUserName?: string): Ex
   const counterpartName = handshakeCounterpartName(handshake, currentUserName)
   const counterpartEmail = handshake.counterpart?.email ?? ''
   const isProvider = handshake.is_current_user_provider === true
+  const expectedDelta = isProvider ? hours : 0
+  const reservedDelta = isProvider ? 0 : -hours
 
   return {
     id: handshake.id,
@@ -115,10 +147,11 @@ function toExpectedAgreement(handshake: Handshake, currentUserName?: string): Ex
     counterpart_avatar_url: handshake.counterpart?.avatar_url ?? null,
     status: handshake.status,
     provisioned_hours: hours,
-    expected_delta: isProvider ? hours : 0,
+    reserved_delta: reservedDelta,
+    expected_delta: expectedDelta,
     note: isProvider
       ? `Time expected after completion`
-      : `Hours already reflected in your available time`,
+      : `Already reserved at acceptance`,
   }
 }
 
@@ -174,11 +207,13 @@ function SummaryCard({
   value,
   color,
   bg,
+  signed = false,
 }: {
   label: string
   value: number
   color: string
   bg: string
+  signed?: boolean
 }) {
   return (
     <Box
@@ -205,7 +240,7 @@ function SummaryCard({
         color={color}
         bg={bg}
       >
-        {formatHours(value)}
+        {signed ? formatAmount(value) : formatHours(value)}
       </Box>
     </Box>
   )
@@ -245,6 +280,7 @@ const TransactionHistoryPage = () => {
   const requestIdRef = useRef(0)
   const agreementRequestIdRef = useRef(0)
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [handshakes, setHandshakes] = useState<Handshake[]>([])
   const [activeAgreements, setActiveAgreements] = useState<ExpectedAgreement[]>([])
   const [summary, setSummary] = useState<TransactionSummary>(EMPTY_SUMMARY)
   const [direction, setDirection] = useState<TransactionDirection>('all')
@@ -253,6 +289,7 @@ const TransactionHistoryPage = () => {
   const [isLoading, setIsLoading] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [selectedTransactionGroup, setSelectedTransactionGroup] = useState<GroupedTransactionRow | null>(null)
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(count / PAGE_SIZE)), [count])
   const exportDisabled = isLoading || isExporting || transactions.length === 0
@@ -262,10 +299,80 @@ const TransactionHistoryPage = () => {
     () => `${user?.first_name ?? ''} ${user?.last_name ?? ''}`.trim(),
     [user?.first_name, user?.last_name],
   )
-  const expectedBalance = useMemo(
-    () => summary.current_balance + activeAgreements.reduce((sum, item) => sum + item.expected_delta, 0),
-    [summary.current_balance, activeAgreements],
+  const upcomingDelta = useMemo(
+    () => activeAgreements.reduce((sum, item) => sum + item.expected_delta, 0),
+    [activeAgreements],
   )
+  const expectedBalance = useMemo(
+    () => summary.current_balance + upcomingDelta,
+    [summary.current_balance, upcomingDelta],
+  )
+  const completedMultiUseByService = useMemo(() => {
+    const map = new Map<string, Handshake[]>()
+
+    for (const handshake of handshakes) {
+      if (
+        handshake.status !== 'completed'
+        || handshake.is_current_user_provider !== true
+        || !handshake.service_id
+        || !isMultiUseHandshake(handshake)
+      ) {
+        continue
+      }
+
+      const current = map.get(handshake.service_id) ?? []
+      current.push(handshake)
+      map.set(handshake.service_id, current)
+    }
+
+    return map
+  }, [handshakes])
+  const groupedTransactions = useMemo(() => {
+    const groups = new Map<string, GroupedTransactionRow>()
+
+    for (const transaction of transactions) {
+      const completedCount = transaction.service_id
+        ? (completedMultiUseByService.get(transaction.service_id)?.length ?? 0)
+        : 0
+      const shouldGroup = isMultiUseTransaction(transaction, completedCount)
+      const key = shouldGroup ? `${transaction.transaction_type}:${transaction.service_id}` : transaction.id
+      const existing = groups.get(key)
+
+      if (existing) {
+        existing.items.push(transaction)
+        existing.createdAt = new Date(transaction.created_at).getTime() > new Date(existing.createdAt).getTime()
+          ? transaction.created_at
+          : existing.createdAt
+        existing.balanceAfter = transaction.balance_after
+        existing.amount = Math.max(existing.amount, transaction.amount)
+        continue
+      }
+
+      const label = shouldGroup
+        ? `${completedCount} members`
+        : counterpartName(transaction)
+
+      groups.set(key, {
+        key,
+        serviceId: transaction.service_id,
+        primary: transaction,
+        items: [transaction],
+        amount: transaction.amount,
+        balanceAfter: transaction.balance_after,
+        createdAt: transaction.created_at,
+        counterpartLabel: label,
+        counterpartAvatarUrl: shouldGroup ? null : (transaction.counterpart?.avatar_url ?? null),
+        description: shouldGroup
+          ? `Settled once for ${completedCount} participants. Open details to view everyone in this session.`
+          : transaction.description,
+        isMultiUse: shouldGroup,
+      })
+    }
+
+    return Array.from(groups.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )
+  }, [completedMultiUseByService, transactions])
 
   const fetchTransactions = useCallback(async (signal?: AbortSignal) => {
     const requestId = ++requestIdRef.current
@@ -303,6 +410,7 @@ const TransactionHistoryPage = () => {
     try {
       const handshakes = await handshakeAPI.list(signal)
       if (requestId !== agreementRequestIdRef.current) return
+      setHandshakes(handshakes)
 
       const nextAgreements = handshakes
         .filter((handshake) => ACTIVE_HANDSHAKE_STATUSES.has(handshake.status))
@@ -447,7 +555,7 @@ const TransactionHistoryPage = () => {
 
         <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)', xl: 'repeat(4, 1fr)' }} gap={4} mb={6}>
           <SummaryCard label="Time Available" value={summary.current_balance} color={PURPLE} bg={PURPLE_LT} />
-          <SummaryCard label="Upcoming Time" value={expectedBalance} color={BLUE} bg={BLUE_LT} />
+          <SummaryCard label="Upcoming Time" value={expectedBalance} color={BLUE} bg={BLUE_LT} signed />
           <SummaryCard label="Time Received" value={summary.total_earned} color={GREEN} bg={GREEN_LT} />
           <SummaryCard label="Time Shared" value={summary.total_spent} color={RED} bg={RED_LT} />
         </Grid>
@@ -469,13 +577,11 @@ const TransactionHistoryPage = () => {
                   Active Agreements
                 </Text>
                 <Text fontSize="12px" color={GRAY600}>
-                  Ongoing accepted exchanges. Reserved hours are already reflected in your available time; only pending incoming time increases your upcoming time.
+                  Ongoing accepted exchanges. Reserved hours are already reflected in your available time; upcoming time only shows what will still change when these sessions are completed.
                 </Text>
               </Box>
               <Box px="10px" py="5px" borderRadius="999px" bg={WHITE} color={BLUE} fontSize="12px" fontWeight={700}>
-                {activeAgreements.reduce((sum, item) => sum + item.expected_delta, 0) > 0
-                  ? `Upcoming +${formatHours(activeAgreements.reduce((sum, item) => sum + item.expected_delta, 0))}`
-                  : 'No upcoming time'}
+                {upcomingDelta !== 0 ? `Upcoming ${formatAmount(upcomingDelta)}` : 'No upcoming change'}
               </Box>
             </Flex>
 
@@ -528,9 +634,20 @@ const TransactionHistoryPage = () => {
                     flexShrink={0}
                   >
                     <Box textAlign={{ base: 'left', md: 'right' }}>
+                      {agreement.reserved_delta !== 0 && (
+                        <>
+                          <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase">Reserved now</Text>
+                          <Text fontSize="13px" fontWeight={800} color={RED}>
+                            {formatAmount(agreement.reserved_delta)}
+                          </Text>
+                        </>
+                      )}
                       <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase">Upcoming</Text>
-                      <Text fontSize="13px" fontWeight={800} color={agreement.expected_delta > 0 ? GREEN : GRAY700}>
-                        {agreement.expected_delta > 0 ? formatAmount(agreement.expected_delta) : 'No additional change'}
+                      <Text fontSize="13px" fontWeight={800} color={agreement.expected_delta > 0 ? GREEN : agreement.expected_delta < 0 ? RED : GRAY700}>
+                        {agreement.expected_delta !== 0 ? formatAmount(agreement.expected_delta) : 'No change'}
+                      </Text>
+                      <Text fontSize="11px" color={GRAY500} mt="2px">
+                        {agreement.note}
                       </Text>
                     </Box>
                   </Flex>
@@ -575,7 +692,7 @@ const TransactionHistoryPage = () => {
           </Flex>
 
           <Text fontSize="13px" color={GRAY500}>
-            {count === 0 ? '0 entries' : `${count} ${count === 1 ? 'entry' : 'entries'}`}
+            {groupedTransactions.length === 0 ? '0 entries' : `${groupedTransactions.length} ${groupedTransactions.length === 1 ? 'entry' : 'entries'}`}
           </Text>
         </Flex>
 
@@ -607,7 +724,7 @@ const TransactionHistoryPage = () => {
               </Flex>
             </Box>
           </Box>
-        ) : transactions.length === 0 ? (
+        ) : groupedTransactions.length === 0 ? (
           <Box borderRadius="24px" border={`1px solid ${GRAY200}`} bg={WHITE}>
             <EmptyLedgerIllustration />
           </Box>
@@ -624,18 +741,21 @@ const TransactionHistoryPage = () => {
             </Box>
 
             <Box>
-              {transactions.map((transaction, index) => {
-                const tone = amountTone(transaction.amount)
-                const accent = transactionAccent(transaction)
+              {groupedTransactions.map((row, index) => {
+                const tone = amountTone(row.amount)
+                const accent = transactionAccent(row.primary)
                 const Icon = accent.icon
-                const name = counterpartName(transaction)
+                const name = row.counterpartLabel
+                const isClickable = row.isMultiUse
 
                 return (
                   <Box
-                    key={transaction.id}
+                    key={row.key}
                     px={{ base: 4, md: 6 }}
                     py={{ base: 4, md: 5 }}
                     borderTop={index === 0 ? 'none' : `1px solid ${GRAY100}`}
+                    onClick={() => { if (isClickable) setSelectedTransactionGroup(row) }}
+                    style={{ cursor: isClickable ? 'pointer' : 'default' }}
                   >
                     <Box display={{ base: 'block', md: 'none' }}>
                       <Flex justify="space-between" align="flex-start" gap={3} mb={3}>
@@ -644,14 +764,14 @@ const TransactionHistoryPage = () => {
                             <Icon size={16} />
                           </Box>
                           <Box>
-                            <Text fontSize="14px" fontWeight={700} color={GRAY800}>{transaction.service_title ?? transaction.transaction_type_display}</Text>
+                            <Text fontSize="14px" fontWeight={700} color={GRAY800}>{row.primary.service_title ?? row.primary.transaction_type_display}</Text>
                             <Text fontSize="12px" color={GRAY500}>
-                              {formatDate(transaction.created_at)} · {accent.stateLabel}
+                              {formatDate(row.createdAt)} · {accent.stateLabel}
                             </Text>
                           </Box>
                         </Flex>
                         <Box px="10px" py="6px" borderRadius="999px" bg={tone.bg} color={tone.color} fontSize="12px" fontWeight={800}>
-                          {formatAmount(transaction.amount)}
+                          {formatAmount(row.amount)}
                         </Box>
                       </Flex>
 
@@ -659,9 +779,9 @@ const TransactionHistoryPage = () => {
                         <Box>
                           <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase" mb={1}>Counterpart</Text>
                           <Flex align="center" gap={2}>
-                            {transaction.counterpart ? (
+                            {row.counterpartAvatarUrl ? (
                               <Avatar.Root size="xs">
-                                <Avatar.Image src={transaction.counterpart.avatar_url ?? undefined} alt={name} />
+                                <Avatar.Image src={row.counterpartAvatarUrl ?? undefined} alt={name} />
                                 <Avatar.Fallback name={name} />
                               </Avatar.Root>
                             ) : (
@@ -672,19 +792,19 @@ const TransactionHistoryPage = () => {
                         </Box>
                         <Box>
                           <Text fontSize="11px" color={GRAY400} fontWeight={700} textTransform="uppercase" mb={1}>Time Available</Text>
-                          <Text fontSize="13px" fontWeight={700} color={GRAY800}>{formatHours(transaction.balance_after)}</Text>
+                          <Text fontSize="13px" fontWeight={700} color={GRAY800}>{formatHours(row.balanceAfter)}</Text>
                         </Box>
                       </Grid>
 
-                      <Text fontSize="12px" color={GRAY500} mt={3}>{transaction.description}</Text>
+                      <Text fontSize="12px" color={GRAY500} mt={3}>{row.description}</Text>
                       <Text fontSize="11px" color={GRAY500} mt={1}>
-                        {serviceMeta(transaction.service_type, transaction.is_current_user_provider)}
+                        {serviceMeta(row.primary.service_type, row.primary.is_current_user_provider)}
                       </Text>
                     </Box>
 
                     <Grid display={{ base: 'none', md: 'grid' }} templateColumns="180px 220px minmax(220px, 1fr) 140px 140px" gap={4} alignItems="center">
                       <Box>
-                        <Text fontSize="13px" fontWeight={600} color={GRAY800}>{formatDate(transaction.created_at)}</Text>
+                        <Text fontSize="13px" fontWeight={600} color={GRAY800}>{formatDate(row.createdAt)}</Text>
                         <Text fontSize="11px" color={GRAY500} mt={1}>{accent.stateLabel}</Text>
                       </Box>
 
@@ -693,9 +813,9 @@ const TransactionHistoryPage = () => {
                           <Icon size={16} />
                         </Box>
                         <Flex align="center" gap={2} minW={0}>
-                          {transaction.counterpart ? (
+                          {row.counterpartAvatarUrl ? (
                             <Avatar.Root size="xs">
-                              <Avatar.Image src={transaction.counterpart.avatar_url ?? undefined} alt={name} />
+                              <Avatar.Image src={row.counterpartAvatarUrl ?? undefined} alt={name} />
                               <Avatar.Fallback name={name} />
                             </Avatar.Root>
                           ) : (
@@ -713,7 +833,7 @@ const TransactionHistoryPage = () => {
                               {name}
                             </Text>
                             <Text fontSize="11px" color={GRAY500}>
-                              {transaction.counterpart?.email ?? 'System entry'}
+                              {row.isMultiUse ? `${row.items.length} linked records` : (row.primary.counterpart?.email ?? 'System entry')}
                             </Text>
                           </Box>
                         </Flex>
@@ -721,22 +841,22 @@ const TransactionHistoryPage = () => {
 
                       <Box minW={0}>
                         <Text fontSize="13px" fontWeight={700} color={GRAY800} whiteSpace="nowrap" overflow="hidden" textOverflow="ellipsis">
-                          {transaction.service_title ?? 'Manual adjustment'}
+                          {row.primary.service_title ?? 'Manual adjustment'}
                         </Text>
                         <Text fontSize="11px" color={GRAY500} mt={1} whiteSpace="nowrap" overflow="hidden" textOverflow="ellipsis">
-                          {serviceMeta(transaction.service_type, transaction.is_current_user_provider)}
+                          {serviceMeta(row.primary.service_type, row.primary.is_current_user_provider)}
                         </Text>
                         <Text fontSize="11px" color={GRAY500} mt={1} whiteSpace="nowrap" overflow="hidden" textOverflow="ellipsis">
-                          {transaction.description}
+                          {row.description}
                         </Text>
                       </Box>
 
                       <Text fontSize="14px" fontWeight={800} color={tone.color}>
-                        {formatAmount(transaction.amount)}
+                        {formatAmount(row.amount)}
                       </Text>
 
                       <Text fontSize="14px" fontWeight={700} color={GRAY800}>
-                        {formatHours(transaction.balance_after)}
+                        {formatHours(row.balanceAfter)}
                       </Text>
                     </Grid>
                   </Box>
@@ -746,7 +866,7 @@ const TransactionHistoryPage = () => {
           </Box>
         )}
 
-        {!isLoading && !error && transactions.length > 0 && (
+        {!isLoading && !error && groupedTransactions.length > 0 && (
           <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'center' }} justify="space-between" gap={3} mt={5}>
             <Text fontSize="13px" color={GRAY500}>
               Page {page} of {totalPages}
@@ -800,6 +920,29 @@ const TransactionHistoryPage = () => {
           </Flex>
         )}
       </Box>
+
+      <MultiUseDetailsModal
+        isOpen={!!selectedTransactionGroup}
+        title={selectedTransactionGroup?.primary.service_title ?? 'Session details'}
+        subtitle={selectedTransactionGroup
+          ? `${completedMultiUseByService.get(selectedTransactionGroup.serviceId ?? '')?.length ?? 0} participants completed this one-time session.`
+          : undefined}
+        onClose={() => setSelectedTransactionGroup(null)}
+        items={(
+          selectedTransactionGroup?.serviceId
+            ? (completedMultiUseByService.get(selectedTransactionGroup.serviceId) ?? [])
+            : []
+        ).map((handshake) => ({
+          id: handshake.id,
+          title: handshake.counterpart
+            ? `${handshake.counterpart.first_name} ${handshake.counterpart.last_name}`.trim() || handshake.counterpart.email
+            : handshake.requester_name,
+          subtitle: 'Completed participant',
+          meta: formatDate(handshake.updated_at),
+          value: formatHours(handshake.provisioned_hours),
+          avatarUrl: handshake.counterpart?.avatar_url ?? null,
+        }))}
+      />
     </Box>
   )
 }

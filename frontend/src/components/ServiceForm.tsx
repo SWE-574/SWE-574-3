@@ -433,13 +433,23 @@ export default function ServiceForm({
   const [eventDateTimeError, setEventDateTimeError] = useState<string | undefined>()
 
   const schema = useMemo(() => getSchema(type), [type])
-  const { register, handleSubmit, control, watch, trigger, reset, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, control, watch, trigger, reset, setValue, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: { location_type: 'In-Person', schedule_type: 'One-Time', max_participants: 1 },
   })
 
   const locType   = watch('location_type')
   const schedType = watch('schedule_type')
+  const maxParticipants = watch('max_participants')
+  const isGroupOffer = type === 'Offer' && Number(maxParticipants) > 1
+  const isFixedGroupOffer = type === 'Offer' && schedType === 'One-Time' && Number(maxParticipants) > 1
+  const [onlineLocation, setOnlineLocation] = useState('')
+
+  useEffect(() => {
+    if (isGroupOffer && schedType === 'Recurrent') {
+      setValue('schedule_type', 'One-Time', { shouldDirty: true, shouldValidate: true })
+    }
+  }, [isGroupOffer, schedType, setValue])
 
   const addTag = (tag: Tag) => {
     setSelectedTags((prev) => {
@@ -473,9 +483,15 @@ export default function ServiceForm({
           lng,
         })
       }
+    } else if (initialService.location_type === 'Online') {
+      setOnlineLocation(initialService.location_area ?? '')
     }
 
-    if (initialService.type === 'Event' && initialService.scheduled_time) {
+    if ((initialService.type === 'Event' || (
+      initialService.type === 'Offer'
+      && initialService.schedule_type === 'One-Time'
+      && initialService.max_participants > 1
+    )) && initialService.scheduled_time) {
       const scheduledDate = new Date(initialService.scheduled_time)
       if (!Number.isNaN(scheduledDate.getTime())) {
         const year = scheduledDate.getFullYear()
@@ -606,18 +622,25 @@ export default function ServiceForm({
         setLocationError('Please search and select a location')
         return
       }
+    } else if (isFixedGroupOffer && !onlineLocation.trim()) {
+      setLocationError('Please enter the meeting link or platform')
+      return
     }
     setLocationError(undefined)
 
-    // Validate scheduled_time for Events
-    if (type === 'Event') {
+    // Validate scheduled_time for Events and fixed group offers
+    if (type === 'Event' || isFixedGroupOffer) {
       if (!eventDate || !eventTime) {
-        setEventDateTimeError('Please select both a date and time for the event')
+        setEventDateTimeError(type === 'Event'
+          ? 'Please select both a date and time for the event'
+          : 'Please select the exact date and time for this group offer')
         return
       }
       const scheduledMs = new Date(`${eventDate}T${eventTime}:00`).getTime()
       if (scheduledMs <= Date.now()) {
-        setEventDateTimeError('Event date/time must be in the future')
+        setEventDateTimeError(type === 'Event'
+          ? 'Event date/time must be in the future'
+          : 'Group offer date/time must be in the future')
         return
       }
       setEventDateTimeError(undefined)
@@ -661,10 +684,12 @@ export default function ServiceForm({
           fd.append('location_area', locationValue.label.slice(0, 100))
           fd.append('location_lat', locationValue.lat.toFixed(6))
           fd.append('location_lng', locationValue.lng.toFixed(6))
+        } else if (values.location_type === 'Online' && isFixedGroupOffer) {
+          fd.append('location_area', onlineLocation.trim().slice(0, 100))
         } else {
           fd.append('location_area', '')
         }
-        if (type === 'Event' && eventDate && eventTime) {
+        if ((type === 'Event' || isFixedGroupOffer) && eventDate && eventTime) {
           fd.append('scheduled_time', new Date(`${eventDate}T${eventTime}:00`).toISOString())
         }
         tagIds.forEach((id) => fd.append('tag_ids', id))
@@ -704,11 +729,13 @@ export default function ServiceForm({
           // Round to 6 decimal places — backend DecimalField(max_digits=9, decimal_places=6)
           fd.append('location_lat',  locationValue.lat.toFixed(6))
           fd.append('location_lng',  locationValue.lng.toFixed(6))
+        } else if (values.location_type === 'Online' && isFixedGroupOffer) {
+          fd.append('location_area', onlineLocation.trim().slice(0, 100))
         }
         fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
         fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
         if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
-        if (type === 'Event' && eventDate && eventTime) {
+        if ((type === 'Event' || isFixedGroupOffer) && eventDate && eventTime) {
           // Send as UTC ISO string so the backend stores the correct absolute time
           // regardless of the server's TIME_ZONE setting.
           fd.append('scheduled_time', new Date(`${eventDate}T${eventTime}:00`).toISOString())
@@ -815,6 +842,11 @@ export default function ServiceForm({
                   _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
                 />
                 <ErrTxt msg={errors.max_participants?.message} />
+                {isGroupOffer && (
+                  <Text fontSize="11px" color={GRAY400} mt="5px">
+                    Group offers are one-time only. Recurring is disabled when max participants is greater than 1.
+                  </Text>
+                )}
               </Box>
               )}
             </Grid>
@@ -853,11 +885,28 @@ export default function ServiceForm({
               </Box>
             )}
 
-            {type === 'Event' ? (
+            {locType === 'Online' && isFixedGroupOffer && (
+              <Box>
+                <Label required>
+                  <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
+                  Meeting link or platform
+                </Label>
+                <Input
+                  placeholder="e.g. Zoom link, Google Meet, Discord server"
+                  value={onlineLocation}
+                  onChange={(e) => { setOnlineLocation(e.target.value); setLocationError(undefined) }}
+                  style={inputStyle}
+                  _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
+                />
+                <ErrTxt msg={locationError} />
+              </Box>
+            )}
+
+            {(type === 'Event' || isFixedGroupOffer) ? (
               <Box>
                 <Label required>
                   <FiCalendar size={12} style={{ display: 'inline', marginRight: 5 }} />
-                  Event Date & Time
+                  {type === 'Event' ? 'Event Date & Time' : 'Group Offer Date & Time'}
                 </Label>
                 <Flex gap={3}>
                   <Box flex={1}>
@@ -880,7 +929,9 @@ export default function ServiceForm({
                 </Flex>
                 {eventDateTimeError && <ErrTxt msg={eventDateTimeError} />}
                 <Text fontSize="11px" color={GRAY400} mt="5px">
-                  Participants can join up until the event starts. 24 hours before the event, check-in opens and self-cancellation is disabled.
+                  {type === 'Event'
+                    ? 'Participants can join up until the event starts. 24 hours before the event, check-in opens and self-cancellation is disabled.'
+                    : 'This exact date/time will be reused for every approved participant. It cannot be customized per handshake.'}
                 </Text>
               </Box>
             ) : (
@@ -897,7 +948,9 @@ export default function ServiceForm({
                       <SegmentedControl
                         value={field.value}
                         onChange={field.onChange}
-                        options={[{ value: 'One-Time', label: 'One-Time' }, { value: 'Recurrent', label: 'Recurring' }]}
+                        options={isGroupOffer
+                          ? [{ value: 'One-Time', label: 'One-Time' }]
+                          : [{ value: 'One-Time', label: 'One-Time' }, { value: 'Recurrent', label: 'Recurring' }]}
                         accent={accent}
                       />
                     )}

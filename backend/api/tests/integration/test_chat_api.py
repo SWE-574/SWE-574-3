@@ -30,7 +30,24 @@ class TestChatViewSet:
         response = client.get('/api/chats/')
         assert response.status_code == status.HTTP_200_OK
         assert 'results' in response.data
-        assert any(item['handshake_id'] == str(handshake.id) for item in response.data['results'])
+        conversation = next(item for item in response.data['results'] if item['handshake_id'] == str(handshake.id))
+        assert conversation['service_member_count'] == 1
+
+    def test_list_conversations_includes_group_member_count(self):
+        """Group service rows include canonical owner+accepted member count."""
+        owner = UserFactory()
+        service = _group_service(owner)
+        requester = UserFactory()
+        handshake = HandshakeFactory(service=service, requester=requester, status='accepted')
+        _accepted_handshake(service)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+
+        response = client.get('/api/chats/')
+        assert response.status_code == status.HTTP_200_OK
+        conversation = next(item for item in response.data['results'] if item['handshake_id'] == str(handshake.id))
+        assert conversation['service_member_count'] == 3
     
     def test_get_conversation_messages(self):
         """Test retrieving messages for a conversation"""
@@ -197,6 +214,12 @@ class TestGroupChatViewSet:
         response = client.get(f'/api/group-chat/{service.id}/')
         assert response.status_code == status.HTTP_200_OK
         assert response.data['service_id'] == str(service.id)
+        assert response.data['service_title'] == service.title
+        assert response.data['participants'] == [{
+            'id': str(owner.id),
+            'name': f'{owner.first_name} {owner.last_name}'.strip(),
+            'avatar_url': owner.avatar_url,
+        }]
         assert 'messages' in response.data
 
     def test_accepted_participant_can_get_messages(self):
@@ -212,6 +235,9 @@ class TestGroupChatViewSet:
         response = client.get(f'/api/group-chat/{service.id}/')
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data['messages']) == 1
+        assert len(response.data['participants']) == 2
+        assert response.data['participants'][0]['id'] == str(service.user_id)
+        assert response.data['participants'][1]['id'] == str(participant.id)
 
     def test_get_returns_messages_oldest_first(self):
         """Messages are returned in ascending (oldest-first) order."""
@@ -239,7 +265,7 @@ class TestGroupChatViewSet:
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
     def test_pending_handshake_user_cannot_get_messages(self):
-        """A user with only a *pending* handshake is denied (must be accepted)."""
+        """A pending requester must wait until the handshake is accepted."""
         service = _group_service()
         requester = UserFactory()
         HandshakeFactory(service=service, requester=requester, status='pending')

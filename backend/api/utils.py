@@ -81,6 +81,14 @@ def provision_timebank(handshake: Handshake) -> bool:
         
         return True
 
+def _is_group_one_time_service(service: Service) -> bool:
+    return (
+        service.type in ('Offer', 'Need')
+        and service.schedule_type == 'One-Time'
+        and service.max_participants > 1
+    )
+
+
 def complete_timebank_transfer(handshake: Handshake) -> bool:
     """Credit the provider once both parties confirm completion.
     
@@ -94,45 +102,42 @@ def complete_timebank_transfer(handshake: Handshake) -> bool:
         if handshake.status == 'completed':
             return True
 
+        service = Service.objects.select_for_update().get(id=handshake.service.id)
         provider, receiver = get_provider_and_receiver(handshake)
-        provider = User.objects.select_for_update().get(id=provider.id)
-        hours = handshake.provisioned_hours
+        impacted_user_ids: set[str] = {str(provider.id), str(receiver.id)}
 
-        # Use F() expression for atomic balance update
-        provider.timebank_balance = F("timebank_balance") + hours
-        provider.save(update_fields=["timebank_balance"])
+        handshake.status = "completed"
+        handshake.save(update_fields=["status"])
 
-        # Refresh to get the actual balance value after atomic update
-        provider.refresh_from_db(fields=["timebank_balance"])
+        if not _is_group_one_time_service(service):
+            provider = User.objects.select_for_update().get(id=provider.id)
+            hours = handshake.provisioned_hours
 
-        # Record transaction history
-        TransactionHistory.objects.create(
-            user=provider,
-            transaction_type='transfer',
-            amount=hours,  # Positive for credit
-            balance_after=provider.timebank_balance,
-            handshake=handshake,
-            description=f"Service completed: '{handshake.service.title}' ({hours} hours transferred)"
-        )
+            provider.timebank_balance = F("timebank_balance") + hours
+            provider.save(update_fields=["timebank_balance"])
+            provider.refresh_from_db(fields=["timebank_balance"])
 
-        # Award karma for completing handshake as provider (+5)
-        provider.karma_score = F("karma_score") + 5
-        provider.save(update_fields=["karma_score"])
-        provider.refresh_from_db(fields=["karma_score"])
+            TransactionHistory.objects.create(
+                user=provider,
+                transaction_type='transfer',
+                amount=hours,
+                balance_after=provider.timebank_balance,
+                handshake=handshake,
+                description=f"Service completed: '{handshake.service.title}' ({hours} hours transferred)"
+            )
 
-        receiver_id = str(receiver.id)
-        provider_id = str(provider.id)
+            provider.karma_score = F("karma_score") + 5
+            provider.save(update_fields=["karma_score"])
+            provider.refresh_from_db(fields=["karma_score"])
 
         def invalidate_after_commit() -> None:
-            invalidate_conversations(provider_id)
-            invalidate_conversations(receiver_id)
-            invalidate_transactions(provider_id)
-            invalidate_transactions(receiver_id)
+            for user_id in impacted_user_ids:
+                invalidate_conversations(user_id)
+                invalidate_transactions(user_id)
 
         transaction.on_commit(invalidate_after_commit)
 
         # Option B: One-Time services become Completed only when all participant handshakes are completed.
-        service = Service.objects.select_for_update().get(id=handshake.service.id)
         if service.schedule_type == 'One-Time':
             # Compute post-completion counts without depending on an in-transaction status flip.
             completed_excluding_current = Handshake.objects.filter(
@@ -152,8 +157,34 @@ def complete_timebank_transfer(handshake: Handshake) -> bool:
                 service.status = 'Completed'
                 service.save(update_fields=['status'])
 
-        handshake.status = "completed"
-        handshake.save(update_fields=["status"])
+            if _is_group_one_time_service(service) and active_count_after == 0:
+                provider = User.objects.select_for_update().get(id=provider.id)
+                already_paid = TransactionHistory.objects.filter(
+                    user=provider,
+                    transaction_type='transfer',
+                    handshake__service=service,
+                ).exists()
+                if not already_paid:
+                    hours = Decimal(service.duration)
+                    provider.timebank_balance = F("timebank_balance") + hours
+                    provider.save(update_fields=["timebank_balance"])
+                    provider.refresh_from_db(fields=["timebank_balance"])
+
+                    TransactionHistory.objects.create(
+                        user=provider,
+                        transaction_type='transfer',
+                        amount=hours,
+                        balance_after=provider.timebank_balance,
+                        handshake=handshake,
+                        description=(
+                            f"Group service completed: '{service.title}' "
+                            f"({hours} hours transferred after all participants completed)"
+                        )
+                    )
+
+                    provider.karma_score = F("karma_score") + 5
+                    provider.save(update_fields=["karma_score"])
+                    provider.refresh_from_db(fields=["karma_score"])
 
         return True
 

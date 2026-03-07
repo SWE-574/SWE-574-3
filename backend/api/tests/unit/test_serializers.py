@@ -2,9 +2,11 @@
 Unit tests for serializers
 """
 import pytest
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.exceptions import ValidationError
@@ -113,6 +115,7 @@ class TestServiceSerializer:
             'location_lng': 29.0089,
             'max_participants': 2,
             'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
             'status': 'Active',
             'tag_ids': [tag.id]
         })
@@ -438,6 +441,28 @@ class TestTransactionHistorySerializer:
         assert data['is_current_user_provider'] is True
         assert data['counterpart']['id'] == str(service_owner.id)
         assert data['counterpart']['email'] == service_owner.email
+
+    def test_adjustment_transaction_allows_null_handshake(self):
+        """Adjustment transactions without a handshake should serialize nullable fields as None."""
+        user = UserFactory()
+        transaction = TransactionHistoryFactory(
+            user=user,
+            handshake=None,
+            transaction_type='adjustment',
+            description='Manual admin adjustment',
+        )
+
+        serializer = TransactionHistorySerializer(transaction)
+        data = serializer.data
+
+        assert data['handshake_id'] is None
+        assert data['service_id'] is None
+        assert data['service_title'] is None
+        assert data['service_type'] is None
+        assert data['schedule_type'] is None
+        assert data['max_participants'] is None
+        assert data['counterpart'] is None
+        assert data['is_current_user_provider'] is False
 
 
 @pytest.mark.django_db

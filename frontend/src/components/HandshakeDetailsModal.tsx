@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Box,
   Text,
@@ -16,20 +16,40 @@ interface Props {
   onSubmit: (data: InitiatePayload) => Promise<void>
   serviceType?: string
   scheduledTime?: string | null
+  presetDetails?: {
+    exactLocation: string
+    exactDuration: number
+    scheduledTime: string
+  } | null
   /** Original post duration (hours). Used for Offer/Need to show "Original post: X hours" and validate agreed duration. */
   serviceDuration?: number | null
 }
 
 const isOfferOrNeed = (t?: string) => t === 'Offer' || t === 'Need'
 
-export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, scheduledTime, serviceDuration }: Props) {
-  const useStrictDuration = isOfferOrNeed(serviceType)
+export function HandshakeDetailsModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  serviceType,
+  scheduledTime,
+  presetDetails,
+  serviceDuration,
+}: Props) {
   const [location, setLocation] = useState('')
   const [duration, setDuration] = useState<number>(1)
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const useStrictDuration = isOfferOrNeed(serviceType)
+
+  useEffect(() => {
+    if (!isOpen || presetDetails) return
+    if (useStrictDuration && serviceDuration != null) {
+      setDuration(serviceDuration)
+    }
+  }, [isOpen, presetDetails, serviceDuration, useStrictDuration])
 
   if (!isOpen) return null
 
@@ -64,10 +84,30 @@ export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, 
     )
   }
 
+  const isPresetMode = !!presetDetails
+
   const minDate = new Date().toISOString().slice(0, 10)
 
   const handleSubmit = async () => {
     setError(null)
+    if (isPresetMode && presetDetails) {
+      setLoading(true)
+      try {
+        await onSubmit({
+          exact_location: presetDetails.exactLocation,
+          exact_duration: presetDetails.exactDuration,
+          scheduled_time: presetDetails.scheduledTime,
+        })
+        onClose()
+      } catch (e: unknown) {
+        const err = e as { response?: { data?: { detail?: string } }; message?: string }
+        setError(err?.response?.data?.detail ?? err?.message ?? 'Failed to initiate handshake.')
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
     if (!location.trim()) { setError('Location is required.'); return }
     if (!date || !time) { setError('Scheduled date and time are required.'); return }
     if (useStrictDuration) {
@@ -116,79 +156,105 @@ export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, 
         onClick={(e) => e.stopPropagation()}
       >
         <Text fontSize="17px" fontWeight={700} color="gray.800" mb={1}>
-          Initiate Handshake
+          {isPresetMode ? 'Use Group Offer Details' : 'Initiate Handshake'}
         </Text>
         <Text fontSize="13px" color="gray.500" mb={5}>
-          Provide session details. The requester will review and approve.
+          {isPresetMode
+            ? 'This group offer already has a fixed location and date. The requester will review and approve these preset details.'
+            : 'Provide session details. The requester will review and approve.'
+          }
         </Text>
 
-        <Stack gap={4}>
-          <Box>
-            <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
-              Exact Location
-            </Text>
-            <Input
-              placeholder="e.g. Beşiktaş Library, Room 3"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              size="sm"
-              borderRadius="8px"
-            />
-          </Box>
-
-          <Box>
-            {useStrictDuration && serviceDuration != null && (
-              <Text fontSize="12px" color="gray.500" mb={1}>
-                Original post: {Number(serviceDuration)} hours
+        {isPresetMode && presetDetails ? (
+          <Stack gap={4}>
+            <Box>
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Location</Text>
+              <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
+                <Text fontSize="13px" color="gray.800">{presetDetails.exactLocation}</Text>
+              </Box>
+            </Box>
+            <Box>
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Duration</Text>
+              <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
+                <Text fontSize="13px" color="gray.800">{presetDetails.exactDuration}h</Text>
+              </Box>
+            </Box>
+            <Box>
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Scheduled Date & Time</Text>
+              <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
+                <Text fontSize="13px" color="gray.800">{formatEventDateTime(presetDetails.scheduledTime)}</Text>
+              </Box>
+            </Box>
+          </Stack>
+        ) : (
+          <Stack gap={4}>
+            <Box>
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
+                Exact Location
               </Text>
-            )}
-            <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
-              {useStrictDuration ? 'Agreed duration (hours)' : 'Duration (hours)'}
-            </Text>
-            <Input
-              type="number"
-              min={useStrictDuration ? 1 : 0.5}
-              max={useStrictDuration ? 10 : undefined}
-              step={useStrictDuration ? 1 : 0.5}
-              placeholder={useStrictDuration ? 'e.g. 1' : undefined}
-              value={duration}
-              onChange={(e) => setDuration(parseFloat(e.target.value) || 0)}
-              size="sm"
-              borderRadius="8px"
-              w="120px"
-            />
-            {useStrictDuration && (
-              <Text fontSize="11px" color="gray.500" mt={1}>
-                Time credit will be based on this agreed duration.
-              </Text>
-            )}
-          </Box>
-
-          <Box>
-            <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
-              Scheduled Date & Time
-            </Text>
-            <Flex gap={2}>
               <Input
-                type="date"
-                min={minDate}
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
+                placeholder="e.g. Beşiktaş Library, Room 3"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
                 size="sm"
                 borderRadius="8px"
-                flex={1}
               />
+            </Box>
+
+            <Box>
+              {useStrictDuration && serviceDuration != null && (
+                <Text fontSize="12px" color="gray.500" mb={1}>
+                  Original post: {Number(serviceDuration)} hours
+                </Text>
+              )}
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
+                {useStrictDuration ? 'Agreed duration (hours)' : 'Duration (hours)'}
+              </Text>
               <Input
-                type="time"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
+                type="number"
+                min={useStrictDuration ? 1 : 0.5}
+                max={useStrictDuration ? 10 : undefined}
+                step={useStrictDuration ? 1 : 0.5}
+                placeholder={useStrictDuration ? 'e.g. 1' : undefined}
+                value={duration}
+                onChange={(e) => setDuration(parseFloat(e.target.value) || 0)}
                 size="sm"
                 borderRadius="8px"
                 w="120px"
               />
-            </Flex>
-          </Box>
-        </Stack>
+              {useStrictDuration && (
+                <Text fontSize="11px" color="gray.500" mt={1}>
+                  Time credit will be based on this agreed duration.
+                </Text>
+              )}
+            </Box>
+
+            <Box>
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
+                Scheduled Date & Time
+              </Text>
+              <Flex gap={2}>
+                <Input
+                  type="date"
+                  min={minDate}
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  size="sm"
+                  borderRadius="8px"
+                  flex={1}
+                />
+                <Input
+                  type="time"
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                  size="sm"
+                  borderRadius="8px"
+                  w="120px"
+                />
+              </Flex>
+            </Box>
+          </Stack>
+        )}
 
         {error && (
           <Text fontSize="12px" color="red.500" mt={3}>
@@ -207,7 +273,7 @@ export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, 
             loading={loading}
             style={{ background: '#16a34a', color: 'white' }}
           >
-            Send Details
+            {isPresetMode ? 'Share Fixed Details' : 'Send Details'}
           </Button>
         </Flex>
       </Box>

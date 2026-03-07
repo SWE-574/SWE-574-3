@@ -13,7 +13,7 @@ if __name__ == "__main__":
 from api.models import (
     ChatMessage, Handshake, Notification, ReputationRep, Comment,
     Service, Tag, User, UserBadge, ForumCategory, ForumTopic, ForumPost,
-    Report, AdminAuditLog,
+    Report, AdminAuditLog, ServiceMedia,
 )
 from api.achievement_utils import check_and_assign_badges
 from api.services import HandshakeService
@@ -42,6 +42,7 @@ demo_users = User.objects.filter(email__in=demo_emails)
 if demo_users.exists():
     print(f"  Removing data for {demo_users.count()} demo users...")
     user_ids = list(demo_users.values_list('id', flat=True))
+    ServiceMedia.objects.filter(service__user_id__in=user_ids).delete()
     Service.objects.filter(user_id__in=user_ids).delete()
     Handshake.objects.filter(Q(requester_id__in=user_ids) | Q(service__user_id__in=user_ids)).delete()
     Notification.objects.filter(user_id__in=user_ids).delete()
@@ -94,7 +95,59 @@ print(f"  Processed {len(tags_data)} tags ({created_count} created)")
 
 print("\n[3/8] Creating demo users with Turkish names...")
 
-def create_or_update_user(email, first_name, last_name, bio, balance, karma, date_joined_offset_days=0):
+def dicebear_avatar(seed):
+    return f"https://api.dicebear.com/9.x/avataaars/svg?seed={seed}"
+
+
+def picsum_image(seed, width, height):
+    return f"https://picsum.photos/seed/{seed}/{width}/{height}"
+
+
+def semantic_service_image(service, width=800, height=600):
+    title = service.title.lower()
+    semantic_presets = [
+        (('manti', 'börek', 'coffee', 'cooking'), ('turkish-food,cooking', 101)),
+        (('guitar', 'music'), ('guitar,music', 102)),
+        (('jogging', 'running', 'sports'), ('running,fitness', 103)),
+        (('watercolor', 'painting', 'art'), ('painting,art', 104)),
+        (('gardening', 'plant', 'balcony'), ('gardening,plants', 105)),
+        (('photography', 'camera', 'photo'), ('photography,camera', 106)),
+        (('chess',), ('chess,board-game', 107)),
+        (('language', 'english', 'turkish', 'french'), ('language,conversation', 108)),
+        (('genealogy', 'history', 'archive'), ('books,history', 109)),
+        (('smartphone', 'tech', 'app', 'printer'), ('technology,devices', 110)),
+    ]
+
+    category = 'community,workshop'
+    lock = 199
+    for keywords, preset in semantic_presets:
+        if any(keyword in title for keyword in keywords):
+            category, lock = preset
+            break
+
+    return f"https://loremflickr.com/{width}/{height}/{category}?lock={lock}"
+
+
+def is_fixed_group_offer(service):
+    return (
+        service.type == 'Offer'
+        and service.schedule_type == 'One-Time'
+        and service.max_participants > 1
+    )
+
+
+def create_or_update_user(
+    email,
+    first_name,
+    last_name,
+    bio,
+    balance,
+    karma,
+    date_joined_offset_days=0,
+    avatar_url=None,
+    banner_url=None,
+    location=None,
+):
     user, created = User.objects.get_or_create(
         email=email,
         defaults={
@@ -102,6 +155,9 @@ def create_or_update_user(email, first_name, last_name, bio, balance, karma, dat
             'first_name': first_name,
             'last_name': last_name,
             'bio': bio,
+            'avatar_url': avatar_url,
+            'banner_url': banner_url,
+            'location': location,
             'timebank_balance': balance,
             'karma_score': karma,
             'role': 'member',
@@ -116,6 +172,9 @@ def create_or_update_user(email, first_name, last_name, bio, balance, karma, dat
         user.first_name = first_name
         user.last_name = last_name
         user.bio = bio
+        user.avatar_url = avatar_url
+        user.banner_url = banner_url
+        user.location = location
         user.is_verified = True
         user.is_onboarded = True
         user.set_password('demo123')
@@ -128,49 +187,73 @@ def create_or_update_user(email, first_name, last_name, bio, balance, karma, dat
 elif_user = create_or_update_user(
     'elif@demo.com', 'Elif', 'Yılmaz',
     'Freelance designer and cooking enthusiast living in Beşiktaş. Love sharing traditional Turkish recipes and learning about Istanbul\'s food culture!',
-    Decimal('6.50'), 35, date_joined_offset_days=45
+    Decimal('6.50'), 35, date_joined_offset_days=45,
+    avatar_url=dicebear_avatar('elif'),
+    banner_url=picsum_image('elif-banner', 1200, 400),
+    location='Beşiktaş, Istanbul',
 )
 
 cem = create_or_update_user(
     'cem@demo.com', 'Cem', 'Demir',
     'University student in Kadıköy passionate about chess and genealogy research. Always happy to teach beginners and help trace family histories!',
-    Decimal('4.00'), 18, date_joined_offset_days=30
+    Decimal('4.00'), 18, date_joined_offset_days=30,
+    avatar_url=dicebear_avatar('cem'),
+    banner_url=picsum_image('cem-banner', 1200, 400),
+    location='Kadıköy, Istanbul',
 )
 
 ayse = create_or_update_user(
     'ayse@demo.com', 'Ayşe', 'Kaya',
     'Gardening enthusiast and community organizer in Üsküdar. Passionate about sustainable living and urban farming. Love sharing knowledge about growing food in small spaces!',
-    Decimal('7.00'), 42, date_joined_offset_days=60
+    Decimal('7.00'), 42, date_joined_offset_days=60,
+    avatar_url=dicebear_avatar('ayse'),
+    banner_url=picsum_image('ayse-banner', 1200, 400),
+    location='Üsküdar, Istanbul',
 )
 
 mehmet = create_or_update_user(
     'mehmet@demo.com', 'Mehmet', 'Özkan',
     'Retired teacher living in Şişli. Expert in genealogy research and Istanbul history. Enjoy helping others discover their family roots and learn about our city\'s rich past.',
-    Decimal('8.50'), 55, date_joined_offset_days=90
+    Decimal('8.50'), 55, date_joined_offset_days=90,
+    avatar_url=dicebear_avatar('mehmet'),
+    banner_url=picsum_image('mehmet-banner', 1200, 400),
+    location='Şişli, Istanbul',
 )
 
 zeynep = create_or_update_user(
     'zeynep@demo.com', 'Zeynep', 'Arslan',
     'Language teacher and cultural exchange enthusiast. Fluent in Turkish, English, and French. Love connecting people through language and helping others practice conversation in a friendly, relaxed setting.',
-    Decimal('9.00'), 68, date_joined_offset_days=75
+    Decimal('9.00'), 68, date_joined_offset_days=75,
+    avatar_url=dicebear_avatar('zeynep'),
+    banner_url=picsum_image('zeynep-banner', 1200, 400),
+    location='Beyoğlu, Istanbul',
 )
 
 can = create_or_update_user(
     'can@demo.com', 'Can', 'Şahin',
     'Photography hobbyist based in Beşiktaş. Specialize in Istanbul landmarks and street photography. Happy to share tips on composition, lighting, and capturing the city\'s unique character.',
-    Decimal('5.50'), 28, date_joined_offset_days=25
+    Decimal('5.50'), 28, date_joined_offset_days=25,
+    avatar_url=dicebear_avatar('can'),
+    banner_url=picsum_image('can-banner', 1200, 400),
+    location='Beşiktaş, Istanbul',
 )
 
 deniz = create_or_update_user(
     'deniz@demo.com', 'Deniz', 'Aydın',
     'Tech-savvy professional in Kadıköy. Enjoy helping others with smartphones, apps, and basic tech troubleshooting. Patient teacher for all skill levels!',
-    Decimal('5.00'), 22, date_joined_offset_days=20
+    Decimal('5.00'), 22, date_joined_offset_days=20,
+    avatar_url=dicebear_avatar('deniz'),
+    banner_url=picsum_image('deniz-banner', 1200, 400),
+    location='Kadıköy, Istanbul',
 )
 
 burak = create_or_update_user(
     'burak@demo.com', 'Burak', 'Kurt',
     'Chess player and music lover. Intermediate level chess player looking to improve and teach others. Also enjoy discussing music and sharing recommendations.',
-    Decimal('4.50'), 15, date_joined_offset_days=15
+    Decimal('4.50'), 15, date_joined_offset_days=15,
+    avatar_url=dicebear_avatar('burak'),
+    banner_url=picsum_image('burak-banner', 1200, 400),
+    location='Kadıköy, Istanbul',
 )
 
 all_users = [elif_user, cem, ayse, mehmet, zeynep, can, deniz, burak]
@@ -184,6 +267,9 @@ def get_tag(tag_id, tag_name):
         return Tag.objects.get(name=tag_name)
 
 cooking_tag = get_tag('Q8476', 'Cooking')
+music_tag = get_tag('Q11424', 'Music')
+sports_tag = get_tag('Q11461', 'Sports')
+art_tag = get_tag('Q11019', 'Art')
 chess_tag = get_tag('Q7186', 'Chess')
 education_tag = get_tag('Q11465', 'Education')
 technology_tag = get_tag('Q11466', 'Technology')
@@ -191,7 +277,53 @@ gardening_tag = get_tag('Q11467', 'Gardening')
 language_tag = get_tag('Q2013', 'Language')
 photography_tag = get_tag('Q11631', 'Photography')
 
+print("  Enriching user profiles...")
+user_skill_map = {
+    'elif@demo.com': [cooking_tag, art_tag],
+    'cem@demo.com': [chess_tag, education_tag],
+    'ayse@demo.com': [gardening_tag, art_tag, education_tag],
+    'mehmet@demo.com': [education_tag, technology_tag],
+    'zeynep@demo.com': [language_tag, education_tag, cooking_tag],
+    'can@demo.com': [photography_tag, art_tag],
+    'deniz@demo.com': [technology_tag, sports_tag],
+    'burak@demo.com': [music_tag, chess_tag],
+}
+user_portfolio_map = {
+    'elif@demo.com': [
+        picsum_image('elif-portfolio-1', 600, 400),
+        picsum_image('elif-portfolio-2', 600, 400),
+    ],
+    'ayse@demo.com': [
+        picsum_image('ayse-portfolio-1', 600, 400),
+        picsum_image('ayse-portfolio-2', 600, 400),
+        picsum_image('ayse-portfolio-3', 600, 400),
+    ],
+    'can@demo.com': [
+        picsum_image('can-portfolio-1', 600, 400),
+        picsum_image('can-portfolio-2', 600, 400),
+    ],
+    'zeynep@demo.com': [
+        picsum_image('zeynep-portfolio-1', 600, 400),
+    ],
+}
+
+for user in all_users:
+    user.skills.set(user_skill_map[user.email])
+    user.portfolio_images = user_portfolio_map.get(user.email, [])
+    user.save(update_fields=['portfolio_images'])
+
 services = []
+now = timezone.now()
+
+manti_demo_time = now - timedelta(days=1, hours=2)
+borek_demo_time = now - timedelta(days=3, hours=1)
+gardening_demo_time = now - timedelta(days=2, hours=3)
+photography_demo_time = now - timedelta(days=1, hours=5)
+
+manti_seed_time = now + timedelta(days=2)
+borek_seed_time = now + timedelta(days=3)
+gardening_seed_time = now + timedelta(days=4)
+photography_seed_time = now + timedelta(days=5)
 
 elif_manti = Service.objects.create(
     user=elif_user,
@@ -205,6 +337,8 @@ elif_manti = Service.objects.create(
     location_lng=Decimal('29.0089'),
     max_participants=3,
     schedule_type='One-Time',
+    scheduled_time=manti_seed_time,
+    schedule_details='This week at 18:30 in my Beşiktaş kitchen',
     status='Active',
     created_at=timezone.now() - timedelta(days=20),
 )
@@ -224,7 +358,8 @@ elif_borek = Service.objects.create(
     location_lng=Decimal('29.0089'),
     max_participants=2,
     schedule_type='One-Time',
-    schedule_details='Next Saturday at 14:00',
+    scheduled_time=borek_seed_time,
+    schedule_details='This week at 14:00 in Beşiktaş',
     status='Active',
     created_at=timezone.now() - timedelta(days=5),
 )
@@ -301,7 +436,8 @@ ayse_gardening = Service.objects.create(
     location_lng=Decimal('29.0125'),
     max_participants=3,
     schedule_type='One-Time',
-    schedule_details='Next Saturday at 10:00',
+    scheduled_time=gardening_seed_time,
+    schedule_details='This week at 10:00 in Üsküdar',
     status='Active',
     created_at=timezone.now() - timedelta(days=8),
 )
@@ -412,7 +548,8 @@ can_photography = Service.objects.create(
     location_lng=Decimal('29.0089'),
     max_participants=2,
     schedule_type='One-Time',
-    schedule_details='Next Sunday morning for best light',
+    scheduled_time=photography_seed_time,
+    schedule_details='This week at golden hour in Beşiktaş',
     status='Active',
     created_at=timezone.now() - timedelta(days=7),
 )
@@ -480,7 +617,88 @@ burak_chess.tags.set([chess_tag])
 services.append(burak_chess)
 print(f"  Created: {burak_chess.title}")
 
+burak_guitar = Service.objects.create(
+    user=burak,
+    title='Guitar Basics for Beginners',
+    description='Friendly beginner guitar session covering tuning, basic chords, strumming rhythm, and a simple song to practice at home. Bring your own guitar if you have one, or I can provide a spare acoustic for the lesson.',
+    type='Offer',
+    duration=Decimal('1.50'),
+    location_type='In-Person',
+    location_area='Kadıköy',
+    location_lat=Decimal('40.9819'),
+    location_lng=Decimal('29.0244'),
+    max_participants=2,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=5, hours=2),
+    schedule_details='Next Tuesday at 19:00 in Kadıköy',
+    status='Active',
+    created_at=timezone.now() - timedelta(days=11),
+)
+burak_guitar.tags.set([music_tag])
+services.append(burak_guitar)
+print(f"  Created: {burak_guitar.title}")
+
+deniz_jogging = Service.objects.create(
+    user=deniz,
+    title='Morning Jogging Partner in Kadıköy',
+    description='Looking for a reliable jogging partner for easy-paced morning runs along the Kadıköy coast. Hoping to stay consistent, keep each other motivated, and gradually build up endurance together.',
+    type='Need',
+    duration=Decimal('1.00'),
+    location_type='In-Person',
+    location_area='Kadıköy',
+    location_lat=Decimal('40.9819'),
+    location_lng=Decimal('29.0244'),
+    max_participants=1,
+    schedule_type='Recurrent',
+    schedule_details='Weekdays at 07:00',
+    status='Active',
+    created_at=timezone.now() - timedelta(days=4),
+)
+deniz_jogging.tags.set([sports_tag])
+services.append(deniz_jogging)
+print(f"  Created: {deniz_jogging.title}")
+
+ayse_watercolor = Service.objects.create(
+    user=ayse,
+    title='Watercolor Painting for Beginners',
+    description='A calm beginner-friendly watercolor session focused on brush control, color mixing, and simple botanical illustrations. Great for anyone curious about painting and looking for a relaxed creative workshop.',
+    type='Offer',
+    duration=Decimal('2.00'),
+    location_type='In-Person',
+    location_area='Üsküdar',
+    location_lat=Decimal('41.0214'),
+    location_lng=Decimal('29.0125'),
+    max_participants=3,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=7, hours=1),
+    schedule_details='Next Sunday at 13:00 in Üsküdar',
+    status='Active',
+    created_at=timezone.now() - timedelta(days=13),
+)
+ayse_watercolor.tags.set([art_tag])
+services.append(ayse_watercolor)
+print(f"  Created: {ayse_watercolor.title}")
+
 print(f"\n  Created {len(services)} services")
+
+print("  Adding service cover images...")
+service_media_specs = [
+    elif_manti,
+    elif_borek,
+    ayse_gardening,
+    can_photography,
+    burak_guitar,
+    deniz_jogging,
+    ayse_watercolor,
+]
+for service in service_media_specs:
+    ServiceMedia.objects.create(
+        service=service,
+        media_type='image',
+        file_url=semantic_service_image(service),
+        display_order=0,
+    )
+print(f"  Added {len(service_media_specs)} service cover images")
 
 print("\n[5/8] Creating handshakes and completing workflows...")
 
@@ -505,9 +723,14 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
         }
         
         handshake.provider_initiated = True
-        handshake.exact_location = exact_locations.get(service.location_area, f'{service.location_area} area')
-        handshake.exact_duration = service.duration
-        handshake.scheduled_time = timezone.now() + timedelta(days=3)
+        if is_fixed_group_offer(service):
+            handshake.exact_location = service.location_area
+            handshake.exact_duration = service.duration
+            handshake.scheduled_time = service.scheduled_time
+        else:
+            handshake.exact_location = exact_locations.get(service.location_area, f'{service.location_area} area')
+            handshake.exact_duration = service.duration
+            handshake.scheduled_time = timezone.now() + timedelta(days=3)
         handshake.updated_at = created_at_time + timedelta(hours=2)
         handshake.save()
         
@@ -607,6 +830,20 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
         traceback.print_exc()
         return None, False
 
+
+def sync_fixed_group_offer_time(service, scheduled_time):
+    """Backdate the demo-facing session time after seed workflows are created."""
+    Service.objects.filter(pk=service.pk).update(scheduled_time=scheduled_time)
+    Handshake.objects.filter(
+        service=service,
+        status__in=['pending', 'accepted', 'completed', 'reported', 'paused'],
+    ).update(
+        scheduled_time=scheduled_time,
+        exact_location=service.location_area,
+        exact_duration=service.duration,
+    )
+    service.refresh_from_db(fields=['scheduled_time'])
+
 completed_handshakes = []
 accepted_handshakes = []
 pending_handshakes = []
@@ -626,6 +863,8 @@ handshake1, completed = simulate_handshake_workflow(
 if handshake1 and completed:
     completed_handshakes.append(handshake1)
     print(f"  Completed: {elif_manti.title} (Elif -> Cem)")
+if handshake15 or handshake1:
+    sync_fixed_group_offer_time(elif_manti, manti_demo_time)
 
 handshake2, completed = simulate_handshake_workflow(
     cem_genealogy, mehmet, provider_initiated_days_ago=10, completed_days_ago=5
@@ -640,6 +879,8 @@ handshake3, completed = simulate_handshake_workflow(
 if handshake3 and completed:
     completed_handshakes.append(handshake3)
     print(f"  Completed: {ayse_gardening.title} (Ayşe -> Elif)")
+if handshake3:
+    sync_fixed_group_offer_time(ayse_gardening, gardening_demo_time)
 
 handshake4, completed = simulate_handshake_workflow(
     mehmet_tech, deniz, provider_initiated_days_ago=4, completed_days_ago=1
@@ -661,6 +902,8 @@ handshake6, completed = simulate_handshake_workflow(
 if handshake6 and completed:
     completed_handshakes.append(handshake6)
     print(f"  Completed: {can_photography.title} (Can -> Burak)")
+if handshake6:
+    sync_fixed_group_offer_time(can_photography, photography_demo_time)
 
 handshake7, completed = simulate_handshake_workflow(
     elif_borek, zeynep, provider_initiated_days_ago=3, completed_days_ago=0
@@ -668,6 +911,8 @@ handshake7, completed = simulate_handshake_workflow(
 if handshake7 and completed:
     completed_handshakes.append(handshake7)
     print(f"  Completed: {elif_borek.title} (Elif -> Zeynep)")
+if handshake7:
+    sync_fixed_group_offer_time(elif_borek, borek_demo_time)
 
 handshake8, completed = simulate_handshake_workflow(
     cem_chess_offer, burak, provider_initiated_days_ago=16, completed_days_ago=12
@@ -728,9 +973,11 @@ except Exception as e:
     print(f"  Could not create pending handshake: {e}")
 
 try:
-    pending2 = HandshakeService.express_interest(mehmet_tech, deniz)
+    pending2 = HandshakeService.express_interest(burak_guitar, deniz)
+    pending2.created_at = timezone.now() - timedelta(hours=12)
+    pending2.save(update_fields=['created_at'])
     pending_handshakes.append(pending2)
-    print(f"  Pending: {mehmet_tech.title} (Mehmet -> Deniz)")
+    print(f"  Pending: {burak_guitar.title} (Burak -> Deniz)")
 except Exception as e:
     print(f"  Could not create pending handshake: {e}")
 
@@ -752,6 +999,8 @@ reputation_data = [
 ]
 
 for handshake, giver, receiver, punctual, helpful, kind, comment in reputation_data:
+    if handshake is None:
+        continue
     try:
         rep = ReputationRep.objects.create(
             handshake=handshake,
@@ -906,6 +1155,9 @@ admin_user = User.objects.create_superuser(
     first_name='Moderator',
     last_name='Admin',
     bio='Platform moderator and administrator',
+    avatar_url=dicebear_avatar('moderator'),
+    banner_url=picsum_image('moderator-banner', 1200, 400),
+    location='Beyoğlu, Istanbul',
     timebank_balance=Decimal('10.00'),
     karma_score=100,
     role='admin',
@@ -914,6 +1166,7 @@ admin_user = User.objects.create_superuser(
     is_verified=True,
     is_onboarded=True,
 )
+admin_user.skills.set([technology_tag, education_tag])
 print(f"  Created: {admin_email} (Admin account)")
 
 print("\n[10/10] Creating admin-testable data (reports + audit logs)...")
@@ -1029,8 +1282,9 @@ print("\n" + "=" * 60)
 print("Demo setup complete!")
 print("=" * 60)
 print(f"\nSummary:")
-print(f"  Users: {len(all_users)}")
+print(f"  Users: {len(all_users) + 1}")
 print(f"  Services: {len(services)}")
+print(f"  Service Media: {ServiceMedia.objects.count()}")
 print(f"  Completed Handshakes: {len(completed_handshakes)}")
 print(f"  Accepted Handshakes: {len(accepted_handshakes)}")
 print(f"  Pending Handshakes: {len(pending_handshakes)}")

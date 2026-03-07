@@ -252,9 +252,13 @@ export interface Notification {
 
 export interface Transaction {
   id: string
+  handshake_id?: string | null
+  service_id?: string | null
   transaction_type: 'provision' | 'transfer' | 'refund' | 'adjustment'
   transaction_type_display: string
   service_type?: 'Offer' | 'Need' | 'Event' | null
+  schedule_type?: 'One-Time' | 'Recurrent' | null
+  max_participants?: number | null
   is_current_user_provider?: boolean
   counterpart: {
     id: string

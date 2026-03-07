@@ -2,8 +2,11 @@ import apiClient from './api'
 import type { User, BadgeProgress, AchievementProgressItem } from '@/types'
 
 export interface UserHistoryItem {
+  service_id: string
   service_title: string
   service_type: 'Offer' | 'Need' | 'Event'
+  schedule_type: 'One-Time' | 'Recurrent'
+  max_participants: number
   duration: number | string
   partner_name: string
   partner_id: string
