@@ -1598,9 +1598,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
             .values_list('requester_id', flat=True)
             .distinct()
         )
-        if not recipient_ids:
-            return
-
         recipients = User.objects.filter(id__in=recipient_ids)
         summary = ', '.join(changed_fields) if changed_fields else 'service details'
         title = 'Event updated' if service.type == 'Event' else 'Service updated'
