@@ -149,7 +149,7 @@ export function MainSidebar({
                 <FiZap size={11} color="rgba(255,255,255,0.65)" />
                 <Text fontSize="10px" fontWeight={600} color="rgba(255,255,255,0.65)"
                   style={{ letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-                  Time Bank
+                  Your Time
                 </Text>
               </Flex>
               <Flex align="baseline" gap="5px">

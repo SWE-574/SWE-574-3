@@ -28,6 +28,11 @@ const joinedYear  = (d?: string) => d ? new Date(d).getFullYear() : null
 const fmtDate     = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 const fmtDur      = (d: number | string) => `${Number(d)}h`
 
+function isOwnHistoryItem(item: UserHistoryItem) {
+  if (item.service_type === 'Need') return item.was_provider === false
+  return item.was_provider === true
+}
+
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const SectionCard = ({ children, mb = 5 }: { children: React.ReactNode; mb?: number }) => (
   <Box bg={WHITE} borderRadius="12px" border={`1px solid ${GRAY200}`} overflow="hidden" mb={mb}
@@ -85,7 +90,7 @@ function ServiceCard({ service, onNav }: { service: Service; onNav: () => void }
 }
 
 // ── History row ───────────────────────────────────────────────────────────────
-function HistoryRow({ item, canClick, onClick }: { item: UserHistoryItem; canClick: boolean; onClick: () => void }) {
+function HistoryRow({ item, canClick, onClick, contextLabel }: { item: UserHistoryItem; canClick: boolean; onClick: () => void; contextLabel: string }) {
   const col = AVATAR_PALETTE[item.partner_name.charCodeAt(0) % AVATAR_PALETTE.length]
   const ini = item.partner_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
   return (
@@ -100,7 +105,7 @@ function HistoryRow({ item, canClick, onClick }: { item: UserHistoryItem; canCli
       }
       <Box flex={1} minW={0}>
         <Text fontSize="13px" fontWeight={600} color={GRAY800} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.service_title}</Text>
-        <Text fontSize="11px" color={GRAY500}>{item.was_provider ? 'Provided to' : 'Received from'} {item.partner_name}</Text>
+        <Text fontSize="11px" color={GRAY500}>{contextLabel} {item.partner_name}</Text>
       </Box>
       <Box textAlign="right" flexShrink={0}>
         <Text fontSize="12px" fontWeight={600} color={GREEN}>{fmtDur(item.duration)}</Text>
@@ -211,6 +216,7 @@ const PublicProfile = () => {
   const offersCount = services.filter(s => s.type === 'Offer').length
   const needsCount  = services.filter(s => s.type === 'Need').length
   const earnedBadges = badges.filter(b => b.earned)
+  const ownHistory = history.filter(isOwnHistoryItem)
   const punctual    = profileUser.punctual_count ?? 0
   const helpful     = profileUser.helpful_count  ?? 0
   const kind        = profileUser.kind_count     ?? 0
@@ -299,7 +305,7 @@ const PublicProfile = () => {
             {([
               [offersCount,         'Offers',    GREEN,  GREEN_LT,  <FiZap    size={14} />],
               [needsCount,          'Needs',     BLUE,   BLUE_LT,   <FiLayers size={14} />],
-              [history.length,      'Exchanges', AMBER,  AMBER_LT,  <FiRepeat size={14} />],
+              [ownHistory.length,   'Exchanges', AMBER,  AMBER_LT,  <FiRepeat size={14} />],
               [earnedBadges.length, 'Badges',    PURPLE, PURPLE_LT, <FiAward  size={14} />],
             ] as [number, string, string, string, React.ReactNode][]).map(([val, label, color, bg, icon]) => (
               <Box key={label} bg={WHITE}
@@ -348,16 +354,16 @@ const PublicProfile = () => {
 
               {profileUser.show_history && (
                 <SectionCard mb={0}>
-                  <SectionHead label={`Exchange History (${history.length})`} />
-                  {history.length === 0 ? (
+                  <SectionHead label={`Time Activity (${ownHistory.length})`} />
+                  {ownHistory.length === 0 ? (
                     <Flex py={8} direction="column" align="center" gap={2}>
                       <FiCheckCircle size={18} color={GRAY300} />
-                      <Text fontSize="13px" color={GRAY400}>No completed exchanges yet</Text>
+                      <Text fontSize="13px" color={GRAY400}>No time activity on this user&apos;s own services yet</Text>
                     </Flex>
                   ) : (
                     <Box px={4}>
-                      {history.map((item, i) => (
-                        <HistoryRow key={i} item={item} canClick={!!currentUser}
+                      {ownHistory.map((item, i) => (
+                        <HistoryRow key={i} item={item} canClick={!!currentUser} contextLabel="Own service with"
                           onClick={() => navigate(`/public-profile/${item.partner_id}`)} />
                       ))}
                     </Box>
