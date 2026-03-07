@@ -1578,8 +1578,37 @@ class ServiceViewSet(viewsets.ModelViewSet):
             if old_value != new_value:
                 changed_fields.append(field_name)
 
-        if any(k in self.request.data for k in ('tag_ids', 'tag_names', 'tags')):
-            changed_fields.append('tags')
+        # Tags are handled specially: only mark them as changed if the resulting
+        # tag set actually differs from the persisted service.tags.
+        tag_keys = ('tag_ids', 'tag_names', 'tags')
+        if any(k in serializer.validated_data for k in tag_keys):
+            try:
+                service_tags = getattr(service, 'tags')
+            except AttributeError:
+                # If the service has no tags relation, preserve prior behavior and
+                # treat any tag payload as a change.
+                changed_fields.append('tags')
+            else:
+                # Compute the current tag identifiers/names.
+                if 'tag_ids' in serializer.validated_data:
+                    old_tag_ids = set(service_tags.values_list('id', flat=True))
+                    new_tag_ids = set(serializer.validated_data.get('tag_ids') or [])
+                    if old_tag_ids != new_tag_ids:
+                        changed_fields.append('tags')
+                elif 'tag_names' in serializer.validated_data:
+                    old_tag_names = set(service_tags.values_list('name', flat=True))
+                    new_tag_names = set(serializer.validated_data.get('tag_names') or [])
+                    if old_tag_names != new_tag_names:
+                        changed_fields.append('tags')
+                elif 'tags' in serializer.validated_data:
+                    # Normalize possible tag representations (objects or IDs).
+                    old_tag_ids = set(service_tags.values_list('id', flat=True))
+                    raw_new_tags = serializer.validated_data.get('tags') or []
+                    new_tag_ids = {
+                        getattr(tag, 'id', tag) for tag in raw_new_tags
+                    }
+                    if old_tag_ids != new_tag_ids:
+                        changed_fields.append('tags')
 
         # Stable order, no duplicates.
         return list(dict.fromkeys(changed_fields))
