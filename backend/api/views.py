@@ -2359,7 +2359,7 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         user = self.request.user
         return Handshake.objects.filter(
             Q(requester=user) | Q(service__user=user)
-        ).select_related('service', 'requester', 'service__user').prefetch_related(
+        ).select_related('service', 'requester', 'service__user', 'cancellation_requested_by').prefetch_related(
             Prefetch('reps', queryset=ReputationRep.objects.filter(giver=user), to_attr='user_reps')
         ).order_by('-created_at')
 
@@ -2956,7 +2956,6 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     def cancel_handshake(self, request, pk=None):
         handshake = self.get_object()
         user = request.user
-        # Offer: service owner = provider; Need: service owner = receiver. Allow both parties to cancel.
         if handshake.service.user != user and handshake.requester != user:
             return create_error_response(
                 'Only the service owner or the requester can cancel this handshake',
@@ -2964,23 +2963,262 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_403_FORBIDDEN
             )
 
-        if handshake.status != 'accepted':
-            return create_error_response(
-                'Can only cancel accepted handshakes',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
+        with transaction.atomic():
+            locked_handshake = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester', 'service__user')
+                .get(pk=handshake.pk)
             )
 
-        svc = handshake.service
-        with transaction.atomic():
-            cancel_timebank_transfer(handshake)
+            if locked_handshake.status == 'accepted' and locked_handshake.service.type != 'Event':
+                return create_error_response(
+                    'Accepted handshakes require a cancellation request and approval',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
 
-            # If the service was Agreed, reopen it now that the accepted slot is freed.
+            if locked_handshake.status != 'pending':
+                return create_error_response(
+                    'Can only directly cancel pending handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            locked_handshake.status = 'cancelled'
+            locked_handshake.save(update_fields=['status', 'updated_at'])
+
+            if user == locked_handshake.requester:
+                create_notification(
+                    user=locked_handshake.service.user,
+                    notification_type='handshake_cancelled',
+                    title='Handshake Cancelled',
+                    message=f"{user.first_name} {user.last_name} cancelled their request for '{locked_handshake.service.title}'.",
+                    handshake=locked_handshake,
+                    service=locked_handshake.service,
+                )
+
+            serializer = self.get_serializer(locked_handshake)
+            return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='cancel-request')
+    def request_cancellation(self, request, pk=None):
+        handshake = self.get_object()
+        user = request.user
+        if handshake.service.user != user and handshake.requester != user:
+            return create_error_response(
+                'Only the service owner or the requester can request cancellation',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+
+        reason = str(request.data.get('reason') or '').strip()
+
+        with transaction.atomic():
+            locked_handshake = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester', 'service__user')
+                .get(pk=handshake.pk)
+            )
+
+            if locked_handshake.service.type == 'Event':
+                return create_error_response(
+                    'Cancellation requests are only available for Offer and Need handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if locked_handshake.status != 'accepted':
+                return create_error_response(
+                    'Can only request cancellation for accepted handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if locked_handshake.cancellation_requested_by_id is not None:
+                return create_error_response(
+                    'A cancellation request is already pending for this handshake',
+                    code=ErrorCodes.ALREADY_EXISTS,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            locked_handshake.cancellation_requested_by = user
+            locked_handshake.cancellation_requested_at = timezone.now()
+            locked_handshake.cancellation_reason = reason
+            locked_handshake.save(update_fields=[
+                'cancellation_requested_by',
+                'cancellation_requested_at',
+                'cancellation_reason',
+                'updated_at',
+            ])
+
+            other_user = (
+                locked_handshake.requester
+                if locked_handshake.service.user == user
+                else locked_handshake.service.user
+            )
+            display_name = f"{user.first_name} {user.last_name}".strip() or user.email
+            message = f"{display_name} requested to cancel '{locked_handshake.service.title}'."
+            if reason:
+                message = f"{message} Reason: {reason}"
+
+            create_notification(
+                user=other_user,
+                notification_type='handshake_cancellation_requested',
+                title='Cancellation Requested',
+                message=message,
+                handshake=locked_handshake,
+                service=locked_handshake.service,
+            )
+            invalidate_conversations(str(locked_handshake.requester_id))
+            invalidate_conversations(str(locked_handshake.service.user_id))
+
+            serializer = self.get_serializer(locked_handshake)
+            return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='cancel-request/approve')
+    def approve_cancellation_request(self, request, pk=None):
+        handshake = self.get_object()
+        user = request.user
+        if handshake.service.user != user and handshake.requester != user:
+            return create_error_response(
+                'Only the service owner or the requester can approve cancellation',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+
+        with transaction.atomic():
+            locked_handshake = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester', 'service__user')
+                .get(pk=handshake.pk)
+            )
+
+            if locked_handshake.service.type == 'Event':
+                return create_error_response(
+                    'Cancellation requests are only available for Offer and Need handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if locked_handshake.status != 'accepted':
+                return create_error_response(
+                    'Can only approve cancellation for accepted handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if locked_handshake.cancellation_requested_by_id is None:
+                return create_error_response(
+                    'There is no pending cancellation request for this handshake',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if locked_handshake.cancellation_requested_by_id == user.id:
+                return create_error_response(
+                    'The user who requested cancellation cannot approve it',
+                    code=ErrorCodes.PERMISSION_DENIED,
+                    status_code=status.HTTP_403_FORBIDDEN
+                )
+
+            svc = locked_handshake.service
+            requester_name = (
+                f"{locked_handshake.cancellation_requested_by.first_name} "
+                f"{locked_handshake.cancellation_requested_by.last_name}"
+            ).strip() or locked_handshake.cancellation_requested_by.email
+
+            cancel_timebank_transfer(locked_handshake)
+
             if svc.status == 'Agreed':
                 Service.objects.filter(pk=svc.pk).update(status='Active')
 
-        serializer = self.get_serializer(handshake)
-        return Response(serializer.data)
+            create_notification(
+                user=svc.user,
+                notification_type='handshake_cancelled',
+                title='Cancellation Approved',
+                message=f"The cancellation request for '{svc.title}' was approved by mutual agreement. Requested by {requester_name}.",
+                handshake=locked_handshake,
+                service=svc,
+            )
+
+            serializer = self.get_serializer(locked_handshake)
+            return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='cancel-request/reject')
+    def reject_cancellation_request(self, request, pk=None):
+        handshake = self.get_object()
+        user = request.user
+        if handshake.service.user != user and handshake.requester != user:
+            return create_error_response(
+                'Only the service owner or the requester can reject cancellation',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN
+            )
+
+        with transaction.atomic():
+            locked_handshake = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester', 'service__user')
+                .get(pk=handshake.pk)
+            )
+
+            if locked_handshake.service.type == 'Event':
+                return create_error_response(
+                    'Cancellation requests are only available for Offer and Need handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if locked_handshake.status != 'accepted':
+                return create_error_response(
+                    'Can only reject cancellation for accepted handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if locked_handshake.cancellation_requested_by_id is None:
+                return create_error_response(
+                    'There is no pending cancellation request for this handshake',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if locked_handshake.cancellation_requested_by_id == user.id:
+                return create_error_response(
+                    'The user who requested cancellation cannot reject it',
+                    code=ErrorCodes.PERMISSION_DENIED,
+                    status_code=status.HTTP_403_FORBIDDEN
+                )
+
+            request_user = locked_handshake.cancellation_requested_by
+            locked_handshake.cancellation_requested_by = None
+            locked_handshake.cancellation_requested_at = None
+            locked_handshake.cancellation_reason = ''
+            locked_handshake.save(update_fields=[
+                'cancellation_requested_by',
+                'cancellation_requested_at',
+                'cancellation_reason',
+                'updated_at',
+            ])
+
+            responder_name = f"{user.first_name} {user.last_name}".strip() or user.email
+            create_notification(
+                user=request_user,
+                notification_type='handshake_cancellation_rejected',
+                title='Cancellation Request Declined',
+                message=f"{responder_name} declined your cancellation request for '{locked_handshake.service.title}'.",
+                handshake=locked_handshake,
+                service=locked_handshake.service,
+            )
+            invalidate_conversations(str(locked_handshake.requester_id))
+            invalidate_conversations(str(locked_handshake.service.user_id))
+
+            serializer = self.get_serializer(locked_handshake)
+            return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='confirm', throttle_classes=[ConfirmationThrottle])
     @track_performance
@@ -3564,7 +3802,8 @@ class ChatViewSet(viewsets.ViewSet):
         ).select_related(
             'service', 
             'requester', 
-            'service__user'
+            'service__user',
+            'cancellation_requested_by',
         ).prefetch_related(
             last_message_prefetch,
             reputation_prefetch
@@ -3618,6 +3857,7 @@ class ChatViewSet(viewsets.ViewSet):
             
             # Check if user has already left reputation for this handshake (using prefetched data)
             user_has_reviewed = len(handshake.user_reps) > 0
+            cancellation_request_user = handshake.cancellation_requested_by
             
             conversations.append({
                 'handshake_id': str(handshake.id),
@@ -3650,6 +3890,22 @@ class ChatViewSet(viewsets.ViewSet):
                 'max_participants': handshake.service.max_participants,
                 'schedule_type': handshake.service.schedule_type,
                 'service_member_count': 1 + active_member_counts_by_service.get(handshake.service_id, 0),
+                'cancellation_requested_by_id': str(cancellation_request_user.id) if cancellation_request_user else None,
+                'cancellation_requested_by_name': (
+                    f"{cancellation_request_user.first_name} {cancellation_request_user.last_name}".strip() or cancellation_request_user.email
+                ) if cancellation_request_user else None,
+                'cancellation_requested_at': handshake.cancellation_requested_at.isoformat() if handshake.cancellation_requested_at else None,
+                'cancellation_reason': handshake.cancellation_reason or '',
+                'can_request_cancellation': (
+                    handshake.service.type != 'Event'
+                    and handshake.status == 'accepted'
+                    and handshake.cancellation_requested_by_id is None
+                ),
+                'can_respond_to_cancellation': (
+                    handshake.status == 'accepted'
+                    and handshake.cancellation_requested_by_id is not None
+                    and handshake.cancellation_requested_by_id != user.id
+                ),
             })
 
         page = paginator.paginate_queryset(conversations, request)
