@@ -2216,7 +2216,7 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             Q(requester=user) | Q(service__user=user)
         ).select_related('service', 'requester', 'service__user').prefetch_related(
             Prefetch('reps', queryset=ReputationRep.objects.filter(giver=user), to_attr='user_reps')
-        )
+        ).order_by('-created_at')
 
     @action(detail=False, methods=['post'], url_path=r'services/(?P<service_id>[^/.]+)/interest', permission_classes=[permissions.IsAuthenticated])
     @track_performance
