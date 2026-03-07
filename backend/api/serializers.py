@@ -1357,6 +1357,10 @@ class HandshakeSerializer(serializers.ModelSerializer):
     counterpart = serializers.SerializerMethodField()
     is_current_user_provider = serializers.SerializerMethodField()
     user_has_reviewed = serializers.SerializerMethodField()
+    cancellation_requested_by_id = serializers.UUIDField(source='cancellation_requested_by.id', read_only=True, allow_null=True)
+    cancellation_requested_by_name = serializers.SerializerMethodField()
+    can_request_cancellation = serializers.SerializerMethodField()
+    can_respond_to_cancellation = serializers.SerializerMethodField()
 
     class Meta:
         model = Handshake
@@ -1368,6 +1372,9 @@ class HandshakeSerializer(serializers.ModelSerializer):
             'provider_confirmed_complete', 'receiver_confirmed_complete',
             'exact_location', 'exact_duration', 'scheduled_time',
             'provider_initiated', 'requester_initiated',
+            'cancellation_requested_by_id', 'cancellation_requested_by_name',
+            'cancellation_requested_at', 'cancellation_reason',
+            'can_request_cancellation', 'can_respond_to_cancellation',
             'evaluation_window_starts_at', 'evaluation_window_ends_at', 'evaluation_window_closed_at',
             'user_has_reviewed',
             'created_at', 'updated_at'
@@ -1420,6 +1427,35 @@ class HandshakeSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'user_reps'):
             return len(obj.user_reps) > 0
         return ReputationRep.objects.filter(handshake=obj, giver=request.user).exists()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_cancellation_requested_by_name(self, obj):
+        requester = obj.cancellation_requested_by
+        if requester is None:
+            return None
+        return f"{requester.first_name} {requester.last_name}".strip() or requester.email
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_can_request_cancellation(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        if obj.service.type == 'Event':
+            return False
+        if obj.status != 'accepted':
+            return False
+        if request.user.id not in {obj.requester_id, obj.service.user_id}:
+            return False
+        return obj.cancellation_requested_by_id is None
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_can_respond_to_cancellation(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        if obj.status != 'accepted' or obj.cancellation_requested_by_id is None:
+            return False
+        return request.user.id in {obj.requester_id, obj.service.user_id} and request.user.id != obj.cancellation_requested_by_id
 
 # Chat Message Serializers
 @extend_schema_serializer(

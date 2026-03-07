@@ -377,6 +377,16 @@ class Handshake(models.Model):  # noqa: E302
     scheduled_time = models.DateTimeField(null=True, blank=True, help_text='Scheduled time for the service')
     provider_initiated = models.BooleanField(default=False, help_text='Whether provider has initiated the handshake')
     requester_initiated = models.BooleanField(default=False, help_text='Whether requester has initiated the handshake')
+    cancellation_requested_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='requested_handshake_cancellations',
+        help_text='Which participant requested cancellation of an accepted handshake.',
+    )
+    cancellation_requested_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True, default='')
     evaluation_window_starts_at = models.DateTimeField(null=True, blank=True)
     evaluation_window_ends_at = models.DateTimeField(null=True, blank=True, db_index=True)
     evaluation_window_closed_at = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -439,6 +449,8 @@ class Notification(models.Model):
         ('handshake_request', 'Handshake Request'),
         ('handshake_accepted', 'Handshake Accepted'),
         ('handshake_denied', 'Handshake Denied'),
+        ('handshake_cancellation_requested', 'Handshake Cancellation Requested'),
+        ('handshake_cancellation_rejected', 'Handshake Cancellation Rejected'),
         ('handshake_cancelled', 'Handshake Cancelled'),
         ('service_updated', 'Service Updated'),
         ('chat_message', 'Chat Message'),
