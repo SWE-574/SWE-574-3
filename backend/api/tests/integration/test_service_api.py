@@ -5,11 +5,13 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 from decimal import Decimal
+from datetime import timedelta
+from django.utils import timezone
 
 from api.tests.helpers.factories import UserFactory, ServiceFactory, TagFactory, HandshakeFactory
 from api.tests.helpers.factories import AdminUserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Service
+from api.models import Service, Notification
 
 
 @pytest.mark.django_db
@@ -138,6 +140,113 @@ class TestServiceViewSet:
         
         service.refresh_from_db()
         assert service.title == 'Updated Title'
+
+    def test_update_offer_allowed_when_application_exists_and_notifies_applicant(self):
+        """Offer owner can edit and pending applicants get notified."""
+        owner = UserFactory()
+        applicant = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer')
+        HandshakeFactory(service=service, requester=applicant, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Updated title'})
+        assert response.status_code == status.HTTP_200_OK
+
+        service.refresh_from_db()
+        assert service.title == 'Updated title'
+        assert Notification.objects.filter(
+            user=applicant,
+            type='service_updated',
+            related_service=service,
+        ).exists()
+
+    def test_update_need_allowed_when_application_exists_and_notifies_applicant(self):
+        """Need owner can edit and pending applicants get notified."""
+        owner = UserFactory()
+        applicant = UserFactory()
+        service = ServiceFactory(user=owner, type='Need')
+        HandshakeFactory(service=service, requester=applicant, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Updated title'})
+        assert response.status_code == status.HTTP_200_OK
+
+        service.refresh_from_db()
+        assert service.title == 'Updated title'
+        assert Notification.objects.filter(
+            user=applicant,
+            type='service_updated',
+            related_service=service,
+        ).exists()
+
+    def test_update_offer_blocked_after_completed_session(self):
+        """Offer owner cannot edit after a completed (approved + finished) session exists."""
+        owner = UserFactory()
+        applicant = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer')
+        HandshakeFactory(
+            service=service,
+            requester=applicant,
+            status='completed',
+            provider_confirmed_complete=True,
+            receiver_confirmed_complete=True,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Should Fail'})
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+        service.refresh_from_db()
+        assert service.title != 'Should Fail'
+
+    def test_update_event_notifies_joined_and_checked_in_participants(self):
+        """Event edits notify active event participants (joined/check-in) only."""
+        owner = UserFactory(first_name='Owner')
+        joined_user = UserFactory()
+        checked_in_user = UserFactory()
+        attended_user = UserFactory()
+        service = ServiceFactory(
+            user=owner,
+            type='Event',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(days=2),
+        )
+
+        HandshakeFactory(service=service, requester=joined_user, status='accepted')
+        HandshakeFactory(service=service, requester=checked_in_user, status='checked_in')
+        HandshakeFactory(service=service, requester=attended_user, status='attended')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Updated Event Title'})
+        assert response.status_code == status.HTTP_200_OK
+
+        joined_notification = Notification.objects.filter(
+            user=joined_user,
+            type='service_updated',
+            related_service=service,
+        ).exists()
+        checked_in_notification = Notification.objects.filter(
+            user=checked_in_user,
+            type='service_updated',
+            related_service=service,
+        ).exists()
+        attended_notification = Notification.objects.filter(
+            user=attended_user,
+            type='service_updated',
+            related_service=service,
+        ).exists()
+
+        assert joined_notification is True
+        assert checked_in_notification is True
+        assert attended_notification is False
     
     def test_update_service_unauthorized(self):
         """Test updating service as non-owner fails"""

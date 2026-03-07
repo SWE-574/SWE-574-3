@@ -10,7 +10,7 @@ import { FiX, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCi
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
 import WikidataTagAutocomplete from './WikidataTagAutocomplete'
-import type { Tag } from '@/types'
+import type { Service, Tag } from '@/types'
 
 import {
   GREEN, GREEN_LT,
@@ -364,10 +364,23 @@ function LocationSearch({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event' }) {
+interface ServiceFormProps {
+  type: 'Offer' | 'Need' | 'Event'
+  mode?: 'create' | 'edit'
+  serviceId?: string
+  initialService?: Service
+}
+
+export default function ServiceForm({
+  type,
+  mode = 'create',
+  serviceId,
+  initialService,
+}: ServiceFormProps) {
   const navigate = useNavigate()
   const accent   = type === 'Event' ? AMBER : type === 'Offer' ? GREEN : BLUE
   const accentLt = type === 'Event' ? AMBER_LT : type === 'Offer' ? GREEN_LT : BLUE_LT
+  const isEditMode = mode === 'edit' && !!serviceId
 
   // Tags
   const [selectedTags, setSelectedTags]     = useState<Tag[]>([])
@@ -387,7 +400,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
   const [eventTime, setEventTime]           = useState('')
   const [eventDateTimeError, setEventDateTimeError] = useState<string | undefined>()
 
-  const { register, handleSubmit, control, watch, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, control, watch, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: { location_type: 'In-Person', schedule_type: 'One-Time', max_participants: 1 },
   })
@@ -401,6 +414,47 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
       return exists ? prev : [...prev, tag]
     })
   }
+
+  useEffect(() => {
+    if (!initialService) return
+
+    reset({
+      title: initialService.title,
+      description: initialService.description,
+      duration: Number(initialService.duration),
+      location_type: initialService.location_type,
+      max_participants: initialService.max_participants,
+      schedule_type: initialService.schedule_type,
+      schedule_details: initialService.schedule_details ?? '',
+    })
+
+    setSelectedTags(initialService.tags ?? [])
+
+    if (initialService.location_type === 'In-Person' && initialService.location_area) {
+      const lat = initialService.location_lat == null ? null : Number(initialService.location_lat)
+      const lng = initialService.location_lng == null ? null : Number(initialService.location_lng)
+      if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
+        setLocationValue({
+          label: initialService.location_area,
+          lat,
+          lng,
+        })
+      }
+    }
+
+    if (initialService.type === 'Event' && initialService.scheduled_time) {
+      const scheduledDate = new Date(initialService.scheduled_time)
+      if (!Number.isNaN(scheduledDate.getTime())) {
+        const year = scheduledDate.getFullYear()
+        const month = String(scheduledDate.getMonth() + 1).padStart(2, '0')
+        const day = String(scheduledDate.getDate()).padStart(2, '0')
+        const hours = String(scheduledDate.getHours()).padStart(2, '0')
+        const minutes = String(scheduledDate.getMinutes()).padStart(2, '0')
+        setEventDate(`${year}-${month}-${day}`)
+        setEventTime(`${hours}:${minutes}`)
+      }
+    }
+  }, [initialService, reset])
 
   // ── Media ────────────────────────────────────────────────────────────────
 
@@ -495,43 +549,78 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
         if (cleanedName) tagNames.push(cleanedName)
       })
 
-      const fd = new FormData()
-      fd.append('title', values.title)
-      fd.append('description', values.description)
-      fd.append('type', type)
-      fd.append('duration', String(values.duration))
-      fd.append('location_type', values.location_type)
-      if (values.location_type === 'In-Person' && locationValue) {
-        // Truncate label to 100 chars (backend max_length) to avoid DRF validation errors
-        fd.append('location_area', locationValue.label.slice(0, 100))
-        // Round to 6 decimal places — backend DecimalField(max_digits=9, decimal_places=6)
-        fd.append('location_lat',  locationValue.lat.toFixed(6))
-        fd.append('location_lng',  locationValue.lng.toFixed(6))
+      if (isEditMode && serviceId) {
+        const payload: Record<string, unknown> = {
+          title: values.title,
+          description: values.description,
+          duration: values.duration,
+          location_type: values.location_type,
+          max_participants: values.max_participants,
+          schedule_type: type === 'Event' ? 'One-Time' : values.schedule_type,
+          schedule_details: values.schedule_details ?? '',
+          tag_ids: tagIds,
+          tag_names: tagNames,
+        }
+        if (Object.keys(wikidataLabelMap).length > 0) {
+          payload.wikidata_labels_json = JSON.stringify(wikidataLabelMap)
+        }
+
+        if (values.location_type === 'In-Person' && locationValue) {
+          payload.location_area = locationValue.label.slice(0, 100)
+          payload.location_lat = locationValue.lat.toFixed(6)
+          payload.location_lng = locationValue.lng.toFixed(6)
+        } else {
+          payload.location_area = null
+          payload.location_lat = null
+          payload.location_lng = null
+        }
+
+        if (type === 'Event' && eventDate && eventTime) {
+          payload.scheduled_time = new Date(`${eventDate}T${eventTime}:00`).toISOString()
+        }
+
+        const updated = await serviceAPI.update(serviceId, payload as Partial<Service>)
+        toast.success(`${type} updated successfully!`)
+        navigate(`/service-detail/${updated.id}`)
+      } else {
+        const fd = new FormData()
+        fd.append('title', values.title)
+        fd.append('description', values.description)
+        fd.append('type', type)
+        fd.append('duration', String(values.duration))
+        fd.append('location_type', values.location_type)
+        if (values.location_type === 'In-Person' && locationValue) {
+          // Truncate label to 100 chars (backend max_length) to avoid DRF validation errors
+          fd.append('location_area', locationValue.label.slice(0, 100))
+          // Round to 6 decimal places — backend DecimalField(max_digits=9, decimal_places=6)
+          fd.append('location_lat',  locationValue.lat.toFixed(6))
+          fd.append('location_lng',  locationValue.lng.toFixed(6))
+        }
+        fd.append('max_participants', String(values.max_participants))
+        fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
+        if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
+        if (type === 'Event' && eventDate && eventTime) {
+          // Send as UTC ISO string so the backend stores the correct absolute time
+          // regardless of the server's TIME_ZONE setting.
+          fd.append('scheduled_time', new Date(`${eventDate}T${eventTime}:00`).toISOString())
+        }
+        tagIds.forEach((id) => fd.append('tag_ids', id))
+        tagNames.forEach((name) => fd.append('tag_names', name))
+        if (Object.keys(wikidataLabelMap).length > 0) {
+          fd.append('wikidata_labels_json', JSON.stringify(wikidataLabelMap))
+        }
+        // Send cover (primary) first so the backend stores it as display_order=0
+        const orderedFiles = primaryMediaIdx === 0
+          ? mediaFiles
+          : [
+              mediaFiles[primaryMediaIdx],
+              ...mediaFiles.filter((_, i) => i !== primaryMediaIdx),
+            ]
+        orderedFiles.forEach((f) => fd.append('media', f))
+        const created = await serviceAPI.create(fd)
+        toast.success(`${type} posted successfully!`)
+        navigate(`/service-detail/${created.id}`)
       }
-      fd.append('max_participants', String(values.max_participants))
-      fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
-      if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
-      if (type === 'Event' && eventDate && eventTime) {
-        // Send as UTC ISO string so the backend stores the correct absolute time
-        // regardless of the server's TIME_ZONE setting.
-        fd.append('scheduled_time', new Date(`${eventDate}T${eventTime}:00`).toISOString())
-      }
-      tagIds.forEach((id) => fd.append('tag_ids', id))
-      tagNames.forEach((name) => fd.append('tag_names', name))
-      if (Object.keys(wikidataLabelMap).length > 0) {
-        fd.append('wikidata_labels_json', JSON.stringify(wikidataLabelMap))
-      }
-      // Send cover (primary) first so the backend stores it as display_order=0
-      const orderedFiles = primaryMediaIdx === 0
-        ? mediaFiles
-        : [
-            mediaFiles[primaryMediaIdx],
-            ...mediaFiles.filter((_, i) => i !== primaryMediaIdx),
-          ]
-      orderedFiles.forEach((f) => fd.append('media', f))
-      const created = await serviceAPI.create(fd)
-      toast.success(`${type} posted successfully!`)
-      navigate(`/service-detail/${created.id}`)
     } catch (err: unknown) {
       const data = (err as { response?: { data?: unknown } })?.response?.data
       let msg = 'Failed to post. Please try again.'
@@ -772,6 +861,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
         <Box h="1px" bg={GRAY100} />
 
         {/* ── Images ─────────────────────────────────────────────────────── */}
+        {!isEditMode && (
         <Section icon={<FiImage size={14} />} label="Photos">
           <Box>
             {mediaPreviews.length > 0 && (
@@ -909,6 +999,7 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
             )}
           </Box>
         </Section>
+        )}
 
         {/* ── Actions ────────────────────────────────────────────────────── */}
         <Flex justify="flex-end" gap={3} pt={2} borderTop={`1px solid ${GRAY100}`}>
@@ -943,7 +1034,9 @@ export default function ServiceForm({ type }: { type: 'Offer' | 'Need' | 'Event'
             onMouseLeave={(e) => { e.currentTarget.style.opacity = submitting ? '0.75' : '1' }}
           >
             {submitting && <Spinner size="xs" color="white" />}
-            {submitting ? 'Posting…' : type === 'Event' ? 'Post Event' : `Post ${type}`}
+            {submitting
+              ? (isEditMode ? 'Saving…' : 'Posting…')
+              : (isEditMode ? 'Save Changes' : (type === 'Event' ? 'Post Event' : `Post ${type}`))}
           </button>
         </Flex>
 

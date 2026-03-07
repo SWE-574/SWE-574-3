@@ -22,6 +22,7 @@ from decimal import Decimal
 from datetime import timedelta
 import logging
 import bleach
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -1554,6 +1555,69 @@ class ServiceViewSet(viewsets.ModelViewSet):
     def get_serializer_context(self):
         return {'request': self.request}
 
+    def _changed_service_fields(self, service: Service, serializer) -> List[str]:
+        """Compute user-facing fields that changed in this update request."""
+        tracked_fields = [
+            'title',
+            'description',
+            'duration',
+            'location_type',
+            'location_area',
+            'max_participants',
+            'schedule_type',
+            'schedule_details',
+            'scheduled_time',
+            'status',
+        ]
+        changed_fields: List[str] = []
+        for field_name in tracked_fields:
+            if field_name not in serializer.validated_data:
+                continue
+            old_value = getattr(service, field_name, None)
+            new_value = serializer.validated_data.get(field_name)
+            if old_value != new_value:
+                changed_fields.append(field_name)
+
+        if any(k in self.request.data for k in ('tag_ids', 'tag_names', 'tags')):
+            changed_fields.append('tags')
+
+        # Stable order, no duplicates.
+        return list(dict.fromkeys(changed_fields))
+
+    def _notify_service_edit_subscribers(self, service: Service, changed_fields: List[str]) -> None:
+        """Notify affected applicants/participants when a service update is applied."""
+        if service.type == 'Event':
+            recipient_statuses = ['accepted', 'checked_in']
+        else:
+            recipient_statuses = ['pending', 'accepted']
+
+        recipient_ids = (
+            service.handshakes
+            .filter(status__in=recipient_statuses)
+            .exclude(requester_id=service.user_id)
+            .values_list('requester_id', flat=True)
+            .distinct()
+        )
+        if not recipient_ids:
+            return
+
+        recipients = User.objects.filter(id__in=recipient_ids)
+        summary = ', '.join(changed_fields) if changed_fields else 'service details'
+        title = 'Event updated' if service.type == 'Event' else 'Service updated'
+        message = (
+            f"{service.user.first_name} updated '{service.title}'. "
+            f"Changed fields: {summary}."
+        )
+
+        for recipient in recipients:
+            create_notification(
+                user=recipient,
+                notification_type='service_updated',
+                title=title,
+                message=message,
+                service=service,
+            )
+
     def retrieve(self, request, *args, **kwargs):
         """Return a single service regardless of status so owners and participants
         can view Agreed/Completed/Cancelled services from their history."""
@@ -1648,16 +1712,30 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if service.user != self.request.user and getattr(self.request.user, 'role', None) != 'admin':
             raise PermissionDenied('Attempting to modify another user\'s service')
 
+        is_admin = getattr(self.request.user, 'role', None) == 'admin'
+
         # Block edits to Event details once inside the 24-hour lockdown window.
         # Non-Event services are completely unaffected by this guard.
         # Admins are exempt so they can still toggle visibility or moderate.
-        is_admin = getattr(self.request.user, 'role', None) == 'admin'
         if service.type == 'Event' and service.is_in_lockdown_window and not is_admin:
             raise PermissionDenied(
                 'Cannot edit event details within 24 hours of the scheduled start time.'
             )
 
+        # Once a completed Offer/Need session exists, the listing is immutable for owners.
+        if (
+            service.type in ('Offer', 'Need')
+            and not is_admin
+            and service.handshakes.filter(status='completed').exists()
+        ):
+            raise PermissionDenied(
+                'Cannot edit this service because an approved session has already been completed.'
+            )
+
+        changed_fields = self._changed_service_fields(service, serializer)
         super().perform_update(serializer)
+        if changed_fields:
+            self._notify_service_edit_subscribers(service, changed_fields)
         invalidate_service_lists()
         invalidate_user_services(str(service.user.id))
 

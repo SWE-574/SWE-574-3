@@ -23,6 +23,7 @@ const ServiceDetailPage      = lazy(() => import('@/pages/ServiceDetailPage'))
 const PostOfferForm          = lazy(() => import('@/pages/PostOfferForm'))
 const PostNeedForm           = lazy(() => import('@/pages/PostNeedForm'))
 const PostEventForm          = lazy(() => import('@/pages/PostEventForm'))
+const EditServiceForm        = lazy(() => import('@/pages/EditServiceForm'))
 const ChatPage               = lazy(() => import('@/pages/ChatPage'))
 const UserProfile            = lazy(() => import('@/pages/UserProfile'))
 const PublicProfile          = lazy(() => import('@/pages/PublicProfile'))
@@ -156,6 +157,7 @@ const FULL_SCREEN_PREFIXES = [
   '/dashboard', '/forum', '/messages', '/admin',
   '/profile', '/public-profile',
   '/service-detail', '/post-offer', '/post-need', '/post-event',
+  '/edit-service',
   '/transaction-history', '/notifications', '/achievements',
   '/onboarding',
 ]
@@ -273,6 +275,10 @@ function App() {
           <Route
             path="/post-event"
             element={<ProtectedRoute><PostEventForm /></ProtectedRoute>}
+          />
+          <Route
+            path="/edit-service/:id"
+            element={<ProtectedRoute><EditServiceForm /></ProtectedRoute>}
           />
           <Route
             path="/messages"

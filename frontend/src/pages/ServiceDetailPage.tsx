@@ -535,6 +535,12 @@ export default function ServiceDetailPage() {
   const myHandshake = handshakes.find((h) => exId(h.service) === service?.id && exId(h.requester) === user?.id)
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
+  const eventEditLocked = isEvent && isWithinLockdownWindow(service?.scheduled_time)
+  const hasCompletedSession = incoming.some((h) => h.status === 'completed')
+  const ownerEditLocked = isOwn && ((isEvent && eventEditLocked) || (!isEvent && hasCompletedSession))
+  const ownerEditLockReason = isEvent
+    ? 'Editing is locked during the final 24 hours before event start.'
+    : 'Editing is locked after an approved session is completed.'
   const reportedParticipantIds = new Set(
     incoming
       .filter((h) => h.status === 'reported')
@@ -1282,6 +1288,22 @@ export default function ServiceDetailPage() {
                 isOwn ? (
                   /* Organizer view */
                   <Stack gap={4}>
+                    <Box as="button" w="full" py="10px" borderRadius="10px"
+                      bg={ownerEditLocked ? GRAY100 : BLUE_LT}
+                      color={ownerEditLocked ? GRAY400 : BLUE}
+                      fontSize="13px" fontWeight={700}
+                      display="flex" alignItems="center" justifyContent="center" gap="6px"
+                      onClick={() => { if (!ownerEditLocked) navigate(`/edit-service/${service.id}`) }}
+                      style={{ border: `1px solid ${BLUE}30`, cursor: ownerEditLocked ? 'not-allowed' : 'pointer', opacity: ownerEditLocked ? 0.75 : 1 }}
+                    >
+                      Edit Event
+                    </Box>
+                    {ownerEditLocked && (
+                      <Text fontSize="11px" color={GRAY500} mt="-8px">
+                        {ownerEditLockReason}
+                      </Text>
+                    )}
+
                     <Flex align="center" justify="space-between">
                       <Text fontSize="13px" fontWeight={700} color={GRAY800}>Participants</Text>
                       <Box px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
@@ -1568,6 +1590,22 @@ export default function ServiceDetailPage() {
                 <>
                   {isOwn ? (
                     <Stack gap={4}>
+                      <Box as="button" w="full" py="10px" borderRadius="10px"
+                        bg={ownerEditLocked ? GRAY100 : BLUE_LT}
+                        color={ownerEditLocked ? GRAY400 : BLUE}
+                        fontSize="13px" fontWeight={700}
+                        display="flex" alignItems="center" justifyContent="center" gap="6px"
+                        onClick={() => { if (!ownerEditLocked) navigate(`/edit-service/${service.id}`) }}
+                        style={{ border: `1px solid ${BLUE}30`, cursor: ownerEditLocked ? 'not-allowed' : 'pointer', opacity: ownerEditLocked ? 0.75 : 1 }}
+                      >
+                        Edit Listing
+                      </Box>
+                      {ownerEditLocked && (
+                        <Text fontSize="11px" color={GRAY500} mt="-8px">
+                          {ownerEditLockReason}
+                        </Text>
+                      )}
+
                       <Flex align="center" justify="space-between">
                         <Text fontSize="13px" fontWeight={700} color={GRAY800}>
                           {service.max_participants > 1 ? 'Participants' : 'Incoming Requests'}
