@@ -532,7 +532,15 @@ export default function ServiceDetailPage() {
     if (typeof val === 'object' && 'id' in (val as Record<string, unknown>)) return (val as { id: string }).id
   }
 
-  const myHandshake = handshakes.find((h) => exId(h.service) === service?.id && exId(h.requester) === user?.id)
+  // For recurrent services, prefer an active handshake over a historical completed one
+  // so the UI reflects the user's *current* participation, not a past cycle.
+  const myHandshake = (() => {
+    const mine = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) === user?.id)
+    if (isRecurr) {
+      return mine.find((h) => ['pending', 'accepted'].includes(h.status)) ?? mine[0]
+    }
+    return mine[0]
+  })()
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
   const eventEditLocked = isEvent && isWithinLockdownWindow(service?.scheduled_time)
@@ -586,8 +594,12 @@ export default function ServiceDetailPage() {
       && (isOwn ? exId(h.requester) !== currentUserId : exId(h.requester) === currentUserId)
     )
     : []
-  // For "Leave Evaluation" we only care about the first completed handshake where user has NOT yet reviewed
-  const evaluationHandshake = completedHandshakes.find((h) => !h.user_has_reviewed) ?? completedHandshakes[0]
+  // For "Leave Evaluation" we only care about the first completed handshake where user has NOT yet reviewed.
+  // For recurrent services, do NOT fall back to an already-reviewed handshake — that would
+  // permanently show "You already reviewed" and block the user from participating again.
+  const evaluationHandshake = isRecurr
+    ? completedHandshakes.find((h) => !h.user_has_reviewed)
+    : (completedHandshakes.find((h) => !h.user_has_reviewed) ?? completedHandshakes[0])
   const showLeaveEvaluationCTA = !!evaluationHandshake && !evaluationHandshake.user_has_reviewed
   const evaluationCounterpartName = evaluationHandshake
     ? (isOwn ? evaluationHandshake.requester_name : evaluationHandshake.provider_name)
