@@ -62,13 +62,6 @@ export function EventChatPanel({
 
   const organizerId = service.user?.id ?? (service as unknown as { provider?: { id: string } }).provider?.id
 
-    // Reset chat state when service.id changes
-    useEffect(() => {
-      setFetchDone(false)
-      setRoomId(null)
-      setMessages([])
-    }, [service.id])
-
   useEffect(() => {
     const ac = new AbortController()
     let cancelled = false
@@ -353,7 +346,7 @@ export default function EventChatModal({ isOpen, onClose, service, onReportUser,
         </Flex>
 
         <Box flex={1} minH={0}>
-          <EventChatPanel service={service} onReportUser={onReportUser} reportingIssue={reportingIssue} />
+          <EventChatPanel key={service.id} service={service} onReportUser={onReportUser} reportingIssue={reportingIssue} />
         </Box>
       </Box>
     </Box>

@@ -246,7 +246,7 @@ export default function EventDetailModal({
           )}
 
           {activeTab === 'chat' && (
-            <EventChatPanel service={service} onReportUser={onReportUser} reportingIssue={reportingIssue} />
+            <EventChatPanel key={service.id} service={service} onReportUser={onReportUser} reportingIssue={reportingIssue} />
           )}
         </Box>
       </Box>
