@@ -4,9 +4,18 @@ export interface Handshake {
   id: string
   service: string | { id: string }
   service_title: string
+  service_type?: 'Offer' | 'Need' | 'Event'
   requester: string
   requester_name: string
   provider_name: string
+  counterpart?: {
+    id: string
+    first_name: string
+    last_name: string
+    email: string
+    avatar_url?: string | null
+  } | null
+  is_current_user_provider?: boolean
   status: 'pending' | 'accepted' | 'denied' | 'cancelled' | 'completed' | 'reported' | 'paused' | 'checked_in' | 'attended' | 'no_show'
   provisioned_hours: number
   provider_confirmed_complete: boolean

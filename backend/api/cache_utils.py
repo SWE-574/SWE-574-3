@@ -200,19 +200,18 @@ def invalidate_conversations(user_id: str) -> None:
     CacheManager.delete(key)
 
 
-def cache_transactions(user_id: str, data: list, ttl: int = CACHE_TTL_SHORT) -> None:
-    key = f"transactions:{user_id}"
+def cache_transactions(user_id: str, data: list, page: str = '1', direction: str = 'all', ttl: int = CACHE_TTL_SHORT) -> None:
+    key = f"transactions:{user_id}:page={page}:direction={direction}"
     CacheManager.set(key, data, ttl)
 
 
-def get_cached_transactions(user_id: str) -> Optional[list]:
-    key = f"transactions:{user_id}"
+def get_cached_transactions(user_id: str, page: str = '1', direction: str = 'all') -> Optional[list]:
+    key = f"transactions:{user_id}:page={page}:direction={direction}"
     return CacheManager.get(key)
 
 
 def invalidate_transactions(user_id: str) -> None:
-    key = f"transactions:{user_id}"
-    CacheManager.delete(key)
+    CacheManager.delete_pattern(f"transactions:{user_id}:")
 
 
 def cache_service_detail(service_id: str, data: dict, ttl: int = CACHE_TTL_MEDIUM) -> None:
