@@ -5,7 +5,7 @@
  * When VITE_MAPBOX_TOKEN is missing, shows a text fallback and still supports "Use My Location".
  */
 
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
 import Map, { Source, Layer, NavigationControl } from 'react-map-gl/mapbox'
 import type { MapRef, LayerProps } from 'react-map-gl/mapbox'
 import mapboxgl from 'mapbox-gl'
