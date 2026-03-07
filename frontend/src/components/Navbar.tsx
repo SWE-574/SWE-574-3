@@ -179,7 +179,7 @@ const Navbar = () => {
       <Flex maxW="1440px" mx="auto" px={{ base: 4, md: 8 }} h="64px" align="center" justify="space-between" position="relative">
 
         {/* Logo */}
-        <Link to="/browse" style={{ textDecoration: 'none', flexShrink: 0 }}>
+        <Link to="/dashboard" style={{ textDecoration: 'none', flexShrink: 0 }}>
           <Flex align="center" gap={3}>
             <Logo size={32} />
             <Text fontWeight="800" fontSize="17px" color={GRAY900} letterSpacing="-0.3px">
@@ -231,12 +231,21 @@ const Navbar = () => {
 
               {/* Balance — desktop (invisible on dashboard, keeps layout stable) */}
               <Flex
+                as="button"
                 align="center" gap="5px" px="12px" py="5px" borderRadius="10px"
                 display={{ base: 'none', sm: 'flex' }}
+                onClick={() => navigate('/transaction-history')}
                 style={{
                   background: GREEN_LT, border: `1px solid #BBF7D0`,
                   fontSize: '13px', fontWeight: 700, color: GREEN,
                   visibility: isDashboard ? 'hidden' : 'visible',
+                  cursor: isDashboard ? 'default' : 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isDashboard) (e.currentTarget as HTMLDivElement).style.filter = 'brightness(0.98)'
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.filter = 'none'
                 }}
               >
                 <span style={{ fontSize: '12px' }}>⏱</span>
@@ -365,7 +374,8 @@ const Navbar = () => {
               </Text>
             </Box>
             {/* Time bank inline */}
-            <Flex align="center" gap="4px" px="10px" py="5px" borderRadius="9px"
+            <Flex as="button" align="center" gap="4px" px="10px" py="5px" borderRadius="9px"
+              onClick={() => { navigate('/transaction-history'); setMobileOpen(false) }}
               style={{ background: GREEN_LT, border: `1px solid #BBF7D0`, fontSize: '13px', fontWeight: 700, color: GREEN, flexShrink: 0 }}
             >
               <span style={{ fontSize: '11px' }}>⏱</span>

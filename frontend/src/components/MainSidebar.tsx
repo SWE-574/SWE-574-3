@@ -122,8 +122,27 @@ export function MainSidebar({
 
             {/* Time bank widget */}
             <Box
+              as="button"
+              w="full"
+              display="block"
               borderRadius="14px" p="14px" mb={3} position="relative" overflow="hidden"
-              style={{ background: `linear-gradient(135deg, ${GREEN} 0%, #1a3d35 100%)` }}
+              onClick={() => navigate('/transaction-history')}
+              style={{
+                background: `linear-gradient(135deg, ${GREEN} 0%, #1a3d35 100%)`,
+                border: 'none',
+                padding: '14px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                transition: 'transform 0.12s ease, box-shadow 0.12s ease',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 8px 20px rgba(17,24,39,0.18)'
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.transform = 'translateY(0)'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = 'none'
+              }}
             >
               <Box style={{ position: 'absolute', top: '-20px', right: '-20px', width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
               <Flex align="center" gap="5px" mb="5px">
