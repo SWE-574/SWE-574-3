@@ -22,6 +22,7 @@ from decimal import Decimal
 from datetime import timedelta
 import logging
 import bleach
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -1554,6 +1555,95 @@ class ServiceViewSet(viewsets.ModelViewSet):
     def get_serializer_context(self):
         return {'request': self.request}
 
+    def _changed_service_fields(self, service: Service, serializer) -> List[str]:
+        """Compute user-facing fields that changed in this update request."""
+        tracked_fields = [
+            'title',
+            'description',
+            'duration',
+            'location_type',
+            'location_area',
+            'max_participants',
+            'schedule_type',
+            'schedule_details',
+            'scheduled_time',
+            'status',
+        ]
+        changed_fields: List[str] = []
+        for field_name in tracked_fields:
+            if field_name not in serializer.validated_data:
+                continue
+            old_value = getattr(service, field_name, None)
+            new_value = serializer.validated_data.get(field_name)
+            if old_value != new_value:
+                changed_fields.append(field_name)
+
+        # Tags are handled specially: only mark them as changed if the resulting
+        # tag set actually differs from the persisted service.tags.
+        tag_keys = ('tag_ids', 'tag_names', 'tags')
+        if any(k in serializer.validated_data for k in tag_keys):
+            try:
+                service_tags = getattr(service, 'tags')
+            except AttributeError:
+                # If the service has no tags relation, preserve prior behavior and
+                # treat any tag payload as a change.
+                changed_fields.append('tags')
+            else:
+                # Compute the current tag identifiers/names.
+                if 'tag_ids' in serializer.validated_data:
+                    old_tag_ids = set(service_tags.values_list('id', flat=True))
+                    new_tag_ids = set(serializer.validated_data.get('tag_ids') or [])
+                    if old_tag_ids != new_tag_ids:
+                        changed_fields.append('tags')
+                elif 'tag_names' in serializer.validated_data:
+                    old_tag_names = set(service_tags.values_list('name', flat=True))
+                    new_tag_names = set(serializer.validated_data.get('tag_names') or [])
+                    if old_tag_names != new_tag_names:
+                        changed_fields.append('tags')
+                elif 'tags' in serializer.validated_data:
+                    # Normalize possible tag representations (objects or IDs).
+                    old_tag_ids = set(service_tags.values_list('id', flat=True))
+                    raw_new_tags = serializer.validated_data.get('tags') or []
+                    new_tag_ids = {
+                        getattr(tag, 'id', tag) for tag in raw_new_tags
+                    }
+                    if old_tag_ids != new_tag_ids:
+                        changed_fields.append('tags')
+
+        # Stable order, no duplicates.
+        return list(dict.fromkeys(changed_fields))
+
+    def _notify_service_edit_subscribers(self, service: Service, changed_fields: List[str]) -> None:
+        """Notify affected applicants/participants when a service update is applied."""
+        if service.type == 'Event':
+            recipient_statuses = ['accepted', 'checked_in']
+        else:
+            recipient_statuses = ['pending', 'accepted']
+
+        recipient_ids = (
+            service.handshakes
+            .filter(status__in=recipient_statuses)
+            .exclude(requester_id=service.user_id)
+            .values_list('requester_id', flat=True)
+            .distinct()
+        )
+        recipients = User.objects.filter(id__in=recipient_ids)
+        summary = ', '.join(changed_fields) if changed_fields else 'service details'
+        title = 'Event updated' if service.type == 'Event' else 'Service updated'
+        message = (
+            f"{service.user.first_name} updated '{service.title}'. "
+            f"Changed fields: {summary}."
+        )
+
+        for recipient in recipients:
+            create_notification(
+                user=recipient,
+                notification_type='service_updated',
+                title=title,
+                message=message,
+                service=service,
+            )
+
     def retrieve(self, request, *args, **kwargs):
         """Return a single service regardless of status so owners and participants
         can view Agreed/Completed/Cancelled services from their history."""
@@ -1648,16 +1738,32 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if service.user != self.request.user and getattr(self.request.user, 'role', None) != 'admin':
             raise PermissionDenied('Attempting to modify another user\'s service')
 
+        is_admin = getattr(self.request.user, 'role', None) == 'admin'
+
         # Block edits to Event details once inside the 24-hour lockdown window.
         # Non-Event services are completely unaffected by this guard.
         # Admins are exempt so they can still toggle visibility or moderate.
-        is_admin = getattr(self.request.user, 'role', None) == 'admin'
         if service.type == 'Event' and service.is_in_lockdown_window and not is_admin:
             raise PermissionDenied(
                 'Cannot edit event details within 24 hours of the scheduled start time.'
             )
 
+        # Lock one-time Offer/Need listings while an approved session is still active.
+        # Recurrent listings stay editable for future cycles.
+        if (
+            service.type in ('Offer', 'Need')
+            and not is_admin
+            and service.schedule_type != 'Recurrent'
+            and service.handshakes.filter(status__in=['accepted', 'reported', 'paused']).exists()
+        ):
+            raise PermissionDenied(
+                'Cannot edit this service while an approved session is still active.'
+            )
+
+        changed_fields = self._changed_service_fields(service, serializer)
         super().perform_update(serializer)
+        if changed_fields:
+            self._notify_service_edit_subscribers(service, changed_fields)
         invalidate_service_lists()
         invalidate_user_services(str(service.user.id))
 
