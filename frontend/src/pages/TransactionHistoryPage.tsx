@@ -87,7 +87,6 @@ function handshakeCounterpartName(handshake: Handshake, currentUserName?: string
   if (fullName && fullName !== currentUserName) return fullName
   if (counterpart?.email) return counterpart.email
   if (handshake.provider_name && handshake.provider_name !== currentUserName) return handshake.provider_name
-  if (handshake.receiver_name && handshake.receiver_name !== currentUserName) return handshake.receiver_name
   if (handshake.requester_name && handshake.requester_name !== currentUserName) return handshake.requester_name
   return 'Unknown user'
 }
@@ -259,6 +258,10 @@ const TransactionHistoryPage = () => {
   const exportDisabled = isLoading || isExporting || transactions.length === 0
   const previousDisabled = page === 1
   const nextDisabled = page >= totalPages
+  const currentUserName = useMemo(
+    () => `${user?.first_name ?? ''} ${user?.last_name ?? ''}`.trim(),
+    [user?.first_name, user?.last_name],
+  )
   const expectedBalance = useMemo(
     () => summary.current_balance + activeAgreements.reduce((sum, item) => sum + item.expected_delta, 0),
     [summary.current_balance, activeAgreements],
@@ -288,8 +291,9 @@ const TransactionHistoryPage = () => {
       if (isAbort || requestId !== requestIdRef.current) return
       setError('Could not load your transaction history. Please try again.')
     } finally {
-      if (requestId !== requestIdRef.current) return
-      setIsLoading(false)
+      if (requestId === requestIdRef.current) {
+        setIsLoading(false)
+      }
     }
   }, [direction, page])
 
@@ -302,10 +306,7 @@ const TransactionHistoryPage = () => {
 
       const nextAgreements = handshakes
         .filter((handshake) => ACTIVE_HANDSHAKE_STATUSES.has(handshake.status))
-        .map((handshake) => toExpectedAgreement(
-          handshake,
-          `${user?.first_name ?? ''} ${user?.last_name ?? ''}`.trim(),
-        ))
+        .map((handshake) => toExpectedAgreement(handshake, currentUserName))
         .filter((item): item is ExpectedAgreement => item !== null)
 
       setActiveAgreements(nextAgreements)
@@ -322,7 +323,7 @@ const TransactionHistoryPage = () => {
       if (isAbort || requestId !== agreementRequestIdRef.current) return
       setActiveAgreements([])
     }
-  }, [user?.id])
+  }, [currentUserName])
 
   useEffect(() => {
     const controller = new AbortController()
