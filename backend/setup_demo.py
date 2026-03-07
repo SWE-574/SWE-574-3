@@ -203,9 +203,8 @@ elif_manti = Service.objects.create(
     location_area='Beşiktaş',
     location_lat=Decimal('41.0422'),
     location_lng=Decimal('29.0089'),
-    max_participants=2,
-    schedule_type='Recurrent',
-    schedule_details='Every Tuesday at 19:00',
+    max_participants=3,
+    schedule_type='One-Time',
     status='Active',
     created_at=timezone.now() - timedelta(days=20),
 )
@@ -611,6 +610,15 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
 completed_handshakes = []
 accepted_handshakes = []
 pending_handshakes = []
+
+# Create Zeynep's accepted handshake for Manti BEFORE completing Cem's,
+# otherwise the service transitions to 'Completed' and blocks new handshakes.
+handshake15, completed = simulate_handshake_workflow(
+    elif_manti, zeynep, provider_initiated_days_ago=1
+)
+if handshake15 and not completed:
+    accepted_handshakes.append(handshake15)
+    print(f"  Accepted (pending completion): {elif_manti.title} (Elif -> Zeynep)")
 
 handshake1, completed = simulate_handshake_workflow(
     elif_manti, cem, provider_initiated_days_ago=15, completed_days_ago=10

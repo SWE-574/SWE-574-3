@@ -26,7 +26,7 @@ test.describe('Authentication', () => {
 
     await page.locator('#email').fill(USERS.cem.email)
     await page.locator('#password').fill('wrong-password-xyz')
-    await page.getByRole('button', { name: 'Log In' }).click()
+    await page.getByRole('button', { name: 'Sign in' }).click()
 
     // Still on login page
     await expect(page).toHaveURL(/\/login/)
@@ -51,7 +51,7 @@ test.describe('Authentication', () => {
     await page.goto('/login')
 
     await page.locator('#password').fill('demo123')
-    await page.getByRole('button', { name: 'Log In' }).click()
+    await page.getByRole('button', { name: 'Sign in' }).click()
 
     // Should remain on login page
     await expect(page).toHaveURL(/\/login/)
@@ -61,19 +61,18 @@ test.describe('Authentication', () => {
     await loginAs(page, USERS.elif)
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
 
-    // Find and click the logout button / menu item
-    // The Navbar typically exposes an avatar / menu → Log Out
-    // Try clicking the user avatar / profile menu first
-    const navLogout = page.getByRole('button', { name: /log out|logout|sign out/i })
-    const userMenu  = page.getByRole('button', { name: /profile|avatar|user menu/i })
-
-    if (await navLogout.isVisible().catch(() => false)) {
-      await navLogout.click()
+    // The avatar dropdown is a custom component (not ARIA menus).
+    // Click the avatar area to open the dropdown, then click "Log Out".
+    const avatar = page.locator('img[alt="avatar"]')
+    if (await avatar.isVisible().catch(() => false)) {
+      await avatar.click()
     } else {
-      // Open user menu then click Log Out
-      await userMenu.first().click()
-      await page.getByRole('menuitem', { name: /log out|logout|sign out/i }).click()
+      // Fallback: initials-based avatar — click the chevron area next to it
+      await page.locator('nav').getByText(USERS.elif.name.split(' ').map(n => n[0]).join('')).click()
     }
+
+    // Click the "Log Out" item in the dropdown
+    await page.getByText('Log Out').click()
 
     // After logout the user should be redirected away from protected areas
     await expect(page).not.toHaveURL(/\/dashboard/, { timeout: 10_000 })

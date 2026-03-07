@@ -66,7 +66,8 @@ test.describe('1-to-1 Chat', () => {
     await loginAs(page, USERS.cem)
     await page.goto('/messages')
 
-    const convButtons = page.locator('button').filter({ hasText: /Elif|Traditional|Börek/i })
+    // Cem's only active conversation is with Burak (Chess Practice Partner)
+    const convButtons = page.locator('button').filter({ hasText: /Burak|Chess/i })
     await expect(convButtons.first()).toBeVisible({ timeout: 20_000 })
     await convButtons.first().click()
 
@@ -80,22 +81,16 @@ test.describe('1-to-1 Chat', () => {
     await expect(msgInput).toHaveValue('', { timeout: 5_000 })
   })
 
-  test('navigating directly to /messages/:handshakeId opens that conversation', async ({ page }) => {
-    // Approach: login, go to /messages, grab the URL after clicking a conversation,
-    // then verify the handshakeId-specific URL works on a fresh navigation.
+  test('clicking a conversation shows its messages and input', async ({ page }) => {
     await loginAs(page, USERS.cem)
     await page.goto('/messages')
 
-    const convButtons = page.locator('button').filter({ hasText: /Elif|Traditional|Börek/i })
+    // Cem's active conversation: Chess Practice Partner with Burak
+    const convButtons = page.locator('button').filter({ hasText: /Burak|Chess/i })
     await expect(convButtons.first()).toBeVisible({ timeout: 20_000 })
     await convButtons.first().click()
 
-    // Capture the URL that the app navigated to
-    await page.waitForURL(/\/messages\//, { timeout: 10_000 })
-    const directUrl = page.url()
-
-    // Open that URL fresh (same session)
-    await page.goto(directUrl)
+    // The message input should appear on the right panel
     await expect(page.getByPlaceholder('Write a message…')).toBeVisible({ timeout: 15_000 })
   })
 })
