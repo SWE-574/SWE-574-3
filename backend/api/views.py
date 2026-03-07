@@ -78,7 +78,7 @@ from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -4705,26 +4705,65 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     def list(self, request, *args, **kwargs):
         from .cache_utils import get_cached_transactions, cache_transactions
         user = request.user
-        
-        cached_result = get_cached_transactions(str(user.id))
+
+        direction = self._get_direction_filter()
+        page = request.query_params.get('page', '1')
+        cached_result = get_cached_transactions(str(user.id), page=page, direction=direction)
         if cached_result is not None:
             return Response(cached_result)
-        
+
+        summary = self._build_summary(user)
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
-            cache_transactions(str(user.id), response.data, ttl=CACHE_TTL_SHORT)
+            response.data['summary'] = summary
+            cache_transactions(str(user.id), response.data, page=request.query_params.get('page', '1'), direction=direction, ttl=CACHE_TTL_SHORT)
             return response
-        
+
         serializer = self.get_serializer(queryset, many=True)
-        response_data = serializer.data
-        cache_transactions(str(user.id), response_data, ttl=CACHE_TTL_SHORT)
+        response_data = {
+            'count': len(serializer.data),
+            'next': None,
+            'previous': None,
+            'results': serializer.data,
+            'summary': summary,
+        }
+        cache_transactions(str(user.id), response_data, page=request.query_params.get('page', '1'), direction=direction, ttl=CACHE_TTL_SHORT)
         return Response(response_data)
 
     def get_queryset(self):
-        return TransactionHistory.objects.filter(user=self.request.user).order_by('-created_at')
+        queryset = TransactionHistory.objects.filter(user=self.request.user).select_related(
+            'handshake__service__user',
+            'handshake__requester',
+        )
+
+        direction = self._get_direction_filter()
+        if direction == 'credit':
+            queryset = queryset.filter(amount__gt=0)
+        elif direction == 'debit':
+            queryset = queryset.filter(amount__lt=0)
+
+        return queryset.order_by('-created_at')
+
+    def _get_direction_filter(self):
+        direction = self.request.query_params.get('direction', 'all').strip().lower()
+        if direction not in {'all', 'credit', 'debit'}:
+            return 'all'
+        return direction
+
+    def _build_summary(self, user):
+        aggregates = TransactionHistory.objects.filter(user=user).aggregate(
+            total_earned=Sum('amount', filter=Q(amount__gt=0)),
+            total_spent=Sum('amount', filter=Q(amount__lt=0)),
+        )
+
+        return {
+            'current_balance': float(user.timebank_balance),
+            'total_earned': float(aggregates['total_earned'] or Decimal('0')),
+            'total_spent': abs(float(aggregates['total_spent'] or Decimal('0'))),
+        }
 
 
 class WikidataSearchView(APIView):
