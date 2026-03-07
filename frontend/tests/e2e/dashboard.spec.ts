@@ -34,11 +34,9 @@ test.describe('Dashboard', () => {
       page.getByText(/Manti|Börek|Chess|Gardening|Genealogy/i).first(),
     ).toBeVisible({ timeout: 20_000 })
 
-    // Check that card images use loading="lazy"
-    const images = page.locator('img[loading="lazy"]')
-    const count = await images.count()
-    // There should be at least one lazy-loaded image (avatar or card thumbnail)
-    expect(count).toBeGreaterThanOrEqual(0) // 0 is OK if no thumbnails are uploaded in demo
+    // All rendered images should use loading="lazy" (passes even with zero images)
+    const nonLazyImages = page.locator('img:not([loading="lazy"])')
+    await expect(nonLazyImages).toHaveCount(0)
   })
 
   test('search bar is present and filters services', async ({ page }) => {

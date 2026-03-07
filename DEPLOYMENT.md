@@ -2,7 +2,7 @@
 
 Three ways to run The Hive — all powered by **Docker Compose v2** (`docker compose`).
 
-Every option uses a **single `.env` file** at the project root. Run `make env` to generate it interactively, or copy `.env.example` and edit manually.
+Backend and infrastructure share a **single `.env` file** at the project root. The frontend (Vite) also reads this root `.env` via `envDir` in `vite.config.ts`, so `VITE_*` variables work from the same file. Run `make env` to generate it interactively, or copy `.env.example` and edit manually.
 
 ---
 
@@ -186,8 +186,7 @@ Without a key, email features are silently disabled — the app still works.
 ## Make Targets
 
 ```
-make env              # interactive .env generator
-make env-force        # regenerate .env (overwrites existing)
+make env              # interactive .env generator (re-run to overwrite)
 
 make setup            # local: venv + deps + infra + migrate
 make setup-demo       # local: setup + demo data
