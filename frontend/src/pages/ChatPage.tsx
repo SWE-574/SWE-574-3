@@ -1884,6 +1884,9 @@ export default function ChatPage() {
         isOpen={showInitiateModal}
         onClose={() => setShowInitiateModal(false)}
         onSubmit={handleInitiate}
+        serviceType={selectedConv?.service_type}
+        scheduledTime={selectedConv?.scheduled_time}
+        serviceDuration={selectedConv?.provisioned_hours ?? null}
         presetDetails={selectedConv && isFixedGroupOffer(selectedConv) && selectedConv.service_scheduled_time && selectedConv.service_location_area
           ? {
               exactLocation: selectedConv.service_location_area,

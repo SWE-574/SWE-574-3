@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Box,
   Text,
@@ -21,15 +21,35 @@ interface Props {
     exactDuration: number
     scheduledTime: string
   } | null
+  /** Original post duration (hours). Used for Offer/Need to guide/validate agreed duration. */
+  serviceDuration?: number | null
 }
 
-export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, scheduledTime, presetDetails }: Props) {
+const isOfferOrNeed = (t?: string) => t === 'Offer' || t === 'Need'
+
+export function HandshakeDetailsModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  serviceType,
+  scheduledTime,
+  presetDetails,
+  serviceDuration,
+}: Props) {
   const [location, setLocation] = useState('')
   const [duration, setDuration] = useState<number>(1)
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const useStrictDuration = isOfferOrNeed(serviceType) && serviceDuration != null
+
+  useEffect(() => {
+    if (!isOpen || presetDetails) return
+    if (useStrictDuration && serviceDuration != null) {
+      setDuration(serviceDuration)
+    }
+  }, [isOpen, presetDetails, serviceDuration, useStrictDuration])
 
   if (!isOpen) return null
 
@@ -91,6 +111,10 @@ export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, 
     if (!location.trim()) { setError('Location is required.'); return }
     if (!date || !time) { setError('Scheduled date and time are required.'); return }
     if (duration <= 0) { setError('Duration must be greater than 0.'); return }
+    if (useStrictDuration && serviceDuration != null && duration !== serviceDuration) {
+      setError(`Duration must match the original post duration of ${serviceDuration}h.`)
+      return
+    }
 
     const scheduled_time = `${date}T${time}:00`
     const now = new Date()
@@ -179,6 +203,11 @@ export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, 
               <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
                 Duration (hours)
               </Text>
+              {useStrictDuration && serviceDuration != null && (
+                <Text fontSize="11px" color="gray.500" mb={2}>
+                  Original post: {serviceDuration}h
+                </Text>
+              )}
               <Input
                 type="number"
                 min={0.5}
@@ -188,6 +217,7 @@ export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, 
                 size="sm"
                 borderRadius="8px"
                 w="120px"
+                disabled={useStrictDuration}
               />
             </Box>
 
