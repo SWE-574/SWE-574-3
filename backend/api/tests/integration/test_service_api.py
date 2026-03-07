@@ -68,6 +68,7 @@ class TestServiceViewSet:
             'location_lng': 29.0089,
             'max_participants': 2,
             'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
             'status': 'Active',
             'tag_ids': [tag.id]
         })
@@ -531,6 +532,29 @@ class TestServiceRetrieveStatusVisibility:
         assert response.status_code == status.HTTP_200_OK
         assert all(s['status'] == 'Active' for s in response.data['results'])
 
+    def test_list_excludes_expired_group_offers_from_feed(self):
+        """Past one-time group offers should disappear from the public feed."""
+        expired = ServiceFactory(
+            type='Offer',
+            status='Active',
+            schedule_type='One-Time',
+            max_participants=3,
+            scheduled_time=timezone.now() - timedelta(hours=1),
+        )
+        future = ServiceFactory(
+            type='Offer',
+            status='Active',
+            schedule_type='One-Time',
+            max_participants=3,
+            scheduled_time=timezone.now() + timedelta(days=1),
+        )
+
+        response = APIClient().get('/api/services/')
+        assert response.status_code == status.HTTP_200_OK
+        ids = {item['id'] for item in response.data['results']}
+        assert str(expired.id) not in ids
+        assert str(future.id) in ids
+
     def test_need_service_max_participants_forced_to_one(self):
         """Creating a Need service must force max_participants to 1."""
         user = UserFactory()
@@ -562,11 +586,32 @@ class TestServiceRetrieveStatusVisibility:
             'description': 'Group session with multiple participants',
             'type': 'Offer',
             'duration': 2.0,
-            'location_type': 'Online',
+            'location_type': 'In-Person',
+            'location_area': 'Beşiktaş Culture Center',
             'max_participants': 5,
             'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
         })
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data['max_participants'] == 5
         service = Service.objects.get(id=response.data['id'])
         assert service.max_participants == 5
+
+    def test_group_offer_requires_future_schedule_and_exact_location(self):
+        """One-time group offers must include fixed meeting details."""
+        user = UserFactory()
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', {
+            'title': 'Incomplete Group Offer',
+            'description': 'Missing fixed meeting details',
+            'type': 'Offer',
+            'duration': 2.0,
+            'location_type': 'In-Person',
+            'max_participants': 3,
+            'schedule_type': 'One-Time',
+        })
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        field_errors = response.data.get('field_errors', {})
+        assert 'location_area' in field_errors or 'scheduled_time' in field_errors

@@ -151,6 +151,37 @@ class TestHandshakeViewSet:
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
         assert handshake.exact_location == 'Test Location'
+
+    def test_group_offer_initiate_uses_service_details(self):
+        """One-time group offers must reuse service-level date/location details."""
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            schedule_type='One-Time',
+            max_participants=3,
+            duration=Decimal('2.00'),
+            location_area='Kadıköy Youth Center',
+            scheduled_time=timezone.now() + timedelta(days=4),
+        )
+        handshake = HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+
+        response = client.post(f'/api/handshakes/{handshake.id}/initiate/', {
+            'exact_location': 'Tamper attempt',
+            'exact_duration': 9,
+            'scheduled_time': '2099-01-01T10:00:00Z',
+        })
+        assert response.status_code == status.HTTP_200_OK
+
+        handshake.refresh_from_db()
+        assert handshake.provider_initiated is True
+        assert handshake.exact_location == service.location_area
+        assert handshake.exact_duration == service.duration
+        assert handshake.scheduled_time == service.scheduled_time
     
     def test_approve_handshake(self):
         """Test receiver approving handshake"""

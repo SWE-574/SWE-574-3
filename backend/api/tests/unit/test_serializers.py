@@ -2,9 +2,11 @@
 Unit tests for serializers
 """
 import pytest
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.exceptions import ValidationError
@@ -113,6 +115,7 @@ class TestServiceSerializer:
             'location_lng': 29.0089,
             'max_participants': 2,
             'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
             'status': 'Active',
             'tag_ids': [tag.id]
         })

@@ -163,8 +163,8 @@ class TestGroupChatViewSetAccessControl:
         result = vs._get_service_or_403(vs.request, str(service.id))
         assert result == service
 
-    def test_pending_requester_is_denied(self):
-        """User with only a pending handshake is denied."""
+    def test_pending_requester_is_denied_for_group_offer(self):
+        """Pending group-offer requester must wait for acceptance."""
         from rest_framework.exceptions import PermissionDenied
         service = ServiceFactory(schedule_type='One-Time', max_participants=3)
         requester = UserFactory()
@@ -216,12 +216,12 @@ class TestGroupChatViewSetAccessControl:
             vs._get_service_or_403(vs.request, str(uuid.uuid4()))
 
     def test_denied_handshake_status_variations(self):
-        """Statuses other than 'accepted' do not grant access."""
+        """Terminal or rejected statuses do not grant access."""
         from rest_framework.exceptions import PermissionDenied
         service = ServiceFactory(schedule_type='One-Time', max_participants=3)
         requester = UserFactory()
 
-        for hs_status in ('pending', 'denied', 'cancelled', 'completed'):
+        for hs_status in ('denied', 'cancelled'):
             HandshakeFactory(service=service, requester=requester, status=hs_status)
             vs = self._viewset_with_user(requester)
             with pytest.raises(PermissionDenied, match=''):
