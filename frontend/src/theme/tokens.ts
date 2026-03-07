@@ -8,6 +8,7 @@
 export const GREEN    = '#2D5C4E'
 export const GREEN_LT = '#F0FDF4'   // emerald-50
 export const GREEN_MD = '#D1FAE5'   // emerald-100
+export const GREEN_DARK = '#1A3A30'
 export const YELLOW   = '#F8C84A'   // brand yellow
 
 // ─── Accent ───────────────────────────────────────────────────────────────────
@@ -16,6 +17,9 @@ export const AMBER_LT = '#FFFBEB'   // amber-50
 
 export const BLUE     = '#1D4ED8'   // blue-700
 export const BLUE_LT  = '#EFF6FF'   // blue-50
+
+export const TEAL     = '#0D9488'   // teal-600
+export const ORANGE   = '#EA580C'   // orange-600
 
 export const PURPLE   = '#7C3AED'   // violet-600
 export const PURPLE_LT = '#F3E8FF'  // violet-50

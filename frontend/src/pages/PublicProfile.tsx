@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Box, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
 import {
-  FiArrowLeft, FiMessageSquare, FiClock, FiMapPin, FiCalendar,
+  FiArrowLeft, FiClock, FiMapPin, FiCalendar,
   FiStar, FiCheckCircle, FiThumbsUp, FiUser, FiAlertCircle,
   FiZap, FiLayers, FiRepeat, FiAward,
 } from 'react-icons/fi'
@@ -13,17 +13,18 @@ import type { User, Service, BadgeProgress, ProfileReview } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
 import { groupHistoryItems, isOwnHistoryItem, type GroupedHistoryEntry } from '@/utils/historyGrouping'
 import {
-  GREEN, GREEN_LT,
+  GREEN, GREEN_LT, GREEN_DARK,
   AMBER, AMBER_LT,
-  BLUE, BLUE_LT,
+  BLUE, BLUE_LT, TEAL, ORANGE,
   PURPLE, PURPLE_LT,
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 
-const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
+const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, TEAL, ORANGE]
 const avatarBg    = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
+const AVATAR_IMAGE_BG = `linear-gradient(180deg, ${WHITE} 0%, ${GRAY100} 100%)`
 const getInitials = (f: string, l: string, e: string) =>
   f && l ? `${f[0]}${l[0]}`.toUpperCase() : (f || l || e || 'U')[0].toUpperCase()
 const joinedYear  = (d?: string) => d ? new Date(d).getFullYear() : null
@@ -45,7 +46,14 @@ function ProfileReviewRow({ review }: { review: ProfileReview }) {
   return (
     <Flex gap={3} py="10px" borderBottom={`1px solid ${GRAY100}`}>
       {review.user_avatar_url ? (
-        <Box w="32px" h="32px" borderRadius="full" flexShrink={0} style={{ backgroundImage: `url(${review.user_avatar_url})`, backgroundSize: 'cover' }} />
+        <Box w="32px" h="32px" borderRadius="full" flexShrink={0} overflow="hidden"
+          style={{ background: AVATAR_IMAGE_BG }}>
+          <img
+            src={review.user_avatar_url}
+            alt={review.user_name}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        </Box>
       ) : (
         <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center" style={{ background: col, color: WHITE, fontSize: '11px', fontWeight: 700 }}>{ini}</Flex>
       )}
@@ -146,7 +154,16 @@ function HistoryRow({
       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '' }}
       onClick={canClick ? handleClick : undefined}>
       {item.partnerAvatarUrl
-        ? <Box w="32px" h="32px" borderRadius="full" flexShrink={0} style={{ backgroundImage: `url(${item.partnerAvatarUrl})`, backgroundSize: 'cover' }} />
+        ? (
+          <Box w="32px" h="32px" borderRadius="full" flexShrink={0} overflow="hidden"
+            style={{ background: AVATAR_IMAGE_BG }}>
+            <img
+              src={item.partnerAvatarUrl}
+              alt={displayPartner}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          </Box>
+        )
         : <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center" style={{ background: col, color: WHITE, fontSize: '11px', fontWeight: 700 }}>{ini}</Flex>
       }
       <Box flex={1} minW={0}>
@@ -274,7 +291,7 @@ const PublicProfile = () => {
   const bgColor     = avatarBg(displayName)
   const bannerBg = profileUser.banner_url
     ? { backgroundImage: `url(${profileUser.banner_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : { background: `linear-gradient(135deg, ${GREEN} 0%, #1a3a30 60%, ${AMBER}60 100%)` }
+    : { background: `linear-gradient(135deg, ${GREEN} 0%, ${GREEN_DARK} 60%, ${AMBER}60 100%)` }
 
   const offersCount = services.filter(s => s.type === 'Offer').length
   const needsCount  = services.filter(s => s.type === 'Need').length
@@ -323,18 +340,18 @@ const PublicProfile = () => {
               style={{
                 border: `3px solid ${WHITE}`,
                 overflow: 'hidden',
-                background: profileUser.avatar_url ? undefined : bgColor,
+                background: profileUser.avatar_url ? AVATAR_IMAGE_BG : bgColor,
                 alignItems: 'center', justifyContent: 'center',
                 color: WHITE, fontSize: '28px', fontWeight: 700,
                 boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
               }}>
               {profileUser.avatar_url
-                ? <img src={profileUser.avatar_url} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ? <img src={profileUser.avatar_url} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                 : ini}
             </Box>
           </Box>
 
-          {/* ── Name + meta + buttons — fully below banner ──────────────────── */}
+          {/* ── Name + meta — fully below banner ────────────────────────────── */}
           <Flex align="center" justify="space-between" gap={4} mb={5} wrap="wrap">
             <Box minW={0}>
               <Text fontSize="22px" fontWeight={800} color={GRAY800} lineHeight={1.25}
@@ -351,15 +368,6 @@ const PublicProfile = () => {
                 <Flex align="center" gap="4px" fontSize="12px" color={GREEN} fontWeight={600}><FiStar size={11} />{profileUser.karma_score ?? 0} karma</Flex>
               </Flex>
             </Box>
-            {currentUser && (
-              <Box as="button" px="16px" py="8px" borderRadius="8px" fontSize="13px" fontWeight={600} flexShrink={0}
-                style={{ background: GREEN, color: WHITE, border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '7px' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.filter = 'brightness(0.9)' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = 'none' }}
-                onClick={() => navigate('/messages')}>
-                <FiMessageSquare size={13} />Message
-              </Box>
-            )}
           </Flex>
 
           {/* ── Stats strip ──────────────────────────────────────────────────── */}

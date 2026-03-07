@@ -82,6 +82,7 @@ import { GREEN, GRAY200, WHITE } from '@/theme/tokens'
 | `GREEN`     | `#2D5C4E` | Primary brand colour — buttons, links, active states |
 | `GREEN_LT`  | `#F0FDF4` | Light tint for green backgrounds, hover fills |
 | `GREEN_MD`  | `#D1FAE5` | Mid tint — badges, pills on green accent areas |
+| `GREEN_DARK`| `#1A3A30` | Dark green shade for restrained brand gradients |
 | `YELLOW`    | `#F8C84A` | Navbar logo accent, star ratings, highlights |
 
 ### Accent — Offer (warm)
@@ -102,6 +103,8 @@ import { GREEN, GRAY200, WHITE } from '@/theme/tokens'
 
 | Token        | Value     | Usage                          |
 |--------------|-----------|--------------------------------|
+| `TEAL`       | `#0D9488` | Secondary avatar/accent colour |
+| `ORANGE`     | `#EA580C` | Warm secondary accent colour   |
 | `PURPLE`     | `#7C3AED` | Tag pills, secondary actions   |
 | `PURPLE_LT`  | `#F3E8FF` | Tag pill background tint       |
 

@@ -64,7 +64,7 @@ class HandshakeServiceTestCase(TestCase):
             title='Test Need Service',
             description='A test need service',
             type='Need',
-            duration=Decimal('1.50'),
+            duration=Decimal('2.00'),
             location_type='Online',
             max_participants=1,
             schedule_type='One-Time'
@@ -135,7 +135,7 @@ class HandshakeServiceTestCase(TestCase):
         Handshake.objects.create(
             service=self.service_need,   # max_participants=1
             requester=self.user2,
-            provisioned_hours=Decimal('1.50'),
+            provisioned_hours=Decimal('2.00'),
             status='pending'
         )
 
@@ -207,7 +207,7 @@ class HandshakeServiceTestCase(TestCase):
         self.assertEqual(handshake.service, self.service_need)
         self.assertEqual(handshake.requester, self.user2)
         self.assertEqual(handshake.status, 'pending')
-        self.assertEqual(handshake.provisioned_hours, Decimal('1.50'))
+        self.assertEqual(handshake.provisioned_hours, Decimal('2.00'))
     
     def test_express_interest_duplicate(self):
         """Test cannot express interest twice."""
@@ -224,7 +224,7 @@ class HandshakeServiceTestCase(TestCase):
         Handshake.objects.create(
             service=self.service_need,
             requester=self.user2,
-            provisioned_hours=Decimal('1.50'),
+            provisioned_hours=Decimal('2.00'),
             status='accepted'
         )
 
