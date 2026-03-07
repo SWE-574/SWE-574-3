@@ -24,7 +24,6 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from datetime import timedelta
-from urllib.parse import quote_plus
 import random
 
 print("=" * 60)
@@ -96,63 +95,37 @@ print(f"  Processed {len(tags_data)} tags ({created_count} created)")
 
 print("\n[3/8] Creating demo users with Turkish names...")
 
-def png_placeholder(label, width, height, bg='2D5C4E', fg='F9FAFB'):
-    text = quote_plus(label)
-    return f"https://placehold.co/{width}x{height}/{bg}/{fg}.png?text={text}"
-
-
 def dicebear_avatar(seed):
-    avatar_palette = [
-        ('2D5C4E', 'F9FAFB'),
-        ('1D4ED8', 'EFF6FF'),
-        ('7C3AED', 'F3E8FF'),
-        ('D97706', 'FFFBEB'),
-        ('0D9488', 'F0FDFA'),
-        ('EA580C', 'FFF7ED'),
-    ]
-    bg, fg = avatar_palette[sum(ord(char) for char in seed) % len(avatar_palette)]
-    initials = ''.join(part[0] for part in seed.replace('-', ' ').split()[:2]).upper() or 'H'
-    return png_placeholder(initials, 256, 256, bg=bg, fg=fg)
+    return f"https://api.dicebear.com/9.x/avataaars/png?seed={seed}"
 
 
 def picsum_image(seed, width, height):
-    banner_palette = [
-        ('2D5C4E', 'F9FAFB'),
-        ('1A3A30', 'F0FDF4'),
-        ('1D4ED8', 'EFF6FF'),
-        ('7C3AED', 'F3E8FF'),
-        ('D97706', 'FFFBEB'),
-        ('0D9488', 'F0FDFA'),
-    ]
-    bg, fg = banner_palette[sum(ord(char) for char in seed) % len(banner_palette)]
-    label = seed.replace('-', ' ').title()
-    return png_placeholder(label, width, height, bg=bg, fg=fg)
+    return f"https://picsum.photos/seed/{seed}/{width}/{height}"
 
 
 def semantic_service_image(service, width=800, height=600):
     title = service.title.lower()
     semantic_presets = [
-        (('manti', 'börek', 'coffee', 'cooking', 'meal'), ('Shared Meals', 'D97706', 'FFFBEB')),
-        (('guitar', 'music'), ('Music Circle', '7C3AED', 'F3E8FF')),
-        (('jogging', 'running', 'sports'), ('Walking And Running', '1D4ED8', 'EFF6FF')),
-        (('watercolor', 'painting', 'art'), ('Creative Workshop', '7C3AED', 'F3E8FF')),
-        (('gardening', 'plant', 'balcony', 'garden'), ('Garden Workday', '0D9488', 'F0FDFA')),
-        (('photography', 'camera', 'photo'), ('Photo Walk', '1D4ED8', 'EFF6FF')),
-        (('chess',), ('Chess Meetup', '2D5C4E', 'F9FAFB')),
-        (('language', 'english', 'turkish', 'french', 'conversation'), ('Language Exchange', 'EA580C', 'FFF7ED')),
-        (('genealogy', 'history', 'archive'), ('Family Archive Help', '2D5C4E', 'F9FAFB')),
-        (('smartphone', 'tech', 'app', 'printer', 'phone'), ('Tech Support', '0D9488', 'F0FDFA')),
+        (('manti', 'börek', 'coffee', 'cooking'), ('turkish-food,cooking', 101)),
+        (('guitar', 'music'), ('guitar,music', 102)),
+        (('jogging', 'running', 'sports'), ('running,fitness', 103)),
+        (('watercolor', 'painting', 'art'), ('painting,art', 104)),
+        (('gardening', 'plant', 'balcony'), ('gardening,plants', 105)),
+        (('photography', 'camera', 'photo'), ('photography,camera', 106)),
+        (('chess',), ('chess,board-game', 107)),
+        (('language', 'english', 'turkish', 'french'), ('language,conversation', 108)),
+        (('genealogy', 'history', 'archive'), ('books,history', 109)),
+        (('smartphone', 'tech', 'app', 'printer'), ('technology,devices', 110)),
     ]
 
-    label = 'Hive Community'
-    bg = '2D5C4E'
-    fg = 'F9FAFB'
+    category = 'community,workshop'
+    lock = 199
     for keywords, preset in semantic_presets:
         if any(keyword in title for keyword in keywords):
-            label, bg, fg = preset
+            category, lock = preset
             break
 
-    return png_placeholder(label, width, height, bg=bg, fg=fg)
+    return f"https://loremflickr.com/{width}/{height}/{category}?lock={lock}"
 
 
 def is_fixed_group_offer(service):
