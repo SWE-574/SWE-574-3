@@ -6,7 +6,7 @@
  */
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Box, Flex, Text, VStack } from '@chakra-ui/react'
+import { Box, Flex, Grid, Text, VStack } from '@chakra-ui/react'
 import {
   FiNavigation, FiMapPin, FiLoader, FiPlus, FiLayers, FiZap, FiAward, FiMenu,
 } from 'react-icons/fi'
@@ -81,6 +81,7 @@ export function MainSidebar({
   const navigate = useNavigate()
   const { user, isAuthenticated } = useAuthStore()
   const balance = user?.timebank_balance ?? null
+  const achievementsCount = user?.achievements?.length ?? user?.badges?.length ?? 0
 
   return (
     <Box
@@ -167,11 +168,19 @@ export function MainSidebar({
             </Box>
 
             {/* Stats row */}
-            <Flex gap="5px">
+            <Grid templateColumns="repeat(2, minmax(0, 1fr))" gap="5px">
               <StatPill label="Pending"  value={pendingHs}   bg={AMBER_LT} color={AMBER} />
               <StatPill label="Active"   value={acceptedHs}  bg={GREEN_LT} color={GREEN} />
               <StatPill label="Done"     value={completedHs} bg={BLUE_LT}  color={BLUE}  />
-            </Flex>
+              <Box
+                as="button"
+                onClick={() => navigate('/achievements')}
+                borderRadius="12px"
+                style={{ cursor: 'pointer', border: 'none', background: 'transparent', padding: 0, textAlign: 'left' }}
+              >
+                <StatPill label="Achievements" value={achievementsCount} bg="#F3E8FF" color="#7C3AED" />
+              </Box>
+            </Grid>
           </>
         ) : (
           <>

@@ -71,6 +71,8 @@ export interface User {
   karma_score?: number
   featured_badge?: string | null
   featured_achievement_id?: string | null
+  achievements?: string[]
+  badges?: string[]
   show_history?: boolean
   video_intro_url?: string | null
   video_intro_file_url?: string | null
@@ -492,6 +494,24 @@ export interface Achievement {
   earned_at?: string
 }
 
+export interface AchievementProgressAchievement {
+  name: string
+  description: string
+  icon_url?: string | null
+  karma_points?: number
+  is_hidden?: boolean
+}
+
+export interface AchievementProgressItem {
+  badge_type: string
+  achievement: AchievementProgressAchievement
+  earned: boolean
+  current: number | null
+  threshold: number | null
+  progress_percent: number
+  earned_at?: string | null
+}
+
 export interface BadgeProgress {
   badge_type: string
   name: string
@@ -500,6 +520,8 @@ export interface BadgeProgress {
   threshold: number
   earned: boolean
   earned_at?: string
+  karma_points?: number
+  is_hidden?: boolean
 }
 
 // ─── Pagination ───────────────────────────────────────────────────────────────

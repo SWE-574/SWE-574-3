@@ -19,7 +19,6 @@ import type { Feature, FeatureCollection, Point } from 'geojson'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 // Disable Mapbox telemetry to avoid CORS errors to events.mapbox.com
-
 const mapboxWithTelemetry = mapboxgl as typeof mapboxgl & {
   setTelemetryEnabled?: (enabled: boolean) => void
 }
