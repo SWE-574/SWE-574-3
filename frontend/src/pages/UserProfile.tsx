@@ -4,7 +4,7 @@ import { Box, Flex, Text, Input, Textarea, Spinner, Stack } from '@chakra-ui/rea
 import {
   FiEdit2, FiCamera, FiSave, FiX, FiAward, FiClock, FiMapPin,
   FiCalendar, FiArrowUpRight, FiPlus, FiCheckCircle, FiStar,
-  FiZap, FiLayers, FiRepeat, FiLock, FiSettings, FiMail, FiShield, FiEye, FiEyeOff, FiTag,
+  FiZap, FiLayers, FiRepeat, FiLock, FiSettings, FiMail, FiShield, FiEye, FiEyeOff, FiTag, FiMessageSquare,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -12,7 +12,7 @@ import { userAPI, dataURLtoBlob } from '@/services/userAPI'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI, type Handshake as EventHandshake } from '@/services/handshakeAPI'
 import { authAPI } from '@/services/authAPI'
-import type { Service, BadgeProgress, Tag } from '@/types'
+import type { Service, BadgeProgress, Tag, ProfileReview } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
 import WikidataTagAutocomplete from '@/components/WikidataTagAutocomplete'
 import { tagAPI } from '@/services/tagAPI'
@@ -36,6 +36,41 @@ const getInitials = (f: string, l: string, e: string) =>
 const joinedYear  = (d?: string) => d ? new Date(d).getFullYear() : null
 const fmtDate     = (d: string)  => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 const fmtDur      = (d: number | string) => `${Number(d)}h`
+const timeAgo    = (d: string) => {
+  const sec = (Date.now() - new Date(d).getTime()) / 1000
+  if (sec < 60) return 'just now'
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
+  if (sec < 2592000) return `${Math.floor(sec / 86400)}d ago`
+  return fmtDate(d)
+}
+
+// ── Profile review row ───────────────────────────────────────────────────────
+function ProfileReviewRow({ review }: { review: ProfileReview }) {
+  const col = AVATAR_PALETTE[review.user_name.charCodeAt(0) % AVATAR_PALETTE.length]
+  const ini = review.user_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() || '?'
+  return (
+    <Flex gap={3} py="10px" borderBottom={`1px solid ${GRAY100}`}>
+      {review.user_avatar_url ? (
+        <Box w="32px" h="32px" borderRadius="full" flexShrink={0} style={{ backgroundImage: `url(${review.user_avatar_url})`, backgroundSize: 'cover' }} />
+      ) : (
+        <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center" style={{ background: col, color: WHITE, fontSize: '11px', fontWeight: 700 }}>{ini}</Flex>
+      )}
+      <Box flex={1} minW={0}>
+        <Flex align="center" gap={2} flexWrap="wrap" mb="4px">
+          <Text fontSize="13px" fontWeight={600} color={GRAY800}>{review.user_name}</Text>
+          <Box px="6px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700} style={{ background: GREEN_LT, color: GREEN }}><FiCheckCircle size={9} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />Verified</Box>
+          {review.handshake_hours != null && (
+            <Box px="6px" py="2px" borderRadius="full" fontSize="10px" fontWeight={600} style={{ background: AMBER_LT, color: AMBER }}>{fmtDur(review.handshake_hours)} exchange</Box>
+          )}
+          <Text fontSize="11px" color={GRAY400}>{timeAgo(review.created_at)}</Text>
+        </Flex>
+        {review.service_title && <Text fontSize="11px" color={GRAY500} mb="4px">{review.service_title}</Text>}
+        <Text fontSize="13px" color={GRAY700} lineHeight={1.55}>{review.body}</Text>
+      </Box>
+    </Flex>
+  )
+}
 const eventTs     = (d?: string | null) => (d ? new Date(d).getTime() : null)
 
 function getHandshakeServiceId(handshake: EventHandshake): string {
@@ -64,7 +99,7 @@ function handshakeToEventCardService(handshake: EventHandshake): Service {
   }
 }
 
-type ServiceTab = 'offers' | 'needs' | 'events' | 'history' | 'settings'
+type ServiceTab = 'offers' | 'needs' | 'events' | 'history' | 'reviews' | 'settings'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const SectionCard = ({ children, mb = 5, overflow = 'hidden' }: { children: React.ReactNode; mb?: number; overflow?: string }) => (
@@ -245,6 +280,9 @@ const UserProfile = () => {
   const [badges, setBadges]               = useState<BadgeProgress[]>([])
   const [eventHandshakes, setEventHandshakes] = useState<EventHandshake[]>([])
   const [joinedEventServicesById, setJoinedEventServicesById] = useState<Record<string, Service>>({})
+  const [reviewsAsProvider, setReviewsAsProvider] = useState<ProfileReview[]>([])
+  const [reviewsAsTaker, setReviewsAsTaker]       = useState<ProfileReview[]>([])
+  const [reviewsLoading, setReviewsLoading]       = useState(false)
   const [servicesLoading, setServicesLoading] = useState(true)
   const [historyLoading, setHistoryLoading]   = useState(true)
   const [eventsLoading, setEventsLoading]     = useState(true)
@@ -285,6 +323,14 @@ const UserProfile = () => {
       .then((list) => setEventHandshakes(list.filter((h) => h.service_type === 'Event')))
       .catch(() => {})
       .finally(() => setEventsLoading(false))
+    setReviewsLoading(true)
+    Promise.all([
+      userAPI.getVerifiedReviews(user.id, { role: 'provider', signal: ac.signal }),
+      userAPI.getVerifiedReviews(user.id, { role: 'receiver', signal: ac.signal }),
+    ]).then(([rProvider, rTaker]) => {
+      setReviewsAsProvider(rProvider.results)
+      setReviewsAsTaker(rTaker.results)
+    }).catch(() => {}).finally(() => setReviewsLoading(false))
     return () => ac.abort()
   }, [user])
 
@@ -713,6 +759,7 @@ const UserProfile = () => {
                   <TabBtn active={activeTab === 'needs'}    label={`Needs (${needsTab.length})`}    onClick={() => setActiveTab('needs')} />
                   <TabBtn active={activeTab === 'events'}   label={`Events (${eventServices.length+joinedUpcoming.length})`} onClick={() => setActiveTab('events')} />
                   <TabBtn active={activeTab === 'history'}  label={`History (${groupedOwnHistory.length})`}   onClick={() => setActiveTab('history')} />
+                  <TabBtn active={activeTab === 'reviews'}  label={`Reviews (${reviewsAsProvider.length + reviewsAsTaker.length})`} onClick={() => setActiveTab('reviews')} icon={<FiMessageSquare size={12} />} />
                   <TabBtn active={activeTab === 'settings'} label="Settings"                        onClick={() => setActiveTab('settings')} icon={<FiSettings size={12} />} />
                 </Flex>
 
@@ -810,6 +857,34 @@ const UserProfile = () => {
                     ))}
                   </Box>
                 ))}
+
+                {/* ── Reviews ── */}
+                {activeTab === 'reviews' && (
+                  <Box px={4} py={3}>
+                    {reviewsLoading ? (
+                      <Flex py={10} justify="center"><Spinner color={GREEN} size="sm" /></Flex>
+                    ) : (
+                      <>
+                        <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb={2}>As a Provider</Text>
+                        {reviewsAsProvider.length === 0 ? (
+                          <Text fontSize="12px" color={GRAY400} py={3}>No reviews yet for exchanges where you provided the service.</Text>
+                        ) : (
+                          <Box mb={4}>
+                            {reviewsAsProvider.map((r) => <ProfileReviewRow key={r.id} review={r} />)}
+                          </Box>
+                        )}
+                        <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb={2} mt={4}>As a Taker</Text>
+                        {reviewsAsTaker.length === 0 ? (
+                          <Text fontSize="12px" color={GRAY400} py={3}>No reviews yet for exchanges where you received the service.</Text>
+                        ) : (
+                          <Box>
+                            {reviewsAsTaker.map((r) => <ProfileReviewRow key={r.id} review={r} />)}
+                          </Box>
+                        )}
+                      </>
+                    )}
+                  </Box>
+                )}
 
                 {/* ── Settings ── */}
                 {activeTab === 'settings' && (

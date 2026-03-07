@@ -322,6 +322,147 @@ class TestUserVerifiedReviewsView:
         assert revealed_response.status_code == status.HTTP_200_OK
         assert revealed_response.data['count'] == 1
 
+    def test_role_filter_offer_provider(self):
+        """Offer: target user is provider; role=provider returns review, role=receiver returns none."""
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(service=service, requester=requester, status='completed')
+        ReputationRep.objects.create(
+            handshake=handshake, giver=requester, receiver=provider,
+            is_punctual=True, is_helpful=False, is_kind=False,
+        )
+        ReputationRep.objects.create(
+            handshake=handshake, giver=provider, receiver=requester,
+            is_punctual=True, is_helpful=False, is_kind=False,
+        )
+        Comment.objects.create(
+            service=service, user=requester, body='Great provider!',
+            is_verified_review=True, related_handshake=handshake,
+        )
+        client = AuthenticatedAPIClient().authenticate_user(provider)
+        r_provider = client.get(f'/api/users/{provider.id}/verified-reviews/', {'role': 'provider'})
+        r_receiver = client.get(f'/api/users/{provider.id}/verified-reviews/', {'role': 'receiver'})
+        assert r_provider.status_code == status.HTTP_200_OK
+        assert r_receiver.status_code == status.HTTP_200_OK
+        assert r_provider.data['count'] == 1
+        assert r_receiver.data['count'] == 0
+        assert r_provider.data['results'][0].get('reviewed_user_role') == 'provider'
+
+    def test_role_filter_offer_receiver(self):
+        """Offer: target user is receiver (requester); role=receiver returns review, role=provider returns none."""
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(service=service, requester=requester, status='completed')
+        ReputationRep.objects.create(
+            handshake=handshake, giver=provider, receiver=requester,
+            is_punctual=True, is_helpful=False, is_kind=False,
+        )
+        ReputationRep.objects.create(
+            handshake=handshake, giver=requester, receiver=provider,
+            is_punctual=True, is_helpful=False, is_kind=False,
+        )
+        Comment.objects.create(
+            service=service, user=provider, body='Great taker!',
+            is_verified_review=True, related_handshake=handshake,
+        )
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        r_provider = client.get(f'/api/users/{requester.id}/verified-reviews/', {'role': 'provider'})
+        r_receiver = client.get(f'/api/users/{requester.id}/verified-reviews/', {'role': 'receiver'})
+        assert r_provider.status_code == status.HTTP_200_OK
+        assert r_receiver.status_code == status.HTTP_200_OK
+        assert r_provider.data['count'] == 0
+        assert r_receiver.data['count'] == 1
+        assert r_receiver.data['results'][0].get('reviewed_user_role') == 'receiver'
+
+    def test_role_filter_need_provider(self):
+        """Need: target user is provider (requester); role=provider returns review."""
+        need_owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=need_owner, type='Need')
+        handshake = HandshakeFactory(service=service, requester=requester, status='completed')
+        ReputationRep.objects.create(
+            handshake=handshake, giver=need_owner, receiver=requester,
+            is_punctual=True, is_helpful=False, is_kind=False,
+        )
+        ReputationRep.objects.create(
+            handshake=handshake, giver=requester, receiver=need_owner,
+            is_punctual=True, is_helpful=False, is_kind=False,
+        )
+        Comment.objects.create(
+            service=service, user=need_owner, body='Great help!',
+            is_verified_review=True, related_handshake=handshake,
+        )
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        r_provider = client.get(f'/api/users/{requester.id}/verified-reviews/', {'role': 'provider'})
+        r_receiver = client.get(f'/api/users/{requester.id}/verified-reviews/', {'role': 'receiver'})
+        assert r_provider.status_code == status.HTTP_200_OK
+        assert r_receiver.status_code == status.HTTP_200_OK
+        assert r_provider.data['count'] == 1
+        assert r_receiver.data['count'] == 0
+        assert r_provider.data['results'][0].get('reviewed_user_role') == 'provider'
+
+    def test_role_filter_need_receiver(self):
+        """Need: target user is receiver (service owner); role=receiver returns review."""
+        need_owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=need_owner, type='Need')
+        handshake = HandshakeFactory(service=service, requester=requester, status='completed')
+        ReputationRep.objects.create(
+            handshake=handshake, giver=requester, receiver=need_owner,
+            is_punctual=True, is_helpful=False, is_kind=False,
+        )
+        ReputationRep.objects.create(
+            handshake=handshake, giver=need_owner, receiver=requester,
+            is_punctual=True, is_helpful=False, is_kind=False,
+        )
+        Comment.objects.create(
+            service=service, user=requester, body='Thanks for the need!',
+            is_verified_review=True, related_handshake=handshake,
+        )
+        client = AuthenticatedAPIClient().authenticate_user(need_owner)
+        r_provider = client.get(f'/api/users/{need_owner.id}/verified-reviews/', {'role': 'provider'})
+        r_receiver = client.get(f'/api/users/{need_owner.id}/verified-reviews/', {'role': 'receiver'})
+        assert r_provider.status_code == status.HTTP_200_OK
+        assert r_receiver.status_code == status.HTTP_200_OK
+        assert r_provider.data['count'] == 0
+        assert r_receiver.data['count'] == 1
+        assert r_receiver.data['results'][0].get('reviewed_user_role') == 'receiver'
+
+    def test_role_filter_blind_review_visibility_unchanged(self):
+        """Blind review visibility still applies when role filter is used."""
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=1),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=47),
+            evaluation_window_closed_at=None,
+        )
+        Comment.objects.create(
+            service=service,
+            user=requester,
+            body='Hidden until reciprocal.',
+            is_verified_review=True,
+            related_handshake=handshake,
+        )
+        ReputationRep.objects.create(
+            handshake=handshake,
+            giver=provider,
+            receiver=requester,
+            is_punctual=True,
+            is_helpful=False,
+            is_kind=False,
+        )
+        client = AuthenticatedAPIClient().authenticate_user(provider)
+        r = client.get(f'/api/users/{provider.id}/verified-reviews/', {'role': 'provider'})
+        assert r.status_code == status.HTTP_200_OK
+        assert r.data['count'] == 1
+
 
 @pytest.mark.django_db
 @pytest.mark.integration
