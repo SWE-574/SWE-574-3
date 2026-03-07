@@ -5197,6 +5197,14 @@ class GroupChatViewSet(viewsets.ViewSet):
     """
     permission_classes = [permissions.IsAuthenticated]
 
+    def _active_statuses_for_group_chat(self, service):
+        is_event = service.type == 'Event'
+        return (
+            ['accepted', 'checked_in', 'attended']
+            if is_event
+            else ['accepted']
+        )
+
     def _get_service_or_403(self, request, pk):
         """Return the service if eligible and the user has access; raise otherwise."""
         try:
@@ -5216,11 +5224,7 @@ class GroupChatViewSet(viewsets.ViewSet):
 
         user = request.user
         is_owner = service.user == user
-        active_statuses = (
-            ['accepted', 'checked_in', 'attended']
-            if is_event
-            else ['accepted']
-        )
+        active_statuses = self._active_statuses_for_group_chat(service)
         has_access = Handshake.objects.filter(
             service=service, requester=user, status__in=active_statuses
         ).exists()
@@ -5235,10 +5239,11 @@ class GroupChatViewSet(viewsets.ViewSet):
     def retrieve(self, request, pk=None):
         """Get the last 50 messages for the group chat."""
         service = self._get_service_or_403(request, pk)
+        active_statuses = self._active_statuses_for_group_chat(service)
         participant_users = [service.user]
         accepted_participants = list(
             User.objects.filter(
-                id__in=Handshake.objects.filter(service=service, status='accepted')
+                id__in=Handshake.objects.filter(service=service, status__in=active_statuses)
                 .values_list('requester_id', flat=True)
             ).distinct()
         )

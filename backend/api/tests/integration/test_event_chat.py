@@ -338,6 +338,30 @@ class TestGroupChatEventAccess:
         response = client.get(f'/api/group-chat/{event.id}/')
         assert response.status_code == status.HTTP_200_OK
 
+    def test_event_participant_list_includes_checked_in_and_attended(self):
+        """Event group chat participants include all active event statuses."""
+        organizer = UserFactory()
+        event = _event_service(organizer=organizer)
+        accepted = UserFactory()
+        checked_in = UserFactory()
+        attended = UserFactory()
+        HandshakeFactory(service=event, requester=accepted, status='accepted')
+        HandshakeFactory(service=event, requester=checked_in, status='checked_in')
+        HandshakeFactory(service=event, requester=attended, status='attended')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(organizer)
+
+        response = client.get(f'/api/group-chat/{event.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        participant_ids = {participant['id'] for participant in response.data['participants']}
+        assert participant_ids == {
+            str(organizer.id),
+            str(accepted.id),
+            str(checked_in.id),
+            str(attended.id),
+        }
+
     def test_event_cancelled_participant_denied_group_chat(self):
         """A cancelled event participant cannot use group chat."""
         event = _event_service()
