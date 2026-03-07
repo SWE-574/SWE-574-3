@@ -44,6 +44,33 @@ const timeAgo    = (d: string) => {
   if (sec < 2592000) return `${Math.floor(sec / 86400)}d ago`
   return fmtDate(d)
 }
+const eventTs     = (d?: string | null) => (d ? new Date(d).getTime() : null)
+
+function getHandshakeServiceId(handshake: EventHandshake): string {
+  if (handshake.service_id) return handshake.service_id
+  if (typeof handshake.service === 'string') return handshake.service
+  return handshake.service.id
+}
+
+function handshakeToEventCardService(handshake: EventHandshake): Service {
+  return {
+    id: handshake.service_id ?? String(handshake.service),
+    title: handshake.service_title,
+    description: `${handshake.status.replace('_', ' ').toUpperCase()}`,
+    type: 'Event',
+    duration: Number(handshake.exact_duration ?? handshake.provisioned_hours ?? 1),
+    status: 'Active',
+    location_type: 'In-Person',
+    location_area: handshake.exact_location ?? undefined,
+    max_participants: handshake.max_participants ?? 1,
+    participant_count: 0,
+    schedule_type: handshake.schedule_type ?? 'One-Time',
+    scheduled_time: handshake.scheduled_time ?? null,
+    tags: [],
+    created_at: handshake.created_at,
+    updated_at: handshake.updated_at,
+  }
+}
 
 // ── Profile review row ───────────────────────────────────────────────────────
 function ProfileReviewRow({ review }: { review: ProfileReview }) {
@@ -99,7 +126,7 @@ function handshakeToEventCardService(handshake: EventHandshake): Service {
   }
 }
 
-type ServiceTab = 'offers' | 'needs' | 'events' | 'history' | 'reviews' | 'settings'
+type ServiceTab = 'offers' | 'needs' | 'events' | 'events' | 'history' | 'reviews' | 'settings'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const SectionCard = ({ children, mb = 5, overflow = 'hidden' }: { children: React.ReactNode; mb?: number; overflow?: string }) => (
@@ -283,6 +310,8 @@ const UserProfile = () => {
   const [reviewsAsProvider, setReviewsAsProvider] = useState<ProfileReview[]>([])
   const [reviewsAsTaker, setReviewsAsTaker]       = useState<ProfileReview[]>([])
   const [reviewsLoading, setReviewsLoading]       = useState(false)
+  const [eventHandshakes, setEventHandshakes] = useState<EventHandshake[]>([])
+  const [joinedEventServicesById, setJoinedEventServicesById] = useState<Record<string, Service>>({})
   const [servicesLoading, setServicesLoading] = useState(true)
   const [historyLoading, setHistoryLoading]   = useState(true)
   const [eventsLoading, setEventsLoading]     = useState(true)
@@ -331,6 +360,11 @@ const UserProfile = () => {
       setReviewsAsProvider(rProvider.results)
       setReviewsAsTaker(rTaker.results)
     }).catch(() => {}).finally(() => setReviewsLoading(false))
+    setEventsLoading(true)
+    handshakeAPI.list(ac.signal)
+      .then((list) => setEventHandshakes(list.filter((h) => h.service_type === 'Event')))
+      .catch(() => {})
+      .finally(() => setEventsLoading(false))
     return () => ac.abort()
   }, [user])
 
