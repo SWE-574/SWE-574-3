@@ -12,11 +12,11 @@ from rest_framework.test import APIRequestFactory
 from api.models import Service, Tag, Handshake, Comment, ReputationRep
 from api.serializers import (
     ServiceSerializer, UserProfileSerializer, PublicUserProfileSerializer,
-    CommentSerializer, HandshakeSerializer
+    CommentSerializer, HandshakeSerializer, TransactionHistorySerializer
 )
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, TagFactory, HandshakeFactory, CommentFactory,
-    ReputationRepFactory,
+    ReputationRepFactory, TransactionHistoryFactory,
 )
 
 User = get_user_model()
@@ -281,6 +281,90 @@ class TestHandshakeSerializer:
         request.user = requester
         serializer = HandshakeSerializer(handshake, context={'request': request})
         assert serializer.data['user_has_reviewed'] is True
+
+    def test_offer_handshake_exposes_counterpart_and_provider_role(self):
+        """Offer handshakes should expose requester as counterpart for the provider."""
+        provider = UserFactory(first_name='Elif', last_name='Yılmaz')
+        requester = UserFactory(first_name='Cem', last_name='Demir')
+        service = ServiceFactory(user=provider, type='Offer', title='Mantı Workshop')
+        handshake = HandshakeFactory(service=service, requester=requester, status='accepted')
+        request = APIRequestFactory().get('/')
+        request.user = provider
+
+        serializer = HandshakeSerializer(handshake, context={'request': request})
+        data = serializer.data
+
+        assert data['service_type'] == 'Offer'
+        assert data['provider_name'] == 'Elif Yılmaz'
+        assert data['is_current_user_provider'] is True
+        assert data['counterpart']['id'] == str(requester.id)
+        assert data['counterpart']['email'] == requester.email
+
+    def test_need_handshake_exposes_requester_as_provider(self):
+        """Need handshakes should mark requester as provider and owner as counterpart."""
+        service_owner = UserFactory(first_name='Elif', last_name='Yılmaz')
+        requester = UserFactory(first_name='Can', last_name='Şahin')
+        service = ServiceFactory(user=service_owner, type='Need', title='Cooking Help')
+        handshake = HandshakeFactory(service=service, requester=requester, status='accepted')
+        request = APIRequestFactory().get('/')
+        request.user = service_owner
+
+        serializer = HandshakeSerializer(handshake, context={'request': request})
+        data = serializer.data
+
+        assert data['service_type'] == 'Need'
+        assert data['provider_name'] == 'Can Şahin'
+        assert data['is_current_user_provider'] is False
+        assert data['counterpart']['id'] == str(requester.id)
+        assert data['counterpart']['email'] == requester.email
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestTransactionHistorySerializer:
+    """Test TransactionHistorySerializer"""
+
+    def test_offer_transaction_marks_requester_as_receiver(self):
+        """Offer transaction for requester should expose provider counterpart and false role flag."""
+        provider = UserFactory(first_name='Mehmet', last_name='Özkan')
+        requester = UserFactory(first_name='Elif', last_name='Yılmaz')
+        service = ServiceFactory(user=provider, type='Offer', title='Genealogy Help')
+        handshake = HandshakeFactory(service=service, requester=requester, status='completed')
+        transaction = TransactionHistoryFactory(
+            user=requester,
+            handshake=handshake,
+            transaction_type='provision',
+        )
+
+        serializer = TransactionHistorySerializer(transaction)
+        data = serializer.data
+
+        assert data['service_title'] == 'Genealogy Help'
+        assert data['service_type'] == 'Offer'
+        assert data['is_current_user_provider'] is False
+        assert data['counterpart']['id'] == str(provider.id)
+        assert data['counterpart']['email'] == provider.email
+
+    def test_need_transaction_marks_requester_as_provider(self):
+        """Need transaction for requester should expose provider role and owner counterpart."""
+        service_owner = UserFactory(first_name='Zeynep', last_name='Arslan')
+        requester = UserFactory(first_name='Elif', last_name='Yılmaz')
+        service = ServiceFactory(user=service_owner, type='Need', title='Coffee Lesson')
+        handshake = HandshakeFactory(service=service, requester=requester, status='accepted')
+        transaction = TransactionHistoryFactory(
+            user=requester,
+            handshake=handshake,
+            transaction_type='transfer',
+        )
+
+        serializer = TransactionHistorySerializer(transaction)
+        data = serializer.data
+
+        assert data['service_title'] == 'Coffee Lesson'
+        assert data['service_type'] == 'Need'
+        assert data['is_current_user_provider'] is True
+        assert data['counterpart']['id'] == str(service_owner.id)
+        assert data['counterpart']['email'] == service_owner.email
 
 
 @pytest.mark.django_db
