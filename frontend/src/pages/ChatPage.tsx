@@ -27,6 +27,7 @@ import {
   buildGroupChatWsUrl,
   type ApiChatMessage,
   type ChatConversation,
+  type GroupChatParticipant,
   type GroupChatMessage,
 } from '@/services/conversationAPI'
 import { handshakeAPI, type InitiatePayload } from '@/services/handshakeAPI'
@@ -202,6 +203,14 @@ function isServiceOwner(conv: ChatConversation): boolean {
   return isOffer ? conv.is_provider : !conv.is_provider
 }
 
+function isFixedGroupOffer(conv: ChatConversation): boolean {
+  return conv.service_type === 'Offer' && conv.schedule_type === 'One-Time' && conv.max_participants > 1
+}
+
+function isGroupChatVisibleStatus(status: string): boolean {
+  return ['accepted'].includes(status)
+}
+
 function ConvRow({
   conv, isSelected, onClick,
 }: { conv: ChatConversation; isSelected: boolean; onClick: () => void }) {
@@ -305,12 +314,18 @@ function ServiceGroup({
     isEvent ||
     (representativeConv?.schedule_type === 'One-Time' &&
     representativeConv?.max_participants > 1)
-  const hasActiveParticipant = convs.some((c) =>
+  const hasEligibleParticipant = convs.some((c) =>
     isEvent
       ? ['accepted', 'checked_in', 'attended'].includes(c.status)
-      : c.status === 'accepted'
+      : isGroupChatVisibleStatus(c.status)
   )
-  const showGroupRow = isGroupEligible && hasActiveParticipant
+  const groupMembers = convs.filter((c) =>
+    isEvent
+      ? ['accepted', 'checked_in', 'attended'].includes(c.status)
+      : isGroupChatVisibleStatus(c.status)
+  )
+  const groupMemberCount = representativeConv?.service_member_count ?? groupMembers.length
+  const showGroupRow = isGroupEligible && hasEligibleParticipant
   const groupServiceId = representativeConv?.service_id ?? null
   const isGroupSelected = groupServiceId !== null && selectedGroupServiceId === groupServiceId
 
@@ -389,7 +404,7 @@ function ServiceGroup({
                     {title}
                   </Text>
                   <Text fontSize="11px" color={GRAY500}>
-                    {convs.filter((c) => c.status === 'accepted').length} participant{convs.filter((c) => c.status === 'accepted').length !== 1 ? 's' : ''}
+                    {groupMemberCount} member{groupMemberCount !== 1 ? 's' : ''}
                   </Text>
                 </Box>
                 <Box
@@ -729,6 +744,9 @@ function ActionCard({
     provider_confirmed_complete, receiver_confirmed_complete,
     scheduled_time, exact_location, exact_duration, provisioned_hours,
   } = conv
+  const fixedGroupOffer = isFixedGroupOffer(conv)
+  const previewScheduledTime = scheduled_time ?? conv.service_scheduled_time ?? null
+  const previewLocation = exact_location ?? conv.service_location_area ?? null
 
   // Service owner always initiates (Offer or Want) — requester approves
   const iAmServiceOwner = isServiceOwner(conv)
@@ -911,9 +929,9 @@ function ActionCard({
               <Text fontSize="12px" color={GRAY500}>
                 Waiting for <b>{conv.other_user.name}</b> to approve
               </Text>
-              {scheduled_time && (
+              {previewScheduledTime && (
                 <Text fontSize="11px" color={GRAY400} mt="3px">
-                  📅 {fmtDateTime(scheduled_time)}{exact_location ? `  •  📍 ${exact_location}` : ''}
+                  📅 {fmtDateTime(previewScheduledTime)}{previewLocation ? `  •  📍 ${previewLocation}` : ''}
                 </Text>
               )}
             </Box>
@@ -927,12 +945,18 @@ function ActionCard({
                 <FiZap size={15} />
               </Box>
               <Box>
-                <Text fontSize="13px" fontWeight={700} color={GRAY800}>Propose a session</Text>
-                <Text fontSize="12px" color={GRAY500}>Set a location, date and duration</Text>
+                <Text fontSize="13px" fontWeight={700} color={GRAY800}>
+                  {fixedGroupOffer ? 'Share fixed group details' : 'Propose a session'}
+                </Text>
+                <Text fontSize="12px" color={GRAY500}>
+                  {fixedGroupOffer
+                    ? 'This offer already has a fixed location, date and duration.'
+                    : 'Set a location, date and duration'}
+                </Text>
               </Box>
             </Flex>
             <Flex align="center" gap={2}>
-              <CTA label="Initiate Handshake" bg={GREEN} onClick={onInitiate} />
+              <CTA label={fixedGroupOffer ? 'Share Offer Details' : 'Initiate Handshake'} bg={GREEN} onClick={onInitiate} />
               <CancelBtn onClick={onCancel} loading={isCancelling} />
             </Flex>
           </Flex>
@@ -949,10 +973,12 @@ function ActionCard({
               </Box>
               <Box>
                 <Text fontSize="13px" fontWeight={700} color={GRAY800}>Service owner proposed a session</Text>
-                <Text fontSize="12px" color={GRAY500}>Review the details and approve or decline</Text>
-                {scheduled_time && (
+                <Text fontSize="12px" color={GRAY500}>
+                  {fixedGroupOffer ? 'Review the fixed group-offer details and approve or decline' : 'Review the details and approve or decline'}
+                </Text>
+                {previewScheduledTime && (
                   <Text fontSize="11px" color={GRAY400} mt="3px">
-                    📅 {fmtDateTime(scheduled_time)}{exact_location ? `  •  📍 ${exact_location}` : ''}
+                    📅 {fmtDateTime(previewScheduledTime)}{previewLocation ? `  •  📍 ${previewLocation}` : ''}
                   </Text>
                 )}
               </Box>
@@ -972,7 +998,7 @@ function ActionCard({
             <Box flex={1}>
               <Text fontSize="13px" fontWeight={700} color={GRAY800}>Waiting for the service owner</Text>
               <Text fontSize="12px" color={GRAY500}>
-                <b>{conv.other_user.name}</b> will propose a session time and location
+                <b>{conv.other_user.name}</b> will {fixedGroupOffer ? 'share the fixed group-offer details' : 'propose a session time and location'}
               </Text>
             </Box>
             <CancelBtn onClick={onCancel} loading={isCancelling} />
@@ -1054,13 +1080,14 @@ function MsgBubble({ msg, isMine }: { msg: ApiChatMessage; isMine: boolean }) {
 // ─── Group Chat Thread ────────────────────────────────────────────────────────
 
 function GroupChatThread({
-  serviceId, messages, user, conversations, wsConnected, draft, setDraft, isSending,
+  serviceId, serviceTitle, participants, messages, user, wsConnected, draft, setDraft, isSending,
   sendError, onSend, onKeyDown, inputRef, bottomRef, onBack,
 }: {
   serviceId: string
+  serviceTitle: string
+  participants: GroupChatParticipant[]
   messages: GroupChatMessage[]
   user: { id?: string } | null
-  conversations: ChatConversation[]
   wsConnected: boolean
   draft: string
   setDraft: (v: string) => void
@@ -1072,10 +1099,6 @@ function GroupChatThread({
   bottomRef: React.RefObject<HTMLDivElement | null>
   onBack: () => void
 }) {
-  const serviceConvs = conversations.filter((c) => c.service_id === serviceId)
-  const serviceTitle = serviceConvs[0]?.service_title ?? 'Group Chat'
-  const participants = serviceConvs.filter((c) => c.status === 'accepted')
-
   return (
     <>
       {/* Header */}
@@ -1128,19 +1151,19 @@ function GroupChatThread({
 
           {/* Participant avatars */}
           <Flex align="center" gap={1} flexShrink={0}>
-            {participants.slice(0, 3).map((c) => (
+            {participants.slice(0, 3).map((participant) => (
               <Box
-                key={c.handshake_id}
+                key={participant.id}
                 w="26px" h="26px" borderRadius="full"
                 bg={GREEN} color={WHITE}
                 display="flex" alignItems="center" justifyContent="center"
                 fontSize="10px" fontWeight={700}
                 style={{ overflow: 'hidden', marginLeft: '-6px', border: `2px solid ${WHITE}` }}
-                title={c.other_user.name}
+                title={participant.name}
               >
-                {c.other_user.avatar_url
-                  ? <img src={c.other_user.avatar_url} alt={c.other_user.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : c.other_user.name.split(' ').map((p: string) => p[0]).join('').toUpperCase().slice(0, 2)
+                {participant.avatar_url
+                  ? <img src={participant.avatar_url} alt={participant.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : participant.name.split(' ').map((p: string) => p[0]).join('').toUpperCase().slice(0, 2)
                 }
               </Box>
             ))}
@@ -1319,6 +1342,8 @@ export default function ChatPage() {
   const [selectedId,           setSelectedId]           = useState<string | null>(paramId ?? null)
   const [groupServiceId,       setGroupServiceId]       = useState<string | null>(null)
   const [groupMessages,        setGroupMessages]        = useState<GroupChatMessage[]>([])
+  const [groupParticipants,    setGroupParticipants]    = useState<GroupChatParticipant[]>([])
+  const [groupServiceTitle,    setGroupServiceTitle]    = useState('Group Chat')
   const [draft,                setDraft]                = useState('')
   const [isSending,            setIsSending]            = useState(false)
   const [sendError,            setSendError]            = useState<string | null>(null)
@@ -1380,7 +1405,11 @@ export default function ChatPage() {
     }
   }, [messages.length, groupMessages.length])
   useEffect(() => { setMessages([]); setSendError(null) }, [selectedId])
-  useEffect(() => { setGroupMessages([]) }, [groupServiceId])
+  useEffect(() => {
+    setGroupMessages([])
+    setGroupParticipants([])
+    setGroupServiceTitle('Group Chat')
+  }, [groupServiceId])
 
   const fetchMessages = useCallback(async (signal: AbortSignal) => {
     if (!selectedId) return
@@ -1391,7 +1420,9 @@ export default function ChatPage() {
   const fetchGroupMessages = useCallback(async (signal: AbortSignal) => {
     if (!groupServiceId) return
     const fetched = await groupChatAPI.getMessages(groupServiceId, signal)
-    setGroupMessages(fetched)
+    setGroupMessages(fetched.messages)
+    setGroupParticipants(fetched.participants)
+    setGroupServiceTitle(fetched.service_title || 'Group Chat')
   }, [groupServiceId])
 
   // Initial load from DB when conversation is selected (so old messages show even when polling is off in dev)
@@ -1668,9 +1699,10 @@ export default function ChatPage() {
             /* ── Group Chat Thread ─────────────────────────────────────────── */
             <GroupChatThread
               serviceId={groupServiceId}
+              serviceTitle={groupServiceTitle}
+              participants={groupParticipants}
               messages={groupMessages}
               user={user}
-              conversations={conversations}
               wsConnected={groupWsConnected}
               draft={draft}
               setDraft={setDraft}
@@ -1852,6 +1884,13 @@ export default function ChatPage() {
         isOpen={showInitiateModal}
         onClose={() => setShowInitiateModal(false)}
         onSubmit={handleInitiate}
+        presetDetails={selectedConv && isFixedGroupOffer(selectedConv) && selectedConv.service_scheduled_time && selectedConv.service_location_area
+          ? {
+              exactLocation: selectedConv.service_location_area,
+              exactDuration: selectedConv.provisioned_hours ?? 0,
+              scheduledTime: selectedConv.service_scheduled_time,
+            }
+          : null}
       />
       {selectedConv?.provider_initiated && (
         <ProviderDetailsModal
