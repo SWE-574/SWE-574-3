@@ -9,6 +9,8 @@ import {
 } from '@chakra-ui/react'
 import type { InitiatePayload } from '@/services/handshakeAPI'
 import { formatEventDateTime } from '@/utils/eventUtils'
+import { LocationPickerMap } from '@/components/LocationPickerMap'
+import { isIntegerDuration, roundTimeToFifteenMinutes } from '@/lib/validation'
 
 interface Props {
   isOpen: boolean
@@ -47,7 +49,7 @@ export function HandshakeDetailsModal({
   useEffect(() => {
     if (!isOpen || presetDetails) return
     if (useStrictDuration && serviceDuration != null) {
-      setDuration(serviceDuration)
+      setDuration(Math.max(1, Math.min(10, Math.round(Number(serviceDuration)))))
     }
   }, [isOpen, presetDetails, serviceDuration, useStrictDuration])
 
@@ -110,15 +112,17 @@ export function HandshakeDetailsModal({
 
     if (!location.trim()) { setError('Location is required.'); return }
     if (!date || !time) { setError('Scheduled date and time are required.'); return }
-    if (useStrictDuration) {
-      if (!Number.isInteger(duration)) { setError('Time credit must be a whole number.'); return }
-      if (duration < 1) { setError('Time credit must be at least 1 hour.'); return }
-      if (duration > 10) { setError('Time credit cannot exceed 10 hours.'); return }
-    } else {
-      if (duration <= 0) { setError('Duration must be greater than 0.'); return }
+    if (!isIntegerDuration(duration)) {
+      setError('Duration must be a whole number of hours (at least 1).')
+      return
+    }
+    if (useStrictDuration && duration > 10) {
+      setError('Time credit cannot exceed 10 hours.')
+      return
     }
 
-    const scheduled_time = `${date}T${time}:00`
+    const timeRounded = roundTimeToFifteenMinutes(time)
+    const scheduled_time = `${date}T${timeRounded}:00`
     const now = new Date()
     if (new Date(scheduled_time) <= now) { setError('Scheduled time must be in the future.'); return }
 
@@ -192,12 +196,10 @@ export function HandshakeDetailsModal({
               <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
                 Exact Location
               </Text>
-              <Input
-                placeholder="e.g. Beşiktaş Library, Room 3"
+              <LocationPickerMap
                 value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                size="sm"
-                borderRadius="8px"
+                onChange={setLocation}
+                height="220px"
               />
             </Box>
 
@@ -212,15 +214,21 @@ export function HandshakeDetailsModal({
               </Text>
               <Input
                 type="number"
-                min={useStrictDuration ? 1 : 0.5}
+                min={1}
                 max={useStrictDuration ? 10 : undefined}
-                step={useStrictDuration ? 1 : 0.5}
+                step={1}
                 placeholder={useStrictDuration ? 'e.g. 1' : undefined}
                 value={duration}
-                onChange={(e) => setDuration(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10)
+                  if (isNaN(v)) return
+                  const clamped = useStrictDuration ? Math.min(10, Math.max(1, v)) : Math.max(1, v)
+                  setDuration(clamped)
+                }}
                 size="sm"
                 borderRadius="8px"
                 w="120px"
+                inputMode="numeric"
               />
               {useStrictDuration && (
                 <Text fontSize="11px" color="gray.500" mt={1}>
@@ -245,6 +253,7 @@ export function HandshakeDetailsModal({
                 />
                 <Input
                   type="time"
+                  step={900}
                   value={time}
                   onChange={(e) => setTime(e.target.value)}
                   size="sm"
