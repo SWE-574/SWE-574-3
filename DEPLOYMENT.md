@@ -2,7 +2,8 @@
 
 Three ways to run The Hive — all powered by **Docker Compose v2** (`docker compose`).
 
-Backend and infrastructure share a **single `.env` file** at the project root. The frontend (Vite) also reads this root `.env` via `envDir` in `vite.config.ts`, so `VITE_*` variables work from the same file. Run `make env` to generate it interactively, or copy `.env.example` and edit manually.
+Backend and infrastructure share a **single `.env` file** at the project root. The frontend (Vite) also reads this root `.env` via `envDir` in `vite.config.ts`, so `VITE_*` variables work from the same file. Run `make env` to generate it interactively, or copy `.env.example` and edit manually. 
+
 
 ---
 
