@@ -249,12 +249,21 @@ export interface Notification {
 
 export interface Transaction {
   id: string
-  user: string
-  counterpart?: User
-  transaction_type: 'credit' | 'debit'
+  transaction_type: 'provision' | 'transfer' | 'refund' | 'adjustment'
+  transaction_type_display: string
+  service_type?: 'Offer' | 'Need' | 'Event' | null
+  is_current_user_provider?: boolean
+  counterpart: {
+    id: string
+    first_name: string
+    last_name: string
+    email: string
+    avatar_url?: string | null
+  } | null
   amount: number
+  balance_after: number
   description: string
-  handshake?: string
+  service_title?: string | null
   created_at: string
 }
 
@@ -499,6 +508,16 @@ export interface PaginatedResponse<T> {
   count: number
   next: string | null
   previous: string | null
+}
+
+export interface TransactionSummary {
+  current_balance: number
+  total_earned: number
+  total_spent: number
+}
+
+export interface PaginatedTransactionResponse extends PaginatedResponse<Transaction> {
+  summary: TransactionSummary
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
