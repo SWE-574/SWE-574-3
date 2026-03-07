@@ -66,10 +66,6 @@ export function EventChatPanel({
     const ac = new AbortController()
     let cancelled = false
 
-    setFetchDone(false)
-    setRoomId(null)
-    setMessages([])
-
     eventChatAPI.getMessages(service.id, ac.signal)
       .then(({ room, messages: fetchedMessages }) => {
         if (cancelled) return
@@ -350,7 +346,7 @@ export default function EventChatModal({ isOpen, onClose, service, onReportUser,
         </Flex>
 
         <Box flex={1} minH={0}>
-          <EventChatPanel service={service} onReportUser={onReportUser} reportingIssue={reportingIssue} />
+          <EventChatPanel key={service.id} service={service} onReportUser={onReportUser} reportingIssue={reportingIssue} />
         </Box>
       </Box>
     </Box>
