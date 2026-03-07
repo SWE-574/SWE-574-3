@@ -1580,8 +1580,8 @@ export default function ChatPage() {
     if (!selectedId || isDeclining) return
     setIsDeclining(true)
     try {
-      await handshakeAPI.cancel(selectedId)
-      toast.success('Handshake declined.')
+      await handshakeAPI.requestChanges(selectedId)
+      toast.success('Session details declined. The owner can propose new session details.')
       setShowApproveModal(false)
       refreshConversations()
     } catch (e: unknown) {
@@ -1886,7 +1886,7 @@ export default function ChatPage() {
         onSubmit={handleInitiate}
         serviceType={selectedConv?.service_type}
         scheduledTime={selectedConv?.scheduled_time}
-        serviceDuration={selectedConv?.provisioned_hours ?? null}
+        serviceDuration={selectedConv?.provisioned_hours ?? undefined}
         presetDetails={selectedConv && isFixedGroupOffer(selectedConv) && selectedConv.service_scheduled_time && selectedConv.service_location_area
           ? {
               exactLocation: selectedConv.service_location_area,

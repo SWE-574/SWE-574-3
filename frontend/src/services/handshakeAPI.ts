@@ -92,6 +92,15 @@ export const handshakeAPI = {
   },
 
   /**
+   * Requester declines the proposed session details. Resets provider_initiated so
+   * the provider can propose new details (location, duration, time) via initiate.
+   */
+  requestChanges: async (id: string): Promise<Handshake> => {
+    const res = await apiClient.post<Handshake>(`/handshakes/${id}/request-changes/`, {})
+    return res.data
+  },
+
+  /**
    * Either party confirms service completion.
    * When both confirm, status transitions to completed.
    */
