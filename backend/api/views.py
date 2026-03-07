@@ -3556,15 +3556,27 @@ class ChatViewSet(viewsets.ViewSet):
         ).order_by('-updated_at')
 
         service_ids = list({handshake.service_id for handshake in handshakes})
-        accepted_counts_by_service = {
-            row['service_id']: row['accepted_count']
-            for row in Handshake.objects.filter(
+        active_member_counts_by_service = {}
+        if service_ids:
+            candidate_rows = Handshake.objects.filter(
                 service_id__in=service_ids,
-                status='accepted',
-            ).values('service_id').annotate(
-                accepted_count=Count('requester_id', distinct=True)
+                status__in=['accepted', 'checked_in', 'attended'],
+            ).values('service_id', 'service__type', 'status').annotate(
+                member_count=Count('requester_id', distinct=True)
             )
-        }
+
+            for row in candidate_rows:
+                service_id = row['service_id']
+                service_type = row['service__type']
+                status_value = row['status']
+                if service_type == 'Event':
+                    active_member_counts_by_service[service_id] = (
+                        active_member_counts_by_service.get(service_id, 0) + row['member_count']
+                    )
+                elif status_value == 'accepted':
+                    active_member_counts_by_service[service_id] = (
+                        active_member_counts_by_service.get(service_id, 0) + row['member_count']
+                    )
 
         conversations = []
         for handshake in handshakes:
@@ -3622,7 +3634,7 @@ class ChatViewSet(viewsets.ViewSet):
                 'user_has_reviewed': user_has_reviewed,
                 'max_participants': handshake.service.max_participants,
                 'schedule_type': handshake.service.schedule_type,
-                'service_member_count': 1 + accepted_counts_by_service.get(handshake.service_id, 0),
+                'service_member_count': 1 + active_member_counts_by_service.get(handshake.service_id, 0),
             })
 
         page = paginator.paginate_queryset(conversations, request)
