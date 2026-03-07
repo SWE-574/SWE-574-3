@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
 import { userAPI, dataURLtoBlob } from '@/services/userAPI'
 import { serviceAPI } from '@/services/serviceAPI'
+import { handshakeAPI, type Handshake as EventHandshake } from '@/services/handshakeAPI'
 import { authAPI } from '@/services/authAPI'
 import type { Service, BadgeProgress, Tag } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
@@ -35,8 +36,35 @@ const getInitials = (f: string, l: string, e: string) =>
 const joinedYear  = (d?: string) => d ? new Date(d).getFullYear() : null
 const fmtDate     = (d: string)  => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 const fmtDur      = (d: number | string) => `${Number(d)}h`
+const eventTs     = (d?: string | null) => (d ? new Date(d).getTime() : null)
 
-type ServiceTab = 'offers' | 'needs' | 'history' | 'settings'
+function getHandshakeServiceId(handshake: EventHandshake): string {
+  if (handshake.service_id) return handshake.service_id
+  if (typeof handshake.service === 'string') return handshake.service
+  return handshake.service.id
+}
+
+function handshakeToEventCardService(handshake: EventHandshake): Service {
+  return {
+    id: handshake.service_id ?? String(handshake.service),
+    title: handshake.service_title,
+    description: `${handshake.status.replace('_', ' ').toUpperCase()}`,
+    type: 'Event',
+    duration: Number(handshake.exact_duration ?? handshake.provisioned_hours ?? 1),
+    status: 'Active',
+    location_type: 'In-Person',
+    location_area: handshake.exact_location ?? undefined,
+    max_participants: handshake.max_participants ?? 1,
+    participant_count: 0,
+    schedule_type: handshake.schedule_type ?? 'One-Time',
+    scheduled_time: handshake.scheduled_time ?? null,
+    tags: [],
+    created_at: handshake.created_at,
+    updated_at: handshake.updated_at,
+  }
+}
+
+type ServiceTab = 'offers' | 'needs' | 'events' | 'history' | 'settings'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const SectionCard = ({ children, mb = 5, overflow = 'hidden' }: { children: React.ReactNode; mb?: number; overflow?: string }) => (
@@ -215,8 +243,11 @@ const UserProfile = () => {
   const [services, setServices]           = useState<Service[]>([])
   const [history, setHistory]             = useState<UserHistoryItem[]>([])
   const [badges, setBadges]               = useState<BadgeProgress[]>([])
+  const [eventHandshakes, setEventHandshakes] = useState<EventHandshake[]>([])
+  const [joinedEventServicesById, setJoinedEventServicesById] = useState<Record<string, Service>>({})
   const [servicesLoading, setServicesLoading] = useState(true)
   const [historyLoading, setHistoryLoading]   = useState(true)
+  const [eventsLoading, setEventsLoading]     = useState(true)
   const [activeTab, setActiveTab]         = useState<ServiceTab>('offers')
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
 
@@ -249,8 +280,41 @@ const UserProfile = () => {
     userAPI.getHistory(user.id, ac.signal)
       .then(setHistory).catch(() => {}).finally(() => setHistoryLoading(false))
     userAPI.getBadgeProgress(user.id, ac.signal).then(setBadges).catch(() => {})
+    setEventsLoading(true)
+    handshakeAPI.list(ac.signal)
+      .then((list) => setEventHandshakes(list.filter((h) => h.service_type === 'Event')))
+      .catch(() => {})
+      .finally(() => setEventsLoading(false))
     return () => ac.abort()
   }, [user])
+
+  useEffect(() => {
+    if (!user) return
+
+    const relevant = eventHandshakes.filter((h) => ['accepted', 'checked_in', 'attended'].includes(h.status))
+    const idsToFetch = Array.from(new Set(relevant.map(getHandshakeServiceId).filter(Boolean))).filter(
+      (id) => !(id in joinedEventServicesById),
+    )
+
+    if (idsToFetch.length === 0) return
+
+    const ac = new AbortController()
+    Promise.allSettled(idsToFetch.map((id) => serviceAPI.get(id, ac.signal)))
+      .then((results) => {
+        const next: Record<string, Service> = {}
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            next[idsToFetch[index]] = result.value
+          }
+        })
+        if (Object.keys(next).length > 0) {
+          setJoinedEventServicesById((prev) => ({ ...prev, ...next }))
+        }
+      })
+      .catch(() => {})
+
+    return () => ac.abort()
+  }, [user, eventHandshakes, joinedEventServicesById])
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
   const startEdit = () => {
@@ -288,6 +352,23 @@ const UserProfile = () => {
 
   const ownHistory = history.filter(isOwnHistoryItem)
   const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
+  const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
+  const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
+  const eventServices = services.filter(s => s.type === 'Event' && s.status === 'Active')
+  const nowTs = Date.now()
+  const createdUpcoming = eventServices.filter((event) => event.status === 'Active' && ((eventTs(event.scheduled_time) ?? nowTs + 1) >= nowTs))
+  const joinedUpcoming = eventHandshakes.filter((handshake) => {
+    if (!['accepted', 'checked_in', 'attended'].includes(handshake.status)) return false
+    const joinedService = joinedEventServicesById[getHandshakeServiceId(handshake)]
+    return joinedService ? joinedService.status === 'Active' : true
+  })
+  const joinedEventCards = joinedUpcoming.map((handshake) => {
+    const serviceId = getHandshakeServiceId(handshake)
+    return {
+      handshake,
+      service: joinedEventServicesById[serviceId] ?? handshakeToEventCardService(handshake),
+    }
+  })
 
   if (!user) {
     return <Flex h="calc(100vh - 64px)" align="center" justify="center"><Spinner color={GREEN} size="lg" /></Flex>
@@ -298,9 +379,6 @@ const UserProfile = () => {
   const bgColor     = avatarBg(displayName)
   const balance     = user.timebank_balance ?? 0
   const balanceWarn = balance > 10
-
-  const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
-  const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
 
   const handleSave = async () => {
     setSaving(true)
@@ -633,6 +711,7 @@ const UserProfile = () => {
                 <Flex px={4} pt={3} gap={0} borderBottom={`1px solid ${GRAY100}`} style={{ overflowX: 'auto' }}>
                   <TabBtn active={activeTab === 'offers'}   label={`Offers (${offersTab.length})`}  onClick={() => setActiveTab('offers')} />
                   <TabBtn active={activeTab === 'needs'}    label={`Needs (${needsTab.length})`}    onClick={() => setActiveTab('needs')} />
+                  <TabBtn active={activeTab === 'events'}   label={`Events (${eventServices.length+joinedUpcoming.length})`} onClick={() => setActiveTab('events')} />
                   <TabBtn active={activeTab === 'history'}  label={`History (${groupedOwnHistory.length})`}   onClick={() => setActiveTab('history')} />
                   <TabBtn active={activeTab === 'settings'} label="Settings"                        onClick={() => setActiveTab('settings')} icon={<FiSettings size={12} />} />
                 </Flex>
@@ -668,6 +747,45 @@ const UserProfile = () => {
                 ) : (
                   <Box p={3} display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
                     {needsTab.map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
+                  </Box>
+                ))}
+
+                {/* ── Events ── */}
+                {activeTab === 'events' && ((eventsLoading || historyLoading) ? (
+                  <Flex py={10} justify="center"><Spinner color={GREEN} /></Flex>
+                ) : (createdUpcoming.length === 0 && joinedUpcoming.length === 0) ? (
+                  <Flex py={10} direction="column" align="center" gap={3}>
+                    <FiCalendar size={22} color={GRAY300} />
+                    <Text fontSize="13px" color={GRAY400}>No event activity yet</Text>
+                    <Flex gap={2} wrap="wrap">
+                      <Box as="button" px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
+                        style={{ background: AMBER_LT, color: AMBER, border: `1px solid ${AMBER}40`, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                        onClick={() => navigate('/post-event')}><FiPlus size={12} />Create Event</Box>
+                    </Flex>
+                  </Flex>
+                ) : (
+                  <Box p={3}>
+                    {createdUpcoming.length > 0 && (
+                      <Box mb={4}>
+                        <Text fontSize="11px" fontWeight={700} color={GRAY500} textTransform="uppercase" letterSpacing="0.06em" mb={2}>Upcoming Created</Text>
+                        <Box display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
+                          {createdUpcoming.map((event) => (
+                            <ServiceCard key={event.id} service={event} onNav={() => navigate(`/service-detail/${event.id}`)} />
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
+
+                    {joinedEventCards.length > 0 && (
+                      <Box mb={4}>
+                        <Text fontSize="11px" fontWeight={700} color={GRAY500} textTransform="uppercase" letterSpacing="0.06em" mb={2}>Upcoming Joined</Text>
+                        <Box display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
+                          {joinedEventCards.map(({ handshake, service }) => (
+                            <ServiceCard key={handshake.id} service={service} onNav={() => navigate(`/service-detail/${service.id}`)} />
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
                   </Box>
                 ))}
 
@@ -839,6 +957,7 @@ const UserProfile = () => {
                   {([
                     ['Post an Offer',       '/post-offer',            GREEN,  GREEN_LT],
                     ['Post a Need',         '/post-need',             BLUE,   BLUE_LT],
+                    ['Create an Event',     '/post-event',            AMBER,  AMBER_LT],
                     ['View Achievements',   '/achievements',          AMBER,  AMBER_LT],
                     ['Time Activity', '/transaction-history',   PURPLE, PURPLE_LT],
                   ] as [string, string, string, string][]).map(([label, path, color]) => (

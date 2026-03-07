@@ -23,6 +23,7 @@ function isMultiUseHistoryItem(item: UserHistoryItem) {
 }
 
 export function isOwnHistoryItem(item: UserHistoryItem) {
+  if (item.service_type === 'Event') return true
   if (item.service_type === 'Need') return item.was_provider === false
   return item.was_provider === true
 }

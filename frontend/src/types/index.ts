@@ -93,6 +93,24 @@ export interface User {
   is_event_banned_until?: string | null
   is_organizer_banned_until?: string | null
   no_show_count?: number
+  created_events?: Service[]
+  joined_events?: ProfileEventHandshake[]
+  invited_events?: ProfileEventHandshake[]
+}
+
+export interface ProfileEventHandshake {
+  id: string
+  service: string
+  service_id?: string
+  service_title: string
+  service_type?: 'Offer' | 'Need' | 'Event'
+  status: 'pending' | 'accepted' | 'denied' | 'cancelled' | 'completed' | 'reported' | 'paused' | 'checked_in' | 'attended' | 'no_show'
+  requester: string
+  requester_name: string
+  provider_name: string
+  scheduled_time?: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface UserProfile {
