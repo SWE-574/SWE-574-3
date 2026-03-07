@@ -24,6 +24,7 @@ import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, TEAL, ORANGE]
 const avatarBg    = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
+const AVATAR_IMAGE_BG = `linear-gradient(180deg, ${WHITE} 0%, ${GRAY100} 100%)`
 const getInitials = (f: string, l: string, e: string) =>
   f && l ? `${f[0]}${l[0]}`.toUpperCase() : (f || l || e || 'U')[0].toUpperCase()
 const joinedYear  = (d?: string) => d ? new Date(d).getFullYear() : null
@@ -45,7 +46,14 @@ function ProfileReviewRow({ review }: { review: ProfileReview }) {
   return (
     <Flex gap={3} py="10px" borderBottom={`1px solid ${GRAY100}`}>
       {review.user_avatar_url ? (
-        <Box w="32px" h="32px" borderRadius="full" flexShrink={0} style={{ backgroundImage: `url(${review.user_avatar_url})`, backgroundSize: 'cover' }} />
+        <Box w="32px" h="32px" borderRadius="full" flexShrink={0} overflow="hidden"
+          style={{ background: AVATAR_IMAGE_BG }}>
+          <img
+            src={review.user_avatar_url}
+            alt={review.user_name}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        </Box>
       ) : (
         <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center" style={{ background: col, color: WHITE, fontSize: '11px', fontWeight: 700 }}>{ini}</Flex>
       )}
@@ -146,7 +154,16 @@ function HistoryRow({
       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '' }}
       onClick={canClick ? handleClick : undefined}>
       {item.partnerAvatarUrl
-        ? <Box w="32px" h="32px" borderRadius="full" flexShrink={0} style={{ backgroundImage: `url(${item.partnerAvatarUrl})`, backgroundSize: 'cover' }} />
+        ? (
+          <Box w="32px" h="32px" borderRadius="full" flexShrink={0} overflow="hidden"
+            style={{ background: AVATAR_IMAGE_BG }}>
+            <img
+              src={item.partnerAvatarUrl}
+              alt={displayPartner}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          </Box>
+        )
         : <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center" style={{ background: col, color: WHITE, fontSize: '11px', fontWeight: 700 }}>{ini}</Flex>
       }
       <Box flex={1} minW={0}>
@@ -323,13 +340,13 @@ const PublicProfile = () => {
               style={{
                 border: `3px solid ${WHITE}`,
                 overflow: 'hidden',
-                background: profileUser.avatar_url ? undefined : bgColor,
+                background: profileUser.avatar_url ? AVATAR_IMAGE_BG : bgColor,
                 alignItems: 'center', justifyContent: 'center',
                 color: WHITE, fontSize: '28px', fontWeight: 700,
                 boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
               }}>
               {profileUser.avatar_url
-                ? <img src={profileUser.avatar_url} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ? <img src={profileUser.avatar_url} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                 : ini}
             </Box>
           </Box>

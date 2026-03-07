@@ -113,29 +113,35 @@ def loremflickr_image(categories, lock, width, height):
     return f"https://loremflickr.com/{width}/{height}/{categories}?lock={lock}"
 
 
+SEMANTIC_MEDIA_OVERRIDES = [
+    (('manti', 'börek'), ('dumplings,food', 101)),
+    (('turkish coffee', 'coffee ritual', 'coffee'), ('coffee,cafe', 111)),
+    (('potluck', 'shared meal', 'recipe'), ('food,kitchen', 121)),
+    (('singalong', 'acoustic', 'guitar', 'song', 'music'), ('music,guitar', 201)),
+    (('reading circle', 'reading', 'book club', 'book', 'poem'), ('books,library', 301)),
+    (('language exchange', 'conversation exchange', 'conversation', 'language'), ('people,meeting', 321)),
+    (('family archive', 'genealogy', 'history', 'story', 'museum'), ('history,books', 341)),
+    (('garden', 'gardening', 'plant', 'balcony'), ('garden,plants', 401)),
+    (('watercolor', 'painting', 'postcard', 'art'), ('painting,art', 421)),
+    (('photo walk', 'photography', 'camera'), ('street,photography', 501)),
+    (('walk', 'walking', 'ferry', 'orientation', 'neighborhood'), ('city,street', 521)),
+    (('jog', 'jogging', 'running'), ('running,fitness', 541)),
+    (('chess', 'board game', 'board-game', 'game night'), ('chess,boardgame', 601)),
+    (('smartphone', 'phone basics', 'digital', 'app', 'tech'), ('technology,computer', 701)),
+    (('community', 'gathering', 'meetup', 'event'), ('people,community', 801)),
+]
+
+
 def semantic_media_theme(text):
     normalized = text.lower()
-    semantic_presets = [
-        (('manti', 'börek', 'coffee', 'cooking', 'meal', 'potluck', 'kitchen'), ('turkish-food,cooking', 101)),
-        (('guitar', 'music', 'sing', 'acoustic', 'song', 'choir'), ('guitar,music', 201)),
-        (('jogging', 'running', 'walk', 'walking', 'ferry', 'museum', 'neighborhood'), ('walking,city', 301)),
-        (('watercolor', 'painting', 'art', 'postcard', 'craft'), ('painting,art', 401)),
-        (('gardening', 'plant', 'balcony', 'garden', 'seed'), ('gardening,plants', 501)),
-        (('photography', 'camera', 'photo'), ('photography,camera', 601)),
-        (('chess', 'board game', 'board-game', 'game night'), ('chess,board-game', 701)),
-        (('language', 'english', 'turkish', 'french', 'conversation', 'reading', 'book'), ('language,conversation', 801)),
-        (('genealogy', 'history', 'archive', 'storytelling', 'memory'), ('books,history', 901)),
-        (('smartphone', 'tech', 'app', 'phone', 'digital', 'online'), ('technology,devices', 1001)),
-        (('event', 'circle', 'meetup', 'community', 'gathering'), ('community,workshop', 1101)),
-    ]
-    for keywords, preset in semantic_presets:
+    for keywords, preset in SEMANTIC_MEDIA_OVERRIDES:
         if any(keyword in normalized for keyword in keywords):
             return preset
-    return ('community,workshop', 1199)
+    return ('people,community', 1199)
 
 
 def semantic_service_image(service, width=800, height=600):
-    category, lock = semantic_media_theme(service.title)
+    category, lock = semantic_media_theme(f"{service.title} {service.description}")
     return loremflickr_image(category, lock, width, height)
 
 
@@ -145,6 +151,11 @@ def semantic_gallery_images(text, count, width=800, height=600, start_offset=0):
         loremflickr_image(category, base_lock + start_offset + index, width, height)
         for index in range(count)
     ]
+
+
+def semantic_banner_image(text, width=1200, height=400, start_offset=40):
+    category, base_lock = semantic_media_theme(text)
+    return loremflickr_image(category, base_lock + start_offset, width, height)
 
 
 def is_fixed_group_offer(service):
@@ -208,7 +219,7 @@ elif_user = create_or_update_user(
     'Freelance designer and cooking enthusiast living in Beşiktaş. I love hosting neighbor-friendly food circles and sharing practical kitchen skills people can reuse at home.',
     Decimal('7.00'), 35, date_joined_offset_days=180,
     avatar_url=dicebear_avatar('elif'),
-    banner_url=picsum_image('elif-banner', 1200, 400),
+    banner_url=semantic_banner_image('community cooking kitchen gathering'),
     location='Beşiktaş, Istanbul',
 )
 
@@ -217,7 +228,7 @@ cem = create_or_update_user(
     'University student in Kadıköy passionate about chess and genealogy research. Always happy to teach beginners and help trace family histories!',
     Decimal('4.00'), 18, date_joined_offset_days=120,
     avatar_url=dicebear_avatar('cem'),
-    banner_url=picsum_image('cem-banner', 1200, 400),
+    banner_url=semantic_banner_image('chess books quiet learning'),
     location='Kadıköy, Istanbul',
 )
 
@@ -226,7 +237,7 @@ ayse = create_or_update_user(
     'Gardening enthusiast and community organizer in Üsküdar. Passionate about sustainable living and urban farming. Love sharing knowledge about growing food in small spaces!',
     Decimal('7.00'), 42, date_joined_offset_days=260,
     avatar_url=dicebear_avatar('ayse'),
-    banner_url=picsum_image('ayse-banner', 1200, 400),
+    banner_url=semantic_banner_image('garden plants balcony workshop'),
     location='Üsküdar, Istanbul',
 )
 
@@ -235,7 +246,7 @@ mehmet = create_or_update_user(
     'Retired teacher living in Şişli. I help neighbors navigate family archives, local history, and everyday digital tasks with patience and care.',
     Decimal('9.00'), 55, date_joined_offset_days=430,
     avatar_url=dicebear_avatar('mehmet'),
-    banner_url=picsum_image('mehmet-banner', 1200, 400),
+    banner_url=semantic_banner_image('history books archive storytelling'),
     location='Şişli, Istanbul',
 )
 
@@ -244,7 +255,7 @@ zeynep = create_or_update_user(
     'Language teacher and cultural exchange enthusiast. Fluent in Turkish, English, and French. Love connecting people through language and helping others practice conversation in a friendly, relaxed setting.',
     Decimal('9.00'), 68, date_joined_offset_days=370,
     avatar_url=dicebear_avatar('zeynep'),
-    banner_url=picsum_image('zeynep-banner', 1200, 400),
+    banner_url=semantic_banner_image('language exchange people conversation'),
     location='Beyoğlu, Istanbul',
 )
 
@@ -253,7 +264,7 @@ can = create_or_update_user(
     'Photography hobbyist based in Beşiktaş. I enjoy community photo walks, documenting neighborhood stories, and helping others feel confident behind the camera.',
     Decimal('6.00'), 28, date_joined_offset_days=25,
     avatar_url=dicebear_avatar('can'),
-    banner_url=picsum_image('can-banner', 1200, 400),
+    banner_url=semantic_banner_image('street photography city stories'),
     location='Beşiktaş, Istanbul',
 )
 
@@ -262,7 +273,7 @@ deniz = create_or_update_user(
     'Tech-savvy professional in Kadıköy. Enjoy helping others with smartphones, apps, and basic tech troubleshooting. Patient teacher for all skill levels!',
     Decimal('5.00'), 22, date_joined_offset_days=80,
     avatar_url=dicebear_avatar('deniz'),
-    banner_url=picsum_image('deniz-banner', 1200, 400),
+    banner_url=semantic_banner_image('technology community help people'),
     location='Kadıköy, Istanbul',
 )
 
@@ -271,7 +282,7 @@ burak = create_or_update_user(
     'Chess player and music lover. I like low-pressure skill swaps, practice sessions, and small group meetups where everyone leaves having learned something useful.',
     Decimal('5.00'), 15, date_joined_offset_days=95,
     avatar_url=dicebear_avatar('burak'),
-    banner_url=picsum_image('burak-banner', 1200, 400),
+    banner_url=semantic_banner_image('music chess community evening'),
     location='Kadıköy, Istanbul',
 )
 
@@ -280,7 +291,7 @@ selin = create_or_update_user(
     'Long-time community host in Cihangir who loves reading circles, quiet neighborhood gatherings, and helping newcomers feel included without pressure.',
     Decimal('8.00'), 74, date_joined_offset_days=540,
     avatar_url=dicebear_avatar('selin'),
-    banner_url=picsum_image('selin-banner', 1200, 400),
+    banner_url=semantic_banner_image('books quiet community gathering'),
     location='Beyoğlu, Istanbul',
 )
 
@@ -289,7 +300,7 @@ emre = create_or_update_user(
     'Urban walker and civic-minded neighbor who enjoys ferry routes, local history, and helping new residents feel more at home in the city.',
     Decimal('6.00'), 31, date_joined_offset_days=220,
     avatar_url=dicebear_avatar('emre'),
-    banner_url=picsum_image('emre-banner', 1200, 400),
+    banner_url=semantic_banner_image('city ferry neighborhood walk'),
     location='Üsküdar, Istanbul',
 )
 
@@ -298,7 +309,7 @@ yasemin = create_or_update_user(
     'Parent, kitchen volunteer, and storyteller who loves gathering people around coffee, handwritten recipes, and warm community rituals.',
     Decimal('8.00'), 63, date_joined_offset_days=300,
     avatar_url=dicebear_avatar('yasemin'),
-    banner_url=picsum_image('yasemin-banner', 1200, 400),
+    banner_url=semantic_banner_image('coffee recipe storytelling kitchen'),
     location='Fatih, Istanbul',
 )
 
@@ -307,7 +318,7 @@ murat = create_or_update_user(
     'Recently moved to Istanbul for remote work and is using The Hive to find low-pressure ways to meet people through board games, study sessions, and neighborhood routines.',
     Decimal('7.00'), 11, date_joined_offset_days=45,
     avatar_url=dicebear_avatar('murat'),
-    banner_url=picsum_image('murat-banner', 1200, 400),
+    banner_url=semantic_banner_image('board games study session city'),
     location='Kadıköy, Istanbul',
 )
 
@@ -316,7 +327,7 @@ levent = create_or_update_user(
     'Retired musician who enjoys acoustic singalongs, museum mornings, and gentle intergenerational meetups where everyone participates a little.',
     Decimal('7.00'), 58, date_joined_offset_days=620,
     avatar_url=dicebear_avatar('levent'),
-    banner_url=picsum_image('levent-banner', 1200, 400),
+    banner_url=semantic_banner_image('music museum conversation community'),
     location='Beyoğlu, Istanbul',
 )
 
@@ -359,31 +370,33 @@ user_skill_map = {
 }
 user_portfolio_map = {
     'elif@demo.com': [
-        *semantic_gallery_images('shared cooking and kitchen community', 3, 600, 400),
+        *semantic_gallery_images('turkish cooking dumplings community kitchen', 3, 600, 400),
     ],
     'ayse@demo.com': [
-        *semantic_gallery_images('balcony garden and watercolor workshop', 3, 600, 400),
+        *semantic_gallery_images('balcony garden plants community', 2, 600, 400),
+        *semantic_gallery_images('watercolor postcards art table', 1, 600, 400, start_offset=10),
     ],
     'can@demo.com': [
-        *semantic_gallery_images('neighborhood photography and local stories', 3, 600, 400),
+        *semantic_gallery_images('street photography local stories city', 3, 600, 400),
     ],
     'zeynep@demo.com': [
-        *semantic_gallery_images('language exchange and reading circles', 2, 600, 400),
+        *semantic_gallery_images('language exchange reading circle people', 2, 600, 400),
     ],
     'selin@demo.com': [
-        *semantic_gallery_images('book club and community gathering', 3, 600, 400),
+        *semantic_gallery_images('book club library community', 3, 600, 400),
     ],
     'emre@demo.com': [
-        *semantic_gallery_images('city walking ferry neighborhood orientation', 2, 600, 400),
+        *semantic_gallery_images('ferry city walk neighborhood', 2, 600, 400),
     ],
     'yasemin@demo.com': [
-        *semantic_gallery_images('coffee ritual recipe storytelling', 3, 600, 400),
+        *semantic_gallery_images('coffee recipe kitchen storytelling', 3, 600, 400),
     ],
     'murat@demo.com': [
-        *semantic_gallery_images('board game study session neighborhood', 2, 600, 400),
+        *semantic_gallery_images('board games study table', 2, 600, 400),
     ],
     'levent@demo.com': [
-        *semantic_gallery_images('acoustic music museum walking', 3, 600, 400),
+        *semantic_gallery_images('acoustic music gathering', 2, 600, 400),
+        *semantic_gallery_images('museum history walk', 1, 600, 400, start_offset=10),
     ],
 }
 user_video_map = {
