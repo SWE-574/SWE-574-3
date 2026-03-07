@@ -397,7 +397,7 @@ class TestInitiateApproveServiceOwnerModel:
         })
 
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
-        assert resp.data['error'] == 'Duration must be a whole number of hours'
+        assert resp.data['detail'] == 'Duration must be a whole number of hours'
 
     def test_offer_requester_cannot_initiate(self):
         """Requester cannot initiate an Offer handshake — only service owner can."""
@@ -526,7 +526,7 @@ class TestInitiateApproveServiceOwnerModel:
         resp = client.post(f'/api/handshakes/{handshake.id}/confirm/', {'hours': 1.5})
 
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
-        assert resp.data['error'] == 'Hours must be a whole number'
+        assert resp.data['detail'] == 'Hours must be a whole number'
 
     def test_need_service_owner_cannot_approve_own_handshake(self):
         """Need service owner cannot approve — they are the initiator, not the approver."""
