@@ -64,3 +64,40 @@ export function getCurrentPosition(): Promise<GeolocationPosition> {
 export function clampDistance(km: number): number {
   return Math.min(Math.max(km, DISTANCE_SEARCH.MIN_KM), DISTANCE_SEARCH.MAX_KM)
 }
+
+// ─── Mapbox reverse geocoding (for handshake address picker) ───────────────────
+
+interface MapboxFeature {
+  place_name?: string
+  text?: string
+  center?: [number, number]
+  context?: Array<{ id: string; text: string }>
+}
+
+/**
+ * Reverse geocode lng,lat to a human-readable address using Mapbox.
+ * Returns the best available address string (place_name) or null if the request fails or returns no features.
+ */
+export async function reverseGeocode(
+  lng: number,
+  lat: number,
+  accessToken: string,
+): Promise<{ address: string } | null> {
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${accessToken}&types=address,neighborhood,locality,place&language=en&limit=1`
+  try {
+    const res = await fetch(url)
+    const data = (await res.json()) as { features?: MapboxFeature[] }
+    const f = data.features?.[0]
+    if (!f?.place_name) return null
+    return { address: f.place_name }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Build a Google Maps URL that opens a search for the given address (directions/navigation).
+ */
+export function buildMapsUrl(address: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+}

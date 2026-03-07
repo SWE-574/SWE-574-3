@@ -95,3 +95,72 @@ test.describe('Handshake — navigation to chat', () => {
     await expect(msgInput).toBeVisible({ timeout: 10_000 })
   })
 })
+
+/**
+ * Provider initiates handshake with session details (address, duration, 15-min time).
+ * Demo: Elif owns "Help with 3D Printer Setup", Deniz is requester (pending).
+ * Without Mapbox token the modal shows fallback: manual address input and hour/minute selects.
+ */
+test.describe('Handshake — initiate session details', () => {
+  test('provider can open Initiate Handshake modal and submit address with 15-min time', async ({ page }) => {
+    await loginAs(page, USERS.elif)
+    await page.goto('/messages')
+
+    // Open the pending conversation with Deniz (Help with 3D Printer Setup)
+    const convRow = page.locator('button').filter({ hasText: /Deniz|3D Printer|Help with/i }).first()
+    await expect(convRow).toBeVisible({ timeout: 20_000 })
+    await convRow.click()
+
+    // Right pane: provider sees "Initiate Handshake"
+    const initiateBtn = page.getByRole('button', { name: /Initiate Handshake/i })
+    await expect(initiateBtn).toBeVisible({ timeout: 10_000 })
+    await initiateBtn.click()
+
+    // Modal opens
+    await expect(page.getByText('Initiate Handshake').first()).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByText('Exact Location').first()).toBeVisible()
+
+    // With no Mapbox token we get fallback: text input for address. Fill it.
+    const locationInput = page.getByPlaceholder(/e\.g\. Beşiktaş Library/)
+    await locationInput.fill('123 Test Street, Istanbul')
+
+    // Duration default is 1; ensure date is set (tomorrow)
+    const dateInput = page.locator('input[type="date"]')
+    await expect(dateInput).toBeVisible()
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const dateStr = tomorrow.toISOString().slice(0, 10)
+    await dateInput.fill(dateStr)
+
+    // Minute select must only offer 00, 15, 30, 45 (two selects: hour then minute)
+    const selects = page.locator('select')
+    await expect(selects.first()).toBeVisible()
+    const minuteSelect = selects.nth(1)
+    await expect(minuteSelect).toBeVisible()
+    const minuteOptions = await minuteSelect.locator('option').allTextContents()
+    expect(minuteOptions.sort()).toEqual(['00', '15', '30', '45'])
+
+    // Submit
+    await page.getByRole('button', { name: 'Send Details' }).click()
+
+    await expectToast(page, /Session details sent/i)
+  })
+
+  test('requester sees session details with Open in Maps link after provider initiates', async ({ page }) => {
+    // Depends on previous test: Elif already initiated with "123 Test Street, Istanbul"
+    // Deniz (requester) opens the conversation and opens Session Details modal
+    await loginAs(page, USERS.deniz)
+    await page.goto('/messages')
+    const denizConv = page.locator('button').filter({ hasText: /Elif|3D Printer|Help with/i }).first()
+    await expect(denizConv).toBeVisible({ timeout: 20_000 })
+    await denizConv.click()
+    const approveBtn = page.getByRole('button', { name: 'Review & Approve' })
+    await expect(approveBtn).toBeVisible({ timeout: 10_000 })
+    await approveBtn.click()
+
+    // ProviderDetailsModal: address and "Open in Maps" link
+    await expect(page.getByText('Session Details').first()).toBeVisible()
+    await expect(page.getByText('123 Test Street, Istanbul')).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Open in Maps' })).toBeVisible()
+  })
+})

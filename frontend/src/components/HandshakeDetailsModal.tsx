@@ -41,7 +41,7 @@ export function HandshakeDetailsModal({
   const [location, setLocation] = useState('')
   const [duration, setDuration] = useState<number>(1)
   const [date, setDate] = useState('')
-  const [time, setTime] = useState('')
+  const [time, setTime] = useState('09:00')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const useStrictDuration = isOfferOrNeed(serviceType)
@@ -241,7 +241,7 @@ export function HandshakeDetailsModal({
               <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
                 Scheduled Date & Time
               </Text>
-              <Flex gap={2}>
+              <Flex gap={2} align="center">
                 <Input
                   type="date"
                   min={minDate}
@@ -251,15 +251,51 @@ export function HandshakeDetailsModal({
                   borderRadius="8px"
                   flex={1}
                 />
-                <Input
-                  type="time"
-                  step={900}
-                  value={time}
-                  onChange={(e) => setTime(e.target.value)}
-                  size="sm"
-                  borderRadius="8px"
-                  w="120px"
-                />
+                <Flex gap={1} align="center">
+                  <select
+                    value={time ? time.split(':')[0] ?? '09' : '09'}
+                    onChange={(e) => {
+                      const h = (e.target as HTMLSelectElement).value
+                      const m = (time && time.includes(':')) ? time.split(':')[1] ?? '00' : '00'
+                      setTime(`${h}:${m}`)
+                    }}
+                    style={{
+                      borderRadius: '8px',
+                      border: '1px solid #E5E7EB',
+                      padding: '6px 8px',
+                      fontSize: '13px',
+                      background: 'white',
+                      width: '64px',
+                    }}
+                  >
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <option key={i} value={String(i).padStart(2, '0')}>
+                        {String(i).padStart(2, '0')}
+                      </option>
+                    ))}
+                  </select>
+                  <Text color="gray.500">:</Text>
+                  <select
+                    value={time && time.includes(':') ? time.split(':')[1] ?? '00' : '00'}
+                    onChange={(e) => {
+                      const m = (e.target as HTMLSelectElement).value
+                      const h = (time && time.includes(':')) ? time.split(':')[0] ?? '09' : '09'
+                      setTime(`${h}:${m}`)
+                    }}
+                    style={{
+                      borderRadius: '8px',
+                      border: '1px solid #E5E7EB',
+                      padding: '6px 8px',
+                      fontSize: '13px',
+                      background: 'white',
+                      width: '64px',
+                    }}
+                  >
+                    {['00', '15', '30', '45'].map((min) => (
+                      <option key={min} value={min}>{min}</option>
+                    ))}
+                  </select>
+                </Flex>
               </Flex>
             </Box>
           </Stack>
