@@ -87,7 +87,7 @@ export function ProviderDetailsModal({
           Session Details
         </Text>
         <Text fontSize="13px" color="gray.500" mb={5}>
-          The provider has confirmed the session details. Review and approve or decline.
+          The service owner has proposed the session details. Review and approve or decline.
         </Text>
 
         <Stack gap={3}>

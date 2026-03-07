@@ -16,9 +16,14 @@ interface Props {
   onSubmit: (data: InitiatePayload) => Promise<void>
   serviceType?: string
   scheduledTime?: string | null
+  /** Original post duration (hours). Used for Offer/Need to show "Original post: X hours" and validate agreed duration. */
+  serviceDuration?: number | null
 }
 
-export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, scheduledTime }: Props) {
+const isOfferOrNeed = (t?: string) => t === 'Offer' || t === 'Need'
+
+export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, scheduledTime, serviceDuration }: Props) {
+  const useStrictDuration = isOfferOrNeed(serviceType)
   const [location, setLocation] = useState('')
   const [duration, setDuration] = useState<number>(1)
   const [date, setDate] = useState('')
@@ -65,7 +70,13 @@ export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, 
     setError(null)
     if (!location.trim()) { setError('Location is required.'); return }
     if (!date || !time) { setError('Scheduled date and time are required.'); return }
-    if (duration <= 0) { setError('Duration must be greater than 0.'); return }
+    if (useStrictDuration) {
+      if (!Number.isInteger(duration)) { setError('Time credit must be a whole number.'); return }
+      if (duration < 1) { setError('Time credit must be at least 1 hour.'); return }
+      if (duration > 10) { setError('Time credit cannot exceed 10 hours.'); return }
+    } else {
+      if (duration <= 0) { setError('Duration must be greater than 0.'); return }
+    }
 
     const scheduled_time = `${date}T${time}:00`
     const now = new Date()
@@ -126,19 +137,31 @@ export function HandshakeDetailsModal({ isOpen, onClose, onSubmit, serviceType, 
           </Box>
 
           <Box>
+            {useStrictDuration && serviceDuration != null && (
+              <Text fontSize="12px" color="gray.500" mb={1}>
+                Original post: {Number(serviceDuration)} hours
+              </Text>
+            )}
             <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
-              Duration (hours)
+              {useStrictDuration ? 'Agreed duration (hours)' : 'Duration (hours)'}
             </Text>
             <Input
               type="number"
-              min={0.5}
-              step={0.5}
+              min={useStrictDuration ? 1 : 0.5}
+              max={useStrictDuration ? 10 : undefined}
+              step={useStrictDuration ? 1 : 0.5}
+              placeholder={useStrictDuration ? 'e.g. 1' : undefined}
               value={duration}
               onChange={(e) => setDuration(parseFloat(e.target.value) || 0)}
               size="sm"
               borderRadius="8px"
               w="120px"
             />
+            {useStrictDuration && (
+              <Text fontSize="11px" color="gray.500" mt={1}>
+                Time credit will be based on this agreed duration.
+              </Text>
+            )}
           </Box>
 
           <Box>

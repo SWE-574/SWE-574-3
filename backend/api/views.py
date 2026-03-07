@@ -2605,6 +2605,11 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 requires_details=True
             )
 
+        # Use negotiated duration instead of original post duration for TimeBank provisioning.
+        if handshake.service.type in ('Offer', 'Need') and handshake.exact_duration is not None:
+            handshake.provisioned_hours = handshake.exact_duration
+            handshake.save(update_fields=['provisioned_hours'])
+
         # Provision TimeBank and accept handshake
         try:
             provision_timebank(handshake)
@@ -2679,8 +2684,8 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='request-changes')
     def request_changes(self, request, pk=None):
         """
-        Receiver requests changes to the handshake details.
-        This resets provider_initiated so provider can re-submit with updated details.
+        Requester declines the proposed session details (Offer: requester=receiver; Need: requester=provider).
+        Resets provider_initiated so the service owner can re-submit with updated details.
         """
         handshake = self.get_object()
         user = request.user
@@ -2688,10 +2693,10 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         from .utils import get_provider_and_receiver
         provider, receiver = get_provider_and_receiver(handshake)
         
-        # Only receiver can request changes
-        if receiver != user:
+        # Only the requester (the one who sees Session Details and can Approve/Decline) can request changes
+        if handshake.requester != user:
             return create_error_response(
-                'Only the service receiver can request changes',
+                'Only the requester can decline the proposed session details',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
@@ -2714,13 +2719,22 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         handshake.provider_initiated = False
         handshake.save(update_fields=['provider_initiated', 'updated_at'])
         
-        # Send notification to provider
+        # Notify the service owner (they initiated; they can re-propose)
+        service_owner = handshake.service.user
+        requester_name = f'{handshake.requester.first_name} {handshake.requester.last_name}'
         Notification.objects.create(
-            user=provider,
+            user=service_owner,
             type='handshake_update',
-            title='Changes Requested',
-            message=f'{receiver.first_name} {receiver.last_name} has requested changes to the handshake details for "{handshake.service.title}"',
+            title='Session details declined',
+            message=f'{requester_name} declined the proposed session details for "{handshake.service.title}". You can propose new details.',
             related_handshake=handshake
+        )
+        
+        # Add chat message from the requester who declined
+        ChatMessage.objects.create(
+            handshake=handshake,
+            sender=handshake.requester,
+            body="I've declined the proposed session details. Please suggest a different time, location or duration."
         )
         
         # Invalidate conversations cache
@@ -2891,10 +2905,11 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='cancel')
     def cancel_handshake(self, request, pk=None):
         handshake = self.get_object()
-        
-        if handshake.service.user != request.user:
+        user = request.user
+        # Offer: service owner = provider; Need: service owner = receiver. Allow both parties to cancel.
+        if handshake.service.user != user and handshake.requester != user:
             return create_error_response(
-                'Only the service provider can cancel',
+                'Only the service owner or the requester can cancel this handshake',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )

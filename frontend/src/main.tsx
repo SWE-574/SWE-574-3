@@ -11,7 +11,7 @@ createRoot(document.getElementById('root')!).render(
     <ChakraProvider value={system}>
       <BrowserRouter>
         <App />
-        <Toaster position="top-right" richColors />
+        <Toaster position="bottom-right" richColors />
       </BrowserRouter>
     </ChakraProvider>
   </StrictMode>,
