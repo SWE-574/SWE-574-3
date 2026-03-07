@@ -228,6 +228,7 @@ class Service(models.Model):
     tags = models.ManyToManyField(Tag, blank=True)
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
     is_visible = models.BooleanField(default=True, help_text='Admin can hide inappropriate services')
+    is_pinned = models.BooleanField(default=False, help_text='Admin can pin events to the top of the feed')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

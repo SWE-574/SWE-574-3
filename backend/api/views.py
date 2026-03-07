@@ -1542,13 +1542,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
         
         # If location-based search, distance ordering takes priority
         if is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
-            pass  # Already ordered by distance from search_engine
+            queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         elif sort_param == 'hot':
             # Sort by hot score (descending - highest score first)
-            queryset = queryset.order_by('-hot_score', '-created_at')
+            queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
         else:
             # Default: sort by latest (created_at descending)
-            queryset = queryset.order_by('-created_at')
+            queryset = queryset.order_by('-is_pinned', '-created_at')
         
         return queryset
 
@@ -1837,6 +1837,33 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'id': str(service.id),
             'is_visible': service.is_visible,
             'message': f'Service has been {action_text}'
+        })
+
+    @action(detail=True, methods=['post'], url_path='pin-event')
+    def pin_event(self, request, pk=None):
+        """Toggle Pin/Unpin an Event (Admin Only).
+
+        Pinned events appear at the top of the discovery feed.
+
+        **Endpoint:** POST /api/services/{id}/pin-event/
+        """
+        if request.user.role != 'admin':
+            raise PermissionDenied('Admin access required')
+
+        service = self.get_object()
+        if service.type != 'Event':
+            return Response({'error': 'Only events can be pinned'}, status=status.HTTP_400_BAD_REQUEST)
+
+        service.is_pinned = not service.is_pinned
+        service.save(update_fields=['is_pinned'])
+
+        action_text = 'pinned' if service.is_pinned else 'unpinned'
+        invalidate_service_lists()
+
+        return Response({
+            'id': str(service.id),
+            'is_pinned': service.is_pinned,
+            'message': f'Event has been {action_text}'
         })
 
     # ------------------------------------------------------------------
