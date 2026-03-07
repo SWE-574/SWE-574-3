@@ -1850,6 +1850,8 @@ export default function ChatPage() {
         isOpen={showInitiateModal}
         onClose={() => setShowInitiateModal(false)}
         onSubmit={handleInitiate}
+        serviceType={selectedConv?.service_type}
+        serviceDuration={selectedConv?.provisioned_hours ?? undefined}
       />
       {selectedConv?.provider_initiated && (
         <ProviderDetailsModal

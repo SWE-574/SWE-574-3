@@ -2472,6 +2472,11 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 requires_details=True
             )
 
+        # Use negotiated duration instead of original post duration for TimeBank provisioning.
+        if handshake.service.type in ('Offer', 'Need') and handshake.exact_duration is not None:
+            handshake.provisioned_hours = handshake.exact_duration
+            handshake.save(update_fields=['provisioned_hours'])
+
         # Provision TimeBank and accept handshake
         try:
             provision_timebank(handshake)
