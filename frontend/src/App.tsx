@@ -171,8 +171,11 @@ function App() {
     p === location.pathname || location.pathname.startsWith(p + '/')
   )
 
+  // Allow the long create-topic form to use normal document scrolling.
+  const isForumCreateTopicPage = location.pathname === '/forum/new'
+
   // Lock/unlock body + html scroll for full-screen pages
-  const isFullScreenPage = FULL_SCREEN_PREFIXES.some((p) =>
+  const isFullScreenPage = !isForumCreateTopicPage && FULL_SCREEN_PREFIXES.some((p) =>
     location.pathname === p || location.pathname.startsWith(p + '/')
   )
   useEffect(() => {
