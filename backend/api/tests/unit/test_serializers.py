@@ -63,6 +63,14 @@ class TestServiceSerializer:
         })
         assert serializer.is_valid() is False
         assert 'duration' in serializer.errors
+
+    def test_service_partial_update_keeps_offer_duration_rules(self):
+        """PATCH without type should still enforce Offer/Need whole-hour limits."""
+        service = ServiceFactory(type='Offer', duration=2)
+        serializer = ServiceSerializer(service, data={'duration': 1.5}, partial=True)
+
+        assert serializer.is_valid() is False
+        assert serializer.errors['duration'][0] == 'Time credit must be a whole number.'
     
     def test_service_validation_max_participants_positive(self):
         """Test max_participants must be positive"""

@@ -359,9 +359,9 @@ class ServiceSerializer(serializers.ModelSerializer):
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'comment_count', 'hot_score',
-            'is_visible', 'media', 'participant_count', 'event_evaluation_summary',
+            'is_visible', 'is_pinned', 'media', 'participant_count', 'event_evaluation_summary',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible']
+        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):
@@ -443,6 +443,8 @@ class ServiceSerializer(serializers.ModelSerializer):
     def validate_duration(self, value):
         """Validate duration: Offer/Need 1-10 whole hours; Event positive and <1000."""
         service_type = self.initial_data.get('type')
+        if service_type is None and self.instance is not None:
+            service_type = self.instance.type
         if service_type in ('Offer', 'Need'):
             if value != int(value):
                 raise serializers.ValidationError('Time credit must be a whole number.')
