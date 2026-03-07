@@ -1781,7 +1781,7 @@ class ReportSerializer(serializers.ModelSerializer):
     ]
 )
 class TransactionHistorySerializer(serializers.ModelSerializer):
-    handshake_id = serializers.UUIDField(source='handshake.id', read_only=True)
+    handshake_id = serializers.SerializerMethodField()
     service_id = serializers.SerializerMethodField()
     transaction_type_display = serializers.CharField(source='get_transaction_type_display', read_only=True)
     service_title = serializers.SerializerMethodField()
@@ -1800,6 +1800,12 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
             'counterpart', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
+
+    @extend_schema_field(OpenApiTypes.UUID)
+    def get_handshake_id(self, obj):
+        if obj.handshake_id:
+            return str(obj.handshake_id)
+        return None
 
     @extend_schema_field(OpenApiTypes.UUID)
     def get_service_id(self, obj):

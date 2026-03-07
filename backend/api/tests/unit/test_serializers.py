@@ -442,6 +442,28 @@ class TestTransactionHistorySerializer:
         assert data['counterpart']['id'] == str(service_owner.id)
         assert data['counterpart']['email'] == service_owner.email
 
+    def test_adjustment_transaction_allows_null_handshake(self):
+        """Adjustment transactions without a handshake should serialize nullable fields as None."""
+        user = UserFactory()
+        transaction = TransactionHistoryFactory(
+            user=user,
+            handshake=None,
+            transaction_type='adjustment',
+            description='Manual admin adjustment',
+        )
+
+        serializer = TransactionHistorySerializer(transaction)
+        data = serializer.data
+
+        assert data['handshake_id'] is None
+        assert data['service_id'] is None
+        assert data['service_title'] is None
+        assert data['service_type'] is None
+        assert data['schedule_type'] is None
+        assert data['max_participants'] is None
+        assert data['counterpart'] is None
+        assert data['is_current_user_provider'] is False
+
 
 @pytest.mark.django_db
 @pytest.mark.unit
