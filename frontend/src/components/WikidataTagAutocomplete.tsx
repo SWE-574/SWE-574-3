@@ -67,26 +67,6 @@ export default function WikidataTagAutocomplete({
     setHighlightedIndex(-1)
   }
 
-  const createCustomTag = () => {
-    const name = query.trim()
-    if (!name) return
-
-    const exists = selectedTags.some((tag) => tag.name.toLowerCase() === name.toLowerCase())
-    if (exists) {
-      setQuery('')
-      setSuggestions([])
-      setOpen(false)
-      setHighlightedIndex(-1)
-      return
-    }
-
-    onAddTag({ id: `custom:${name.toLowerCase()}`, name })
-    setQuery('')
-    setSuggestions([])
-    setOpen(false)
-    setHighlightedIndex(-1)
-  }
-
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (!open) return
 
@@ -108,8 +88,6 @@ export default function WikidataTagAutocomplete({
       event.preventDefault()
       if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
         addSuggestion(suggestions[highlightedIndex])
-      } else {
-        createCustomTag()
       }
       return
     }
@@ -131,7 +109,7 @@ export default function WikidataTagAutocomplete({
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={handleKeyDown}
-        placeholder={disabled ? 'Max 10 tags reached' : 'Search Wikidata tags or add custom tags…'}
+        placeholder={disabled ? 'Max 10 tags reached' : 'Search Wikidata tags…'}
         disabled={disabled}
         borderRadius="10px"
         border={`1px solid ${GRAY200}`}
@@ -174,18 +152,9 @@ export default function WikidataTagAutocomplete({
             </Box>
           ))}
 
-          {!loading && query.trim() && (
-            <Box
-              px={4}
-              py="10px"
-              cursor="pointer"
-              fontSize="13px"
-              fontWeight={600}
-              color={accent}
-              _hover={{ bg: GRAY50 }}
-              onMouseDown={createCustomTag}
-            >
-              + Create "{query.trim()}"
+          {!loading && query.trim() && suggestions.length === 0 && (
+            <Box px={4} py="10px">
+              <Text color={GRAY400} fontSize="13px">No matching Wikidata tags found</Text>
             </Box>
           )}
 

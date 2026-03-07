@@ -33,21 +33,21 @@ export const tagAPI = {
   },
 
   /**
-   * Ensure a tag with the given name exists in the DB.
-   * Creates it if missing (POST /api/tags/), falls back to name search if 400.
-   * Returns the canonical DB tag with a proper UUID id.
+   * Ensure a tag with the given Wikidata QID exists in the DB.
+   * Creates it if missing (POST /api/tags/), falls back to fetch if already exists.
+   * Returns the canonical DB tag.
    */
-  ensureInDb: async (name: string): Promise<Tag> => {
+  ensureInDb: async (tag: Tag): Promise<Tag> => {
     try {
-      const res = await apiClient.post<Tag>('/tags/', { name: name.trim() })
+      const res = await apiClient.post<Tag>('/tags/', { id: tag.id, name: tag.name.trim() })
       return res.data
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status
       if (status === 400) {
-        // Tag already exists — fetch it by name
-        const results = await apiClient.get<Tag[]>('/tags/', { params: { search: name.trim() } })
+        // Tag already exists — fetch it by ID or name
+        const results = await apiClient.get<Tag[]>('/tags/', { params: { search: tag.name.trim() } })
         const exact = (results.data ?? []).find(
-          (t) => t.name.toLowerCase() === name.trim().toLowerCase()
+          (t) => t.id === tag.id || t.name.toLowerCase() === tag.name.trim().toLowerCase()
         )
         if (exact) return exact
       }
