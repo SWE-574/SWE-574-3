@@ -440,6 +440,7 @@ class Notification(models.Model):
         ('handshake_accepted', 'Handshake Accepted'),
         ('handshake_denied', 'Handshake Denied'),
         ('handshake_cancelled', 'Handshake Cancelled'),
+        ('service_updated', 'Service Updated'),
         ('chat_message', 'Chat Message'),
         ('service_reminder', 'Service Reminder'),
         ('service_confirmation', 'Service Confirmation'),

@@ -229,6 +229,7 @@ export type NotificationType =
   | 'handshake_accepted'
   | 'handshake_denied'
   | 'handshake_cancelled'
+  | 'service_updated'
   | 'chat_message'
   | 'service_reminder'
   | 'service_confirmation'
