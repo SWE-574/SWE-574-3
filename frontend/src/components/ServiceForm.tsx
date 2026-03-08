@@ -433,7 +433,7 @@ export default function ServiceForm({
   const [eventDateTimeError, setEventDateTimeError] = useState<string | undefined>()
 
   const schema = useMemo(() => getSchema(type), [type])
-  const { register, handleSubmit, control, watch, trigger, reset, setValue, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, control, watch, trigger, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: { location_type: 'In-Person', schedule_type: 'One-Time', max_participants: 1 },
   })

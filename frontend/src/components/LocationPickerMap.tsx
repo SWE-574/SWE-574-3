@@ -14,7 +14,7 @@ import type { Feature, FeatureCollection, Point } from 'geojson'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 import { Box, Button, Input, Text, Link } from '@chakra-ui/react'
-import { GREEN, GRAY100, GRAY200, GRAY400, GRAY700, GRAY800, WHITE } from '@/theme/tokens'
+import { GREEN, GRAY100, GRAY200, GRAY400, GRAY700, WHITE } from '@/theme/tokens'
 import { reverseGeocode, buildMapsUrl } from '@/utils/location'
 
 const mapboxWithTelemetry = mapboxgl as typeof mapboxgl & { setTelemetryEnabled?: (enabled: boolean) => void }
