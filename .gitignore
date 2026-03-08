@@ -201,7 +201,38 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+
+# Docker / local env
+.env
+.env.local
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# TLS certificates
+nginx/certs/
+
+# Static files
+backend/staticfiles
+
+# Logs
+logs/
+
+backend/tests/reports/
+frontend/tests/reports/
+
+# Allow frontend src lib (validation helpers)
+!frontend/src/lib/
+!frontend/src/lib/**
+
+frontend/test-results/
+
+.DS_Store

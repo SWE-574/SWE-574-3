@@ -1,0 +1,196 @@
+name: CI — Backend
+
+on:
+  push:
+    branches: [dev, "feature/**", "fix/**", "chore/**"]
+    paths: ["backend/**", ".github/workflows/ci-backend.yml"]
+  pull_request:
+    branches: [dev]
+    paths: ["backend/**", ".github/workflows/ci-backend.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      db:
+        image: postgis/postgis:15-3.4
+        env:
+          POSTGRES_DB: the_hive_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_NAME: the_hive_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres_ci
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: 127.0.0.1:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_BUCKET_NAME: hive-media
+      MINIO_USE_SSL: "false"
+      SECRET_KEY: ci-secret-key-not-used-in-production
+      DEBUG: "True"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DJANGO_SETTINGS_MODULE: hive_project.settings
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name ci_minio \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin123 \
+            --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1" \
+            --health-interval 5s \
+            --health-timeout 3s \
+            --health-retries 20 \
+            minio/minio:latest server /data --console-address ":9001"
+
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ci_minio)
+            if [ "$STATUS" = "healthy" ]; then
+              echo "MinIO is healthy."
+              break
+            fi
+            if [ "$STATUS" = "unhealthy" ]; then
+              echo "::error::MinIO became unhealthy"
+              docker logs ci_minio
+              exit 1
+            fi
+            echo "Waiting for MinIO... status=$STATUS ($i/30)"
+            sleep 2
+          done
+
+          STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ci_minio)
+          if [ "$STATUS" != "healthy" ]; then
+            echo "::error::MinIO did not become healthy in time"
+            docker logs ci_minio
+            exit 1
+          fi
+
+      - name: Pin CI environment variables
+        # $GITHUB_ENV overrides act's .env injection AND any job-level env for
+        # all subsequent steps — the only reliable way to win the precedence war.
+        run: |
+          {
+            echo "DB_NAME=the_hive_db"
+            echo "DB_USER=postgres"
+            echo "DB_PASSWORD=postgres_ci"
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=5432"
+            echo "REDIS_HOST=127.0.0.1"
+            echo "REDIS_PORT=6379"
+            echo "MINIO_ENDPOINT=127.0.0.1:9000"
+            echo "MINIO_ACCESS_KEY=minioadmin"
+            echo "MINIO_SECRET_KEY=minioadmin123"
+            echo "MINIO_BUCKET_NAME=hive-media"
+            echo "MINIO_USE_SSL=false"
+            echo "SECRET_KEY=ci-secret-key-not-used-in-production"
+            echo "DEBUG=True"
+            echo "ALLOWED_HOSTS=localhost,127.0.0.1"
+            echo "DJANGO_SETTINGS_MODULE=hive_project.settings"
+          } >> "$GITHUB_ENV"
+
+      - name: Validate required env vars
+        run: |
+          missing=0
+          for var in DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT REDIS_HOST REDIS_PORT MINIO_ENDPOINT MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_BUCKET_NAME MINIO_USE_SSL SECRET_KEY DJANGO_SETTINGS_MODULE; do
+            val=$(printenv "$var" || true)
+            if [ -z "$val" ]; then
+              echo "::error::Required env var $var is not set"
+              missing=$((missing + 1))
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install GDAL / GEOS (GeoDjango)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gdal-bin libgdal-dev libgeos-dev
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: pip-
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install pip-audit
+
+      - name: Audit Python dependencies
+        working-directory: backend
+        run: .venv/bin/pip-audit --skip-editable
+
+      - name: Run migrations
+        working-directory: backend
+        run: .venv/bin/python manage.py migrate --no-input
+
+      - name: Check no missing migration files
+        working-directory: backend
+        run: .venv/bin/python manage.py makemigrations --check --dry-run
+
+      - name: Check all migrations applied
+        working-directory: backend
+        run: .venv/bin/python manage.py migrate --check
+
+      - name: Run tests
+        working-directory: backend
+        run: |
+          mkdir -p tests/reports/coverage
+          .venv/bin/pytest -c pytest-ci.ini
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-junit
+          path: backend/tests/reports/junit.xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/tests/reports/coverage/
+
+      - name: Stop MinIO
+        if: always()
+        run: docker rm -f ci_minio || true

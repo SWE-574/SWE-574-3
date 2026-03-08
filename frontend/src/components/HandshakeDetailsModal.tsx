@@ -1,0 +1,364 @@
+import { useEffect, useState } from 'react'
+import {
+  Box,
+  Text,
+  Button,
+  Input,
+  Stack,
+  Flex,
+} from '@chakra-ui/react'
+import type { InitiatePayload } from '@/services/handshakeAPI'
+import { formatEventDateTime } from '@/utils/eventUtils'
+import { LocationPickerMap } from '@/components/LocationPickerMap'
+import { isIntegerDuration, roundTimeToFifteenMinutes } from '@/lib/validation'
+
+interface Props {
+  isOpen: boolean
+  onClose: () => void
+  onSubmit: (data: InitiatePayload) => Promise<void>
+  serviceType?: string
+  serviceLocationType?: string | null
+  scheduledTime?: string | null
+  defaultLocation?: string | null
+  presetDetails?: {
+    exactLocation: string
+    locationGuide?: string | null
+    exactDuration: number
+    scheduledTime: string
+  } | null
+  /** Original post duration (hours). Used for Offer/Need to show "Original post: X hours" and validate agreed duration. */
+  serviceDuration?: number | null
+}
+
+const isOfferOrNeed = (t?: string) => t === 'Offer' || t === 'Need'
+
+export function HandshakeDetailsModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  serviceType,
+  serviceLocationType,
+  scheduledTime,
+  defaultLocation,
+  presetDetails,
+  serviceDuration,
+}: Props) {
+  const [location, setLocation] = useState('')
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [duration, setDuration] = useState<number>(1)
+  const [date, setDate] = useState('')
+  const [time, setTime] = useState('09:00')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const useStrictDuration = isOfferOrNeed(serviceType)
+  const requiresLocation = serviceLocationType !== 'Online'
+
+  useEffect(() => {
+    if (!isOpen || presetDetails) return
+    if (useStrictDuration && serviceDuration != null) {
+      setDuration(Math.max(1, Math.min(10, Math.round(Number(serviceDuration)))))
+    }
+    if (!requiresLocation) {
+      setLocation('')
+      setLocationCoords(null)
+    } else if (defaultLocation) {
+      setLocation(defaultLocation)
+      setLocationCoords(null)
+    }
+  }, [defaultLocation, isOpen, presetDetails, requiresLocation, serviceDuration, useStrictDuration])
+
+  if (!isOpen) return null
+
+  // Event handshakes don't use the initiation flow — show info only
+  if (serviceType === 'Event') {
+    return (
+      <Box
+        position="fixed" inset={0} zIndex={1000}
+        style={{ background: 'rgba(0,0,0,0.5)' }}
+        display="flex" alignItems="center" justifyContent="center"
+        onClick={onClose}
+      >
+        <Box
+          bg="white" borderRadius="16px" p={6} w="100%" maxW="400px" mx={4}
+          boxShadow="xl" onClick={(e) => e.stopPropagation()}
+        >
+          <Text fontSize="17px" fontWeight={700} color="gray.800" mb={1}>Event Registration</Text>
+          {scheduledTime && (
+            <Text fontSize="13px" color="gray.500" mb={4}>
+              📅 {formatEventDateTime(scheduledTime)}
+            </Text>
+          )}
+          <Text fontSize="13px" color="gray.600" mb={5} lineHeight={1.6}>
+            You have joined this event. Check-in opens 24 hours before the event starts.
+            Make sure to check in to confirm your attendance!
+          </Text>
+          <Flex justify="flex-end">
+            <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
+          </Flex>
+        </Box>
+      </Box>
+    )
+  }
+
+  const isPresetMode = !!presetDetails
+
+  const minDate = new Date().toISOString().slice(0, 10)
+
+  const handleSubmit = async () => {
+    setError(null)
+    if (isPresetMode && presetDetails) {
+      setLoading(true)
+      try {
+        await onSubmit({
+          exact_location: presetDetails.exactLocation,
+          exact_duration: presetDetails.exactDuration,
+          scheduled_time: presetDetails.scheduledTime,
+        })
+        onClose()
+      } catch (e: unknown) {
+        const err = e as { response?: { data?: { detail?: string } }; message?: string }
+        setError(err?.response?.data?.detail ?? err?.message ?? 'Failed to initiate handshake.')
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    if (requiresLocation && !location.trim()) { setError('Location is required.'); return }
+    if (!date || !time) { setError('Scheduled date and time are required.'); return }
+    if (!isIntegerDuration(duration)) {
+      setError('Duration must be a whole number of hours (at least 1).')
+      return
+    }
+    if (useStrictDuration && duration > 10) {
+      setError('Time credit cannot exceed 10 hours.')
+      return
+    }
+
+    const timeRounded = roundTimeToFifteenMinutes(time)
+    const scheduled_time = `${date}T${timeRounded}:00`
+    const now = new Date()
+    if (new Date(scheduled_time) <= now) { setError('Scheduled time must be in the future.'); return }
+
+    setLoading(true)
+    try {
+      await onSubmit({
+        exact_location: requiresLocation ? location.trim() : '',
+        exact_duration: duration,
+        scheduled_time,
+        ...(requiresLocation && locationCoords && {
+          exact_location_lat: locationCoords.lat,
+          exact_location_lng: locationCoords.lng,
+        }),
+      })
+      onClose()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      setError(err?.response?.data?.detail ?? err?.message ?? 'Failed to initiate handshake.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Box
+      position="fixed"
+      inset={0}
+      zIndex={1000}
+      style={{ background: 'rgba(0,0,0,0.5)' }}
+      display="flex"
+      alignItems="center"
+      justifyContent="center"
+      onClick={onClose}
+    >
+      <Box
+        bg="white"
+        borderRadius="16px"
+        p={6}
+        w="100%"
+        maxW="440px"
+        mx={4}
+        boxShadow="xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Text fontSize="17px" fontWeight={700} color="gray.800" mb={1}>
+          {isPresetMode ? 'Use Group Offer Details' : 'Initiate Handshake'}
+        </Text>
+        <Text fontSize="13px" color="gray.500" mb={5}>
+          {isPresetMode
+            ? 'This group offer already has a fixed location and date. The requester will review and approve these preset details.'
+            : 'Provide session details. The requester will review and approve.'
+          }
+        </Text>
+
+        {isPresetMode && presetDetails ? (
+          <Stack gap={4}>
+            {requiresLocation && presetDetails.exactLocation.trim() && (
+              <Box>
+                <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Location</Text>
+                <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
+                  <Text fontSize="13px" color="gray.800">{presetDetails.exactLocation}</Text>
+                </Box>
+              </Box>
+            )}
+            <Box>
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Duration</Text>
+              <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
+                <Text fontSize="13px" color="gray.800">{presetDetails.exactDuration}h</Text>
+              </Box>
+            </Box>
+            <Box>
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Scheduled Date & Time</Text>
+              <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
+                <Text fontSize="13px" color="gray.800">{formatEventDateTime(presetDetails.scheduledTime)}</Text>
+              </Box>
+            </Box>
+            {requiresLocation && presetDetails.locationGuide?.trim() && (
+              <Box>
+                <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Location Guide</Text>
+                <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
+                  <Text fontSize="13px" color="gray.800">{presetDetails.locationGuide.trim()}</Text>
+                </Box>
+              </Box>
+            )}
+          </Stack>
+        ) : (
+          <Stack gap={4}>
+            {requiresLocation && (
+              <Box>
+                <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
+                  Exact Location
+                </Text>
+                <LocationPickerMap
+                  value={location}
+                  onChange={(value, coords) => {
+                    setLocation(value)
+                    setLocationCoords(coords ?? null)
+                  }}
+                  height="220px"
+                />
+              </Box>
+            )}
+
+            <Box>
+              {useStrictDuration && serviceDuration != null && (
+                <Text fontSize="12px" color="gray.500" mb={1}>
+                  Original post: {Number(serviceDuration)} hours
+                </Text>
+              )}
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
+                {useStrictDuration ? 'Agreed duration (hours)' : 'Duration (hours)'}
+              </Text>
+              <Input
+                type="number"
+                min={1}
+                max={useStrictDuration ? 10 : undefined}
+                step={1}
+                placeholder={useStrictDuration ? 'e.g. 1' : undefined}
+                value={duration}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10)
+                  if (isNaN(v)) return
+                  const clamped = useStrictDuration ? Math.min(10, Math.max(1, v)) : Math.max(1, v)
+                  setDuration(clamped)
+                }}
+                size="sm"
+                borderRadius="8px"
+                w="120px"
+                inputMode="numeric"
+              />
+              {useStrictDuration && (
+                <Text fontSize="11px" color="gray.500" mt={1}>
+                  Time credit will be based on this agreed duration.
+                </Text>
+              )}
+            </Box>
+
+            <Box>
+              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
+                Scheduled Date & Time
+              </Text>
+              <Flex gap={2} align="center">
+                <Input
+                  type="date"
+                  min={minDate}
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  size="sm"
+                  borderRadius="8px"
+                  flex={1}
+                />
+                <Flex gap={1} align="center">
+                  <select
+                    value={time ? time.split(':')[0] ?? '09' : '09'}
+                    onChange={(e) => {
+                      const h = (e.target as HTMLSelectElement).value
+                      const m = (time && time.includes(':')) ? time.split(':')[1] ?? '00' : '00'
+                      setTime(`${h}:${m}`)
+                    }}
+                    style={{
+                      borderRadius: '8px',
+                      border: '1px solid #E5E7EB',
+                      padding: '6px 8px',
+                      fontSize: '13px',
+                      background: 'white',
+                      width: '64px',
+                    }}
+                  >
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <option key={i} value={String(i).padStart(2, '0')}>
+                        {String(i).padStart(2, '0')}
+                      </option>
+                    ))}
+                  </select>
+                  <Text color="gray.500">:</Text>
+                  <select
+                    value={time && time.includes(':') ? time.split(':')[1] ?? '00' : '00'}
+                    onChange={(e) => {
+                      const m = (e.target as HTMLSelectElement).value
+                      const h = (time && time.includes(':')) ? time.split(':')[0] ?? '09' : '09'
+                      setTime(`${h}:${m}`)
+                    }}
+                    style={{
+                      borderRadius: '8px',
+                      border: '1px solid #E5E7EB',
+                      padding: '6px 8px',
+                      fontSize: '13px',
+                      background: 'white',
+                      width: '64px',
+                    }}
+                  >
+                    {['00', '15', '30', '45'].map((min) => (
+                      <option key={min} value={min}>{min}</option>
+                    ))}
+                  </select>
+                </Flex>
+              </Flex>
+            </Box>
+          </Stack>
+        )}
+
+        {error && (
+          <Text fontSize="12px" color="red.500" mt={3}>
+            {error}
+          </Text>
+        )}
+
+        <Flex gap={2} mt={5} justify="flex-end">
+          <Button size="sm" variant="ghost" onClick={onClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            colorScheme="green"
+            onClick={handleSubmit}
+            loading={loading}
+            style={{ background: '#16a34a', color: 'white' }}
+          >
+            {isPresetMode ? 'Share Fixed Details' : 'Send Details'}
+          </Button>
+        </Flex>
+      </Box>
+    </Box>
+  )
+}
