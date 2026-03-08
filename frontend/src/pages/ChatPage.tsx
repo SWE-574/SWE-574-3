@@ -1220,16 +1220,37 @@ function isUrlSegment(segment: string): boolean {
   return segment.startsWith('http://') || segment.startsWith('https://')
 }
 
-function getUrlLabel(segment: string): string {
+function splitLinkAndTrailingPunctuation(segment: string): { href: string; trailing: string } {
+  let href = segment
+  let trailing = ''
+
+  const punctuation = href.match(/[.,;:!?]+$/)?.[0] ?? ''
+  if (punctuation) {
+    href = href.slice(0, -punctuation.length)
+    trailing = punctuation + trailing
+  }
+
+  while (href.endsWith(')')) {
+    const openParenCount = (href.match(/\(/g) ?? []).length
+    const closeParenCount = (href.match(/\)/g) ?? []).length
+    if (closeParenCount <= openParenCount) break
+    href = href.slice(0, -1)
+    trailing = `)${trailing}`
+  }
+
+  return { href, trailing }
+}
+
+function getUrlLabel(href: string): string {
   try {
-    const url = new URL(segment.replace(/[.,;:)!?]+$/, ''))
+    const url = new URL(href)
     if (url.hostname.includes('google.com') && url.pathname.startsWith('/maps')) {
       return 'Open in Google Maps'
     }
   } catch {
     // Fall back to the raw segment when URL parsing fails.
   }
-  return segment
+  return href
 }
 
 /** Splits message body into segments and returns React nodes; URLs become clickable links. */
@@ -1237,24 +1258,23 @@ function linkifyMessageBody(body: string, linkColor: string): ReactNode[] {
   const segments = body.split(URL_IN_MESSAGE)
   return segments.map((segment, i) => {
     if (isUrlSegment(segment)) {
-      const trailingPunctuation = segment.match(/[.,;:)!?]+$/)?.[0] ?? ''
-      const href = trailingPunctuation ? segment.slice(0, -trailingPunctuation.length) : segment
+      const { href, trailing } = splitLinkAndTrailingPunctuation(segment)
       return (
-<span key={i}>
-  <Link
-    href={href}
-    target="_blank"
-    rel="noopener noreferrer"
-    color={linkColor}
-    fontWeight={600}
-    textDecoration="underline"
-    _hover={{ opacity: 0.9 }}
-    style={{ wordBreak: 'break-all' }}
-  >
-    {getUrlLabel(segment)}
-  </Link>
-  {trailingPunctuation}
-</span>
+        <span key={i}>
+          <Link
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            color={linkColor}
+            fontWeight={600}
+            textDecoration="underline"
+            _hover={{ opacity: 0.9 }}
+            style={{ wordBreak: 'break-all' }}
+          >
+            {getUrlLabel(href)}
+          </Link>
+          {trailing}
+        </span>
       )
     }
     return segment
@@ -1600,6 +1620,18 @@ export default function ChatPage() {
   paramIdRef.current    = paramId
 
   const selectedConv     = conversations.find((c) => c.handshake_id === selectedId) ?? null
+  const selectedGroupConversation = useMemo(
+    () => conversations.find((c) => c.service_id === groupServiceId) ?? null,
+    [conversations, groupServiceId],
+  )
+  const groupRequiresSession = useMemo(
+    () => (
+      selectedGroupConversation?.schedule_type === 'Recurrent'
+      && selectedGroupConversation?.service_type !== 'Event'
+      && (selectedGroupConversation?.max_participants ?? 0) > 1
+    ),
+    [selectedGroupConversation],
+  )
   const refreshConversations = useCallback(() => setConvRefreshTick((n) => n + 1), [])
 
   useEffect(() => {
@@ -1653,7 +1685,23 @@ export default function ChatPage() {
   const fetchGroupMessages = useCallback(async (signal: AbortSignal) => {
     if (!groupServiceId) return
     try {
-      const fetched = await groupChatAPI.getMessages(groupServiceId, signal, groupSessionId)
+      let resolvedSessionId = groupSessionId
+      if (!resolvedSessionId) {
+        // Resolve session first for recurrent group chats to avoid an expected 400 round-trip.
+        const sessions = await groupChatAPI.getSessions(groupServiceId, signal)
+        const firstSession = sessions[0]
+        if (firstSession) {
+          resolvedSessionId = firstSession.id
+          setGroupSessionId((prev) => prev ?? firstSession.id)
+        } else if (groupRequiresSession) {
+          setGroupMessages([])
+          setGroupParticipants([])
+          setGroupLoadError("Group chat isn't available for this post yet. It will appear once this post has active participants.")
+          return
+        }
+      }
+
+      const fetched = await groupChatAPI.getMessages(groupServiceId, signal, resolvedSessionId)
       setGroupLoadError(null)
       setGroupMessages(fetched.messages)
       setGroupParticipants(fetched.participants)
@@ -1678,7 +1726,7 @@ export default function ChatPage() {
         throw err
       }
     }
-  }, [groupServiceId, groupSessionId])
+  }, [groupServiceId, groupSessionId, groupRequiresSession])
 
   // Initial load from DB when conversation is selected (so old messages show even when polling is off in dev)
   useEffect(() => {
@@ -1753,7 +1801,7 @@ export default function ChatPage() {
     url: groupWsUrl,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onMessage: handleGroupWsMessage as any,
-    enabled: !!groupServiceId && isAuthenticated,
+    enabled: !!groupServiceId && isAuthenticated && (!groupRequiresSession || !!groupSessionId),
   })
 
   const selectConversation = useCallback((id: string) => {
