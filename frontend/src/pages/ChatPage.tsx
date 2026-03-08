@@ -1192,13 +1192,35 @@ function isUrlSegment(segment: string): boolean {
   return segment.startsWith('http://') || segment.startsWith('https://')
 }
 
+function splitLinkAndTrailingPunctuation(segment: string): { href: string; trailing: string } {
+  let href = segment
+  let trailing = ''
+
+  // Strip sentence punctuation first (excluding parentheses).
+  const punctuation = href.match(/[.,;:!?]+$/)?.[0] ?? ''
+  if (punctuation) {
+    href = href.slice(0, -punctuation.length)
+    trailing = punctuation + trailing
+  }
+
+  // Strip only unmatched trailing ')' so valid URLs ending with ')' still work.
+  while (href.endsWith(')')) {
+    const openParenCount = (href.match(/\(/g) ?? []).length
+    const closeParenCount = (href.match(/\)/g) ?? []).length
+    if (closeParenCount <= openParenCount) break
+    href = href.slice(0, -1)
+    trailing = `)${trailing}`
+  }
+
+  return { href, trailing }
+}
+
 /** Splits message body into segments and returns React nodes; URLs become clickable links. */
 function linkifyMessageBody(body: string, linkColor: string): ReactNode[] {
   const segments = body.split(URL_IN_MESSAGE)
   return segments.map((segment, i) => {
     if (isUrlSegment(segment)) {
-      const trailingPunctuation = segment.match(/[.,;:)!?]+$/)?.[0] ?? ''
-      const href = trailingPunctuation ? segment.slice(0, -trailingPunctuation.length) : segment
+      const { href, trailing } = splitLinkAndTrailingPunctuation(segment)
       return (
         <span key={i}>
           <Link
@@ -1213,7 +1235,7 @@ function linkifyMessageBody(body: string, linkColor: string): ReactNode[] {
           >
             {href}
           </Link>
-          {trailingPunctuation}
+          {trailing}
         </span>
       )
     }
