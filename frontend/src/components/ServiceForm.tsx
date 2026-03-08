@@ -10,6 +10,7 @@ import { FiX, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCi
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
 import WikidataTagAutocomplete from './WikidataTagAutocomplete'
+import { LocationPickerMap } from './LocationPickerMap'
 import type { Service, ServiceMedia, Tag } from '@/types'
 
 import {
@@ -206,9 +207,9 @@ function UseMyLocationButton({
           const data = await res.json() as { features?: GeoFeature[] }
           const f    = data.features?.[0]
           const label = f ? extractDistrict(f) : `${lat.toFixed(5)}, ${lng.toFixed(5)}`
-          onLocated({ label, lat, lng })
+          onLocated({ label, fullAddress: f?.place_name ?? label, district: label, lat, lng })
         } catch {
-          onLocated({ label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, lat, lng })
+          onLocated({ label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, fullAddress: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, district: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, lat, lng })
         } finally { setLoading(false) }
       },
       () => { setErr('Could not get your location'); setLoading(false) },
@@ -244,6 +245,8 @@ function UseMyLocationButton({
 
 interface LocationValue {
   label: string
+  fullAddress?: string
+  district?: string
   lat: number
   lng: number
 }
@@ -253,11 +256,15 @@ function LocationSearch({
   value,
   onChange,
   error,
+  mode = 'district',
+  placeholder,
 }: {
   accent: string
   value: LocationValue | null
   onChange: (v: LocationValue | null) => void
   error?: string
+  mode?: 'district' | 'full'
+  placeholder?: string
 }) {
   const [query, setQuery]       = useState(value?.label ?? '')
   const [results, setResults]   = useState<GeoFeature[]>([])
@@ -305,11 +312,11 @@ function LocationSearch({
 
   const handleSelect = (f: GeoFeature) => {
     const [lng, lat] = f.center
-    const label = extractDistrict(f)   // store & display only the district name
+    const label = mode === 'district' ? extractDistrict(f) : f.place_name
     setQuery(label)
     setShowDrop(false)
     setResults([])
-    onChange({ label, lat, lng })
+    onChange({ label, fullAddress: f.place_name, district: extractDistrict(f), lat, lng })
   }
 
   const handleClear = () => {
@@ -342,7 +349,7 @@ function LocationSearch({
             onChange={(e) => { setQuery(e.target.value); setShowDrop(true); if (value) onChange(null) }}
             onFocus={() => { if (results.length > 0) setShowDrop(true) }}
             onBlur={() => setTimeout(() => setShowDrop(false), 160)}
-            placeholder="Search address — e.g. Bağdat Caddesi, Kadıköy"
+            placeholder={placeholder ?? 'Search address — e.g. Bağdat Caddesi, Kadıköy'}
             style={{
               flex: 1, border: 'none', outline: 'none', background: 'transparent',
               fontSize: '14px', color: GRAY800, padding: '10px 0',
@@ -417,6 +424,10 @@ export default function ServiceForm({
   // Location (set by Mapbox geocoding)
   const [locationValue, setLocationValue]   = useState<LocationValue | null>(null)
   const [locationError, setLocationError]   = useState<string | undefined>()
+  const [sessionExactLocation, setSessionExactLocation] = useState('')
+  const [sessionExactLocationCoords, setSessionExactLocationCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [sessionLocationGuide, setSessionLocationGuide] = useState('')
+  const [sessionExactLocationError, setSessionExactLocationError] = useState<string | undefined>()
 
   // Media
   const [mediaFiles, setMediaFiles]         = useState<File[]>([])
@@ -444,6 +455,30 @@ export default function ServiceForm({
   const isGroupOffer = type === 'Offer' && Number(maxParticipants) > 1
   const isFixedGroupOffer = type === 'Offer' && schedType === 'One-Time' && Number(maxParticipants) > 1
   const [onlineLocation, setOnlineLocation] = useState('')
+
+  const syncExactFromLocation = useCallback((value: LocationValue) => {
+    setSessionExactLocation(value.fullAddress ?? value.label)
+    setSessionExactLocationCoords({ lat: value.lat, lng: value.lng })
+    setSessionExactLocationError(undefined)
+  }, [])
+
+  const syncPublicFromExact = useCallback((value: {
+    district?: string | null
+    fullAddress?: string | null
+    lat: number
+    lng: number
+  }) => {
+    const districtLabel = (value.district || value.fullAddress || '').trim()
+    if (!districtLabel) return
+    setLocationValue({
+      label: districtLabel,
+      district: districtLabel,
+      fullAddress: value.fullAddress ?? districtLabel,
+      lat: value.lat,
+      lng: value.lng,
+    })
+    setLocationError(undefined)
+  }, [])
 
   // Recurring group offers are allowed — no forced override needed
 
@@ -481,6 +516,15 @@ export default function ServiceForm({
       }
     } else if (initialService.location_type === 'Online') {
       setOnlineLocation(initialService.location_area ?? '')
+    }
+    setSessionLocationGuide(initialService.session_location_guide ?? '')
+    if (initialService.session_exact_location) {
+      setSessionExactLocation(initialService.session_exact_location)
+      const exactLat = initialService.session_exact_location_lat == null ? null : Number(initialService.session_exact_location_lat)
+      const exactLng = initialService.session_exact_location_lng == null ? null : Number(initialService.session_exact_location_lng)
+      if (exactLat != null && exactLng != null && Number.isFinite(exactLat) && Number.isFinite(exactLng)) {
+        setSessionExactLocationCoords({ lat: exactLat, lng: exactLng })
+      }
     }
 
     if ((initialService.type === 'Event' || (
@@ -618,11 +662,20 @@ export default function ServiceForm({
         setLocationError('Please search and select a location')
         return
       }
+      if (isFixedGroupOffer && !sessionExactLocation.trim()) {
+        setSessionExactLocationError('Please enter the exact address that will be shared in session details')
+        return
+      }
+      if (isFixedGroupOffer && !sessionExactLocationCoords) {
+        setSessionExactLocationError('Please select the exact address from search results or pick it on the map so coordinates are saved')
+        return
+      }
     } else if (isFixedGroupOffer && !onlineLocation.trim()) {
       setLocationError('Please enter the meeting link or platform')
       return
     }
     setLocationError(undefined)
+    setSessionExactLocationError(undefined)
 
     // Validate scheduled_time for Events and fixed group offers
     if (type === 'Event' || isFixedGroupOffer) {
@@ -678,12 +731,36 @@ export default function ServiceForm({
         fd.append('schedule_details', values.schedule_details ?? '')
         if (values.location_type === 'In-Person' && locationValue) {
           fd.append('location_area', locationValue.label.slice(0, 100))
+          if (isFixedGroupOffer && sessionExactLocation.trim()) {
+            fd.append('session_exact_location', sessionExactLocation.trim().slice(0, 255))
+            if (sessionExactLocationCoords) {
+              fd.append('session_exact_location_lat', sessionExactLocationCoords.lat.toFixed(6))
+              fd.append('session_exact_location_lng', sessionExactLocationCoords.lng.toFixed(6))
+            } else {
+              fd.append('session_exact_location_lat', '')
+              fd.append('session_exact_location_lng', '')
+            }
+            fd.append('session_location_guide', sessionLocationGuide.trim().slice(0, 255))
+          } else {
+            fd.append('session_exact_location', '')
+            fd.append('session_exact_location_lat', '')
+            fd.append('session_exact_location_lng', '')
+            fd.append('session_location_guide', '')
+          }
           fd.append('location_lat', locationValue.lat.toFixed(6))
           fd.append('location_lng', locationValue.lng.toFixed(6))
         } else if (values.location_type === 'Online' && isFixedGroupOffer) {
           fd.append('location_area', onlineLocation.trim().slice(0, 100))
+          fd.append('session_exact_location', '')
+          fd.append('session_exact_location_lat', '')
+          fd.append('session_exact_location_lng', '')
+          fd.append('session_location_guide', '')
         } else {
           fd.append('location_area', '')
+          fd.append('session_exact_location', '')
+          fd.append('session_exact_location_lat', '')
+          fd.append('session_exact_location_lng', '')
+          fd.append('session_location_guide', '')
         }
         if ((type === 'Event' || isFixedGroupOffer) && eventDate && eventTime) {
           fd.append('scheduled_time', new Date(`${eventDate}T${eventTime}:00`).toISOString())
@@ -722,11 +799,31 @@ export default function ServiceForm({
         if (values.location_type === 'In-Person' && locationValue) {
           // Truncate label to 100 chars (backend max_length) to avoid DRF validation errors
           fd.append('location_area', locationValue.label.slice(0, 100))
+          if (isFixedGroupOffer && sessionExactLocation.trim()) {
+            fd.append('session_exact_location', sessionExactLocation.trim().slice(0, 255))
+            if (sessionExactLocationCoords) {
+              fd.append('session_exact_location_lat', sessionExactLocationCoords.lat.toFixed(6))
+              fd.append('session_exact_location_lng', sessionExactLocationCoords.lng.toFixed(6))
+            } else {
+              fd.append('session_exact_location_lat', '')
+              fd.append('session_exact_location_lng', '')
+            }
+            fd.append('session_location_guide', sessionLocationGuide.trim().slice(0, 255))
+          } else {
+            fd.append('session_exact_location', '')
+            fd.append('session_exact_location_lat', '')
+            fd.append('session_exact_location_lng', '')
+            fd.append('session_location_guide', '')
+          }
           // Round to 6 decimal places — backend DecimalField(max_digits=9, decimal_places=6)
           fd.append('location_lat',  locationValue.lat.toFixed(6))
           fd.append('location_lng',  locationValue.lng.toFixed(6))
         } else if (values.location_type === 'Online' && isFixedGroupOffer) {
           fd.append('location_area', onlineLocation.trim().slice(0, 100))
+          fd.append('session_exact_location', '')
+          fd.append('session_exact_location_lat', '')
+          fd.append('session_exact_location_lng', '')
+          fd.append('session_location_guide', '')
         }
         fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
         fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
@@ -864,21 +961,111 @@ export default function ServiceForm({
             </Box>
 
             {locType === 'In-Person' && (
-              <Box>
-                <Flex align="center" justify="space-between" mb="6px">
-                  <Label required>
-                    <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
-                    Address
-                  </Label>
-                  <UseMyLocationButton accent={accent} onLocated={(v) => { setLocationValue(v); setLocationError(undefined) }} />
-                </Flex>
-                <LocationSearch
-                  accent={accent}
-                  value={locationValue}
-                  onChange={(v) => { setLocationValue(v); if (v) setLocationError(undefined) }}
-                  error={locationError}
-                />
-              </Box>
+              <Stack gap={4}>
+                <Box>
+                  <Flex align="center" justify="space-between" mb="6px">
+                    <Label required>
+                      <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
+                      {isFixedGroupOffer ? 'Public district / area' : 'Address'}
+                    </Label>
+                    <UseMyLocationButton
+                      accent={accent}
+                      onLocated={(v) => {
+                        setLocationValue(v)
+                        setLocationError(undefined)
+                        if (isFixedGroupOffer) {
+                          syncExactFromLocation(v)
+                        }
+                      }}
+                    />
+                  </Flex>
+                  <LocationSearch
+                    accent={accent}
+                    value={locationValue}
+                    onChange={(v) => {
+                      setLocationValue(v)
+                      if (v) {
+                        setLocationError(undefined)
+                        if (isFixedGroupOffer) {
+                          syncExactFromLocation(v)
+                        }
+                      }
+                    }}
+                    error={locationError}
+                  />
+                  {isFixedGroupOffer && (
+                    <Text fontSize="11px" color={GRAY400} mt="5px">
+                      This public area is shown on the listing and service detail before approval.
+                    </Text>
+                  )}
+                </Box>
+
+                {isFixedGroupOffer && (
+                  <Box>
+                    <Label required>
+                      <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
+                      Exact address for session details
+                    </Label>
+                    <LocationSearch
+                      accent={accent}
+                      value={sessionExactLocationCoords ? {
+                        label: sessionExactLocation,
+                        fullAddress: sessionExactLocation,
+                        district: locationValue?.label,
+                        lat: sessionExactLocationCoords.lat,
+                        lng: sessionExactLocationCoords.lng,
+                      } : null}
+                      onChange={(v) => {
+                        if (v) {
+                          setSessionExactLocation(v.fullAddress ?? v.label)
+                          setSessionExactLocationCoords({ lat: v.lat, lng: v.lng })
+                          setSessionExactLocationError(undefined)
+                          syncPublicFromExact({
+                            district: v.district,
+                            fullAddress: v.fullAddress ?? v.label,
+                            lat: v.lat,
+                            lng: v.lng,
+                          })
+                        } else {
+                          setSessionExactLocationCoords(null)
+                        }
+                      }}
+                      error={sessionExactLocationError}
+                      mode="full"
+                      placeholder="Search the exact meeting address — e.g. Moda Sahili No: 12, Kadıköy"
+                    />
+                    <Text fontSize="11px" color={GRAY400} mt="5px" mb="8px">
+                      You can also fine-tune it on the map below.
+                    </Text>
+                    <LocationPickerMap
+                      value={sessionExactLocation}
+                      coords={sessionExactLocationCoords}
+                      onChange={(value, coords, meta) => {
+                        setSessionExactLocation(value)
+                        setSessionExactLocationCoords(coords ?? null)
+                        if (coords) {
+                          syncPublicFromExact({
+                            district: meta?.district ?? null,
+                            fullAddress: meta?.fullAddress ?? value,
+                            lat: coords.lat,
+                            lng: coords.lng,
+                          })
+                        }
+                        if (value.trim() && coords) setSessionExactLocationError(undefined)
+                      }}
+                      height="220px"
+                      auxiliaryLabel="Location guide (optional)"
+                      auxiliaryValue={sessionLocationGuide}
+                      auxiliaryPlaceholder="Near of the park"
+                      onAuxiliaryChange={setSessionLocationGuide}
+                    />
+                    <ErrTxt msg={sessionExactLocationError} />
+                    <Text fontSize="11px" color={AMBER} mt="5px">
+                      This exact address will be shared when you send the fixed session details to interested participants.
+                    </Text>
+                  </Box>
+                )}
+              </Stack>
             )}
 
             {locType === 'Online' && isFixedGroupOffer && (

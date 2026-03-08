@@ -18,8 +18,10 @@ interface Props {
   onSubmit: (data: InitiatePayload) => Promise<void>
   serviceType?: string
   scheduledTime?: string | null
+  defaultLocation?: string | null
   presetDetails?: {
     exactLocation: string
+    locationGuide?: string | null
     exactDuration: number
     scheduledTime: string
   } | null
@@ -35,10 +37,12 @@ export function HandshakeDetailsModal({
   onSubmit,
   serviceType,
   scheduledTime,
+  defaultLocation,
   presetDetails,
   serviceDuration,
 }: Props) {
   const [location, setLocation] = useState('')
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [duration, setDuration] = useState<number>(1)
   const [date, setDate] = useState('')
   const [time, setTime] = useState('09:00')
@@ -51,7 +55,11 @@ export function HandshakeDetailsModal({
     if (useStrictDuration && serviceDuration != null) {
       setDuration(Math.max(1, Math.min(10, Math.round(Number(serviceDuration)))))
     }
-  }, [isOpen, presetDetails, serviceDuration, useStrictDuration])
+    if (defaultLocation) {
+      setLocation(defaultLocation)
+      setLocationCoords(null)
+    }
+  }, [defaultLocation, isOpen, presetDetails, serviceDuration, useStrictDuration])
 
   if (!isOpen) return null
 
@@ -128,7 +136,15 @@ export function HandshakeDetailsModal({
 
     setLoading(true)
     try {
-      await onSubmit({ exact_location: location.trim(), exact_duration: duration, scheduled_time })
+      await onSubmit({
+        exact_location: location.trim(),
+        exact_duration: duration,
+        scheduled_time,
+        ...(locationCoords && {
+          exact_location_lat: locationCoords.lat,
+          exact_location_lng: locationCoords.lng,
+        }),
+      })
       onClose()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
@@ -189,6 +205,14 @@ export function HandshakeDetailsModal({
                 <Text fontSize="13px" color="gray.800">{formatEventDateTime(presetDetails.scheduledTime)}</Text>
               </Box>
             </Box>
+            {presetDetails.locationGuide?.trim() && (
+              <Box>
+                <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Location Guide</Text>
+                <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
+                  <Text fontSize="13px" color="gray.800">{presetDetails.locationGuide.trim()}</Text>
+                </Box>
+              </Box>
+            )}
           </Stack>
         ) : (
           <Stack gap={4}>
@@ -198,7 +222,10 @@ export function HandshakeDetailsModal({
               </Text>
               <LocationPickerMap
                 value={location}
-                onChange={setLocation}
+                onChange={(value, coords) => {
+                  setLocation(value)
+                  setLocationCoords(coords ?? null)
+                }}
                 height="220px"
               />
             </Box>

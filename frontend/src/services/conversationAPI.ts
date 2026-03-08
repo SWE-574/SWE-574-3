@@ -54,9 +54,14 @@ export interface ChatConversation {
   evaluation_window_ends_at: string | null
   evaluation_window_closed_at: string | null
   exact_location: string | null
+  exact_location_maps_url?: string | null
+  exact_location_guide?: string | null
   exact_duration: number | null
   scheduled_time: string | null
   service_location_area?: string | null
+  service_exact_location?: string | null
+  service_exact_location_maps_url?: string | null
+  service_location_guide?: string | null
   service_scheduled_time?: string | null
   provisioned_hours: number | null
   user_has_reviewed: boolean

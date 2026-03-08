@@ -33,6 +33,9 @@ export interface Handshake {
   /** True if the current user has already submitted a review for this handshake */
   user_has_reviewed?: boolean
   exact_location?: string | null
+  /** Google Maps URL for the exact location (set when session details are initiated). */
+  exact_location_maps_url?: string | null
+  exact_location_guide?: string | null
   exact_duration?: number | null
   scheduled_time?: string | null
   cancellation_requested_by_id?: string | null
@@ -49,6 +52,9 @@ export interface InitiatePayload {
   exact_location: string
   exact_duration: number
   scheduled_time: string
+  /** Optional coordinates; when provided, backend builds Google Maps URL from them. */
+  exact_location_lat?: number
+  exact_location_lng?: number
 }
 
 export type HandshakeIssueType = 'no_show' | 'service_issue' | 'harassment' | 'spam' | 'scam' | 'other'

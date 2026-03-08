@@ -13,6 +13,11 @@ interface Props {
   isOpen: boolean
   onClose: () => void
   exactLocation: string
+  /** When set, session details were stored with a Google Maps URL (from coordinates or address). */
+  exactLocationMapsUrl?: string | null
+  locationGuide?: string | null
+  locationLabel?: string
+  locationNote?: string | null
   exactDuration: number
   scheduledTime: string
   onApprove: () => Promise<void>
@@ -55,6 +60,10 @@ export function ProviderDetailsModal({
   isOpen,
   onClose,
   exactLocation,
+  exactLocationMapsUrl,
+  locationGuide,
+  locationLabel = 'Location',
+  locationNote,
   exactDuration,
   scheduledTime,
   onApprove,
@@ -97,14 +106,19 @@ export function ProviderDetailsModal({
             <Box color="gray.400" mt="2px"><FiMapPin size={16} /></Box>
             <Box flex={1}>
               <Text fontSize="11px" color="gray.400" fontWeight={600} textTransform="uppercase" letterSpacing="0.05em">
-                Location
+                {locationLabel}
               </Text>
               <Text fontSize="14px" color="gray.800" fontWeight={600}>
                 {exactLocation}
               </Text>
+              {locationNote && (
+                <Text fontSize="12px" color="gray.500" mt={1}>
+                  {locationNote}
+                </Text>
+              )}
               {exactLocation && (
                 <Link
-                  href={buildMapsUrl(exactLocation)}
+                  href={exactLocationMapsUrl || buildMapsUrl(exactLocation)}
                   target="_blank"
                   rel="noopener noreferrer"
                   fontSize="13px"
@@ -114,7 +128,7 @@ export function ProviderDetailsModal({
                   display="inline-block"
                   _hover={{ textDecoration: 'underline' }}
                 >
-                  Open in Maps
+                  Open in Google Maps
                 </Link>
               )}
             </Box>
@@ -129,6 +143,13 @@ export function ProviderDetailsModal({
             label="Scheduled Time"
             value={formatDateTime(scheduledTime)}
           />
+          {locationGuide?.trim() && (
+            <DetailRow
+              icon={<FiMapPin size={16} />}
+              label="Location Guide"
+              value={locationGuide.trim()}
+            />
+          )}
         </Stack>
 
         <Flex gap={2} mt={5} justify="flex-end">

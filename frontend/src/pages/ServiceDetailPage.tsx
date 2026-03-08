@@ -1077,6 +1077,8 @@ export default function ServiceDetailPage() {
                   />
                 </Grid>
 
+                
+
                 {/* Slot progress bar */}
                 {service.max_participants > 1 && (
                   <Box mb={6} border={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? `1px solid ${AMBER}60` : 'none'}
