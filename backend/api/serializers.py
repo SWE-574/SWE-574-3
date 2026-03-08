@@ -364,7 +364,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         model = Service
         fields = [
             'id', 'user', 'title', 'description', 'type', 'duration',
-            'location_type', 'location_area', 'location_lat', 'location_lng',
+            'location_type', 'location_area', 'session_exact_location', 'session_exact_location_lat', 'session_exact_location_lng', 'session_location_guide', 'location_lat', 'location_lng',
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
@@ -484,7 +484,11 @@ class ServiceSerializer(serializers.ModelSerializer):
         service_type = data.get('type', getattr(instance, 'type', None))
         schedule_type = data.get('schedule_type', getattr(instance, 'schedule_type', None))
         max_participants = data.get('max_participants', getattr(instance, 'max_participants', 1))
+        location_type = data.get('location_type', getattr(instance, 'location_type', None))
         location_area = data.get('location_area', getattr(instance, 'location_area', ''))
+        session_exact_location = data.get('session_exact_location', getattr(instance, 'session_exact_location', ''))
+        session_exact_location_lat = data.get('session_exact_location_lat', getattr(instance, 'session_exact_location_lat', None))
+        session_exact_location_lng = data.get('session_exact_location_lng', getattr(instance, 'session_exact_location_lng', None))
         scheduled_time = data.get('scheduled_time', getattr(instance, 'scheduled_time', None))
 
         if service_type == 'Need':
@@ -499,7 +503,15 @@ class ServiceSerializer(serializers.ModelSerializer):
         if is_fixed_group_offer:
             if not (location_area or '').strip():
                 raise serializers.ValidationError({
-                    'location_area': 'One-time group offers require an exact meeting location or link.',
+                    'location_area': 'One-time group offers require a public district or area for the listing.',
+                })
+            if location_type == 'In-Person' and not (session_exact_location or '').strip():
+                raise serializers.ValidationError({
+                    'session_exact_location': 'One-time in-person group offers require an exact address to share in session details.',
+                })
+            if location_type == 'In-Person' and (session_exact_location_lat is None or session_exact_location_lng is None):
+                raise serializers.ValidationError({
+                    'session_exact_location': 'Please choose the exact address from search results or pick it on the map so coordinates are saved.',
                 })
             if scheduled_time is None:
                 raise serializers.ValidationError({
@@ -509,6 +521,11 @@ class ServiceSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'scheduled_time': 'One-time group offers must be scheduled in the future.',
                 })
+        elif 'session_exact_location' not in data:
+            data['session_exact_location'] = ''
+            data['session_exact_location_lat'] = None
+            data['session_exact_location_lng'] = None
+            data['session_location_guide'] = ''
         return data
 
     @extend_schema_field(UserSummarySerializer)
@@ -597,6 +614,12 @@ class ServiceSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         """Replace exact coordinates with a ~1 km privacy-fuzzed version before sending."""
         data = super().to_representation(instance)
+        request = self.context.get('request')
+        if request is None or not getattr(request, 'user', None) or request.user != instance.user:
+            data.pop('session_exact_location', None)
+            data.pop('session_exact_location_lat', None)
+            data.pop('session_exact_location_lng', None)
+            data.pop('session_location_guide', None)
         if instance.location_type == 'In-Person':
             lat, lng = self._real_coords(instance)
             if lat is not None:
@@ -691,6 +714,34 @@ class ServiceSerializer(serializers.ModelSerializer):
                 validated_data['location_lng'] = lng_decimal.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
             except (ValueError, TypeError, Exception):
                 validated_data.pop('location_lng', None)
+
+        if 'session_exact_location_lat' in validated_data and validated_data['session_exact_location_lat']:
+            from decimal import Decimal, ROUND_HALF_UP
+            try:
+                lat_value = validated_data['session_exact_location_lat']
+                if isinstance(lat_value, str):
+                    lat_decimal = Decimal(lat_value)
+                elif isinstance(lat_value, (int, float)):
+                    lat_decimal = Decimal(str(lat_value))
+                else:
+                    lat_decimal = lat_value
+                validated_data['session_exact_location_lat'] = lat_decimal.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
+            except (ValueError, TypeError, Exception):
+                validated_data.pop('session_exact_location_lat', None)
+
+        if 'session_exact_location_lng' in validated_data and validated_data['session_exact_location_lng']:
+            from decimal import Decimal, ROUND_HALF_UP
+            try:
+                lng_value = validated_data['session_exact_location_lng']
+                if isinstance(lng_value, str):
+                    lng_decimal = Decimal(lng_value)
+                elif isinstance(lng_value, (int, float)):
+                    lng_decimal = Decimal(str(lng_value))
+                else:
+                    lng_decimal = lng_value
+                validated_data['session_exact_location_lng'] = lng_decimal.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
+            except (ValueError, TypeError, Exception):
+                validated_data.pop('session_exact_location_lng', None)
         
         # Prefer explicit user passed via serializer.save(user=...)
         if 'user' not in validated_data:
@@ -881,6 +932,22 @@ class ServiceSerializer(serializers.ModelSerializer):
         validated_data.pop('wikidata_labels_json', '')
         media_order = validated_data.pop('media_order', [])
         replace_media = validated_data.pop('replace_media', False)
+
+        for coord_key in ('location_lat', 'location_lng', 'session_exact_location_lat', 'session_exact_location_lng'):
+            coord_value = validated_data.get(coord_key)
+            if not coord_value:
+                continue
+            from decimal import Decimal, ROUND_HALF_UP
+            try:
+                if isinstance(coord_value, str):
+                    coord_decimal = Decimal(coord_value)
+                elif isinstance(coord_value, (int, float)):
+                    coord_decimal = Decimal(str(coord_value))
+                else:
+                    coord_decimal = coord_value
+                validated_data[coord_key] = coord_decimal.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
+            except (ValueError, TypeError, Exception):
+                validated_data.pop(coord_key, None)
 
         service = super().update(instance, validated_data)
 
@@ -1370,7 +1437,7 @@ class HandshakeSerializer(serializers.ModelSerializer):
             'counterpart', 'is_current_user_provider',
             'status', 'provisioned_hours',
             'provider_confirmed_complete', 'receiver_confirmed_complete',
-            'exact_location', 'exact_duration', 'scheduled_time',
+            'exact_location', 'exact_location_maps_url', 'exact_location_guide', 'exact_duration', 'scheduled_time',
             'provider_initiated', 'requester_initiated',
             'cancellation_requested_by_id', 'cancellation_requested_by_name',
             'cancellation_requested_at', 'cancellation_reason',
