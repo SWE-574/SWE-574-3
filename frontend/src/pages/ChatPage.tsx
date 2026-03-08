@@ -1560,6 +1560,18 @@ export default function ChatPage() {
   paramIdRef.current    = paramId
 
   const selectedConv     = conversations.find((c) => c.handshake_id === selectedId) ?? null
+  const selectedGroupConversation = useMemo(
+    () => conversations.find((c) => c.service_id === groupServiceId) ?? null,
+    [conversations, groupServiceId],
+  )
+  const groupRequiresSession = useMemo(
+    () => (
+      selectedGroupConversation?.schedule_type === 'Recurrent'
+      && selectedGroupConversation?.service_type !== 'Event'
+      && (selectedGroupConversation?.max_participants ?? 0) > 1
+    ),
+    [selectedGroupConversation],
+  )
   const refreshConversations = useCallback(() => setConvRefreshTick((n) => n + 1), [])
 
   useEffect(() => {
@@ -1613,7 +1625,23 @@ export default function ChatPage() {
   const fetchGroupMessages = useCallback(async (signal: AbortSignal) => {
     if (!groupServiceId) return
     try {
-      const fetched = await groupChatAPI.getMessages(groupServiceId, signal, groupSessionId)
+      let resolvedSessionId = groupSessionId
+      if (!resolvedSessionId) {
+        // Resolve session first for recurrent group chats to avoid an expected 400 round-trip.
+        const sessions = await groupChatAPI.getSessions(groupServiceId, signal)
+        const firstSession = sessions[0]
+        if (firstSession) {
+          resolvedSessionId = firstSession.id
+          setGroupSessionId((prev) => prev ?? firstSession.id)
+        } else if (groupRequiresSession) {
+          setGroupMessages([])
+          setGroupParticipants([])
+          setGroupLoadError("Group chat isn't available for this post yet. It will appear once this post has active participants.")
+          return
+        }
+      }
+
+      const fetched = await groupChatAPI.getMessages(groupServiceId, signal, resolvedSessionId)
       setGroupLoadError(null)
       setGroupMessages(fetched.messages)
       setGroupParticipants(fetched.participants)
@@ -1638,7 +1666,7 @@ export default function ChatPage() {
         throw err
       }
     }
-  }, [groupServiceId, groupSessionId])
+  }, [groupServiceId, groupSessionId, groupRequiresSession])
 
   // Initial load from DB when conversation is selected (so old messages show even when polling is off in dev)
   useEffect(() => {
@@ -1713,7 +1741,7 @@ export default function ChatPage() {
     url: groupWsUrl,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onMessage: handleGroupWsMessage as any,
-    enabled: !!groupServiceId && isAuthenticated,
+    enabled: !!groupServiceId && isAuthenticated && (!groupRequiresSession || !!groupSessionId),
   })
 
   const selectConversation = useCallback((id: string) => {
