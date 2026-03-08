@@ -6,6 +6,15 @@
 
 ---
 
+## Deployment
+
+| Endpoint | URL | Description |
+|---|---|---|
+| Web Application | [apiary.selmangunes.com](https://apiary.selmangunes.com) | Main production |
+
+
+---
+
 ## Deliverables (with links)
 
 ### 1. Software Requirements Specification
@@ -53,3 +62,30 @@
 - Repository: [mobile-client](https://github.com/SWE-574/mobile-client)
 - Release: [0.1.0-alpha](https://github.com/SWE-574/mobile-client/releases/tag/customer-milestone-1) (tag: `customer-milestone-1`)
 - Build and run: [DEPLOYMENT.md](https://github.com/SWE-574/mobile-client/blob/main/deployment.md)
+
+
+
+### Standard Users
+
+| Name | Email | Location | Profile Focus |
+|---|---|---|---|
+| Elif Yılmaz | `elif@demo.com` | Beşiktaş, Istanbul | Freelance designer, cooking & kitchen skills |
+| Cem Demir | `cem@demo.com` | Kadıköy, Istanbul | Chess tutoring, genealogy research |
+| Ayşe Kaya | `ayse@demo.com` | Üsküdar, Istanbul | Urban gardening, community organizing |
+| Mehmet Özkan | `mehmet@demo.com` | Şişli, Istanbul | Retired teacher, digital help & local history |
+| Zeynep Arslan | `zeynep@demo.com` | Beyoğlu, Istanbul | Language teaching (Turkish/English/French) |
+| Can Şahin | `can@demo.com` | Beşiktaş, Istanbul | Photography, community photo walks |
+| Deniz Aydın | `deniz@demo.com` | Kadıköy, Istanbul | Tech support, smartphone & app help |
+| Burak Kurt | `burak@demo.com` | Kadıköy, Istanbul | Chess, music, low-pressure skill swaps |
+| Selin Aksoy | `selin@demo.com` | Beyoğlu, Istanbul | Community host, reading circles |
+| Emre Taş | `emre@demo.com` | Üsküdar, Istanbul | Urban walks, civic neighbor activities |
+| Yasemin Ergin | `yasemin@demo.com` | Fatih, Istanbul | Kitchen volunteer, storytelling, coffee rituals |
+| Murat Sezer | `murat@demo.com` | Kadıköy, Istanbul | New resident, board games & study sessions |
+| Levent Yalçın | `levent@demo.com` | Beyoğlu, Istanbul | Retired musician, singalongs, museum mornings |
+
+### Admin Account
+
+| Role | Email | Password | Access Scope |
+|---|---|---|---|
+| Admin / Moderator | `moderator@demo.com` | `demo123` | Report queue, user moderation, audit logs, service/forum moderation |
+
