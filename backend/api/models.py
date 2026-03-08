@@ -216,6 +216,10 @@ class Service(models.Model):
     duration = models.DecimalField(max_digits=5, decimal_places=2)
     location_type = models.CharField(max_length=10, choices=LOCATION_CHOICES)
     location_area = models.CharField(max_length=100, null=True, blank=True, help_text='General area for in-person services (e.g., Besiktas, Kadikoy)')
+    session_exact_location = models.CharField(max_length=255, null=True, blank=True, help_text='Exact address shown in session details for approved fixed group offers')
+    session_exact_location_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text='Latitude for the exact session address used by approved fixed group offers')
+    session_exact_location_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text='Longitude for the exact session address used by approved fixed group offers')
+    session_location_guide = models.CharField(max_length=255, null=True, blank=True, help_text='Optional landmark or building note shared alongside fixed group-offer session details')
     location_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text='Latitude for approximate location')
     location_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text='Longitude for approximate location')
     location = gis_models.PointField(null=True, blank=True, geography=True, srid=4326, help_text='PostGIS point for geospatial queries')
@@ -373,6 +377,8 @@ class Handshake(models.Model):  # noqa: E302
     provider_confirmed_complete = models.BooleanField(default=False)
     receiver_confirmed_complete = models.BooleanField(default=False)
     exact_location = models.CharField(max_length=255, null=True, blank=True, help_text='Exact location agreed upon by both parties')
+    exact_location_maps_url = models.URLField(max_length=512, null=True, blank=True, help_text='Google Maps URL for the exact location (built from coordinates or address when session details are set).')
+    exact_location_guide = models.CharField(max_length=255, null=True, blank=True, help_text='Optional landmark or building note shared alongside the exact session location')
     exact_duration = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text='Exact duration agreed upon by both parties')
     scheduled_time = models.DateTimeField(null=True, blank=True, help_text='Scheduled time for the service')
     provider_initiated = models.BooleanField(default=False, help_text='Whether provider has initiated the handshake')
@@ -671,10 +677,51 @@ class PublicChatMessage(models.Model):
         ordering = ['created_at']
 
 
+class GroupChatSession(models.Model):
+    """
+    Chat thread for a specific occurrence of a group/recurrent service.
+    For Recurrent offers, each occurrence (distinct scheduled_time) has its own session
+    so participants are isolated per occurrence. For One-Time/Event, group chat continues
+    to use service_id only (no session); this model is used only for Recurrent.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='group_chat_sessions'
+    )
+    scheduled_time = models.DateTimeField(
+        db_index=True,
+        help_text='Scheduled time for this occurrence; identifies the session with the service.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"GroupChatSession(service={self.service_id}, scheduled_time={self.scheduled_time})"
+
+    class Meta:
+        ordering = ['scheduled_time']
+        indexes = [
+            models.Index(fields=['service', 'scheduled_time'], name='api_gcs_service_scheduled_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['service', 'scheduled_time'],
+                name='api_groupchatsession_service_scheduled_uniq',
+            ),
+        ]
+
+
 class ServiceGroupChatMessage(models.Model):
     """Private group chat messages for a service — only accepted participants can read/write."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='group_chat_messages')
+    group_chat_session = models.ForeignKey(
+        GroupChatSession,
+        on_delete=models.CASCADE,
+        related_name='messages',
+        null=True,
+        blank=True,
+        help_text='When set (recurrent offers), message belongs to this session thread; when null, legacy service-level thread (One-Time/Event).',
+    )
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_chat_messages')
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
@@ -687,6 +734,7 @@ class ServiceGroupChatMessage(models.Model):
         indexes = [
             models.Index(fields=['service', 'created_at'], name='api_sgcm_service_created_idx'),
             models.Index(fields=['sender'], name='api_sgcm_sender_idx'),
+            models.Index(fields=['group_chat_session', 'created_at'], name='api_sgcm_session_created_idx'),
         ]
 
 

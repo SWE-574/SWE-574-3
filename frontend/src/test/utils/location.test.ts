@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { haversineDistance } from '@/utils/location'
+import { haversineDistance, buildMapsUrl } from '@/utils/location'
 
 describe('haversineDistance', () => {
   it('returns 0 for identical coordinates', () => {
@@ -24,5 +24,20 @@ describe('haversineDistance', () => {
   it('returns a positive value for distinct coordinates', () => {
     const dist = haversineDistance(0, 0, 1, 1)
     expect(dist).toBeGreaterThan(0)
+  })
+})
+
+describe('buildMapsUrl', () => {
+  it('returns a Google Maps search URL for the given address', () => {
+    const url = buildMapsUrl('Nagihan Sokak 3, Çekmeköy')
+    expect(url).toContain('https://www.google.com/maps/search/')
+    expect(url).toContain('api=1')
+    expect(url).toContain('query=')
+    expect(url).toContain(encodeURIComponent('Nagihan Sokak 3, Çekmeköy'))
+  })
+
+  it('encodes special characters in the address', () => {
+    const url = buildMapsUrl('Beşiktaş, İstanbul')
+    expect(url).toContain(encodeURIComponent('Beşiktaş, İstanbul'))
   })
 })

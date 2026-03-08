@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, Button, Flex, Text, Stack, Spinner, Link } from '@chakra-ui/react'
 import {
@@ -208,6 +208,10 @@ function isFixedGroupOffer(conv: ChatConversation): boolean {
   return conv.service_type === 'Offer' && conv.schedule_type === 'One-Time' && conv.max_participants > 1
 }
 
+function isGroupService(conv: ChatConversation): boolean {
+  return conv.max_participants > 1
+}
+
 function isGroupChatVisibleStatus(status: string): boolean {
   return ['accepted'].includes(status)
 }
@@ -307,14 +311,10 @@ function ServiceGroup({
     if (hasSelected) setOpen(true)
   }, [hasSelected])
 
-  // Show group chat row when service is One-Time with max_participants > 1
-  // and at least one accepted handshake exists. Events always get group chat.
   const representativeConv = convs[0]
   const isEvent = representativeConv?.service_type === 'Event'
   const isGroupEligible =
-    isEvent ||
-    (representativeConv?.schedule_type === 'One-Time' &&
-    representativeConv?.max_participants > 1)
+    isEvent || (representativeConv != null && isGroupService(representativeConv))
   const hasEligibleParticipant = convs.some((c) =>
     isEvent
       ? ['accepted', 'checked_in', 'attended'].includes(c.status)
@@ -763,14 +763,28 @@ function ActionCard({
   const {
     status, is_provider, provider_initiated,
     provider_confirmed_complete, receiver_confirmed_complete,
-    scheduled_time, exact_location, exact_duration, provisioned_hours,
+    scheduled_time, exact_location, exact_location_guide, exact_duration, provisioned_hours,
   } = conv
   const fixedGroupOffer = isFixedGroupOffer(conv)
+  const isOnlineService = conv.service_location_type === 'Online'
+  const iAmServiceOwner = isServiceOwner(conv)
   const previewScheduledTime = scheduled_time ?? conv.service_scheduled_time ?? null
-  const previewLocation = exact_location ?? conv.service_location_area ?? null
+  const previewLocation = isOnlineService
+    ? null
+    : fixedGroupOffer && status === 'pending'
+    ? (exact_location ?? conv.service_exact_location ?? conv.service_location_area ?? null)
+    : (exact_location ?? conv.service_location_area ?? null)
+  const previewMapsUrl = isOnlineService
+    ? null
+    : fixedGroupOffer && status === 'pending'
+    ? (
+        conv.service_exact_location_maps_url
+        || conv.exact_location_maps_url
+        || (previewLocation ? buildMapsUrl(previewLocation) : null)
+      )
+    : (conv.exact_location_maps_url || (previewLocation ? buildMapsUrl(previewLocation) : null))
 
   // Service owner always initiates (Offer or Want) — requester approves
-  const iAmServiceOwner = isServiceOwner(conv)
 
   const myConfirmed    = is_provider ? provider_confirmed_complete : receiver_confirmed_complete
   const otherConfirmed = is_provider ? receiver_confirmed_complete : provider_confirmed_complete
@@ -815,7 +829,7 @@ function ActionCard({
   }
 
   if (status === 'accepted') {
-    const hasDetails = provisioned_hours != null || scheduled_time || exact_location || exact_duration
+    const hasDetails = provisioned_hours != null || scheduled_time || exact_location || exact_location_guide || exact_duration
     const hasCancellationRequest = Boolean(conv.cancellation_requested_by_id)
     const canRespondToCancellation = conv.can_respond_to_cancellation === true
     const cancellationReason = conv.cancellation_reason?.trim()
@@ -871,7 +885,7 @@ function ActionCard({
                   </Flex>
                 </Box>
               )}
-              {exact_location && (
+              {!isOnlineService && exact_location && (
                 <Box>
                   <Text fontSize="10px" color={GRAY400} fontWeight={600} mb="2px">LOCATION</Text>
                   <Flex align="center" gap={1} flexWrap="wrap">
@@ -881,7 +895,7 @@ function ActionCard({
                     </Text>
                   </Flex>
                   <Link
-                    href={buildMapsUrl(exact_location)}
+                    href={conv.exact_location_maps_url || buildMapsUrl(exact_location)}
                     target="_blank"
                     rel="noopener noreferrer"
                     fontSize="12px"
@@ -891,8 +905,16 @@ function ActionCard({
                     display="inline-block"
                     _hover={{ textDecoration: 'underline' }}
                   >
-                    Open in Maps
+                    Open in Google Maps
                   </Link>
+                </Box>
+              )}
+              {!isOnlineService && exact_location_guide?.trim() && (
+                <Box>
+                  <Text fontSize="10px" color={GRAY400} fontWeight={600} mb="2px">LOCATION GUIDE</Text>
+                  <Text fontSize="13px" fontWeight={600} color={GRAY700}>
+                    {exact_location_guide.trim()}
+                  </Text>
                 </Box>
               )}
             </Flex>
@@ -1046,6 +1068,22 @@ function ActionCard({
                   📅 {fmtDateTime(previewScheduledTime)}{previewLocation ? `  •  📍 ${previewLocation}` : ''}
                 </Text>
               )}
+              {previewMapsUrl && (
+                <Link
+                  href={previewMapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  fontSize="12px"
+                  fontWeight={600}
+                  color={GREEN}
+                  mt="2px"
+                  display="inline-block"
+                  _hover={{ textDecoration: 'underline' }}
+                >
+                  Open in Google Maps
+                </Link>
+              )}
+
             </Box>
           </Flex>
         ) : (
@@ -1062,8 +1100,8 @@ function ActionCard({
                 </Text>
                 <Text fontSize="12px" color={GRAY500}>
                   {fixedGroupOffer
-                    ? 'This offer already has a fixed location, date and duration.'
-                    : 'Set a location, date and duration'}
+                    ? (isOnlineService ? 'This offer already has a fixed date and duration.' : 'This offer already has a fixed location, date and duration.')
+                    : (isOnlineService ? 'Set a date and duration' : 'Set a location, date and duration')}
                 </Text>
               </Box>
             </Flex>
@@ -1093,6 +1131,26 @@ function ActionCard({
                     📅 {fmtDateTime(previewScheduledTime)}{previewLocation ? `  •  📍 ${previewLocation}` : ''}
                   </Text>
                 )}
+                {previewMapsUrl && (
+                  <Link
+                    href={previewMapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    fontSize="12px"
+                    fontWeight={600}
+                    color={GREEN}
+                    mt="2px"
+                    display="inline-block"
+                    _hover={{ textDecoration: 'underline' }}
+                  >
+                    Open in Google Maps
+                  </Link>
+                )}
+                {fixedGroupOffer && (
+                  <Text fontSize="11px" color={GRAY500} mt="4px">
+                    These fixed session details were already shared by the service owner. Approving will confirm them for this exchange.
+                  </Text>
+                )}
               </Box>
             </Flex>
             <Flex align="center" gap={2}>
@@ -1110,7 +1168,7 @@ function ActionCard({
             <Box flex={1}>
               <Text fontSize="13px" fontWeight={700} color={GRAY800}>Waiting for the service owner</Text>
               <Text fontSize="12px" color={GRAY500}>
-                <b>{conv.other_user.name}</b> will {fixedGroupOffer ? 'share the fixed group-offer details' : 'propose a session time and location'}
+                <b>{conv.other_user.name}</b> will {fixedGroupOffer ? 'share the fixed group-offer details' : (isOnlineService ? 'propose the session time' : 'propose a session time and location')}
               </Text>
             </Box>
             <CancelBtn onClick={onCancel} loading={isCancelling} />
@@ -1156,7 +1214,75 @@ function CancelBtn({ onClick, loading }: { onClick: () => void; loading: boolean
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
+const URL_IN_MESSAGE = /(https?:\/\/[^\s]+)/g
+
+function isUrlSegment(segment: string): boolean {
+  return segment.startsWith('http://') || segment.startsWith('https://')
+}
+
+function splitLinkAndTrailingPunctuation(segment: string): { href: string; trailing: string } {
+  let href = segment
+  let trailing = ''
+
+  const punctuation = href.match(/[.,;:!?]+$/)?.[0] ?? ''
+  if (punctuation) {
+    href = href.slice(0, -punctuation.length)
+    trailing = punctuation + trailing
+  }
+
+  while (href.endsWith(')')) {
+    const openParenCount = (href.match(/\(/g) ?? []).length
+    const closeParenCount = (href.match(/\)/g) ?? []).length
+    if (closeParenCount <= openParenCount) break
+    href = href.slice(0, -1)
+    trailing = `)${trailing}`
+  }
+
+  return { href, trailing }
+}
+
+function getUrlLabel(href: string): string {
+  try {
+    const url = new URL(href)
+    if (url.hostname.includes('google.com') && url.pathname.startsWith('/maps')) {
+      return 'Open in Google Maps'
+    }
+  } catch {
+    // Fall back to the raw segment when URL parsing fails.
+  }
+  return href
+}
+
+/** Splits message body into segments and returns React nodes; URLs become clickable links. */
+function linkifyMessageBody(body: string, linkColor: string): ReactNode[] {
+  const segments = body.split(URL_IN_MESSAGE)
+  return segments.map((segment, i) => {
+    if (isUrlSegment(segment)) {
+      const { href, trailing } = splitLinkAndTrailingPunctuation(segment)
+      return (
+        <span key={i}>
+          <Link
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            color={linkColor}
+            fontWeight={600}
+            textDecoration="underline"
+            _hover={{ opacity: 0.9 }}
+            style={{ wordBreak: 'break-all' }}
+          >
+            {getUrlLabel(href)}
+          </Link>
+          {trailing}
+        </span>
+      )
+    }
+    return segment
+  })
+}
+
 function MsgBubble({ msg, isMine }: { msg: ApiChatMessage; isMine: boolean }) {
+  const linkColor = isMine ? WHITE : GREEN
   return (
     <Flex
       justify={isMine ? 'flex-end' : 'flex-start'}
@@ -1176,7 +1302,7 @@ function MsgBubble({ msg, isMine }: { msg: ApiChatMessage; isMine: boolean }) {
           boxShadow={isMine ? 'none' : '0 1px 2px rgba(0,0,0,0.06)'}
           style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}
         >
-          {msg.body}
+          {linkifyMessageBody(msg.body, linkColor)}
         </Box>
         <Text
           fontSize="10px" color={GRAY400} mt="3px"
@@ -1193,7 +1319,7 @@ function MsgBubble({ msg, isMine }: { msg: ApiChatMessage; isMine: boolean }) {
 
 function GroupChatThread({
   serviceId, serviceTitle, participants, messages, user, wsConnected, draft, setDraft, isSending,
-  sendError, onSend, onKeyDown, inputRef, bottomRef, onBack,
+  sendError, loadError, onSend, onKeyDown, inputRef, bottomRef, onBack,
 }: {
   serviceId: string
   serviceTitle: string
@@ -1205,6 +1331,7 @@ function GroupChatThread({
   setDraft: (v: string) => void
   isSending: boolean
   sendError: string | null
+  loadError: string | null
   onSend: () => void
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   inputRef: React.RefObject<HTMLTextAreaElement | null>
@@ -1302,6 +1429,13 @@ function GroupChatThread({
 
       {/* Messages */}
       <Box flex={1} overflowY="auto" py={3}>
+        {loadError && (
+          <Box px={4} pb={2}>
+            <Box px={3} py={2} bg={RED_LT} borderRadius="10px">
+              <Text fontSize="12px" color={RED}>{loadError}</Text>
+            </Box>
+          </Box>
+        )}
         {messages.length === 0 ? (
           <Flex align="center" justify="center" h="100%" direction="column" gap={3}>
             <Box
@@ -1337,7 +1471,7 @@ function GroupChatThread({
                       boxShadow={isMine ? 'none' : '0 1px 2px rgba(0,0,0,0.06)'}
                       style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}
                     >
-                      {msg.body}
+                      {linkifyMessageBody(msg.body, isMine ? WHITE : BLUE)}
                     </Box>
                     <Text
                       fontSize="10px" color={GRAY400} mt="3px"
@@ -1453,12 +1587,14 @@ export default function ChatPage() {
   const [messages,             setMessages]             = useState<ApiChatMessage[]>([])
   const [selectedId,           setSelectedId]           = useState<string | null>(paramId ?? null)
   const [groupServiceId,       setGroupServiceId]       = useState<string | null>(null)
+  const [groupSessionId,       setGroupSessionId]       = useState<string | null>(null)
   const [groupMessages,        setGroupMessages]        = useState<GroupChatMessage[]>([])
   const [groupParticipants,    setGroupParticipants]    = useState<GroupChatParticipant[]>([])
   const [groupServiceTitle,    setGroupServiceTitle]    = useState('Group Chat')
   const [draft,                setDraft]                = useState('')
   const [isSending,            setIsSending]            = useState(false)
   const [sendError,            setSendError]            = useState<string | null>(null)
+  const [groupLoadError,       setGroupLoadError]       = useState<string | null>(null)
   const [isCancelling,         setIsCancelling]         = useState(false)
   const [isRequestingCancellation, setIsRequestingCancellation] = useState(false)
   const [isApprovingCancellation, setIsApprovingCancellation] = useState(false)
@@ -1484,6 +1620,18 @@ export default function ChatPage() {
   paramIdRef.current    = paramId
 
   const selectedConv     = conversations.find((c) => c.handshake_id === selectedId) ?? null
+  const selectedGroupConversation = useMemo(
+    () => conversations.find((c) => c.service_id === groupServiceId) ?? null,
+    [conversations, groupServiceId],
+  )
+  const groupRequiresSession = useMemo(
+    () => (
+      selectedGroupConversation?.schedule_type === 'Recurrent'
+      && selectedGroupConversation?.service_type !== 'Event'
+      && (selectedGroupConversation?.max_participants ?? 0) > 1
+    ),
+    [selectedGroupConversation],
+  )
   const refreshConversations = useCallback(() => setConvRefreshTick((n) => n + 1), [])
 
   useEffect(() => {
@@ -1524,6 +1672,8 @@ export default function ChatPage() {
     setGroupMessages([])
     setGroupParticipants([])
     setGroupServiceTitle('Group Chat')
+    setGroupSessionId(null)
+    setGroupLoadError(null)
   }, [groupServiceId])
 
   const fetchMessages = useCallback(async (signal: AbortSignal) => {
@@ -1534,11 +1684,49 @@ export default function ChatPage() {
 
   const fetchGroupMessages = useCallback(async (signal: AbortSignal) => {
     if (!groupServiceId) return
-    const fetched = await groupChatAPI.getMessages(groupServiceId, signal)
-    setGroupMessages(fetched.messages)
-    setGroupParticipants(fetched.participants)
-    setGroupServiceTitle(fetched.service_title || 'Group Chat')
-  }, [groupServiceId])
+    try {
+      let resolvedSessionId = groupSessionId
+      if (!resolvedSessionId) {
+        // Resolve session first for recurrent group chats to avoid an expected 400 round-trip.
+        const sessions = await groupChatAPI.getSessions(groupServiceId, signal)
+        const firstSession = sessions[0]
+        if (firstSession) {
+          resolvedSessionId = firstSession.id
+          setGroupSessionId((prev) => prev ?? firstSession.id)
+        } else if (groupRequiresSession) {
+          setGroupMessages([])
+          setGroupParticipants([])
+          setGroupLoadError("Group chat isn't available for this post yet. It will appear once this post has active participants.")
+          return
+        }
+      }
+
+      const fetched = await groupChatAPI.getMessages(groupServiceId, signal, resolvedSessionId)
+      setGroupLoadError(null)
+      setGroupMessages(fetched.messages)
+      setGroupParticipants(fetched.participants)
+      setGroupServiceTitle(fetched.service_title || 'Group Chat')
+      if (fetched.session_id) setGroupSessionId(fetched.session_id)
+    } catch (err: unknown) {
+      const axErr = err as { response?: { status?: number; data?: { detail?: string } } }
+      const detail = axErr?.response?.data?.detail as string | undefined
+      // Some recurrent group chats require selecting a session thread first.
+      // Try to resolve one automatically before surfacing an error.
+      if (axErr?.response?.status === 400 && (!groupSessionId || detail?.toLowerCase().includes('session_id'))) {
+        const sessions = await groupChatAPI.getSessions(groupServiceId, signal)
+        const first = sessions[0]
+        if (first) setGroupSessionId(first.id)
+        else {
+          setGroupMessages([])
+          setGroupParticipants([])
+          setGroupLoadError("Group chat isn't available for this post yet. It will appear once this post has active participants.")
+        }
+      } else {
+        setGroupLoadError(detail || 'Failed to load group chat.')
+        throw err
+      }
+    }
+  }, [groupServiceId, groupSessionId, groupRequiresSession])
 
   // Initial load from DB when conversation is selected (so old messages show even when polling is off in dev)
   useEffect(() => {
@@ -1550,7 +1738,11 @@ export default function ChatPage() {
   useEffect(() => {
     if (!groupServiceId) return
     const ac = new AbortController()
-    fetchGroupMessages(ac.signal).catch(() => {})
+    fetchGroupMessages(ac.signal).catch((err: unknown) => {
+      if (ac.signal.aborted) return
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setGroupLoadError(detail || 'Failed to load group chat.')
+    })
     return () => ac.abort()
   }, [groupServiceId, fetchGroupMessages])
 
@@ -1594,8 +1786,8 @@ export default function ChatPage() {
 
   // ── Group WebSocket ────────────────────────────────────────────────────────
   const groupWsUrl = useMemo(
-    () => (groupServiceId ? buildGroupChatWsUrl(groupServiceId) : ''),
-    [groupServiceId],
+    () => (groupServiceId ? buildGroupChatWsUrl(groupServiceId, groupSessionId) : ''),
+    [groupServiceId, groupSessionId],
   )
   const handleGroupWsMessage = useCallback((msg: GroupChatMessage) => {
     if (!msg?.id) return
@@ -1609,7 +1801,7 @@ export default function ChatPage() {
     url: groupWsUrl,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onMessage: handleGroupWsMessage as any,
-    enabled: !!groupServiceId && isAuthenticated,
+    enabled: !!groupServiceId && isAuthenticated && (!groupRequiresSession || !!groupSessionId),
   })
 
   const selectConversation = useCallback((id: string) => {
@@ -1641,7 +1833,7 @@ export default function ChatPage() {
         // Group chat send
         const sent = groupWsConnected ? groupWsSend(body) : false
         if (!sent) {
-          const msg = await groupChatAPI.sendMessage(groupServiceId, body)
+          const msg = await groupChatAPI.sendMessage(groupServiceId, body, groupSessionId)
           setGroupMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev
             return [...prev, msg]
@@ -1662,7 +1854,7 @@ export default function ChatPage() {
       setIsSending(false)
       inputRef.current?.focus()
     }
-  }, [selectedId, groupServiceId, draft, isSending, wsConnected, wsSend, groupWsConnected, groupWsSend])
+  }, [selectedId, groupServiceId, groupSessionId, draft, isSending, wsConnected, wsSend, groupWsConnected, groupWsSend])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
@@ -1877,6 +2069,7 @@ export default function ChatPage() {
               setDraft={setDraft}
               isSending={isSending}
               sendError={sendError}
+              loadError={groupLoadError}
               onSend={handleSend}
               onKeyDown={handleKeyDown}
               inputRef={inputRef}
@@ -2060,11 +2253,14 @@ export default function ChatPage() {
         onClose={() => setShowInitiateModal(false)}
         onSubmit={handleInitiate}
         serviceType={selectedConv?.service_type}
+        serviceLocationType={selectedConv?.service_location_type ?? null}
         scheduledTime={selectedConv?.scheduled_time}
+        defaultLocation={selectedConv?.service_location_area ?? null}
         serviceDuration={selectedConv?.provisioned_hours ?? undefined}
-        presetDetails={selectedConv && isFixedGroupOffer(selectedConv) && selectedConv.service_scheduled_time && selectedConv.service_location_area
+        presetDetails={selectedConv && isFixedGroupOffer(selectedConv) && selectedConv.service_scheduled_time && (selectedConv.service_exact_location || selectedConv.service_location_area)
           ? {
-              exactLocation: selectedConv.service_location_area,
+              exactLocation: selectedConv.service_exact_location || selectedConv.service_location_area || '',
+              locationGuide: selectedConv.service_location_guide ?? null,
               exactDuration: selectedConv.provisioned_hours ?? 0,
               scheduledTime: selectedConv.service_scheduled_time,
             }
@@ -2074,7 +2270,16 @@ export default function ChatPage() {
         <ProviderDetailsModal
           isOpen={showApproveModal}
           onClose={() => setShowApproveModal(false)}
-          exactLocation={selectedConv.exact_location ?? ''}
+          showLocation={selectedConv.service_location_type !== 'Online'}
+          exactLocation={selectedConv.status === 'pending' && isFixedGroupOffer(selectedConv)
+            ? (selectedConv.exact_location ?? selectedConv.service_exact_location ?? selectedConv.service_location_area ?? '')
+            : (selectedConv.exact_location ?? '')}
+          exactLocationMapsUrl={selectedConv.status === 'pending' && isFixedGroupOffer(selectedConv)
+            ? (selectedConv.service_exact_location_maps_url ?? selectedConv.exact_location_maps_url ?? (selectedConv.exact_location ? buildMapsUrl(selectedConv.exact_location) : null))
+            : selectedConv.exact_location_maps_url}
+          locationGuide={selectedConv.exact_location_guide ?? selectedConv.service_location_guide ?? null}
+          locationLabel="Location"
+          locationNote={null}
           exactDuration={selectedConv.exact_duration ?? 1}
           scheduledTime={selectedConv.scheduled_time ?? ''}
           onApprove={handleApprove}

@@ -4,6 +4,7 @@ import urllib.parse
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 import bleach
 from .models import Handshake, ChatMessage, ChatRoom, PublicChatMessage, ServiceGroupChatMessage
@@ -332,38 +333,95 @@ class PublicChatConsumer(AsyncWebsocketConsumer):
 
 
 class GroupChatConsumer(AsyncWebsocketConsumer):
-    """WebSocket consumer for private group chats (accepted participants only)."""
+    """WebSocket consumer for private group chats (accepted participants only). Optional session_id for recurrent."""
+
+    CLOSE_MISSING_TOKEN = 4401
+    CLOSE_FORBIDDEN = 4403
+    CLOSE_NOT_FOUND = 4404
+    CLOSE_BAD_REQUEST = 4400
+    CLOSE_INTERNAL_ERROR = 4500
+
+    async def _reject(self, reason, code):
+        logger.warning(
+            "GroupChat WS rejected: reason=%s service_id=%s session_id=%s code=%s",
+            reason,
+            getattr(self, 'service_id', None),
+            getattr(self, 'session_id', None),
+            code,
+        )
+        await self.close(code=code)
 
     async def connect(self):
         self.service_id = self.scope['url_route']['kwargs']['service_id']
-        self.room_group_name = f'group_chat_{self.service_id}'
+        self.session_id = None
+        self.room_group_name = None
+        query_string = self.scope.get('query_string', b'').decode()
+        if query_string:
+            from urllib.parse import parse_qs
+            params = parse_qs(query_string)
+            session_ids = params.get('session_id', [])
+            if session_ids:
+                self.session_id = session_ids[0].strip() or None
 
         token = _get_token_from_scope(self.scope)
         if not token:
-            await self.close(code=4001)
+            await self._reject('missing access token', self.CLOSE_MISSING_TOKEN)
             return
 
         try:
             user = await self._authenticate(token)
             if not user:
-                await self.close(code=4003)
+                await self._reject('invalid access token', self.CLOSE_FORBIDDEN)
                 return
 
-            has_access = await self._check_access(user, self.service_id)
+            requires_session = await self._service_requires_session(self.service_id)
+            if requires_session and not self.session_id:
+                # Recurrent group chat must always be session-scoped.
+                await self._reject(
+                    'session_id is required for recurrent group chat',
+                    self.CLOSE_BAD_REQUEST,
+                )
+                return
+            if self.session_id and not requires_session:
+                # Keep backward compatibility for one-time/event clients that may
+                # accidentally include session_id in the query string.
+                self.session_id = None
+
+            if self.session_id:
+                has_access = await self._check_session_access(user, self.service_id, self.session_id)
+            else:
+                has_access = await self._check_access(user, self.service_id)
             if not has_access:
-                await self.close(code=4003)
+                if self.session_id:
+                    session_exists = await self._session_exists_for_service(self.service_id, self.session_id)
+                    if not session_exists:
+                        await self._reject('session not found for service', self.CLOSE_NOT_FOUND)
+                    else:
+                        await self._reject('user is not allowed for session', self.CLOSE_FORBIDDEN)
+                else:
+                    await self._reject('user is not allowed for service group chat', self.CLOSE_FORBIDDEN)
                 return
 
             self.user = user
+            self.room_group_name = (
+                f'group_chat_session_{self.session_id}' if self.session_id
+                else f'group_chat_{self.service_id}'
+            )
         except Exception:
-            await self.close(code=4003)
+            logger.exception(
+                "GroupChat WS connect failure: service_id=%s session_id=%s",
+                self.service_id,
+                self.session_id,
+            )
+            await self.close(code=self.CLOSE_INTERNAL_ERROR)
             return
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        if self.room_group_name:
+            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
     async def receive(self, text_data):
         try:
@@ -371,7 +429,9 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
             if data.get('type') == 'chat_message':
                 body = data.get('body', '').strip()
                 if body:
-                    message = await self._save_message(self.service_id, self.user.id, body)
+                    message = await self._save_message(
+                        self.service_id, self.user.id, body, session_id=self.session_id
+                    )
                     if message is None:
                         await self.send(text_data=json.dumps({'type': 'error', 'message': 'Empty message'}))
                         return
@@ -400,7 +460,8 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
             from .models import Service
             service = Service.objects.select_related('user').get(id=service_id)
             is_event = service.type == 'Event'
-            is_group_service = service.schedule_type == 'One-Time' and service.max_participants > 1
+            # Match REST GroupChatViewSet: group chat for Event or any service with max_participants > 1 (One-Time or Recurrent)
+            is_group_service = service.max_participants > 1
             if not is_event and not is_group_service:
                 return False
             if service.user == user:
@@ -411,14 +472,65 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
             return False
 
     @database_sync_to_async
-    def _save_message(self, service_id, user_id, body):
+    def _check_session_access(self, user, service_id, session_id):
+        """True if user has access to this recurrent session (owner or accepted handshake with same scheduled_time)."""
+        try:
+            from .models import Service, GroupChatSession
+            service = Service.objects.select_related('user').get(id=service_id)
+            if not (
+                service.schedule_type == 'Recurrent'
+                and service.max_participants > 1
+                and service.type != 'Event'
+            ):
+                return False
+            session = GroupChatSession.objects.get(id=session_id, service_id=service_id)
+            if service.user == user:
+                return True
+            active = ['accepted']
+            return Handshake.objects.filter(
+                service=service, requester=user, status__in=active, scheduled_time=session.scheduled_time
+            ).exists()
+        except (Service.DoesNotExist, GroupChatSession.DoesNotExist, ValidationError, ValueError):
+            return False
+
+    @database_sync_to_async
+    def _service_requires_session(self, service_id):
+        try:
+            from .models import Service
+            service = Service.objects.get(id=service_id)
+            return (
+                service.schedule_type == 'Recurrent'
+                and service.max_participants > 1
+                and service.type != 'Event'
+            )
+        except (Service.DoesNotExist, ValidationError, ValueError):
+            return False
+
+    @database_sync_to_async
+    def _session_exists_for_service(self, service_id, session_id):
+        try:
+            from .models import GroupChatSession
+            return GroupChatSession.objects.filter(id=session_id, service_id=service_id).exists()
+        except (ValidationError, ValueError):
+            return False
+
+    @database_sync_to_async
+    def _save_message(self, service_id, user_id, body, session_id=None):
         cleaned = bleach.clean(body, tags=[], strip=True).strip()[:5000]
         if not cleaned:
             return None
-        from .models import Service
+        from .models import Service, GroupChatSession
         service = Service.objects.get(id=service_id)
         user = User.objects.get(id=user_id)
-        return ServiceGroupChatMessage.objects.create(service=service, sender=user, body=cleaned)
+        group_chat_session = None
+        if session_id:
+            try:
+                group_chat_session = GroupChatSession.objects.get(id=session_id, service_id=service_id)
+            except (GroupChatSession.DoesNotExist, ValidationError, ValueError):
+                return None
+        return ServiceGroupChatMessage.objects.create(
+            service=service, group_chat_session=group_chat_session, sender=user, body=cleaned
+        )
 
     @database_sync_to_async
     def _serialize(self, message):

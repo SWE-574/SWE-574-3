@@ -136,6 +136,10 @@ export interface ServiceFormData {
   duration: number | string
   location_type: 'In-Person' | 'Online'
   location_area?: string
+  session_exact_location?: string
+  session_exact_location_lat?: number | string | null
+  session_exact_location_lng?: number | string | null
+  session_location_guide?: string
   max_participants: number
   schedule_type: 'One-Time' | 'Recurrent'
   schedule_details?: string
@@ -154,6 +158,10 @@ export interface Service {
   location_type: 'In-Person' | 'Online'
   scheduled_time?: string | null
   location_area?: string
+  session_exact_location?: string | null
+  session_exact_location_lat?: string | number | null
+  session_exact_location_lng?: string | number | null
+  session_location_guide?: string | null
   // API returns location_lat/location_lng (backend field names)
   location_lat?: string | number | null
   location_lng?: string | number | null

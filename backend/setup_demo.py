@@ -28,6 +28,7 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from datetime import timedelta
+from urllib.parse import quote
 import random
 
 print("=" * 60)
@@ -250,6 +251,59 @@ def is_fixed_group_offer(service):
         and service.schedule_type == 'One-Time'
         and service.max_participants > 1
     )
+
+
+FIXED_GROUP_AREA_ADDRESSES = {
+    'Beşiktaş': 'Sinanpaşa Mahallesi, Şair Nedim Caddesi No: 28, Beşiktaş, İstanbul, Türkiye',
+    'Kadıköy': 'Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye',
+    'Üsküdar': 'Mimar Sinan Mahallesi, Hakimiyeti Milliye Caddesi No: 27, Üsküdar, İstanbul, Türkiye',
+    'Fatih': 'Balat Mahallesi, Vodina Caddesi No: 64, Fatih, İstanbul, Türkiye',
+    'Beyoğlu': 'Cihangir Mahallesi, Sıraselviler Caddesi No: 114, Beyoğlu, İstanbul, Türkiye',
+    'Şişli': 'Teşvikiye Mahallesi, Hüsrev Gerede Caddesi No: 92, Şişli, İstanbul, Türkiye',
+}
+
+
+def build_google_maps_url(address, lat=None, lng=None):
+    if lat is not None and lng is not None:
+        return f"https://www.google.com/maps?q={float(lat)},{float(lng)}"
+    return f"https://www.google.com/maps/search/?api=1&query={quote(address or '')}"
+
+
+def fixed_group_location_guide(service):
+    title = service.title.lower()
+    if 'manti' in title:
+        return 'Veterinerin olduğu bina, 2. kat topluluk mutfağı'
+    if 'börek' in title or 'borek' in title:
+        return 'Fırının yanındaki apartman, arka bahçeden giriş'
+    if 'garden' in title or 'balcony' in title:
+        return 'Yeşil tente olan apartman, çatı terası'
+    if 'photo walk' in title or 'photography' in title or 'walk' in title:
+        return 'İskele karşısındaki saat kulesinin önü'
+    if 'coffee' in title:
+        return 'Veterinerin olduğu bina, girişte soldaki salon'
+    if 'board game' in title or 'board-game' in title:
+        return 'Kırtasiyenin üstündeki bina, zil 3'
+    return 'Veterinerin olduğu bina'
+
+
+def apply_fixed_group_offer_seed_details(service):
+    if not is_fixed_group_offer(service) or service.location_type != 'In-Person':
+        return
+
+    exact_address = FIXED_GROUP_AREA_ADDRESSES.get(
+        service.location_area,
+        f"{service.location_area or 'İstanbul'}, İstanbul, Türkiye",
+    )
+    service.session_exact_location = exact_address
+    service.session_exact_location_lat = service.location_lat
+    service.session_exact_location_lng = service.location_lng
+    service.session_location_guide = fixed_group_location_guide(service)
+    service.save(update_fields=[
+        'session_exact_location',
+        'session_exact_location_lat',
+        'session_exact_location_lng',
+        'session_location_guide',
+    ])
 
 
 def create_or_update_user(
@@ -611,8 +665,8 @@ cem_chess_offer = Service.objects.create(
     location_lat=Decimal('40.9819'),
     location_lng=Decimal('29.0244'),
     max_participants=1,
-    schedule_type='Recurrent',
-    schedule_details='Every Sunday at 15:00',
+    schedule_type='One-Time',
+    schedule_details='Next Sunday at 15:00',
     status='Active',
     created_at=timezone.now() - timedelta(days=18),
 )
@@ -720,8 +774,8 @@ zeynep_language = Service.objects.create(
     duration=Decimal('1.00'),
     location_type='Online',
     max_participants=1,
-    schedule_type='Recurrent',
-    schedule_details='Every Wednesday at 20:00',
+    schedule_type='One-Time',
+    schedule_details='Next Wednesday at 20:00',
     status='Active',
     created_at=timezone.now() - timedelta(days=22),
 )
@@ -812,7 +866,7 @@ print(f"  Created: {deniz_tech.title}")
 
 burak_chess = Service.objects.create(
     user=burak,
-    title='Looking for a Weekly Chess Practice Partner',
+    title='Looking for a Chess Practice Partner',
     description='I am looking for steady, friendly practice games where we can talk through moves and keep each other improving over time. Casual and community-minded is ideal.',
     type='Need',
     duration=Decimal('1.00'),
@@ -821,8 +875,8 @@ burak_chess = Service.objects.create(
     location_lat=Decimal('40.9819'),
     location_lng=Decimal('29.0244'),
     max_participants=1,
-    schedule_type='Recurrent',
-    schedule_details='Every Friday evening',
+    schedule_type='One-Time',
+    schedule_details='This Friday evening',
     status='Active',
     created_at=timezone.now() - timedelta(days=9),
 )
@@ -862,8 +916,8 @@ deniz_jogging = Service.objects.create(
     location_lat=Decimal('40.9819'),
     location_lng=Decimal('29.0244'),
     max_participants=1,
-    schedule_type='Recurrent',
-    schedule_details='Weekdays at 07:00',
+    schedule_type='One-Time',
+    schedule_details='Tomorrow at 07:00',
     status='Active',
     created_at=timezone.now() - timedelta(days=4),
 )
@@ -903,8 +957,8 @@ selin_reading_circle = create_demo_service(
     location_lat=Decimal('41.0320'),
     location_lng=Decimal('28.9740'),
     max_participants=6,
-    schedule_type='Recurrent',
-    schedule_details='Every other Thursday at 19:00 in Cihangir',
+    schedule_type='One-Time',
+    schedule_details='Next Thursday at 19:00 in Cihangir',
     tags=[language_tag, education_tag],
     created_days_ago=30,
 )
@@ -954,9 +1008,9 @@ emre_boardgames_need = create_demo_service(
     location_area='Üsküdar',
     location_lat=Decimal('41.0257'),
     location_lng=Decimal('29.0154'),
-    max_participants=3,
-    schedule_type='Recurrent',
-    schedule_details='Saturday evenings, twice a month',
+    max_participants=1,
+    schedule_type='One-Time',
+    schedule_details='This Saturday evening',
     tags=[chess_tag, education_tag],
     created_days_ago=11,
 )
@@ -995,14 +1049,14 @@ yasemin_recipe_need = create_demo_service(
 
 murat_study_need = create_demo_service(
     user=murat,
-    title='Looking for a Weekly Accountability Study Session',
+    title='Looking for an Accountability Study Session',
     description='Remote work has made my weeks blur together. I am looking for one or two people to meet regularly, set a realistic goal, work quietly, and check in at the end.',
     service_type='Need',
     duration='1.00',
     location_type='Online',
-    max_participants=2,
-    schedule_type='Recurrent',
-    schedule_details='Tuesday evenings online',
+    max_participants=1,
+    schedule_type='One-Time',
+    schedule_details='This Tuesday evening online',
     tags=[education_tag, technology_tag],
     created_days_ago=5,
 )
@@ -1036,8 +1090,8 @@ levent_singalong = create_demo_service(
     location_lat=Decimal('41.0320'),
     location_lng=Decimal('28.9740'),
     max_participants=5,
-    schedule_type='Recurrent',
-    schedule_details='Every Sunday at 16:00',
+    schedule_type='One-Time',
+    schedule_details='This Sunday at 16:00',
     tags=[music_tag, education_tag],
     created_days_ago=40,
 )
@@ -1133,13 +1187,16 @@ levent_music_event = create_demo_service(
 
 print(f"\n  Created {len(services)} services")
 
+for service in services:
+    apply_fixed_group_offer_seed_details(service)
+
 print("  Adding service cover images...")
 service_media_count = 0
 for service in services:
     media_urls = [semantic_service_image(service)]
     if service.type == 'Event':
         media_urls.extend(semantic_gallery_images(service.title, 2, start_offset=5))
-    elif service.max_participants > 1 or service.schedule_type == 'Recurrent':
+    elif service.max_participants > 1:
         media_urls.extend(semantic_gallery_images(service.title, 1, start_offset=3))
 
     for display_order, media_url in enumerate(media_urls):
@@ -1175,13 +1232,25 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
     
     handshake.provider_initiated = True
     if is_fixed_group_offer(service):
-        handshake.exact_location = service.location_area
+        handshake.exact_location = service.session_exact_location or service.location_area
+        handshake.exact_location_guide = service.session_location_guide
         handshake.exact_duration = service.duration
         handshake.scheduled_time = service.scheduled_time
+        handshake.exact_location_maps_url = build_google_maps_url(
+            handshake.exact_location,
+            service.session_exact_location_lat,
+            service.session_exact_location_lng,
+        )
     else:
         handshake.exact_location = exact_locations.get(service.location_area, f'{service.location_area} area')
+        handshake.exact_location_guide = None
         handshake.exact_duration = service.duration
         handshake.scheduled_time = timezone.now() + timedelta(days=3)
+        handshake.exact_location_maps_url = build_google_maps_url(
+            handshake.exact_location,
+            service.location_lat,
+            service.location_lng,
+        )
     handshake.updated_at = created_at_time + timedelta(hours=2)
     handshake.save()
     
@@ -1193,7 +1262,7 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
 
     # Mirror accept_handshake view logic:
     # Only when all slots are filled do we deny remaining pending handshakes
-    # and transition the service to Agreed. Recurrent stays Active.
+    # and transition the service to Agreed.
     if service.schedule_type == 'One-Time':
         accepted_count = Handshake.objects.filter(
             service=service,
@@ -1243,36 +1312,7 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
         )
     
     if completed_days_ago is not None:
-        completion_time = timezone.now() - timedelta(days=completed_days_ago)
-        with transaction.atomic():
-            handshake.provider_confirmed_complete = True
-            handshake.receiver_confirmed_complete = True
-            handshake.updated_at = completion_time
-            # Don't set status='completed' before complete_timebank_transfer —
-            # the function exits early (idempotency guard) if status is already
-            # 'completed', skipping the service-status update logic.
-            handshake.save()
-            complete_timebank_transfer(handshake)
-
-            # After transfer, manually back-date the timestamps
-            Handshake.objects.filter(pk=handshake.pk).update(updated_at=completion_time)
-
-            # Sync service status: One-Time services should become 'Completed'
-            # when no active handshakes remain (mirrors utils.py logic).
-            svc = Service.objects.get(pk=service.pk)
-            if svc.schedule_type == 'One-Time':
-                active_count = Handshake.objects.filter(
-                    service=svc,
-                    status__in=['pending', 'accepted', 'reported', 'paused'],
-                ).count()
-                if active_count == 0 and svc.status != 'Completed':
-                    svc.status = 'Completed'
-                    svc.save(update_fields=['status'])
-
-        handshake.refresh_from_db()
-        check_and_assign_badges(provider)
-        check_and_assign_badges(receiver)
-
+        handshake = complete_seeded_handshake(handshake, completed_days_ago=completed_days_ago)
         return handshake, True
     
     return handshake, False
@@ -1280,16 +1320,59 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
 
 def sync_fixed_group_offer_time(service, scheduled_time):
     """Backdate the demo-facing session time after seed workflows are created."""
+    exact_location = service.session_exact_location or service.location_area
+    exact_maps_url = build_google_maps_url(
+        exact_location,
+        service.session_exact_location_lat,
+        service.session_exact_location_lng,
+    )
     Service.objects.filter(pk=service.pk).update(scheduled_time=scheduled_time)
     Handshake.objects.filter(
         service=service,
         status__in=['pending', 'accepted', 'completed', 'reported', 'paused'],
     ).update(
         scheduled_time=scheduled_time,
-        exact_location=service.location_area,
+        exact_location=exact_location,
+        exact_location_guide=service.session_location_guide,
+        exact_location_maps_url=exact_maps_url,
         exact_duration=service.duration,
     )
     service.refresh_from_db(fields=['scheduled_time'])
+
+
+def complete_seeded_handshake(handshake, *, completed_days_ago):
+    """Mark an already-accepted handshake as completed with realistic backdated timestamps."""
+    completion_time = timezone.now() - timedelta(days=completed_days_ago)
+    with transaction.atomic():
+        handshake.provider_confirmed_complete = True
+        handshake.receiver_confirmed_complete = True
+        handshake.updated_at = completion_time
+        # Don't set status='completed' before complete_timebank_transfer —
+        # the function exits early (idempotency guard) if status is already
+        # 'completed', skipping the service-status update logic.
+        handshake.save()
+        complete_timebank_transfer(handshake)
+
+        # After transfer, manually back-date the timestamps.
+        Handshake.objects.filter(pk=handshake.pk).update(updated_at=completion_time)
+
+        # Sync service status: One-Time services should become 'Completed'
+        # when no active handshakes remain (mirrors utils.py logic).
+        svc = Service.objects.get(pk=handshake.service.pk)
+        if svc.schedule_type == 'One-Time':
+            active_count = Handshake.objects.filter(
+                service=svc,
+                status__in=['pending', 'accepted', 'reported', 'paused'],
+            ).count()
+            if active_count == 0 and svc.status != 'Completed':
+                svc.status = 'Completed'
+                svc.save(update_fields=['status'])
+
+    handshake.refresh_from_db()
+    provider, receiver = get_provider_and_receiver(handshake)
+    check_and_assign_badges(provider)
+    check_and_assign_badges(receiver)
+    return handshake
 
 
 def add_public_chat_messages(service, messages, base_time):
@@ -1531,7 +1614,7 @@ print(f"  Accepted (pending completion): {ayse_plant_advice.title} (Ayşe -> Zey
 handshake14, completed = simulate_handshake_workflow(
     burak_chess, cem, provider_initiated_days_ago=0
 )
-handshake14 = expect_handshake_state(handshake14, completed, expected_completed=False, label='Looking for a Weekly Chess Practice Partner (Burak -> Cem)')
+handshake14 = expect_handshake_state(handshake14, completed, expected_completed=False, label='Looking for a Chess Practice Partner (Burak -> Cem)')
 accepted_handshakes.append(handshake14)
 print(f"  Accepted (pending completion): {burak_chess.title} (Burak -> Cem)")
 
@@ -1539,11 +1622,10 @@ pending1 = create_pending_interest(elif_tech, deniz, age_delta=timedelta(days=1)
 pending2 = create_pending_interest(burak_guitar, deniz, age_delta=timedelta(hours=12), label='Burak -> Deniz')
 
 handshake16, completed = simulate_handshake_workflow(
-    selin_reading_circle, murat, provider_initiated_days_ago=18, completed_days_ago=13
+    selin_reading_circle, murat, provider_initiated_days_ago=18
 )
-handshake16 = expect_handshake_state(handshake16, completed, expected_completed=True, label='Slow Reading Circle for Curious Neighbors (Selin -> Murat)')
-completed_handshakes.append(handshake16)
-print(f"  Completed: {selin_reading_circle.title} (Selin -> Murat)")
+handshake16 = expect_handshake_state(handshake16, completed, expected_completed=False, label='Slow Reading Circle for Curious Neighbors (Selin -> Murat)')
+print(f"  Accepted (pending completion): {selin_reading_circle.title} (Selin -> Murat)")
 
 handshake17, completed = simulate_handshake_workflow(
     selin_reading_circle, can, provider_initiated_days_ago=12, completed_days_ago=7
@@ -1551,6 +1633,9 @@ handshake17, completed = simulate_handshake_workflow(
 handshake17 = expect_handshake_state(handshake17, completed, expected_completed=True, label='Slow Reading Circle for Curious Neighbors (Selin -> Can)')
 completed_handshakes.append(handshake17)
 print(f"  Completed: {selin_reading_circle.title} (Selin -> Can)")
+handshake16 = complete_seeded_handshake(handshake16, completed_days_ago=6)
+completed_handshakes.append(handshake16)
+print(f"  Completed: {selin_reading_circle.title} (Selin -> Murat)")
 
 handshake18, completed = simulate_handshake_workflow(
     yasemin_coffee_offer, zeynep, provider_initiated_days_ago=9, completed_days_ago=6
@@ -1591,7 +1676,7 @@ print(f"  Accepted (pending completion): {murat_boardgames_offer.title} (Murat -
 handshake23, completed = simulate_handshake_workflow(
     murat_study_need, zeynep, provider_initiated_days_ago=1
 )
-handshake23 = expect_handshake_state(handshake23, completed, expected_completed=False, label='Looking for a Weekly Accountability Study Session (Murat -> Zeynep)')
+handshake23 = expect_handshake_state(handshake23, completed, expected_completed=False, label='Looking for an Accountability Study Session (Murat -> Zeynep)')
 accepted_handshakes.append(handshake23)
 print(f"  Accepted (pending completion): {murat_study_need.title} (Murat -> Zeynep)")
 
@@ -1604,7 +1689,7 @@ print(f"  Cancelled with refund: {selin_potluck_need.title} (Selin -> Yasemin)")
 
 pending3 = create_pending_interest(emre_boardgames_need, burak, age_delta=timedelta(days=2), label='Emre -> Burak')
 pending4 = create_pending_interest(yasemin_recipe_need, elif_user, age_delta=timedelta(hours=30), label='Yasemin -> Elif')
-pending5 = create_pending_interest(selin_reading_circle, emre, age_delta=timedelta(hours=18), label='Selin -> Emre')
+pending5 = create_pending_interest(murat_boardgames_offer, emre, age_delta=timedelta(hours=18), label='Murat -> Emre')
 
 print("  Creating event participation...")
 selin_event_1 = event_rsvp(selin_reading_event, elif_user, joined_days_ago=4)
@@ -1953,8 +2038,8 @@ topics = [
     {
         'category': forum_feedback,
         'author': murat,
-        'title': 'Could the platform surface smaller recurring meetups more clearly?',
-        'body': 'As a newcomer, I find one-time events easily, but I almost missed recurring circles that might be even better for building routine. Curious if others feel the same.',
+        'title': 'Could the platform surface smaller meetups more clearly?',
+        'body': 'As a newcomer, I can find big events quickly, but I nearly missed small circles that might be better for building trust. Curious if others feel the same.',
         'created_at': timezone.now() - timedelta(days=3),
         'view_count': 33,
     },
@@ -1998,7 +2083,7 @@ posts_data = [
     (forum_topics[5], emre, "That is a great idea. I want the route to be social, not just scenic.", timezone.now() - timedelta(days=3, hours=12)),
     (forum_topics[6], mehmet, "I write down who told the story, where we were sitting, and what season it was. Those details matter later.", timezone.now() - timedelta(days=8, hours=16)),
     (forum_topics[6], yasemin, "That is beautiful. It is exactly the kind of context I am trying not to lose.", timezone.now() - timedelta(days=8, hours=10)),
-    (forum_topics[7], selin, "Yes. Small recurring gatherings are often where trust actually forms.", timezone.now() - timedelta(days=2, hours=22)),
+    (forum_topics[7], selin, "Yes. Smaller gatherings are often where trust actually forms.", timezone.now() - timedelta(days=2, hours=22)),
     (forum_topics[7], ayse, "A filter for 'easy to join' or 'good for newcomers' could help too.", timezone.now() - timedelta(days=2, hours=12)),
     (forum_topics[8], elif_user, "For me it was when the conversation continued after the practical part was over.", timezone.now() - timedelta(days=10, hours=16)),
     (forum_topics[8], levent, "That is such a good way to put it. The exchange becomes memorable when no one is performing usefulness.", timezone.now() - timedelta(days=10, hours=8)),
