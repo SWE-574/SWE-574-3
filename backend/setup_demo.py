@@ -402,7 +402,7 @@ yasemin = create_or_update_user(
 murat = create_or_update_user(
     'murat@demo.com', 'Murat', 'Sezer',
     'Recently moved to Istanbul for remote work and is using The Hive to find low-pressure ways to meet people through board games, study sessions, and neighborhood routines.',
-    Decimal('7.00'), 11, date_joined_offset_days=45,
+    Decimal('9.00'), 11, date_joined_offset_days=45,
     avatar_url=dicebear_avatar('murat'),
     banner_url=semantic_banner_image('board games study session city'),
     location='Kadıköy, Istanbul',
