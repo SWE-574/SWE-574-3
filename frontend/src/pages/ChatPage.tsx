@@ -1197,21 +1197,24 @@ function linkifyMessageBody(body: string, linkColor: string): ReactNode[] {
   const segments = body.split(URL_IN_MESSAGE)
   return segments.map((segment, i) => {
     if (isUrlSegment(segment)) {
-      const href = segment.replace(/[.,;:)!?]+$/, '')
+      const trailingPunctuation = segment.match(/[.,;:)!?]+$/)?.[0] ?? ''
+      const href = trailingPunctuation ? segment.slice(0, -trailingPunctuation.length) : segment
       return (
-        <Link
-          key={i}
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          color={linkColor}
-          fontWeight={600}
-          textDecoration="underline"
-          _hover={{ opacity: 0.9 }}
-          style={{ wordBreak: 'break-all' }}
-        >
-          {segment}
-        </Link>
+        <span key={i}>
+          <Link
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            color={linkColor}
+            fontWeight={600}
+            textDecoration="underline"
+            _hover={{ opacity: 0.9 }}
+            style={{ wordBreak: 'break-all' }}
+          >
+            {href}
+          </Link>
+          {trailingPunctuation}
+        </span>
       )
     }
     return segment
@@ -1256,7 +1259,7 @@ function MsgBubble({ msg, isMine }: { msg: ApiChatMessage; isMine: boolean }) {
 
 function GroupChatThread({
   serviceId, serviceTitle, participants, messages, user, wsConnected, draft, setDraft, isSending,
-  sendError, onSend, onKeyDown, inputRef, bottomRef, onBack,
+  sendError, loadError, onSend, onKeyDown, inputRef, bottomRef, onBack,
 }: {
   serviceId: string
   serviceTitle: string
@@ -1268,6 +1271,7 @@ function GroupChatThread({
   setDraft: (v: string) => void
   isSending: boolean
   sendError: string | null
+  loadError: string | null
   onSend: () => void
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   inputRef: React.RefObject<HTMLTextAreaElement | null>
@@ -1365,6 +1369,13 @@ function GroupChatThread({
 
       {/* Messages */}
       <Box flex={1} overflowY="auto" py={3}>
+        {loadError && (
+          <Box px={4} pb={2}>
+            <Box px={3} py={2} bg={RED_LT} borderRadius="10px">
+              <Text fontSize="12px" color={RED}>{loadError}</Text>
+            </Box>
+          </Box>
+        )}
         {messages.length === 0 ? (
           <Flex align="center" justify="center" h="100%" direction="column" gap={3}>
             <Box
@@ -1523,6 +1534,7 @@ export default function ChatPage() {
   const [draft,                setDraft]                = useState('')
   const [isSending,            setIsSending]            = useState(false)
   const [sendError,            setSendError]            = useState<string | null>(null)
+  const [groupLoadError,       setGroupLoadError]       = useState<string | null>(null)
   const [isCancelling,         setIsCancelling]         = useState(false)
   const [isRequestingCancellation, setIsRequestingCancellation] = useState(false)
   const [isApprovingCancellation, setIsApprovingCancellation] = useState(false)
@@ -1589,6 +1601,7 @@ export default function ChatPage() {
     setGroupParticipants([])
     setGroupServiceTitle('Group Chat')
     setGroupSessionId(null)
+    setGroupLoadError(null)
   }, [groupServiceId])
 
   const fetchMessages = useCallback(async (signal: AbortSignal) => {
@@ -1601,6 +1614,7 @@ export default function ChatPage() {
     if (!groupServiceId) return
     try {
       const fetched = await groupChatAPI.getMessages(groupServiceId, signal, groupSessionId)
+      setGroupLoadError(null)
       setGroupMessages(fetched.messages)
       setGroupParticipants(fetched.participants)
       setGroupServiceTitle(fetched.service_title || 'Group Chat')
@@ -1608,12 +1622,19 @@ export default function ChatPage() {
     } catch (err: unknown) {
       const axErr = err as { response?: { status?: number; data?: { detail?: string } } }
       const detail = axErr?.response?.data?.detail as string | undefined
-      if (axErr?.response?.status === 400 && detail?.includes('session_id is required')) {
+      // Some recurrent group chats require selecting a session thread first.
+      // Try to resolve one automatically before surfacing an error.
+      if (axErr?.response?.status === 400 && (!groupSessionId || detail?.toLowerCase().includes('session_id'))) {
         const sessions = await groupChatAPI.getSessions(groupServiceId, signal)
         const first = sessions[0]
         if (first) setGroupSessionId(first.id)
-        else throw err
+        else {
+          setGroupMessages([])
+          setGroupParticipants([])
+          setGroupLoadError("Group chat isn't available for this post yet. It will appear once this post has active participants.")
+        }
       } else {
+        setGroupLoadError(detail || 'Failed to load group chat.')
         throw err
       }
     }
@@ -1629,7 +1650,11 @@ export default function ChatPage() {
   useEffect(() => {
     if (!groupServiceId) return
     const ac = new AbortController()
-    fetchGroupMessages(ac.signal).catch(() => {})
+    fetchGroupMessages(ac.signal).catch((err: unknown) => {
+      if (ac.signal.aborted) return
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setGroupLoadError(detail || 'Failed to load group chat.')
+    })
     return () => ac.abort()
   }, [groupServiceId, fetchGroupMessages])
 
@@ -1956,6 +1981,7 @@ export default function ChatPage() {
               setDraft={setDraft}
               isSending={isSending}
               sendError={sendError}
+              loadError={groupLoadError}
               onSend={handleSend}
               onKeyDown={handleKeyDown}
               inputRef={inputRef}

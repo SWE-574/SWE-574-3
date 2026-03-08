@@ -338,6 +338,7 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.service_id = self.scope['url_route']['kwargs']['service_id']
         self.session_id = None
+        self.room_group_name = None
         query_string = self.scope.get('query_string', b'').decode()
         if query_string:
             from urllib.parse import parse_qs
@@ -388,7 +389,8 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
         await self.accept()
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        if self.room_group_name:
+            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
     async def receive(self, text_data):
         try:

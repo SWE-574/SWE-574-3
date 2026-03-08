@@ -126,6 +126,11 @@ jobs:
           curl --fail --retry 10 --retry-delay 3 --retry-connrefused \
             http://localhost/hive-media/
 
+      - name: Smoke-test frontend login route
+        run: |
+          curl --fail --retry 20 --retry-delay 3 --retry-connrefused \
+            http://localhost/login > /dev/null
+
       # ── 6. Seed demo data ─────────────────────────────────────────────────
       - name: Seed demo data
         run: |
@@ -190,6 +195,7 @@ jobs:
 
       # ── 15. Run E2E tests ─────────────────────────────────────────────────
       - name: Run Playwright tests
+        id: playwright
         working-directory: frontend
         continue-on-error: true   # soft-fail: results visible in artifact, not a blocker
         env:
@@ -217,7 +223,7 @@ jobs:
 
       # ── 18. Collect docker logs on failure ────────────────────────────────
       - name: Dump docker logs on failure
-        if: failure()
+        if: always() && (failure() || steps.playwright.outcome != 'success')
         run: |
           docker compose logs --no-color --tail=200 backend  2>&1 | head -400
           docker compose logs --no-color --tail=100 frontend 2>&1 | head -200
