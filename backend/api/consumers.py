@@ -335,6 +335,22 @@ class PublicChatConsumer(AsyncWebsocketConsumer):
 class GroupChatConsumer(AsyncWebsocketConsumer):
     """WebSocket consumer for private group chats (accepted participants only). Optional session_id for recurrent."""
 
+    CLOSE_MISSING_TOKEN = 4401
+    CLOSE_FORBIDDEN = 4403
+    CLOSE_NOT_FOUND = 4404
+    CLOSE_BAD_REQUEST = 4400
+    CLOSE_INTERNAL_ERROR = 4500
+
+    async def _reject(self, reason, code):
+        logger.warning(
+            "GroupChat WS rejected: reason=%s service_id=%s session_id=%s code=%s",
+            reason,
+            getattr(self, 'service_id', None),
+            getattr(self, 'session_id', None),
+            code,
+        )
+        await self.close(code=code)
+
     async def connect(self):
         self.service_id = self.scope['url_route']['kwargs']['service_id']
         self.session_id = None
@@ -349,19 +365,22 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
 
         token = _get_token_from_scope(self.scope)
         if not token:
-            await self.close(code=4001)
+            await self._reject('missing access token', self.CLOSE_MISSING_TOKEN)
             return
 
         try:
             user = await self._authenticate(token)
             if not user:
-                await self.close(code=4003)
+                await self._reject('invalid access token', self.CLOSE_FORBIDDEN)
                 return
 
             requires_session = await self._service_requires_session(self.service_id)
             if requires_session and not self.session_id:
                 # Recurrent group chat must always be session-scoped.
-                await self.close(code=4003)
+                await self._reject(
+                    'session_id is required for recurrent group chat',
+                    self.CLOSE_BAD_REQUEST,
+                )
                 return
             if self.session_id and not requires_session:
                 # Keep backward compatibility for one-time/event clients that may
@@ -373,7 +392,14 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
             else:
                 has_access = await self._check_access(user, self.service_id)
             if not has_access:
-                await self.close(code=4003)
+                if self.session_id:
+                    session_exists = await self._session_exists_for_service(self.service_id, self.session_id)
+                    if not session_exists:
+                        await self._reject('session not found for service', self.CLOSE_NOT_FOUND)
+                    else:
+                        await self._reject('user is not allowed for session', self.CLOSE_FORBIDDEN)
+                else:
+                    await self._reject('user is not allowed for service group chat', self.CLOSE_FORBIDDEN)
                 return
 
             self.user = user
@@ -382,7 +408,12 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
                 else f'group_chat_{self.service_id}'
             )
         except Exception:
-            await self.close(code=4003)
+            logger.exception(
+                "GroupChat WS connect failure: service_id=%s session_id=%s",
+                self.service_id,
+                self.session_id,
+            )
+            await self.close(code=self.CLOSE_INTERNAL_ERROR)
             return
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
@@ -473,6 +504,14 @@ class GroupChatConsumer(AsyncWebsocketConsumer):
                 and service.type != 'Event'
             )
         except (Service.DoesNotExist, ValidationError, ValueError):
+            return False
+
+    @database_sync_to_async
+    def _session_exists_for_service(self, service_id, session_id):
+        try:
+            from .models import GroupChatSession
+            return GroupChatSession.objects.filter(id=session_id, service_id=service_id).exists()
+        except (ValidationError, ValueError):
             return False
 
     @database_sync_to_async
