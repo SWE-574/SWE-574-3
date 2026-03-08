@@ -611,8 +611,7 @@ class TestInitiateApproveServiceOwnerModel:
     def test_third_party_cannot_initiate_or_approve(self):
         """
         An unrelated user cannot initiate or approve any handshake.
-        Backend may return 403 (permission denied) or 404 (resource hidden) —
-        both are acceptable security responses that prevent access.
+        HandshakeViewSet.get_queryset filters by requester|provider, so stranger gets 404.
         """
         service_owner = UserFactory()
         requester = UserFactory()
@@ -624,7 +623,7 @@ class TestInitiateApproveServiceOwnerModel:
         client.authenticate_user(stranger)
 
         resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
-        assert resp.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
+        assert resp.status_code == status.HTTP_404_NOT_FOUND
 
         handshake.provider_initiated = True
         handshake.exact_location = 'Loc'
@@ -633,7 +632,7 @@ class TestInitiateApproveServiceOwnerModel:
         handshake.save()
 
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
+        assert resp.status_code == status.HTTP_404_NOT_FOUND
 
 
 # ── New tests: capacity system + Agreed status ────────────────────────────────
@@ -689,14 +688,13 @@ class TestPendingCapacityIntegration:
         client.authenticate_user(provider)
         client.post(f'/api/handshakes/{h1.id}/accept/')
 
-        # u2 tries to express interest — service is now Agreed (hidden) or full
-        # Backend returns 404 (service not in Active queryset) or 400 (capacity)
+        # u2 tries to express interest — backend returns 400 (at capacity) or 404 (service Agreed/hidden)
         client.authenticate_user(u2)
         resp = client.post(f'/api/services/{svc.id}/interest/')
         assert resp.status_code in (
             status.HTTP_400_BAD_REQUEST,
             status.HTTP_404_NOT_FOUND,
-        ), f"Expected 400 or 404, got {resp.status_code}"
+        ), f"Expected 400 or 404, got {resp.status_code}: {getattr(resp, 'data', resp)}"
 
 
 @pytest.mark.django_db
@@ -744,6 +742,17 @@ class TestAcceptAutoDenyIntegration:
 
         denied = Handshake.objects.filter(service=svc, status='denied').count()
         assert denied == 2
+
+    def test_accept_second_handshake_when_capacity_full_returns_400(self):
+        """max_p=1: after accepting one handshake, accepting another returns 400 (capacity invariant)."""
+        provider, svc, _, handshakes = self._setup_one_time(max_p=1)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+        client.post(f'/api/handshakes/{handshakes[0].id}/accept/')
+
+        # Second handshake was auto-denied; accept on it should fail
+        resp = client.post(f'/api/handshakes/{handshakes[1].id}/accept/')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_group_offer_pending_stays_until_all_slots_filled(self):
         """Group offer with max_p=2: accepting the first should NOT deny the

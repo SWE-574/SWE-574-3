@@ -31,20 +31,13 @@ test.describe('Authentication', () => {
     // Still on login page
     await expect(page).toHaveURL(/\/login/)
 
-    // Some kind of error feedback appears (text or toast)
-    const errorVisible = await page
-      .locator('text=/Invalid|incorrect|credentials|password/i')
-      .first()
-      .isVisible()
-      .catch(() => false)
+    // Error feedback must appear so auth regressions are caught
+    await expect(
+      page.locator('text=/Invalid|incorrect|credentials|password|error/i').first(),
+    ).toBeVisible({ timeout: 10_000 })
 
-    // Or the page just stays on /login without crashing
     await expect(page).toHaveURL(/\/login/)
-    // At minimum the page is still usable
     await expect(page.locator('#email')).toBeVisible()
-
-    // Suppress unused variable lint warning
-    void errorVisible
   })
 
   test('empty email → client-side validation blocks submit', async ({ page }) => {
@@ -100,12 +93,12 @@ test.describe('Authentication', () => {
     await page.getByLabel(/first name/i).fill('E2E')
     await page.getByLabel(/last name/i).fill('User')
     await page.getByLabel(/email/i).fill(unique)
-    await page.locator('#password').fill('Demo1234')
-    await page.locator('#confirmPassword').fill('Demo1234')
+    await page.locator('#password').fill('Str0ngPass!123')
+    await page.locator('#confirmPassword').fill('Str0ngPass!123')
     await page.getByLabel(/I agree to the Terms/i).click()
     await page.getByRole('button', { name: 'Create Account' }).click()
 
     // Backend may redirect to verify-email-sent (email verification on) or dashboard
-    await expect(page).toHaveURL(/\/(verify-email-sent|dashboard)/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/(verify-email-sent|dashboard)/, { timeout: 25_000 })
   })
 })

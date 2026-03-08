@@ -111,16 +111,16 @@ class TestServiceGroupChatMessageModel:
         service.delete()
         assert ServiceGroupChatMessage.objects.filter(service_id=service_id).count() == 0
 
-    def test_deleting_sender_sets_null_or_cascades(self):
-        """Deleting a sender should not raise an integrity error."""
+    def test_deleting_sender_cascades_to_message(self):
+        """Deleting a sender cascades to group chat messages (on_delete=CASCADE)."""
         msg = ServiceGroupChatMessageFactory()
         sender_id = msg.sender_id
-        # Depending on on_delete setting this may cascade or set null
-        try:
-            msg.sender.delete()
-        except Exception:
-            pass  # CASCADE or PROTECT are both valid design choices
-        # The important thing is no unhandled exception propagates
+        msg_id = msg.id
+
+        msg.sender.delete()
+
+        # Message should be cascade-deleted (ServiceGroupChatMessage.sender has on_delete=CASCADE)
+        assert not ServiceGroupChatMessage.objects.filter(id=msg_id).exists()
 
 
 # ── Serializer tests ─────────────────────────────────────────────────────────

@@ -1579,6 +1579,7 @@ export default function ChatPage() {
   const { handshakeId: paramId } = useParams<{ handshakeId?: string }>()
   const [searchParams] = useSearchParams()
   const groupParam = searchParams.get('group')
+  const handshakeParam = searchParams.get('handshake')
   const navigate = useNavigate()
   const { user, isAuthenticated } = useAuthStore()
   // WebSocket auth via Cookie only (Vite proxy forwards headers for /ws)
@@ -1641,6 +1642,15 @@ export default function ChatPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramId])
+
+  // Deep-link: ?handshake={id} from notification click opens that conversation
+  useEffect(() => {
+    if (handshakeParam && handshakeParam !== selectedId) {
+      setSelectedId(handshakeParam)
+      setMobileShowThread(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handshakeParam])
 
   // Deep-link: ?group={serviceId} opens the group chat for that service
   useEffect(() => {

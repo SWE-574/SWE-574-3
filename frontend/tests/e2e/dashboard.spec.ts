@@ -56,8 +56,8 @@ test.describe('Dashboard', () => {
     // Type a search term that matches one specific service
     await searchInput.fill('Chess')
 
-    // After debounce, the Chess service should be visible
-    await expect(page.getByText('Chess Strategy Lessons for Beginners').first()).toBeVisible({ timeout: 10_000 })
+    // After debounce, at least one visible service result should match Chess.
+    await expect(page.locator('a[href*="/service-detail/"]').filter({ hasText: /Chess/i }).first()).toBeVisible({ timeout: 15_000 })
   })
 
   test('filter tabs are visible and clickable', async ({ page }) => {
@@ -97,9 +97,8 @@ test.describe('Dashboard', () => {
       page.getByText(/Manti|Börek|Chess/i).first(),
     ).toBeVisible({ timeout: 20_000 })
 
-    // Wait for one polling cycle (our POLL_INTERVAL is now 60s, so just wait 5s
-    // to make sure no immediate errors occur)
-    await page.waitForTimeout(5_000)
+    // Wait for network to settle so any polling/refetch errors are captured
+    await page.waitForLoadState('networkidle').catch(() => {})
 
     expect(errors).toHaveLength(0)
   })

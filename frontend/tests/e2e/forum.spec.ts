@@ -12,11 +12,8 @@ test.describe('Forum', () => {
     await page.goto('/forum')
 
     await expect(page).toHaveURL(/\/forum/, { timeout: 10_000 })
-    const categoriesOrTopics =
-      page.getByText(/General|Ideas|Help|category/i).first().or(
-        page.getByRole('link', { name: /./ }).first()
-      )
-    await expect(categoriesOrTopics).toBeVisible({ timeout: 15_000 })
+    const categoryCard = page.locator('button, [role="button"], a').filter({ hasText: /General|Ideas|Help|Welcome/i }).first()
+    await expect(categoryCard).toBeVisible({ timeout: 15_000 })
   })
 
   test('clicking a category loads topic list', async ({ page }) => {
@@ -64,5 +61,30 @@ test.describe('Forum', () => {
     await expect(page).toHaveURL(/\/forum\/new/, { timeout: 10_000 })
     const titleInput = page.getByLabel(/title|Title/i).or(page.locator('input[name="title"]'))
     await expect(titleInput.first()).toBeVisible({ timeout: 10_000 })
+  })
+
+  test('logged-in user can create a topic and see it after submit', async ({ page }) => {
+    await loginAs(page, USERS.deniz)
+    await page.goto('/forum')
+
+    const categoryCard = page.locator('button, a').filter({ hasText: /General|Ideas|Help|Welcome/i }).first()
+    await expect(categoryCard).toBeVisible({ timeout: 15_000 })
+    await categoryCard.click()
+
+    const newTopicBtn = page.getByRole('button', { name: /New Topic/i }).or(
+      page.getByText('New Topic').first()
+    )
+    await expect(newTopicBtn.first()).toBeVisible({ timeout: 15_000 })
+    await newTopicBtn.first().click()
+
+    await expect(page).toHaveURL(/\/forum\/new/, { timeout: 10_000 })
+
+    const title = `E2E Forum Topic ${Date.now()}`
+    await page.getByLabel(/title|Title/i).or(page.locator('input[name="title"]')).first().fill(title)
+    await page.locator('textarea').first().fill('E2E test topic body for persistence check.')
+    await page.getByRole('button', { name: /Create Topic/i }).click()
+
+    await expect(page).toHaveURL(/\/forum\/topic\//, { timeout: 15_000 })
+    await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 })
   })
 })

@@ -236,3 +236,4 @@ frontend/tests/reports/
 frontend/test-results/
 
 .DS_Store
+frontend/test-results/.last-run.json

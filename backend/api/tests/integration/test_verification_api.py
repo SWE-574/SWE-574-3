@@ -49,6 +49,20 @@ class TestVerificationAPI:
         response = client.post('/api/auth/verify-email/', {'token': 'expired_token_123'})
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
+    def test_verify_email_token_reuse_fails(self):
+        """Using the same verification token twice returns 400; token is one-time use."""
+        user = UserFactory(is_verified=False)
+        EmailVerificationToken.objects.create(
+            user=user,
+            token="one_time_token_456",
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        client = APIClient()
+        first = client.post('/api/auth/verify-email/', {'token': 'one_time_token_456'})
+        assert first.status_code == status.HTTP_200_OK
+        second = client.post('/api/auth/verify-email/', {'token': 'one_time_token_456'})
+        assert second.status_code == status.HTTP_400_BAD_REQUEST
+
     @patch('api.views._send_email_async')
     def test_send_verification_authenticated(self, mock_send):
         user = UserFactory(is_verified=False)
@@ -126,3 +140,25 @@ class TestPasswordResetAPI:
             'password': 'newsecurepass123'
         })
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_reset_password_token_reuse_fails(self):
+        """Using the same reset token twice returns 400; token is one-time use."""
+        user = UserFactory(email='reuse@test.com')
+        user.set_password('oldpass123')
+        user.save()
+        PasswordResetToken.objects.create(
+            user=user,
+            token="one_time_reset_789",
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        client = APIClient()
+        first = client.post('/api/auth/reset-password/', {
+            'token': 'one_time_reset_789',
+            'password': 'newpass123',
+        })
+        assert first.status_code == status.HTTP_200_OK
+        second = client.post('/api/auth/reset-password/', {
+            'token': 'one_time_reset_789',
+            'password': 'anotherpass123',
+        })
+        assert second.status_code == status.HTTP_400_BAD_REQUEST

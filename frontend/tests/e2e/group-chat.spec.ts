@@ -8,7 +8,7 @@
  *  3. A message can be sent to the group and appears in the thread
  *
  * Demo data:
- *  - "Traditional Manti Cooking Workshop" (elif@demo.com) has max_participants=3
+ *  - "Neighborhood Manti Cooking Circle" (elif@demo.com) has max_participants=3
  *    and accepted handshake for Zeynep, so Zeynep is eligible for group chat
  *    with the provider (Elif).
  *  - Both Elif (provider) and Zeynep (participant) have access.
@@ -103,7 +103,7 @@ test.describe('Group Chat', () => {
     await loginAs(page, USERS.zeynep)
     await page.goto('/messages')
 
-    const header = page.getByRole('button', { name: new RegExp(GROUP_SERVICE_TITLE, 'i') }).first()
+    const header = page.getByRole('button').filter({ hasText: DEMO_SERVICE_PATTERN }).first()
     await expect(header).toBeVisible({ timeout: 20_000 })
 
     // Expand and verify the group row is accessible

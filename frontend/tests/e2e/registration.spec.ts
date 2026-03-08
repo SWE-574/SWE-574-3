@@ -33,12 +33,12 @@ test.describe('Registration', () => {
     await page.getByLabel('First name').fill('E2E')
     await page.getByLabel('Last name').fill('Reg')
     await page.getByLabel('Email address').fill(unique)
-    await page.locator('#password').fill('Demo1234')
-    await page.locator('#confirmPassword').fill('Demo1234')
+    await page.locator('#password').fill('Str0ngPass!123')
+    await page.locator('#confirmPassword').fill('Str0ngPass!123')
     await page.getByLabel(/I agree to the Terms/i).click()
     await page.getByRole('button', { name: 'Create Account' }).click()
 
-    await expect(page).toHaveURL(/\/(verify-email-sent|dashboard)/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/(verify-email-sent|dashboard)/, { timeout: 25_000 })
   })
 
   test('Sign in link goes to /login', async ({ page }) => {

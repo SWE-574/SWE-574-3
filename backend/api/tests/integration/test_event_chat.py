@@ -4,7 +4,8 @@ Integration tests for event chat changes (GitHub issue #76).
 Covers:
 1. ChatViewSet.list() excludes Event-type handshakes from conversations.
 2. PublicChatViewSet restricts event chat to organizer + active participants.
-3. GroupChatViewSet rejects Event-type services entirely.
+3. GroupChatViewSet allows Event-type services for organizer and active participants
+   (checked_in, attended); cancelled/pending participants are denied.
 """
 import pytest
 from decimal import Decimal
