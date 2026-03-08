@@ -1237,21 +1237,24 @@ function linkifyMessageBody(body: string, linkColor: string): ReactNode[] {
   const segments = body.split(URL_IN_MESSAGE)
   return segments.map((segment, i) => {
     if (isUrlSegment(segment)) {
-      const href = segment.replace(/[.,;:)!?]+$/, '')
+      const trailingPunctuation = segment.match(/[.,;:)!?]+$/)?.[0] ?? ''
+      const href = trailingPunctuation ? segment.slice(0, -trailingPunctuation.length) : segment
       return (
-        <Link
-          key={i}
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          color={linkColor}
-          fontWeight={600}
-          textDecoration="underline"
-          _hover={{ opacity: 0.9 }}
-          style={{ wordBreak: 'break-all' }}
-        >
-          {getUrlLabel(segment)}
-        </Link>
+<span key={i}>
+  <Link
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    color={linkColor}
+    fontWeight={600}
+    textDecoration="underline"
+    _hover={{ opacity: 0.9 }}
+    style={{ wordBreak: 'break-all' }}
+  >
+    {getUrlLabel(segment)}
+  </Link>
+  {trailingPunctuation}
+</span>
       )
     }
     return segment
@@ -1296,7 +1299,7 @@ function MsgBubble({ msg, isMine }: { msg: ApiChatMessage; isMine: boolean }) {
 
 function GroupChatThread({
   serviceId, serviceTitle, participants, messages, user, wsConnected, draft, setDraft, isSending,
-  sendError, onSend, onKeyDown, inputRef, bottomRef, onBack,
+  sendError, loadError, onSend, onKeyDown, inputRef, bottomRef, onBack,
 }: {
   serviceId: string
   serviceTitle: string
@@ -1308,6 +1311,7 @@ function GroupChatThread({
   setDraft: (v: string) => void
   isSending: boolean
   sendError: string | null
+  loadError: string | null
   onSend: () => void
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   inputRef: React.RefObject<HTMLTextAreaElement | null>
@@ -1405,6 +1409,13 @@ function GroupChatThread({
 
       {/* Messages */}
       <Box flex={1} overflowY="auto" py={3}>
+        {loadError && (
+          <Box px={4} pb={2}>
+            <Box px={3} py={2} bg={RED_LT} borderRadius="10px">
+              <Text fontSize="12px" color={RED}>{loadError}</Text>
+            </Box>
+          </Box>
+        )}
         {messages.length === 0 ? (
           <Flex align="center" justify="center" h="100%" direction="column" gap={3}>
             <Box
@@ -1556,12 +1567,14 @@ export default function ChatPage() {
   const [messages,             setMessages]             = useState<ApiChatMessage[]>([])
   const [selectedId,           setSelectedId]           = useState<string | null>(paramId ?? null)
   const [groupServiceId,       setGroupServiceId]       = useState<string | null>(null)
+  const [groupSessionId,       setGroupSessionId]       = useState<string | null>(null)
   const [groupMessages,        setGroupMessages]        = useState<GroupChatMessage[]>([])
   const [groupParticipants,    setGroupParticipants]    = useState<GroupChatParticipant[]>([])
   const [groupServiceTitle,    setGroupServiceTitle]    = useState('Group Chat')
   const [draft,                setDraft]                = useState('')
   const [isSending,            setIsSending]            = useState(false)
   const [sendError,            setSendError]            = useState<string | null>(null)
+  const [groupLoadError,       setGroupLoadError]       = useState<string | null>(null)
   const [isCancelling,         setIsCancelling]         = useState(false)
   const [isRequestingCancellation, setIsRequestingCancellation] = useState(false)
   const [isApprovingCancellation, setIsApprovingCancellation] = useState(false)
@@ -1627,6 +1640,8 @@ export default function ChatPage() {
     setGroupMessages([])
     setGroupParticipants([])
     setGroupServiceTitle('Group Chat')
+    setGroupSessionId(null)
+    setGroupLoadError(null)
   }, [groupServiceId])
 
   const fetchMessages = useCallback(async (signal: AbortSignal) => {
@@ -1637,11 +1652,33 @@ export default function ChatPage() {
 
   const fetchGroupMessages = useCallback(async (signal: AbortSignal) => {
     if (!groupServiceId) return
-    const fetched = await groupChatAPI.getMessages(groupServiceId, signal)
-    setGroupMessages(fetched.messages)
-    setGroupParticipants(fetched.participants)
-    setGroupServiceTitle(fetched.service_title || 'Group Chat')
-  }, [groupServiceId])
+    try {
+      const fetched = await groupChatAPI.getMessages(groupServiceId, signal, groupSessionId)
+      setGroupLoadError(null)
+      setGroupMessages(fetched.messages)
+      setGroupParticipants(fetched.participants)
+      setGroupServiceTitle(fetched.service_title || 'Group Chat')
+      if (fetched.session_id) setGroupSessionId(fetched.session_id)
+    } catch (err: unknown) {
+      const axErr = err as { response?: { status?: number; data?: { detail?: string } } }
+      const detail = axErr?.response?.data?.detail as string | undefined
+      // Some recurrent group chats require selecting a session thread first.
+      // Try to resolve one automatically before surfacing an error.
+      if (axErr?.response?.status === 400 && (!groupSessionId || detail?.toLowerCase().includes('session_id'))) {
+        const sessions = await groupChatAPI.getSessions(groupServiceId, signal)
+        const first = sessions[0]
+        if (first) setGroupSessionId(first.id)
+        else {
+          setGroupMessages([])
+          setGroupParticipants([])
+          setGroupLoadError("Group chat isn't available for this post yet. It will appear once this post has active participants.")
+        }
+      } else {
+        setGroupLoadError(detail || 'Failed to load group chat.')
+        throw err
+      }
+    }
+  }, [groupServiceId, groupSessionId])
 
   // Initial load from DB when conversation is selected (so old messages show even when polling is off in dev)
   useEffect(() => {
@@ -1653,7 +1690,11 @@ export default function ChatPage() {
   useEffect(() => {
     if (!groupServiceId) return
     const ac = new AbortController()
-    fetchGroupMessages(ac.signal).catch(() => {})
+    fetchGroupMessages(ac.signal).catch((err: unknown) => {
+      if (ac.signal.aborted) return
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setGroupLoadError(detail || 'Failed to load group chat.')
+    })
     return () => ac.abort()
   }, [groupServiceId, fetchGroupMessages])
 
@@ -1697,8 +1738,8 @@ export default function ChatPage() {
 
   // ── Group WebSocket ────────────────────────────────────────────────────────
   const groupWsUrl = useMemo(
-    () => (groupServiceId ? buildGroupChatWsUrl(groupServiceId) : ''),
-    [groupServiceId],
+    () => (groupServiceId ? buildGroupChatWsUrl(groupServiceId, groupSessionId) : ''),
+    [groupServiceId, groupSessionId],
   )
   const handleGroupWsMessage = useCallback((msg: GroupChatMessage) => {
     if (!msg?.id) return
@@ -1744,7 +1785,7 @@ export default function ChatPage() {
         // Group chat send
         const sent = groupWsConnected ? groupWsSend(body) : false
         if (!sent) {
-          const msg = await groupChatAPI.sendMessage(groupServiceId, body)
+          const msg = await groupChatAPI.sendMessage(groupServiceId, body, groupSessionId)
           setGroupMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev
             return [...prev, msg]
@@ -1765,7 +1806,7 @@ export default function ChatPage() {
       setIsSending(false)
       inputRef.current?.focus()
     }
-  }, [selectedId, groupServiceId, draft, isSending, wsConnected, wsSend, groupWsConnected, groupWsSend])
+  }, [selectedId, groupServiceId, groupSessionId, draft, isSending, wsConnected, wsSend, groupWsConnected, groupWsSend])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
@@ -1980,6 +2021,7 @@ export default function ChatPage() {
               setDraft={setDraft}
               isSending={isSending}
               sendError={sendError}
+              loadError={groupLoadError}
               onSend={handleSend}
               onKeyDown={handleKeyDown}
               inputRef={inputRef}

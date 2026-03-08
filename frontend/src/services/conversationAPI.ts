@@ -93,11 +93,18 @@ export interface GroupChatParticipant {
   avatar_url: string | null
 }
 
+export interface GroupChatSessionSummary {
+  id: string
+  scheduled_time: string
+}
+
 export interface GroupChatThreadData {
   service_id: string
   service_title: string
   participants: GroupChatParticipant[]
   messages: GroupChatMessage[]
+  session_id?: string
+  scheduled_time?: string
 }
 
 interface MessagesResponse {
@@ -154,27 +161,49 @@ export const conversationAPI = {
 
 export const groupChatAPI = {
   /**
-   * GET /api/group-chat/{serviceId}/ — last 50 messages for the private group chat.
-   * Only accessible to users with an accepted handshake (or the service owner).
+   * GET /api/group-chat/{serviceId}/?list_sessions=1 — list sessions for recurrent group chat.
    */
-  getMessages: async (serviceId: string, signal?: AbortSignal): Promise<GroupChatThreadData> => {
+  getSessions: async (serviceId: string, signal?: AbortSignal): Promise<GroupChatSessionSummary[]> => {
+    const res = await apiClient.get<{ sessions: GroupChatSessionSummary[] }>(
+      `/group-chat/${serviceId}/`,
+      { signal, params: { list_sessions: 1 } },
+    )
+    return res.data.sessions ?? []
+  },
+
+  /**
+   * GET /api/group-chat/{serviceId}/ — last 50 messages. For recurrent, pass sessionId.
+   */
+  getMessages: async (
+    serviceId: string,
+    signal?: AbortSignal,
+    sessionId?: string | null,
+  ): Promise<GroupChatThreadData> => {
+    const params = sessionId ? { session_id: sessionId } : {}
     const res = await apiClient.get<GroupChatThreadData>(
       `/group-chat/${serviceId}/`,
-      { signal },
+      { signal, params },
     )
     return {
       service_id: res.data.service_id,
       service_title: res.data.service_title,
       participants: res.data.participants ?? [],
       messages: res.data.messages ?? [],
+      session_id: res.data.session_id,
+      scheduled_time: res.data.scheduled_time,
     }
   },
 
   /**
-   * POST /api/group-chat/{serviceId}/ — send a message to the group chat.
+   * POST /api/group-chat/{serviceId}/ — send a message. For recurrent, pass sessionId.
    */
-  sendMessage: async (serviceId: string, body: string): Promise<GroupChatMessage> => {
-    const res = await apiClient.post<GroupChatMessage>(`/group-chat/${serviceId}/`, { body })
+  sendMessage: async (
+    serviceId: string,
+    body: string,
+    sessionId?: string | null,
+  ): Promise<GroupChatMessage> => {
+    const payload = sessionId ? { body, session_id: sessionId } : { body }
+    const res = await apiClient.post<GroupChatMessage>(`/group-chat/${serviceId}/`, payload)
     return res.data
   },
 }
@@ -212,5 +241,8 @@ export const eventChatAPI = {
 const wsBase = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
 export const buildChatWsUrl      = (id: string) => `${wsBase}/ws/chat/${id}/`
-export const buildGroupChatWsUrl = (id: string) => `${wsBase}/ws/group-chat/${id}/`
+export const buildGroupChatWsUrl = (serviceId: string, sessionId?: string | null) =>
+  sessionId
+    ? `${wsBase}/ws/group-chat/${serviceId}/?session_id=${encodeURIComponent(sessionId)}`
+    : `${wsBase}/ws/group-chat/${serviceId}/`
 export const buildEventChatWsUrl = (roomId: string) => `${wsBase}/ws/public-chat/${roomId}/`

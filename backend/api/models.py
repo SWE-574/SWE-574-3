@@ -677,10 +677,51 @@ class PublicChatMessage(models.Model):
         ordering = ['created_at']
 
 
+class GroupChatSession(models.Model):
+    """
+    Chat thread for a specific occurrence of a group/recurrent service.
+    For Recurrent offers, each occurrence (distinct scheduled_time) has its own session
+    so participants are isolated per occurrence. For One-Time/Event, group chat continues
+    to use service_id only (no session); this model is used only for Recurrent.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='group_chat_sessions'
+    )
+    scheduled_time = models.DateTimeField(
+        db_index=True,
+        help_text='Scheduled time for this occurrence; identifies the session with the service.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"GroupChatSession(service={self.service_id}, scheduled_time={self.scheduled_time})"
+
+    class Meta:
+        ordering = ['scheduled_time']
+        indexes = [
+            models.Index(fields=['service', 'scheduled_time'], name='api_gcs_service_scheduled_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['service', 'scheduled_time'],
+                name='api_groupchatsession_service_scheduled_uniq',
+            ),
+        ]
+
+
 class ServiceGroupChatMessage(models.Model):
     """Private group chat messages for a service — only accepted participants can read/write."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='group_chat_messages')
+    group_chat_session = models.ForeignKey(
+        GroupChatSession,
+        on_delete=models.CASCADE,
+        related_name='messages',
+        null=True,
+        blank=True,
+        help_text='When set (recurrent offers), message belongs to this session thread; when null, legacy service-level thread (One-Time/Event).',
+    )
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='group_chat_messages')
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
@@ -693,6 +734,7 @@ class ServiceGroupChatMessage(models.Model):
         indexes = [
             models.Index(fields=['service', 'created_at'], name='api_sgcm_service_created_idx'),
             models.Index(fields=['sender'], name='api_sgcm_sender_idx'),
+            models.Index(fields=['group_chat_session', 'created_at'], name='api_sgcm_session_created_idx'),
         ]
 
 
