@@ -287,7 +287,7 @@ export function LocationPickerMap({
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [TOKEN, coords, value, handleSelectSearchResult])
+  }, [coords, value, handleSelectSearchResult])
 
   if (!TOKEN) {
     return (
