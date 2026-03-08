@@ -1516,6 +1516,7 @@ export default function ChatPage() {
   const [messages,             setMessages]             = useState<ApiChatMessage[]>([])
   const [selectedId,           setSelectedId]           = useState<string | null>(paramId ?? null)
   const [groupServiceId,       setGroupServiceId]       = useState<string | null>(null)
+  const [groupSessionId,       setGroupSessionId]       = useState<string | null>(null)
   const [groupMessages,        setGroupMessages]        = useState<GroupChatMessage[]>([])
   const [groupParticipants,    setGroupParticipants]    = useState<GroupChatParticipant[]>([])
   const [groupServiceTitle,    setGroupServiceTitle]    = useState('Group Chat')
@@ -1587,6 +1588,7 @@ export default function ChatPage() {
     setGroupMessages([])
     setGroupParticipants([])
     setGroupServiceTitle('Group Chat')
+    setGroupSessionId(null)
   }, [groupServiceId])
 
   const fetchMessages = useCallback(async (signal: AbortSignal) => {
@@ -1597,11 +1599,25 @@ export default function ChatPage() {
 
   const fetchGroupMessages = useCallback(async (signal: AbortSignal) => {
     if (!groupServiceId) return
-    const fetched = await groupChatAPI.getMessages(groupServiceId, signal)
-    setGroupMessages(fetched.messages)
-    setGroupParticipants(fetched.participants)
-    setGroupServiceTitle(fetched.service_title || 'Group Chat')
-  }, [groupServiceId])
+    try {
+      const fetched = await groupChatAPI.getMessages(groupServiceId, signal, groupSessionId)
+      setGroupMessages(fetched.messages)
+      setGroupParticipants(fetched.participants)
+      setGroupServiceTitle(fetched.service_title || 'Group Chat')
+      if (fetched.session_id) setGroupSessionId(fetched.session_id)
+    } catch (err: unknown) {
+      const axErr = err as { response?: { status?: number; data?: { detail?: string } } }
+      const detail = axErr?.response?.data?.detail as string | undefined
+      if (axErr?.response?.status === 400 && detail?.includes('session_id is required')) {
+        const sessions = await groupChatAPI.getSessions(groupServiceId, signal)
+        const first = sessions[0]
+        if (first) setGroupSessionId(first.id)
+        else throw err
+      } else {
+        throw err
+      }
+    }
+  }, [groupServiceId, groupSessionId])
 
   // Initial load from DB when conversation is selected (so old messages show even when polling is off in dev)
   useEffect(() => {
@@ -1657,8 +1673,8 @@ export default function ChatPage() {
 
   // ── Group WebSocket ────────────────────────────────────────────────────────
   const groupWsUrl = useMemo(
-    () => (groupServiceId ? buildGroupChatWsUrl(groupServiceId) : ''),
-    [groupServiceId],
+    () => (groupServiceId ? buildGroupChatWsUrl(groupServiceId, groupSessionId) : ''),
+    [groupServiceId, groupSessionId],
   )
   const handleGroupWsMessage = useCallback((msg: GroupChatMessage) => {
     if (!msg?.id) return
@@ -1704,7 +1720,7 @@ export default function ChatPage() {
         // Group chat send
         const sent = groupWsConnected ? groupWsSend(body) : false
         if (!sent) {
-          const msg = await groupChatAPI.sendMessage(groupServiceId, body)
+          const msg = await groupChatAPI.sendMessage(groupServiceId, body, groupSessionId)
           setGroupMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev
             return [...prev, msg]
@@ -1725,7 +1741,7 @@ export default function ChatPage() {
       setIsSending(false)
       inputRef.current?.focus()
     }
-  }, [selectedId, groupServiceId, draft, isSending, wsConnected, wsSend, groupWsConnected, groupWsSend])
+  }, [selectedId, groupServiceId, groupSessionId, draft, isSending, wsConnected, wsSend, groupWsConnected, groupWsSend])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
