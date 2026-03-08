@@ -35,6 +35,7 @@ export interface LocationPickerMapProps {
   height?: string
   coords?: { lat: number; lng: number } | null
   mapsUrl?: string | null
+  showSearchInput?: boolean
   auxiliaryLabel?: string
   auxiliaryValue?: string
   auxiliaryPlaceholder?: string
@@ -114,6 +115,7 @@ export function LocationPickerMap({
   height = '220px',
   coords = null,
   mapsUrl,
+  showSearchInput = true,
   auxiliaryLabel,
   auxiliaryValue,
   auxiliaryPlaceholder,
@@ -299,56 +301,58 @@ export function LocationPickerMap({
 
   return (
     <Box width="100%">
-      <Box position="relative" mb={3}>
-        <Input
-          placeholder="Search address and select a result"
-          value={searchQuery}
-          onChange={(e) => {
-            setSearchQuery(e.target.value)
-            setShowResults(true)
-          }}
-          onFocus={() => {
-            if (searchResults.length > 0) setShowResults(true)
-          }}
-          onBlur={() => window.setTimeout(() => setShowResults(false), 160)}
-          size="sm"
-          borderRadius="8px"
-          borderColor={GRAY200}
-        />
-        {showResults && (searchLoading || searchResults.length > 0) && (
-          <Box
-            position="absolute"
-            zIndex={20}
-            top="calc(100% + 6px)"
-            left={0}
-            right={0}
-            bg={WHITE}
-            border="1px solid"
+      {showSearchInput && (
+        <Box position="relative" mb={3}>
+          <Input
+            placeholder="Search address and select a result"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value)
+              setShowResults(true)
+            }}
+            onFocus={() => {
+              if (searchResults.length > 0) setShowResults(true)
+            }}
+            onBlur={() => window.setTimeout(() => setShowResults(false), 160)}
+            size="sm"
+            borderRadius="8px"
             borderColor={GRAY200}
-            borderRadius="12px"
-            boxShadow="0 8px 24px rgba(0,0,0,0.12)"
-            maxH="240px"
-            overflowY="auto"
-          >
-            {searchLoading && <Flex justify="center" p={3}><Spinner size="sm" /></Flex>}
-            {!searchLoading && searchResults.map((result) => (
-              <Box
-                key={result.id}
-                px={4}
-                py="10px"
-                cursor="pointer"
-                _hover={{ bg: GRAY100 }}
-                onMouseDown={() => handleSelectSearchResult(result)}
-              >
-                <Text fontSize="13px" color={GRAY700} fontWeight={600}>{result.address}</Text>
-                {result.district && (
-                  <Text fontSize="11px" color={GRAY400} mt="1px">{result.district}</Text>
-                )}
-              </Box>
-            ))}
-          </Box>
-        )}
-      </Box>
+          />
+          {showResults && (searchLoading || searchResults.length > 0) && (
+            <Box
+              position="absolute"
+              zIndex={20}
+              top="calc(100% + 6px)"
+              left={0}
+              right={0}
+              bg={WHITE}
+              border="1px solid"
+              borderColor={GRAY200}
+              borderRadius="12px"
+              boxShadow="0 8px 24px rgba(0,0,0,0.12)"
+              maxH="240px"
+              overflowY="auto"
+            >
+              {searchLoading && <Flex justify="center" p={3}><Spinner size="sm" /></Flex>}
+              {!searchLoading && searchResults.map((result) => (
+                <Box
+                  key={result.id}
+                  px={4}
+                  py="10px"
+                  cursor="pointer"
+                  _hover={{ bg: GRAY100 }}
+                  onMouseDown={() => handleSelectSearchResult(result)}
+                >
+                  <Text fontSize="13px" color={GRAY700} fontWeight={600}>{result.address}</Text>
+                  {result.district && (
+                    <Text fontSize="11px" color={GRAY400} mt="1px">{result.district}</Text>
+                  )}
+                </Box>
+              ))}
+            </Box>
+          )}
+        </Box>
+      )}
       {/* Map and "Use My Location" live in their own container so the button never overlaps the input below */}
       <Box position="relative" width="100%" height={height}>
         <Map

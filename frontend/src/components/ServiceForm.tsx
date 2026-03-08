@@ -1040,6 +1040,7 @@ export default function ServiceForm({
                     <LocationPickerMap
                       value={sessionExactLocation}
                       coords={sessionExactLocationCoords}
+                      showSearchInput={false}
                       onChange={(value, coords, meta) => {
                         setSessionExactLocation(value)
                         setSessionExactLocationCoords(coords ?? null)
