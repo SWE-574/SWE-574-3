@@ -58,7 +58,7 @@ services:
     environment:
       - VITE_API_URL=/api
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://localhost:5173/login >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:5173/login >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
