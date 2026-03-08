@@ -232,3 +232,7 @@ frontend/tests/reports/
 # Allow frontend src lib (validation helpers)
 !frontend/src/lib/
 !frontend/src/lib/**
+
+frontend/test-results/
+
+.DS_Store

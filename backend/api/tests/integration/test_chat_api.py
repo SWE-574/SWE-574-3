@@ -9,7 +9,12 @@ from api.tests.helpers.factories import (
     ServiceGroupChatMessageFactory,
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import ChatMessage, ChatRoom, PublicChatMessage, ServiceGroupChatMessage
+from api.models import (
+    ChatMessage, ChatRoom, PublicChatMessage, ServiceGroupChatMessage,
+    GroupChatSession,
+)
+from django.utils import timezone
+from datetime import timedelta
 
 
 @pytest.mark.django_db
@@ -296,18 +301,144 @@ class TestGroupChatViewSet:
 
     # ── GET: eligibility guards ───────────────────────────────────────────────
 
-    def test_recurrent_service_is_not_eligible(self):
-        """Recurrent services do not have a group chat."""
+    def test_recurrent_service_requires_session_id(self):
+        """Recurrent group chat GET without session_id returns 400."""
         owner = UserFactory()
         service = ServiceFactory(
             user=owner, schedule_type='Recurrent', max_participants=5
         )
-
         client = AuthenticatedAPIClient()
         client.authenticate_user(owner)
-
         response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'session_id' in (response.data.get('detail') or '')
+
+    def test_recurrent_list_sessions_returns_sessions(self):
+        """Recurrent owner can list sessions with list_sessions=1."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+        response = client.get(f'/api/group-chat/{service.id}/', {'list_sessions': 1})
+        assert response.status_code == status.HTTP_200_OK
+        assert 'sessions' in response.data
+        assert response.data['service_id'] == str(service.id)
+
+    def test_recurrent_get_messages_with_session_id(self):
+        """Recurrent group chat returns messages when session_id is provided."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+        st = timezone.now() + timedelta(days=1)
+        session, _ = GroupChatSession.objects.get_or_create(
+            service=service, scheduled_time=st, defaults={}
+        )
+        participant = UserFactory()
+        HandshakeFactory(service=service, requester=participant, status='accepted', scheduled_time=st)
+        ServiceGroupChatMessageFactory(service=service, group_chat_session=session, sender=owner, body='Hello session')
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+        response = client.get(f'/api/group-chat/{service.id}/', {'session_id': str(session.id)})
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data['messages']) == 1
+        assert response.data['messages'][0]['body'] == 'Hello session'
+        assert response.data.get('session_id') == str(session.id)
+
+    def test_recurrent_invalid_session_id_returns_404(self):
+        """Malformed or unknown session_id returns 404 instead of server error."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+        response = client.get(f'/api/group-chat/{service.id}/', {'session_id': 'not-a-uuid'})
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.data.get('detail') == 'Session not found'
+
+    def test_recurrent_participant_cannot_access_other_session(self):
+        """Participant in session A cannot read messages of session B."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+        st_a = timezone.now() + timedelta(days=1)
+        st_b = timezone.now() + timedelta(days=2)
+        session_a, _ = GroupChatSession.objects.get_or_create(service=service, scheduled_time=st_a, defaults={})
+        session_b, _ = GroupChatSession.objects.get_or_create(service=service, scheduled_time=st_b, defaults={})
+        participant_a = UserFactory()
+        HandshakeFactory(service=service, requester=participant_a, status='accepted', scheduled_time=st_a)
+        ServiceGroupChatMessageFactory(service=service, group_chat_session=session_b, sender=owner, body='Secret in B')
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant_a)
+        response = client.get(f'/api/group-chat/{service.id}/', {'session_id': str(session_b.id)})
         assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_one_time_group_chat_unchanged_without_session_id(self):
+        """One-Time group chat GET without session_id still returns 200 (backward compat)."""
+        owner = UserFactory()
+        service = _group_service(owner)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+        response = client.get(f'/api/group-chat/{service.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        assert 'messages' in response.data
+        assert 'participants' in response.data
+
+    def test_recurrent_post_requires_session_id(self):
+        """Recurrent group chat POST without session_id returns 400."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+        response = client.post(
+            f'/api/group-chat/{service.id}/',
+            {'body': 'Hello'},
+            format='json',
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_recurrent_post_with_session_id_stores_in_session(self):
+        """Recurrent send message with session_id creates message in that session."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+        st = timezone.now() + timedelta(days=1)
+        session, _ = GroupChatSession.objects.get_or_create(
+            service=service, scheduled_time=st, defaults={}
+        )
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+        response = client.post(
+            f'/api/group-chat/{service.id}/',
+            {'body': 'Session message', 'session_id': str(session.id)},
+            format='json',
+        )
+        assert response.status_code == status.HTTP_201_CREATED
+        msg = ServiceGroupChatMessage.objects.get(service=service, body='Session message')
+        assert msg.group_chat_session_id == session.id
+
+    def test_recurrent_post_invalid_session_id_returns_404(self):
+        """Malformed session_id on recurrent POST returns 404."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+        response = client.post(
+            f'/api/group-chat/{service.id}/',
+            {'body': 'Hello', 'session_id': 'not-a-uuid'},
+            format='json',
+        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.data.get('detail') == 'Session not found'
 
     def test_single_participant_service_is_not_eligible(self):
         """One-Time services with max_participants=1 do not have a group chat."""

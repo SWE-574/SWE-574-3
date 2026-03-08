@@ -10,12 +10,51 @@ import pytest
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
 
-from api.models import ServiceGroupChatMessage
+from api.models import ServiceGroupChatMessage, GroupChatSession
 from api.serializers import ServiceGroupChatMessageSerializer
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory,
     ServiceGroupChatMessageFactory,
 )
+
+
+# ── GroupChatSession model ───────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestGroupChatSessionModel:
+    """Unit tests for GroupChatSession (recurrent group chat threads)."""
+
+    def test_get_or_create_by_service_and_scheduled_time(self):
+        """Sessions are unique per (service, scheduled_time)."""
+        from django.utils import timezone
+        from datetime import timedelta
+        service = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        st = timezone.now() + timedelta(days=1)
+        s1, created1 = GroupChatSession.objects.get_or_create(
+            service=service, scheduled_time=st, defaults={}
+        )
+        s2, created2 = GroupChatSession.objects.get_or_create(
+            service=service, scheduled_time=st, defaults={}
+        )
+        assert created1 is True
+        assert created2 is False
+        assert s1.id == s2.id
+
+    def test_message_with_session_stored_under_session(self):
+        """ServiceGroupChatMessage with group_chat_session links to that session."""
+        from django.utils import timezone
+        from datetime import timedelta
+        service = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        st = timezone.now() + timedelta(days=1)
+        session, _ = GroupChatSession.objects.get_or_create(
+            service=service, scheduled_time=st, defaults={}
+        )
+        sender = UserFactory()
+        msg = ServiceGroupChatMessage.objects.create(
+            service=service, group_chat_session=session, sender=sender, body='Hi',
+        )
+        assert msg.group_chat_session_id == session.id
+        assert list(session.messages.values_list('id', flat=True)) == [msg.id]
 
 
 # ── Model tests ──────────────────────────────────────────────────────────────
@@ -184,16 +223,15 @@ class TestGroupChatViewSetAccessControl:
         with pytest.raises(PermissionDenied):
             vs._get_service_or_403(vs.request, str(service.id))
 
-    def test_recurrent_service_is_denied(self):
-        """Recurrent services are rejected regardless of user role."""
-        from rest_framework.exceptions import PermissionDenied
+    def test_recurrent_service_is_allowed(self):
+        """Recurrent services with group capacity are allowed."""
         owner = UserFactory()
         service = ServiceFactory(
             user=owner, schedule_type='Recurrent', max_participants=5
         )
         vs = self._viewset_with_user(owner)
-        with pytest.raises(PermissionDenied):
-            vs._get_service_or_403(vs.request, str(service.id))
+        result = vs._get_service_or_403(vs.request, str(service.id))
+        assert result == service
 
     def test_single_participant_service_is_denied(self):
         """max_participants=1 services are rejected."""
@@ -224,5 +262,106 @@ class TestGroupChatViewSetAccessControl:
         for hs_status in ('denied', 'cancelled'):
             HandshakeFactory(service=service, requester=requester, status=hs_status)
             vs = self._viewset_with_user(requester)
-            with pytest.raises(PermissionDenied, match=''):
+            with pytest.raises(PermissionDenied):
                 vs._get_service_or_403(vs.request, str(service.id))
+
+
+# ── GroupChatConsumer._check_access (WebSocket) ─────────────────────────────
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.unit
+class TestGroupChatConsumerAccess:
+    """Unit tests for GroupChatConsumer._check_access (WS group chat eligibility)."""
+
+    def _sync_check(self, user, service_id):
+        """Call the async _check_access via async_to_sync."""
+        from api.consumers import GroupChatConsumer
+        from asgiref.sync import async_to_sync
+        consumer = GroupChatConsumer()
+        return async_to_sync(consumer._check_access)(user, service_id)
+
+    def _sync_requires_session(self, service_id):
+        """Call async _service_requires_session via async_to_sync."""
+        from api.consumers import GroupChatConsumer
+        from asgiref.sync import async_to_sync
+        consumer = GroupChatConsumer()
+        return async_to_sync(consumer._service_requires_session)(service_id)
+
+    def _sync_session_check(self, user, service_id, session_id):
+        """Call async _check_session_access via async_to_sync."""
+        from api.consumers import GroupChatConsumer
+        from asgiref.sync import async_to_sync
+        consumer = GroupChatConsumer()
+        return async_to_sync(consumer._check_session_access)(user, service_id, session_id)
+
+    def test_recurrent_group_owner_allowed(self):
+        """Recurrent group offer owner is allowed to connect to group chat WS."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+        assert self._sync_check(owner, str(service.id)) is True
+
+    def test_recurrent_accepted_participant_allowed(self):
+        """User with accepted handshake on recurrent group offer is allowed."""
+        service = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        participant = UserFactory()
+        HandshakeFactory(service=service, requester=participant, status='accepted')
+        assert self._sync_check(participant, str(service.id)) is True
+
+    def test_recurrent_pending_participant_denied(self):
+        """Pending requester on recurrent group offer is denied WS access."""
+        service = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        requester = UserFactory()
+        HandshakeFactory(service=service, requester=requester, status='pending')
+        assert self._sync_check(requester, str(service.id)) is False
+
+    def test_single_participant_service_denied(self):
+        """max_participants=1 service is denied (no group chat)."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='One-Time', max_participants=1
+        )
+        assert self._sync_check(owner, str(service.id)) is False
+
+    def test_one_time_group_still_works(self):
+        """One-Time group offer owner and accepted participant still allowed."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='One-Time', max_participants=3
+        )
+        assert self._sync_check(owner, str(service.id)) is True
+        participant = UserFactory()
+        HandshakeFactory(service=service, requester=participant, status='accepted')
+        assert self._sync_check(participant, str(service.id)) is True
+
+    def test_recurrent_group_requires_session(self):
+        """Recurrent group services must use session-scoped chat."""
+        service = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        assert self._sync_requires_session(str(service.id)) is True
+
+    def test_one_time_group_does_not_require_session(self):
+        """One-Time group services keep legacy service-scoped chat behavior."""
+        service = ServiceFactory(schedule_type='One-Time', max_participants=3)
+        assert self._sync_requires_session(str(service.id)) is False
+
+    def test_recurrent_session_access_denied_for_malformed_session_id(self):
+        """Malformed session_id never grants access."""
+        service = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        owner = service.user
+        assert self._sync_session_check(owner, str(service.id), 'not-a-uuid') is False
+
+    def test_recurrent_session_access_denied_when_time_does_not_match(self):
+        """Accepted user for one occurrence cannot access another occurrence session."""
+        from django.utils import timezone
+        from datetime import timedelta
+        from api.models import GroupChatSession
+
+        service = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        participant = UserFactory()
+        st_a = timezone.now() + timedelta(days=1)
+        st_b = timezone.now() + timedelta(days=2)
+        HandshakeFactory(service=service, requester=participant, status='accepted', scheduled_time=st_a)
+        session_b, _ = GroupChatSession.objects.get_or_create(service=service, scheduled_time=st_b, defaults={})
+
+        assert self._sync_session_check(participant, str(service.id), str(session_b.id)) is False

@@ -43,6 +43,13 @@ describe('eventChatAPI', () => {
     const url = mod.buildGroupChatWsUrl('svc-456')
     expect(url).toContain('/ws/group-chat/svc-456/')
   })
+
+  it('buildGroupChatWsUrl with sessionId adds session_id query', async () => {
+    const mod = await import('@/services/conversationAPI')
+    const url = mod.buildGroupChatWsUrl('svc-456', 'session-uuid-123')
+    expect(url).toContain('/ws/group-chat/svc-456/')
+    expect(url).toContain('session_id=session-uuid-123')
+  })
 })
 
 describe('PublicChatMessage type exports', () => {
@@ -58,6 +65,7 @@ describe('PublicChatMessage type exports', () => {
     expect(typeof mod.conversationAPI.sendMessage).toBe('function')
 
     // groupChatAPI
+    expect(typeof mod.groupChatAPI.getSessions).toBe('function')
     expect(typeof mod.groupChatAPI.getMessages).toBe('function')
     expect(typeof mod.groupChatAPI.sendMessage).toBe('function')
 

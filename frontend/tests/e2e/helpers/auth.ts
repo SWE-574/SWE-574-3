@@ -10,6 +10,7 @@ export const USERS = {
   can:    { email: 'can@demo.com',    password: 'demo123', name: 'Can Şahin'   },
   deniz:  { email: 'deniz@demo.com',  password: 'demo123', name: 'Deniz Aydın' },
   burak:  { email: 'burak@demo.com',  password: 'demo123', name: 'Burak Kurt'  },
+  yasemin:{ email: 'yasemin@demo.com',password: 'demo123', name: 'Yasemin Ergin' },
 } as const
 
 export type DemoUser = (typeof USERS)[keyof typeof USERS]

@@ -40,7 +40,7 @@ from .exceptions import create_error_response, ErrorCodes
 from .models import (
     User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
-    ChatRoom, PublicChatMessage, ServiceGroupChatMessage, Comment, NegativeRep,
+    ChatRoom, PublicChatMessage, ServiceGroupChatMessage, GroupChatSession, Comment, NegativeRep,
     AdminAuditLog,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
     EmailVerificationToken, PasswordResetToken,
@@ -2560,6 +2560,26 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 service=handshake.service
             )
 
+            # Auto-post structured session summary to chat
+            from django.utils import timezone as tz
+            from urllib.parse import quote
+            summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
+            loc = handshake.exact_location or ''
+            maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(loc)}"
+            session_msg = ChatMessage.objects.create(
+                handshake=handshake,
+                sender=user,
+                body=f"\U0001F4C5 {summary_time} | \U0001F4CD {loc} | \U0001F517 {maps_url}"
+            )
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    f'chat_{handshake.id}',
+                    {'type': 'chat_message', 'message': ChatMessageSerializer(session_msg).data}
+                )
+
             serializer = self.get_serializer(handshake)
             return Response(serializer.data, status=200)
 
@@ -2680,6 +2700,25 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             service=handshake.service
         )
 
+        # Auto-post structured session summary to chat
+        from django.utils import timezone as tz
+        from urllib.parse import quote
+        summary_time = tz.localtime(parsed_time).strftime('%b %d, %Y %I:%M %p')
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
+        session_msg = ChatMessage.objects.create(
+            handshake=handshake,
+            sender=user,
+            body=f"\U0001F4C5 {summary_time} | \U0001F4CD {exact_location} | \U0001F517 {maps_url}"
+        )
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f'chat_{handshake.id}',
+                {'type': 'chat_message', 'message': ChatMessageSerializer(session_msg).data}
+            )
+
         serializer = self.get_serializer(handshake)
         return Response(serializer.data, status=200)
 
@@ -2743,6 +2782,24 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         handshake.status = 'accepted'
         handshake.requester_initiated = True  # Mark requester as having approved
         handshake.save()
+
+        # Auto-post confirmation to chat and broadcast via WebSocket
+        from django.utils import timezone as tz
+        summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
+        loc = handshake.exact_location or ''
+        approve_msg = ChatMessage.objects.create(
+            handshake=handshake,
+            sender=user,
+            body=f"Session approved! See you on {summary_time} at {loc}."
+        )
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f'chat_{handshake.id}',
+                {'type': 'chat_message', 'message': ChatMessageSerializer(approve_msg).data}
+            )
 
         # Notify provider that handshake was approved
         create_notification(
@@ -5550,12 +5607,15 @@ class PublicChatViewSet(viewsets.ViewSet):
 
 class GroupChatViewSet(viewsets.ViewSet):
     """
-    Private group chat for one-time Offer/Need services with max_participants > 1.
+    Private group chat for Offer/Need services with max_participants > 1.
     Only users with an accepted handshake (or the service owner) may access.
 
+    For Recurrent services, chat is session-scoped: pass session_id (query or body)
+    to target a specific occurrence. Optional: GET ?list_sessions=1 to list sessions.
+
     Endpoints:
-    - GET  /api/group-chat/{service_id}/ — get last 50 messages
-    - POST /api/group-chat/{service_id}/ — send a message
+    - GET  /api/group-chat/{service_id}/ — get last 50 messages (optional session_id, list_sessions=1)
+    - POST /api/group-chat/{service_id}/ — send a message (optional session_id in body/query)
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -5578,11 +5638,11 @@ class GroupChatViewSet(viewsets.ViewSet):
         is_event = service.type == 'Event'
         is_group_service = (
             is_event
-            or (service.schedule_type == 'One-Time' and service.max_participants > 1)
+            or service.max_participants > 1
         )
         if not is_group_service:
             from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Group chat is only available for one-time group services')
+            raise PermissionDenied('Group chat is only available for group services or events')
 
         user = request.user
         is_owner = service.user == user
@@ -5597,44 +5657,159 @@ class GroupChatViewSet(viewsets.ViewSet):
 
         return service
 
+    def _is_recurrent_group(self, service):
+        return (
+            service.schedule_type == 'Recurrent'
+            and service.max_participants > 1
+            and service.type != 'Event'
+        )
+
+    def _get_session_for_request(self, request, service):
+        """Resolve GroupChatSession from request (query or body). Returns (session or None, error_response or None)."""
+        session_id = request.query_params.get('session_id') or (request.data if isinstance(request.data, dict) else {}).get('session_id')
+        if not session_id:
+            return None, None
+        try:
+            session = GroupChatSession.objects.select_related('service').get(id=session_id)
+        except (GroupChatSession.DoesNotExist, DjangoValidationError, ValueError):
+            from rest_framework.exceptions import NotFound
+            return None, Response({'detail': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+        if str(session.service_id) != str(service.id):
+            from rest_framework.exceptions import PermissionDenied
+            return None, Response({'detail': 'Session does not belong to this service'}, status=status.HTTP_400_BAD_REQUEST)
+        return session, None
+
+    def _user_has_session_access(self, request, service, session):
+        """True if request.user is owner or has an accepted handshake for this session's scheduled_time."""
+        user = request.user
+        if service.user == user:
+            return True
+        active = self._active_statuses_for_group_chat(service)
+        return Handshake.objects.filter(
+            service=service,
+            requester=user,
+            status__in=active,
+            scheduled_time=session.scheduled_time,
+        ).exists()
+
+    def _list_sessions_for_user(self, service, user):
+        """Return GroupChatSessions for this service that the user can access (owner or accepted handshake with that scheduled_time)."""
+        active = self._active_statuses_for_group_chat(service)
+        if service.user == user:
+            handshake_times = Handshake.objects.filter(
+                service=service, status__in=active
+            ).values_list('scheduled_time', flat=True).distinct()
+        else:
+            handshake_times = Handshake.objects.filter(
+                service=service, requester=user, status__in=active
+            ).values_list('scheduled_time', flat=True).distinct()
+        sessions = []
+        for st in handshake_times:
+            if st is None:
+                continue
+            session, _ = GroupChatSession.objects.get_or_create(
+                service=service,
+                scheduled_time=st,
+                defaults={},
+            )
+            sessions.append(session)
+        return sorted(sessions, key=lambda s: s.scheduled_time)
+
     @track_performance
     def retrieve(self, request, pk=None):
-        """Get the last 50 messages for the group chat."""
+        """Get the last 50 messages for the group chat, or list sessions when list_sessions=1 (recurrent)."""
         service = self._get_service_or_403(request, pk)
+        is_recurrent = self._is_recurrent_group(service)
+
+        if is_recurrent and request.query_params.get('list_sessions'):
+            sessions = self._list_sessions_for_user(service, request.user)
+            return Response({
+                'service_id': str(service.id),
+                'service_title': service.title,
+                'sessions': [
+                    {'id': str(s.id), 'scheduled_time': s.scheduled_time.isoformat()}
+                    for s in sessions
+                ],
+            })
+
+        session, err = self._get_session_for_request(request, service)
+        if err is not None:
+            return err
+        if is_recurrent and session is None:
+            return Response(
+                {'detail': 'session_id is required for recurrent group chat'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         active_statuses = self._active_statuses_for_group_chat(service)
-        participant_users = [service.user]
-        accepted_participants = list(
-            User.objects.filter(
-                id__in=Handshake.objects.filter(service=service, status__in=active_statuses)
-                .values_list('requester_id', flat=True)
-            ).distinct()
-        )
-        participant_users.extend(
-            user for user in accepted_participants if user.id != service.user_id
-        )
-        msgs = (
-            ServiceGroupChatMessage.objects
-            .filter(service=service)
-            .select_related('sender')
-            .order_by('-created_at')[:50]
-        )
+        if session is not None:
+            if not self._user_has_session_access(request, service, session):
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied('You do not have access to this session')
+            participant_user_ids = set()
+            participant_user_ids.add(service.user_id)
+            for uid in Handshake.objects.filter(
+                service=service, status__in=active_statuses, scheduled_time=session.scheduled_time
+            ).values_list('requester_id', flat=True):
+                participant_user_ids.add(uid)
+            participant_users = list(User.objects.filter(id__in=participant_user_ids))
+            msgs = (
+                ServiceGroupChatMessage.objects
+                .filter(group_chat_session=session)
+                .select_related('sender')
+                .order_by('-created_at')[:50]
+            )
+        else:
+            participant_users = [service.user]
+            accepted_participants = list(
+                User.objects.filter(
+                    id__in=Handshake.objects.filter(service=service, status__in=active_statuses)
+                    .values_list('requester_id', flat=True)
+                ).distinct()
+            )
+            participant_users.extend(
+                u for u in accepted_participants if u.id != service.user_id
+            )
+            msgs = (
+                ServiceGroupChatMessage.objects
+                .filter(service=service, group_chat_session__isnull=True)
+                .select_related('sender')
+                .order_by('-created_at')[:50]
+            )
+
         serializer = ServiceGroupChatMessageSerializer(list(reversed(list(msgs))), many=True)
         participants_serializer = GroupChatParticipantSerializer(participant_users, many=True)
-        return Response({
+        payload = {
             'service_id': str(service.id),
             'service_title': service.title,
             'participants': participants_serializer.data,
             'messages': serializer.data,
-        })
+        }
+        if session is not None:
+            payload['session_id'] = str(session.id)
+            payload['scheduled_time'] = session.scheduled_time.isoformat()
+        return Response(payload)
 
     @track_performance
     def create(self, request, pk=None):
-        """Send a message to the group chat."""
+        """Send a message to the group chat (optional session_id for recurrent)."""
         service = self._get_service_or_403(request, pk)
+        is_recurrent = self._is_recurrent_group(service)
+
+        session, err = self._get_session_for_request(request, service)
+        if err is not None:
+            return err
+        if is_recurrent and session is None:
+            return Response(
+                {'detail': 'session_id is required for recurrent group chat'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if session is not None and not self._user_has_session_access(request, service, session):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('You do not have access to this session')
 
         body = (request.data.get('body', '') or '').strip()
         cleaned_body = bleach.clean(body, tags=[], strip=True).strip()[:5000]
-
         if not cleaned_body:
             return create_error_response(
                 'Message body is required',
@@ -5644,11 +5819,12 @@ class GroupChatViewSet(viewsets.ViewSet):
 
         message = ServiceGroupChatMessage.objects.create(
             service=service,
+            group_chat_session=session,
             sender=request.user,
             body=cleaned_body,
         )
 
-        # Broadcast via WebSocket
+        channel_name = f'group_chat_session_{session.id}' if session else f'group_chat_{str(service.id)}'
         try:
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync
@@ -5656,7 +5832,7 @@ class GroupChatViewSet(viewsets.ViewSet):
             if channel_layer:
                 serializer = ServiceGroupChatMessageSerializer(message)
                 async_to_sync(channel_layer.group_send)(
-                    f'group_chat_{str(service.id)}',
+                    channel_name,
                     {'type': 'chat_message', 'message': serializer.data}
                 )
         except Exception as e:

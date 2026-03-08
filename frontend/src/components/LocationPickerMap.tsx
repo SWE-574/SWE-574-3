@@ -14,7 +14,7 @@ import type { Feature, FeatureCollection, Point } from 'geojson'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 import { Box, Button, Input, Text, Link } from '@chakra-ui/react'
-import { GREEN, GRAY100, GRAY200, GRAY400, GRAY700, GRAY800, WHITE } from '@/theme/tokens'
+import { GREEN, GRAY100, GRAY200, GRAY400, GRAY700, WHITE } from '@/theme/tokens'
 import { reverseGeocode, buildMapsUrl } from '@/utils/location'
 
 const mapboxWithTelemetry = mapboxgl as typeof mapboxgl & { setTelemetryEnabled?: (enabled: boolean) => void }
@@ -185,52 +185,60 @@ export function LocationPickerMap({ value, onChange, height = '220px' }: Locatio
   }
 
   return (
-    <Box position="relative" width="100%">
-      <Map
-        ref={mapRef}
-        mapboxAccessToken={TOKEN}
-        initialViewState={initialView}
-        style={{ width: '100%', height, borderRadius: '8px' }}
-        mapStyle="mapbox://styles/sgunes16/cmmc96rwc00c701qz7v0g8h9k"
-        scrollZoom
-        onClick={onMapClick}
-        cursor="crosshair"
-      >
-        <NavigationControl position="top-right" showCompass={false} />
-        {selectedCoords && (
-          <Source id="pick-marker-source" type="geojson" data={pinGeoJSON}>
-            <Layer {...pinLayer} />
-          </Source>
-        )}
-      </Map>
-      <Button
-        size="sm"
-        variant="outline"
-        position="absolute"
-        bottom="10px"
-        right="10px"
-        onClick={requestLocation}
-        loading={locationLoading}
-        bg={WHITE}
-        borderColor={GRAY200}
-        _hover={{ bg: GRAY100 }}
-      >
-        <LocationIcon />
-        <Box as="span" ml={2}>Use My Location</Box>
-      </Button>
+    <Box width="100%">
+      {/* Map and "Use My Location" live in their own container so the button never overlaps the input below */}
+      <Box position="relative" width="100%" height={height}>
+        <Map
+          ref={mapRef}
+          mapboxAccessToken={TOKEN}
+          initialViewState={initialView}
+          style={{ width: '100%', height, borderRadius: '8px' }}
+          mapStyle="mapbox://styles/sgunes16/cmmc96rwc00c701qz7v0g8h9k"
+          scrollZoom
+          onClick={onMapClick}
+          cursor="crosshair"
+        >
+          <NavigationControl position="top-right" showCompass={false} />
+          {selectedCoords && (
+            <Source id="pick-marker-source" type="geojson" data={pinGeoJSON}>
+              <Layer {...pinLayer} />
+            </Source>
+          )}
+        </Map>
+        <Button
+          size="sm"
+          variant="outline"
+          position="absolute"
+          bottom="10px"
+          right="10px"
+          onClick={requestLocation}
+          loading={locationLoading}
+          bg={WHITE}
+          borderColor={GRAY200}
+          _hover={{ bg: GRAY100 }}
+        >
+          <LocationIcon />
+          <Box as="span" ml={2}>Use My Location</Box>
+        </Button>
+      </Box>
       {locationError && (
         <Text fontSize="12px" color="red.500" mt={1}>
           {locationError}
         </Text>
       )}
-      {value.trim() && (
-        <Box mt={3} p={3} borderRadius="8px" bg={GRAY100} border="1px solid" borderColor={GRAY200}>
-          <Text fontSize="13px" fontWeight={600} color={GRAY800} mb={1}>
-            Selected location
-          </Text>
-          <Text fontSize="13px" color={GRAY700} mb={2}>
-            {value}
-          </Text>
+      <Box mt={3}>
+        <Text fontSize="12px" color={GRAY700} fontWeight={500} mb={1}>
+          Exact Location
+        </Text>
+        <Input
+          placeholder="e.g. Nagihan Sokak 3, Çekmeköy"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          size="sm"
+          borderRadius="8px"
+          borderColor={GRAY200}
+        />
+        {value.trim() && (
           <Link
             href={buildMapsUrl(value)}
             target="_blank"
@@ -238,12 +246,14 @@ export function LocationPickerMap({ value, onChange, height = '220px' }: Locatio
             fontSize="13px"
             fontWeight={600}
             color={GREEN}
+            mt={2}
+            display="inline-block"
             _hover={{ textDecoration: 'underline' }}
           >
             Open in Maps
           </Link>
-        </Box>
-      )}
+        )}
+      </Box>
     </Box>
   )
 }
