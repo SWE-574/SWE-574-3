@@ -28,6 +28,7 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from datetime import timedelta
+from urllib.parse import quote
 import random
 
 print("=" * 60)
@@ -250,6 +251,59 @@ def is_fixed_group_offer(service):
         and service.schedule_type == 'One-Time'
         and service.max_participants > 1
     )
+
+
+FIXED_GROUP_AREA_ADDRESSES = {
+    'Beşiktaş': 'Sinanpaşa Mahallesi, Şair Nedim Caddesi No: 28, Beşiktaş, İstanbul, Türkiye',
+    'Kadıköy': 'Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye',
+    'Üsküdar': 'Mimar Sinan Mahallesi, Hakimiyeti Milliye Caddesi No: 27, Üsküdar, İstanbul, Türkiye',
+    'Fatih': 'Balat Mahallesi, Vodina Caddesi No: 64, Fatih, İstanbul, Türkiye',
+    'Beyoğlu': 'Cihangir Mahallesi, Sıraselviler Caddesi No: 114, Beyoğlu, İstanbul, Türkiye',
+    'Şişli': 'Teşvikiye Mahallesi, Hüsrev Gerede Caddesi No: 92, Şişli, İstanbul, Türkiye',
+}
+
+
+def build_google_maps_url(address, lat=None, lng=None):
+    if lat is not None and lng is not None:
+        return f"https://www.google.com/maps?q={float(lat)},{float(lng)}"
+    return f"https://www.google.com/maps/search/?api=1&query={quote(address or '')}"
+
+
+def fixed_group_location_guide(service):
+    title = service.title.lower()
+    if 'manti' in title:
+        return 'Veterinerin olduğu bina, 2. kat topluluk mutfağı'
+    if 'börek' in title or 'borek' in title:
+        return 'Fırının yanındaki apartman, arka bahçeden giriş'
+    if 'garden' in title or 'balcony' in title:
+        return 'Yeşil tente olan apartman, çatı terası'
+    if 'photo walk' in title or 'photography' in title or 'walk' in title:
+        return 'İskele karşısındaki saat kulesinin önü'
+    if 'coffee' in title:
+        return 'Veterinerin olduğu bina, girişte soldaki salon'
+    if 'board game' in title or 'board-game' in title:
+        return 'Kırtasiyenin üstündeki bina, zil 3'
+    return 'Veterinerin olduğu bina'
+
+
+def apply_fixed_group_offer_seed_details(service):
+    if not is_fixed_group_offer(service) or service.location_type != 'In-Person':
+        return
+
+    exact_address = FIXED_GROUP_AREA_ADDRESSES.get(
+        service.location_area,
+        f"{service.location_area or 'İstanbul'}, İstanbul, Türkiye",
+    )
+    service.session_exact_location = exact_address
+    service.session_exact_location_lat = service.location_lat
+    service.session_exact_location_lng = service.location_lng
+    service.session_location_guide = fixed_group_location_guide(service)
+    service.save(update_fields=[
+        'session_exact_location',
+        'session_exact_location_lat',
+        'session_exact_location_lng',
+        'session_location_guide',
+    ])
 
 
 def create_or_update_user(
@@ -1133,6 +1187,9 @@ levent_music_event = create_demo_service(
 
 print(f"\n  Created {len(services)} services")
 
+for service in services:
+    apply_fixed_group_offer_seed_details(service)
+
 print("  Adding service cover images...")
 service_media_count = 0
 for service in services:
@@ -1175,13 +1232,25 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
     
     handshake.provider_initiated = True
     if is_fixed_group_offer(service):
-        handshake.exact_location = service.location_area
+        handshake.exact_location = service.session_exact_location or service.location_area
+        handshake.exact_location_guide = service.session_location_guide
         handshake.exact_duration = service.duration
         handshake.scheduled_time = service.scheduled_time
+        handshake.exact_location_maps_url = build_google_maps_url(
+            handshake.exact_location,
+            service.session_exact_location_lat,
+            service.session_exact_location_lng,
+        )
     else:
         handshake.exact_location = exact_locations.get(service.location_area, f'{service.location_area} area')
+        handshake.exact_location_guide = None
         handshake.exact_duration = service.duration
         handshake.scheduled_time = timezone.now() + timedelta(days=3)
+        handshake.exact_location_maps_url = build_google_maps_url(
+            handshake.exact_location,
+            service.location_lat,
+            service.location_lng,
+        )
     handshake.updated_at = created_at_time + timedelta(hours=2)
     handshake.save()
     
@@ -1251,13 +1320,21 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
 
 def sync_fixed_group_offer_time(service, scheduled_time):
     """Backdate the demo-facing session time after seed workflows are created."""
+    exact_location = service.session_exact_location or service.location_area
+    exact_maps_url = build_google_maps_url(
+        exact_location,
+        service.session_exact_location_lat,
+        service.session_exact_location_lng,
+    )
     Service.objects.filter(pk=service.pk).update(scheduled_time=scheduled_time)
     Handshake.objects.filter(
         service=service,
         status__in=['pending', 'accepted', 'completed', 'reported', 'paused'],
     ).update(
         scheduled_time=scheduled_time,
-        exact_location=service.location_area,
+        exact_location=exact_location,
+        exact_location_guide=service.session_location_guide,
+        exact_location_maps_url=exact_maps_url,
         exact_duration=service.duration,
     )
     service.refresh_from_db(fields=['scheduled_time'])

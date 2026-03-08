@@ -98,7 +98,7 @@ class TestHandshakeViewSet:
         """GET /api/handshakes/ includes user_has_reviewed; True after current user submits review"""
         provider = UserFactory()
         requester = UserFactory()
-        service = ServiceFactory(user=provider, type='Offer')
+        service = ServiceFactory(user=provider, type='Offer', location_type='In-Person')
         now = timezone.now()
         handshake = HandshakeFactory(
             service=service,
@@ -171,7 +171,14 @@ class TestHandshakeViewSet:
             schedule_type='One-Time',
             max_participants=3,
             duration=Decimal('2.00'),
+            location_type='In-Person',
             location_area='Kadıköy Youth Center',
+            location_lat=Decimal('40.987654'),
+            location_lng=Decimal('29.123456'),
+            session_exact_location='Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye',
+            session_exact_location_lat=Decimal('40.987654'),
+            session_exact_location_lng=Decimal('29.123456'),
+            session_location_guide='Veterinerin olduğu bina',
             scheduled_time=timezone.now() + timedelta(days=4),
         )
         handshake = HandshakeFactory(service=service, requester=requester, status='pending')
@@ -188,15 +195,50 @@ class TestHandshakeViewSet:
 
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
-        assert handshake.exact_location == service.location_area
+        assert handshake.exact_location == service.session_exact_location
+        assert handshake.exact_location_guide == service.session_location_guide
         assert handshake.exact_duration == service.duration
         assert handshake.scheduled_time == service.scheduled_time
+        assert handshake.exact_location_maps_url == 'https://www.google.com/maps?q=40.987654,29.123456'
 
         # Fixed-group initiate also posts session summary to chat
         summary_msgs = ChatMessage.objects.filter(handshake=handshake, sender=provider)
         assert summary_msgs.count() == 1
-        assert service.location_area in summary_msgs.first().body
+        assert service.session_exact_location in summary_msgs.first().body
+        assert service.session_location_guide in summary_msgs.first().body
         assert 'google.com/maps' in summary_msgs.first().body
+
+    def test_online_offer_initiate_does_not_require_or_share_location(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            location_type='Online',
+            location_area='Zoom',
+        )
+        handshake = HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(provider)
+
+        response = client.post(f'/api/handshakes/{handshake.id}/initiate/', {
+            'exact_duration': 2,
+            'scheduled_time': '2027-12-20T10:00:00Z',
+        })
+        assert response.status_code == status.HTTP_200_OK
+
+        handshake.refresh_from_db()
+        assert handshake.provider_initiated is True
+        assert handshake.exact_location == ''
+        assert handshake.exact_location_maps_url is None
+
+        summary_msgs = ChatMessage.objects.filter(handshake=handshake, sender=provider)
+        assert summary_msgs.count() == 1
+        body = summary_msgs.first().body
+        assert 'google.com/maps' not in body
+        assert '\U0001F4CD' not in body
+        assert '\U0001F4C5' in body or '📅' in body
 
     def test_approve_handshake(self):
         """Test receiver approving handshake"""

@@ -147,7 +147,7 @@ test.describe('Handshake — initiate session details', () => {
     await expect(mapsLink).toHaveAttribute('target', '_blank')
   })
 
-  test('requester sees session details with Open in Maps link', async ({ page }) => {
+  test('requester sees session details with Open in Google Maps link', async ({ page }) => {
     await loginAs(page, USERS.elif)
     await page.goto('/messages')
     await openServiceGroup(page, PENDING_INITIATE_SERVICE)
@@ -164,6 +164,6 @@ test.describe('Handshake — initiate session details', () => {
     }
 
     await expect(page.getByText('Session Details').first()).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByRole('link', { name: 'Open in Maps' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Open in Google Maps' })).toBeVisible()
   })
 })

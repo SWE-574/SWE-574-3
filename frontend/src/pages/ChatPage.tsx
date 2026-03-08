@@ -763,14 +763,28 @@ function ActionCard({
   const {
     status, is_provider, provider_initiated,
     provider_confirmed_complete, receiver_confirmed_complete,
-    scheduled_time, exact_location, exact_duration, provisioned_hours,
+    scheduled_time, exact_location, exact_location_guide, exact_duration, provisioned_hours,
   } = conv
   const fixedGroupOffer = isFixedGroupOffer(conv)
+  const isOnlineService = conv.service_location_type === 'Online'
+  const iAmServiceOwner = isServiceOwner(conv)
   const previewScheduledTime = scheduled_time ?? conv.service_scheduled_time ?? null
-  const previewLocation = exact_location ?? conv.service_location_area ?? null
+  const previewLocation = isOnlineService
+    ? null
+    : fixedGroupOffer && status === 'pending'
+    ? (exact_location ?? conv.service_exact_location ?? conv.service_location_area ?? null)
+    : (exact_location ?? conv.service_location_area ?? null)
+  const previewMapsUrl = isOnlineService
+    ? null
+    : fixedGroupOffer && status === 'pending'
+    ? (
+        conv.service_exact_location_maps_url
+        || conv.exact_location_maps_url
+        || (previewLocation ? buildMapsUrl(previewLocation) : null)
+      )
+    : (conv.exact_location_maps_url || (previewLocation ? buildMapsUrl(previewLocation) : null))
 
   // Service owner always initiates (Offer or Want) — requester approves
-  const iAmServiceOwner = isServiceOwner(conv)
 
   const myConfirmed    = is_provider ? provider_confirmed_complete : receiver_confirmed_complete
   const otherConfirmed = is_provider ? receiver_confirmed_complete : provider_confirmed_complete
@@ -815,7 +829,7 @@ function ActionCard({
   }
 
   if (status === 'accepted') {
-    const hasDetails = provisioned_hours != null || scheduled_time || exact_location || exact_duration
+    const hasDetails = provisioned_hours != null || scheduled_time || exact_location || exact_location_guide || exact_duration
     const hasCancellationRequest = Boolean(conv.cancellation_requested_by_id)
     const canRespondToCancellation = conv.can_respond_to_cancellation === true
     const cancellationReason = conv.cancellation_reason?.trim()
@@ -871,7 +885,7 @@ function ActionCard({
                   </Flex>
                 </Box>
               )}
-              {exact_location && (
+              {!isOnlineService && exact_location && (
                 <Box>
                   <Text fontSize="10px" color={GRAY400} fontWeight={600} mb="2px">LOCATION</Text>
                   <Flex align="center" gap={1} flexWrap="wrap">
@@ -881,7 +895,7 @@ function ActionCard({
                     </Text>
                   </Flex>
                   <Link
-                    href={buildMapsUrl(exact_location)}
+                    href={conv.exact_location_maps_url || buildMapsUrl(exact_location)}
                     target="_blank"
                     rel="noopener noreferrer"
                     fontSize="12px"
@@ -891,8 +905,16 @@ function ActionCard({
                     display="inline-block"
                     _hover={{ textDecoration: 'underline' }}
                   >
-                    Open in Maps
+                    Open in Google Maps
                   </Link>
+                </Box>
+              )}
+              {!isOnlineService && exact_location_guide?.trim() && (
+                <Box>
+                  <Text fontSize="10px" color={GRAY400} fontWeight={600} mb="2px">LOCATION GUIDE</Text>
+                  <Text fontSize="13px" fontWeight={600} color={GRAY700}>
+                    {exact_location_guide.trim()}
+                  </Text>
                 </Box>
               )}
             </Flex>
@@ -1046,9 +1068,9 @@ function ActionCard({
                   📅 {fmtDateTime(previewScheduledTime)}{previewLocation ? `  •  📍 ${previewLocation}` : ''}
                 </Text>
               )}
-              {previewLocation && (
+              {previewMapsUrl && (
                 <Link
-                  href={buildMapsUrl(previewLocation)}
+                  href={previewMapsUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   fontSize="12px"
@@ -1058,9 +1080,10 @@ function ActionCard({
                   display="inline-block"
                   _hover={{ textDecoration: 'underline' }}
                 >
-                  Open in Maps
+                  Open in Google Maps
                 </Link>
               )}
+
             </Box>
           </Flex>
         ) : (
@@ -1077,8 +1100,8 @@ function ActionCard({
                 </Text>
                 <Text fontSize="12px" color={GRAY500}>
                   {fixedGroupOffer
-                    ? 'This offer already has a fixed location, date and duration.'
-                    : 'Set a location, date and duration'}
+                    ? (isOnlineService ? 'This offer already has a fixed date and duration.' : 'This offer already has a fixed location, date and duration.')
+                    : (isOnlineService ? 'Set a date and duration' : 'Set a location, date and duration')}
                 </Text>
               </Box>
             </Flex>
@@ -1108,9 +1131,9 @@ function ActionCard({
                     📅 {fmtDateTime(previewScheduledTime)}{previewLocation ? `  •  📍 ${previewLocation}` : ''}
                   </Text>
                 )}
-                {previewLocation && (
+                {previewMapsUrl && (
                   <Link
-                    href={buildMapsUrl(previewLocation)}
+                    href={previewMapsUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     fontSize="12px"
@@ -1120,8 +1143,13 @@ function ActionCard({
                     display="inline-block"
                     _hover={{ textDecoration: 'underline' }}
                   >
-                    Open in Maps
+                    Open in Google Maps
                   </Link>
+                )}
+                {fixedGroupOffer && (
+                  <Text fontSize="11px" color={GRAY500} mt="4px">
+                    These fixed session details were already shared by the service owner. Approving will confirm them for this exchange.
+                  </Text>
                 )}
               </Box>
             </Flex>
@@ -1140,7 +1168,7 @@ function ActionCard({
             <Box flex={1}>
               <Text fontSize="13px" fontWeight={700} color={GRAY800}>Waiting for the service owner</Text>
               <Text fontSize="12px" color={GRAY500}>
-                <b>{conv.other_user.name}</b> will {fixedGroupOffer ? 'share the fixed group-offer details' : 'propose a session time and location'}
+                <b>{conv.other_user.name}</b> will {fixedGroupOffer ? 'share the fixed group-offer details' : (isOnlineService ? 'propose the session time' : 'propose a session time and location')}
               </Text>
             </Box>
             <CancelBtn onClick={onCancel} loading={isCancelling} />
@@ -1196,14 +1224,12 @@ function splitLinkAndTrailingPunctuation(segment: string): { href: string; trail
   let href = segment
   let trailing = ''
 
-  // Strip sentence punctuation first (excluding parentheses).
   const punctuation = href.match(/[.,;:!?]+$/)?.[0] ?? ''
   if (punctuation) {
     href = href.slice(0, -punctuation.length)
     trailing = punctuation + trailing
   }
 
-  // Strip only unmatched trailing ')' so valid URLs ending with ')' still work.
   while (href.endsWith(')')) {
     const openParenCount = (href.match(/\(/g) ?? []).length
     const closeParenCount = (href.match(/\)/g) ?? []).length
@@ -1213,6 +1239,18 @@ function splitLinkAndTrailingPunctuation(segment: string): { href: string; trail
   }
 
   return { href, trailing }
+}
+
+function getUrlLabel(href: string): string {
+  try {
+    const url = new URL(href)
+    if (url.hostname.includes('google.com') && url.pathname.startsWith('/maps')) {
+      return 'Open in Google Maps'
+    }
+  } catch {
+    // Fall back to the raw segment when URL parsing fails.
+  }
+  return href
 }
 
 /** Splits message body into segments and returns React nodes; URLs become clickable links. */
@@ -1233,7 +1271,7 @@ function linkifyMessageBody(body: string, linkColor: string): ReactNode[] {
             _hover={{ opacity: 0.9 }}
             style={{ wordBreak: 'break-all' }}
           >
-            {href}
+            {getUrlLabel(href)}
           </Link>
           {trailing}
         </span>
@@ -1433,7 +1471,7 @@ function GroupChatThread({
                       boxShadow={isMine ? 'none' : '0 1px 2px rgba(0,0,0,0.06)'}
                       style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}
                     >
-                      {msg.body}
+                      {linkifyMessageBody(msg.body, isMine ? WHITE : BLUE)}
                     </Box>
                     <Text
                       fontSize="10px" color={GRAY400} mt="3px"
@@ -2215,11 +2253,14 @@ export default function ChatPage() {
         onClose={() => setShowInitiateModal(false)}
         onSubmit={handleInitiate}
         serviceType={selectedConv?.service_type}
+        serviceLocationType={selectedConv?.service_location_type ?? null}
         scheduledTime={selectedConv?.scheduled_time}
+        defaultLocation={selectedConv?.service_location_area ?? null}
         serviceDuration={selectedConv?.provisioned_hours ?? undefined}
-        presetDetails={selectedConv && isFixedGroupOffer(selectedConv) && selectedConv.service_scheduled_time && selectedConv.service_location_area
+        presetDetails={selectedConv && isFixedGroupOffer(selectedConv) && selectedConv.service_scheduled_time && (selectedConv.service_exact_location || selectedConv.service_location_area)
           ? {
-              exactLocation: selectedConv.service_location_area,
+              exactLocation: selectedConv.service_exact_location || selectedConv.service_location_area || '',
+              locationGuide: selectedConv.service_location_guide ?? null,
               exactDuration: selectedConv.provisioned_hours ?? 0,
               scheduledTime: selectedConv.service_scheduled_time,
             }
@@ -2229,7 +2270,16 @@ export default function ChatPage() {
         <ProviderDetailsModal
           isOpen={showApproveModal}
           onClose={() => setShowApproveModal(false)}
-          exactLocation={selectedConv.exact_location ?? ''}
+          showLocation={selectedConv.service_location_type !== 'Online'}
+          exactLocation={selectedConv.status === 'pending' && isFixedGroupOffer(selectedConv)
+            ? (selectedConv.exact_location ?? selectedConv.service_exact_location ?? selectedConv.service_location_area ?? '')
+            : (selectedConv.exact_location ?? '')}
+          exactLocationMapsUrl={selectedConv.status === 'pending' && isFixedGroupOffer(selectedConv)
+            ? (selectedConv.service_exact_location_maps_url ?? selectedConv.exact_location_maps_url ?? (selectedConv.exact_location ? buildMapsUrl(selectedConv.exact_location) : null))
+            : selectedConv.exact_location_maps_url}
+          locationGuide={selectedConv.exact_location_guide ?? selectedConv.service_location_guide ?? null}
+          locationLabel="Location"
+          locationNote={null}
           exactDuration={selectedConv.exact_duration ?? 1}
           scheduledTime={selectedConv.scheduled_time ?? ''}
           onApprove={handleApprove}

@@ -13,6 +13,12 @@ interface Props {
   isOpen: boolean
   onClose: () => void
   exactLocation: string
+  showLocation?: boolean
+  /** When set, session details were stored with a Google Maps URL (from coordinates or address). */
+  exactLocationMapsUrl?: string | null
+  locationGuide?: string | null
+  locationLabel?: string
+  locationNote?: string | null
   exactDuration: number
   scheduledTime: string
   onApprove: () => Promise<void>
@@ -55,6 +61,11 @@ export function ProviderDetailsModal({
   isOpen,
   onClose,
   exactLocation,
+  showLocation = true,
+  exactLocationMapsUrl,
+  locationGuide,
+  locationLabel = 'Location',
+  locationNote,
   exactDuration,
   scheduledTime,
   onApprove,
@@ -93,18 +104,23 @@ export function ProviderDetailsModal({
         </Text>
 
         <Stack gap={3}>
-          <Flex align="flex-start" gap={3} p={3} bg="gray.50" borderRadius="10px">
-            <Box color="gray.400" mt="2px"><FiMapPin size={16} /></Box>
-            <Box flex={1}>
-              <Text fontSize="11px" color="gray.400" fontWeight={600} textTransform="uppercase" letterSpacing="0.05em">
-                Location
-              </Text>
-              <Text fontSize="14px" color="gray.800" fontWeight={600}>
-                {exactLocation}
-              </Text>
-              {exactLocation && (
+          {showLocation && exactLocation.trim() && (
+            <Flex align="flex-start" gap={3} p={3} bg="gray.50" borderRadius="10px">
+              <Box color="gray.400" mt="2px"><FiMapPin size={16} /></Box>
+              <Box flex={1}>
+                <Text fontSize="11px" color="gray.400" fontWeight={600} textTransform="uppercase" letterSpacing="0.05em">
+                  {locationLabel}
+                </Text>
+                <Text fontSize="14px" color="gray.800" fontWeight={600}>
+                  {exactLocation}
+                </Text>
+                {locationNote && (
+                  <Text fontSize="12px" color="gray.500" mt={1}>
+                    {locationNote}
+                  </Text>
+                )}
                 <Link
-                  href={buildMapsUrl(exactLocation)}
+                  href={exactLocationMapsUrl || buildMapsUrl(exactLocation)}
                   target="_blank"
                   rel="noopener noreferrer"
                   fontSize="13px"
@@ -114,11 +130,11 @@ export function ProviderDetailsModal({
                   display="inline-block"
                   _hover={{ textDecoration: 'underline' }}
                 >
-                  Open in Maps
+                  Open in Google Maps
                 </Link>
-              )}
-            </Box>
-          </Flex>
+              </Box>
+            </Flex>
+          )}
           <DetailRow
             icon={<FiClock size={16} />}
             label="Duration"
@@ -129,6 +145,13 @@ export function ProviderDetailsModal({
             label="Scheduled Time"
             value={formatDateTime(scheduledTime)}
           />
+          {showLocation && locationGuide?.trim() && (
+            <DetailRow
+              icon={<FiMapPin size={16} />}
+              label="Location Guide"
+              value={locationGuide.trim()}
+            />
+          )}
         </Stack>
 
         <Flex gap={2} mt={5} justify="flex-end">
