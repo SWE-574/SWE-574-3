@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, Button, Flex, Text, Stack, Spinner, Link } from '@chakra-ui/react'
 import {
@@ -208,6 +208,10 @@ function isFixedGroupOffer(conv: ChatConversation): boolean {
   return conv.service_type === 'Offer' && conv.schedule_type === 'One-Time' && conv.max_participants > 1
 }
 
+function isGroupService(conv: ChatConversation): boolean {
+  return conv.max_participants > 1
+}
+
 function isGroupChatVisibleStatus(status: string): boolean {
   return ['accepted'].includes(status)
 }
@@ -307,14 +311,10 @@ function ServiceGroup({
     if (hasSelected) setOpen(true)
   }, [hasSelected])
 
-  // Show group chat row when service is One-Time with max_participants > 1
-  // and at least one accepted handshake exists. Events always get group chat.
   const representativeConv = convs[0]
   const isEvent = representativeConv?.service_type === 'Event'
   const isGroupEligible =
-    isEvent ||
-    (representativeConv?.schedule_type === 'One-Time' &&
-    representativeConv?.max_participants > 1)
+    isEvent || (representativeConv != null && isGroupService(representativeConv))
   const hasEligibleParticipant = convs.some((c) =>
     isEvent
       ? ['accepted', 'checked_in', 'attended'].includes(c.status)
@@ -1046,6 +1046,21 @@ function ActionCard({
                   📅 {fmtDateTime(previewScheduledTime)}{previewLocation ? `  •  📍 ${previewLocation}` : ''}
                 </Text>
               )}
+              {previewLocation && (
+                <Link
+                  href={buildMapsUrl(previewLocation)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  fontSize="12px"
+                  fontWeight={600}
+                  color={GREEN}
+                  mt="2px"
+                  display="inline-block"
+                  _hover={{ textDecoration: 'underline' }}
+                >
+                  Open in Maps
+                </Link>
+              )}
             </Box>
           </Flex>
         ) : (
@@ -1092,6 +1107,21 @@ function ActionCard({
                   <Text fontSize="11px" color={GRAY400} mt="3px">
                     📅 {fmtDateTime(previewScheduledTime)}{previewLocation ? `  •  📍 ${previewLocation}` : ''}
                   </Text>
+                )}
+                {previewLocation && (
+                  <Link
+                    href={buildMapsUrl(previewLocation)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    fontSize="12px"
+                    fontWeight={600}
+                    color={GREEN}
+                    mt="2px"
+                    display="inline-block"
+                    _hover={{ textDecoration: 'underline' }}
+                  >
+                    Open in Maps
+                  </Link>
                 )}
               </Box>
             </Flex>
@@ -1156,7 +1186,40 @@ function CancelBtn({ onClick, loading }: { onClick: () => void; loading: boolean
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
+const URL_IN_MESSAGE = /(https?:\/\/[^\s]+)/g
+
+function isUrlSegment(segment: string): boolean {
+  return segment.startsWith('http://') || segment.startsWith('https://')
+}
+
+/** Splits message body into segments and returns React nodes; URLs become clickable links. */
+function linkifyMessageBody(body: string, linkColor: string): ReactNode[] {
+  const segments = body.split(URL_IN_MESSAGE)
+  return segments.map((segment, i) => {
+    if (isUrlSegment(segment)) {
+      const href = segment.replace(/[.,;:)!?]+$/, '')
+      return (
+        <Link
+          key={i}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          color={linkColor}
+          fontWeight={600}
+          textDecoration="underline"
+          _hover={{ opacity: 0.9 }}
+          sx={{ wordBreak: 'break-all' }}
+        >
+          {segment}
+        </Link>
+      )
+    }
+    return segment
+  })
+}
+
 function MsgBubble({ msg, isMine }: { msg: ApiChatMessage; isMine: boolean }) {
+  const linkColor = isMine ? WHITE : GREEN
   return (
     <Flex
       justify={isMine ? 'flex-end' : 'flex-start'}
@@ -1176,7 +1239,7 @@ function MsgBubble({ msg, isMine }: { msg: ApiChatMessage; isMine: boolean }) {
           boxShadow={isMine ? 'none' : '0 1px 2px rgba(0,0,0,0.06)'}
           style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}
         >
-          {msg.body}
+          {linkifyMessageBody(msg.body, linkColor)}
         </Box>
         <Text
           fontSize="10px" color={GRAY400} mt="3px"

@@ -445,11 +445,7 @@ export default function ServiceForm({
   const isFixedGroupOffer = type === 'Offer' && schedType === 'One-Time' && Number(maxParticipants) > 1
   const [onlineLocation, setOnlineLocation] = useState('')
 
-  useEffect(() => {
-    if (isGroupOffer && schedType === 'Recurrent') {
-      setValue('schedule_type', 'One-Time', { shouldDirty: true, shouldValidate: true })
-    }
-  }, [isGroupOffer, schedType, setValue])
+  // Recurring group offers are allowed — no forced override needed
 
   const addTag = (tag: Tag) => {
     setSelectedTags((prev) => {
@@ -844,7 +840,7 @@ export default function ServiceForm({
                 <ErrTxt msg={errors.max_participants?.message} />
                 {isGroupOffer && (
                   <Text fontSize="11px" color={GRAY400} mt="5px">
-                    Group offers are one-time only. Recurring is disabled when max participants is greater than 1.
+                    One-time group offers have a fixed date, location, and capacity. Recurring group offers allow participants to re-join after completion.
                   </Text>
                 )}
               </Box>
@@ -948,9 +944,7 @@ export default function ServiceForm({
                       <SegmentedControl
                         value={field.value}
                         onChange={field.onChange}
-                        options={isGroupOffer
-                          ? [{ value: 'One-Time', label: 'One-Time' }]
-                          : [{ value: 'One-Time', label: 'One-Time' }, { value: 'Recurrent', label: 'Recurring' }]}
+                        options={[{ value: 'One-Time', label: 'One-Time' }, { value: 'Recurrent', label: 'Recurring' }]}
                         accent={accent}
                       />
                     )}

@@ -11,7 +11,7 @@ from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Handshake
+from api.models import Handshake, ChatMessage
 
 
 @pytest.mark.django_db
@@ -152,6 +152,15 @@ class TestHandshakeViewSet:
         assert handshake.provider_initiated is True
         assert handshake.exact_location == 'Test Location'
 
+        # Automated session summary is posted to chat
+        summary_msgs = ChatMessage.objects.filter(handshake=handshake, sender=provider)
+        assert summary_msgs.count() == 1
+        body = summary_msgs.first().body
+        assert 'Test Location' in body
+        assert 'google.com/maps' in body
+        assert '\U0001F4C5' in body or '📅' in body
+        assert '\U0001F4CD' in body or '📍' in body
+
     def test_group_offer_initiate_uses_service_details(self):
         """One-time group offers must reuse service-level date/location details."""
         provider = UserFactory()
@@ -182,7 +191,13 @@ class TestHandshakeViewSet:
         assert handshake.exact_location == service.location_area
         assert handshake.exact_duration == service.duration
         assert handshake.scheduled_time == service.scheduled_time
-    
+
+        # Fixed-group initiate also posts session summary to chat
+        summary_msgs = ChatMessage.objects.filter(handshake=handshake, sender=provider)
+        assert summary_msgs.count() == 1
+        assert service.location_area in summary_msgs.first().body
+        assert 'google.com/maps' in summary_msgs.first().body
+
     def test_approve_handshake(self):
         """Test receiver approving handshake"""
         provider = UserFactory()
@@ -207,6 +222,11 @@ class TestHandshakeViewSet:
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
         assert handshake.provisioned_hours > 0
+
+        # Approve posts confirmation message to chat
+        approve_msgs = ChatMessage.objects.filter(handshake=handshake, sender=requester, body__contains='Session approved!')
+        assert approve_msgs.count() == 1
+        assert 'Test Location' in approve_msgs.first().body
         
         requester.refresh_from_db()
         assert requester.timebank_balance < Decimal('3.00')

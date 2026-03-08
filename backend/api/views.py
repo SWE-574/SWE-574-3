@@ -2560,6 +2560,26 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 service=handshake.service
             )
 
+            # Auto-post structured session summary to chat
+            from django.utils import timezone as tz
+            from urllib.parse import quote
+            summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
+            loc = handshake.exact_location or ''
+            maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(loc)}"
+            session_msg = ChatMessage.objects.create(
+                handshake=handshake,
+                sender=user,
+                body=f"\U0001F4C5 {summary_time} | \U0001F4CD {loc} | \U0001F517 {maps_url}"
+            )
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    f'chat_{handshake.id}',
+                    {'type': 'chat_message', 'message': ChatMessageSerializer(session_msg).data}
+                )
+
             serializer = self.get_serializer(handshake)
             return Response(serializer.data, status=200)
 
@@ -2680,6 +2700,25 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             service=handshake.service
         )
 
+        # Auto-post structured session summary to chat
+        from django.utils import timezone as tz
+        from urllib.parse import quote
+        summary_time = tz.localtime(parsed_time).strftime('%b %d, %Y %I:%M %p')
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
+        session_msg = ChatMessage.objects.create(
+            handshake=handshake,
+            sender=user,
+            body=f"\U0001F4C5 {summary_time} | \U0001F4CD {exact_location} | \U0001F517 {maps_url}"
+        )
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f'chat_{handshake.id}',
+                {'type': 'chat_message', 'message': ChatMessageSerializer(session_msg).data}
+            )
+
         serializer = self.get_serializer(handshake)
         return Response(serializer.data, status=200)
 
@@ -2743,6 +2782,24 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         handshake.status = 'accepted'
         handshake.requester_initiated = True  # Mark requester as having approved
         handshake.save()
+
+        # Auto-post confirmation to chat and broadcast via WebSocket
+        from django.utils import timezone as tz
+        summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
+        loc = handshake.exact_location or ''
+        approve_msg = ChatMessage.objects.create(
+            handshake=handshake,
+            sender=user,
+            body=f"Session approved! See you on {summary_time} at {loc}."
+        )
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f'chat_{handshake.id}',
+                {'type': 'chat_message', 'message': ChatMessageSerializer(approve_msg).data}
+            )
 
         # Notify provider that handshake was approved
         create_notification(
@@ -5578,11 +5635,11 @@ class GroupChatViewSet(viewsets.ViewSet):
         is_event = service.type == 'Event'
         is_group_service = (
             is_event
-            or (service.schedule_type == 'One-Time' and service.max_participants > 1)
+            or service.max_participants > 1
         )
         if not is_group_service:
             from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Group chat is only available for one-time group services')
+            raise PermissionDenied('Group chat is only available for group services or events')
 
         user = request.user
         is_owner = service.user == user
