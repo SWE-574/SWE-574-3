@@ -187,7 +187,7 @@ export function LocationPickerMap({ value, onChange, height = '220px' }: Locatio
   return (
     <Box width="100%">
       {/* Map and "Use My Location" live in their own container so the button never overlaps the input below */}
-      <Box position="relative" width="100%" sx={{ height }}>
+      <Box position="relative" width="100%" height={height}>
         <Map
           ref={mapRef}
           mapboxAccessToken={TOKEN}

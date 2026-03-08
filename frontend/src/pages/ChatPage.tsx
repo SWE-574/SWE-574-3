@@ -1208,7 +1208,7 @@ function linkifyMessageBody(body: string, linkColor: string): ReactNode[] {
           fontWeight={600}
           textDecoration="underline"
           _hover={{ opacity: 0.9 }}
-          sx={{ wordBreak: 'break-all' }}
+          style={{ wordBreak: 'break-all' }}
         >
           {segment}
         </Link>
