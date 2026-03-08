@@ -2541,23 +2541,28 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 )
 
             handshake.provider_initiated = True
-            handshake.exact_location = service.session_exact_location or service.location_area
             handshake.exact_duration = service.duration
             handshake.scheduled_time = service.scheduled_time
-            handshake.exact_location_guide = service.session_location_guide
-            from urllib.parse import quote
-            if service.session_exact_location_lat is not None and service.session_exact_location_lng is not None:
-                handshake.exact_location_maps_url = (
-                    f"https://www.google.com/maps?q={float(service.session_exact_location_lat)},{float(service.session_exact_location_lng)}"
-                )
-            elif service.location_lat is not None and service.location_lng is not None:
-                handshake.exact_location_maps_url = (
-                    f"https://www.google.com/maps?q={float(service.location_lat)},{float(service.location_lng)}"
-                )
+            if service.location_type == 'Online':
+                handshake.exact_location = ''
+                handshake.exact_location_guide = ''
+                handshake.exact_location_maps_url = None
             else:
-                handshake.exact_location_maps_url = (
-                    f"https://www.google.com/maps/search/?api=1&query={quote((service.session_exact_location or service.location_area or ''))}"
-                )
+                handshake.exact_location = service.session_exact_location or service.location_area
+                handshake.exact_location_guide = service.session_location_guide
+                from urllib.parse import quote
+                if service.session_exact_location_lat is not None and service.session_exact_location_lng is not None:
+                    handshake.exact_location_maps_url = (
+                        f"https://www.google.com/maps?q={float(service.session_exact_location_lat)},{float(service.session_exact_location_lng)}"
+                    )
+                elif service.location_lat is not None and service.location_lng is not None:
+                    handshake.exact_location_maps_url = (
+                        f"https://www.google.com/maps?q={float(service.location_lat)},{float(service.location_lng)}"
+                    )
+                else:
+                    handshake.exact_location_maps_url = (
+                        f"https://www.google.com/maps/search/?api=1&query={quote((service.session_exact_location or service.location_area or ''))}"
+                    )
             handshake.save()
 
             service_owner = handshake.service.user
@@ -2576,16 +2581,20 @@ class HandshakeViewSet(viewsets.ModelViewSet):
 
             # Auto-post structured session summary to chat (use stored Google Maps URL)
             from django.utils import timezone as tz
-            from urllib.parse import quote
             loc = handshake.exact_location or ''
             guide = (handshake.exact_location_guide or '').strip()
-            maps_url = handshake.exact_location_maps_url or f"https://www.google.com/maps/search/?api=1&query={quote(loc)}"
             summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
-            guide_suffix = f" | 🧭 {guide}" if guide else ''
+            summary_parts = [f"\U0001F4C5 {summary_time}"]
+            if loc:
+                summary_parts.append(f"\U0001F4CD {loc}")
+            if guide:
+                summary_parts.append(f"\U0001F9ED {guide}")
+            if handshake.exact_location_maps_url:
+                summary_parts.append(f"\U0001F517 {handshake.exact_location_maps_url}")
             session_msg = ChatMessage.objects.create(
                 handshake=handshake,
                 sender=user,
-                body=f"\U0001F4C5 {summary_time} | \U0001F4CD {loc}{guide_suffix} | \U0001F517 {maps_url}"
+                body=" | ".join(summary_parts)
             )
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync
@@ -2606,7 +2615,9 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         exact_location_lat = request.data.get('exact_location_lat')
         exact_location_lng = request.data.get('exact_location_lng')
 
-        if not exact_location:
+        requires_exact_location = handshake.service.location_type != 'Online'
+
+        if requires_exact_location and not exact_location:
             return create_error_response(
                 'Exact location is required',
                 code=ErrorCodes.VALIDATION_ERROR,
@@ -2695,16 +2706,19 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             )
 
         # Build and store Google Maps URL (coordinates preferred for accuracy)
-        from urllib.parse import quote
-        if exact_location_lat is not None and exact_location_lng is not None:
-            try:
-                lat_f = float(exact_location_lat)
-                lng_f = float(exact_location_lng)
-                handshake.exact_location_maps_url = f"https://www.google.com/maps?q={lat_f},{lng_f}"
-            except (TypeError, ValueError):
+        if exact_location:
+            from urllib.parse import quote
+            if exact_location_lat is not None and exact_location_lng is not None:
+                try:
+                    lat_f = float(exact_location_lat)
+                    lng_f = float(exact_location_lng)
+                    handshake.exact_location_maps_url = f"https://www.google.com/maps?q={lat_f},{lng_f}"
+                except (TypeError, ValueError):
+                    handshake.exact_location_maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
+            else:
                 handshake.exact_location_maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
         else:
-            handshake.exact_location_maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
+            handshake.exact_location_maps_url = None
 
         # Set handshake details
         handshake.provider_initiated = True
@@ -2733,11 +2747,15 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         # Auto-post structured session summary to chat (use stored Google Maps URL)
         from django.utils import timezone as tz
         summary_time = tz.localtime(parsed_time).strftime('%b %d, %Y %I:%M %p')
-        maps_url = handshake.exact_location_maps_url or f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
+        summary_parts = [f"\U0001F4C5 {summary_time}"]
+        if exact_location:
+            summary_parts.append(f"\U0001F4CD {exact_location}")
+        if handshake.exact_location_maps_url:
+            summary_parts.append(f"\U0001F517 {handshake.exact_location_maps_url}")
         session_msg = ChatMessage.objects.create(
             handshake=handshake,
             sender=user,
-            body=f"\U0001F4C5 {summary_time} | \U0001F4CD {exact_location} | \U0001F517 {maps_url}"
+            body=" | ".join(summary_parts)
         )
         from channels.layers import get_channel_layer
         from asgiref.sync import async_to_sync
@@ -4050,6 +4068,7 @@ class ChatViewSet(viewsets.ViewSet):
                 'exact_location_guide': handshake.exact_location_guide,
                 'exact_duration': float(handshake.exact_duration) if handshake.exact_duration else None,
                 'scheduled_time': handshake.scheduled_time.isoformat() if handshake.scheduled_time else None,
+                'service_location_type': handshake.service.location_type,
                 'service_location_area': handshake.service.location_area,
                 'service_exact_location': (
                     handshake.service.session_exact_location

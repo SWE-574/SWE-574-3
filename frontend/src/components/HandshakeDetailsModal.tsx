@@ -17,6 +17,7 @@ interface Props {
   onClose: () => void
   onSubmit: (data: InitiatePayload) => Promise<void>
   serviceType?: string
+  serviceLocationType?: string | null
   scheduledTime?: string | null
   defaultLocation?: string | null
   presetDetails?: {
@@ -36,6 +37,7 @@ export function HandshakeDetailsModal({
   onClose,
   onSubmit,
   serviceType,
+  serviceLocationType,
   scheduledTime,
   defaultLocation,
   presetDetails,
@@ -49,17 +51,21 @@ export function HandshakeDetailsModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const useStrictDuration = isOfferOrNeed(serviceType)
+  const requiresLocation = serviceLocationType !== 'Online'
 
   useEffect(() => {
     if (!isOpen || presetDetails) return
     if (useStrictDuration && serviceDuration != null) {
       setDuration(Math.max(1, Math.min(10, Math.round(Number(serviceDuration)))))
     }
-    if (defaultLocation) {
+    if (!requiresLocation) {
+      setLocation('')
+      setLocationCoords(null)
+    } else if (defaultLocation) {
       setLocation(defaultLocation)
       setLocationCoords(null)
     }
-  }, [defaultLocation, isOpen, presetDetails, serviceDuration, useStrictDuration])
+  }, [defaultLocation, isOpen, presetDetails, requiresLocation, serviceDuration, useStrictDuration])
 
   if (!isOpen) return null
 
@@ -118,7 +124,7 @@ export function HandshakeDetailsModal({
       return
     }
 
-    if (!location.trim()) { setError('Location is required.'); return }
+    if (requiresLocation && !location.trim()) { setError('Location is required.'); return }
     if (!date || !time) { setError('Scheduled date and time are required.'); return }
     if (!isIntegerDuration(duration)) {
       setError('Duration must be a whole number of hours (at least 1).')
@@ -137,10 +143,10 @@ export function HandshakeDetailsModal({
     setLoading(true)
     try {
       await onSubmit({
-        exact_location: location.trim(),
+        exact_location: requiresLocation ? location.trim() : '',
         exact_duration: duration,
         scheduled_time,
-        ...(locationCoords && {
+        ...(requiresLocation && locationCoords && {
           exact_location_lat: locationCoords.lat,
           exact_location_lng: locationCoords.lng,
         }),
@@ -187,12 +193,14 @@ export function HandshakeDetailsModal({
 
         {isPresetMode && presetDetails ? (
           <Stack gap={4}>
-            <Box>
-              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Location</Text>
-              <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
-                <Text fontSize="13px" color="gray.800">{presetDetails.exactLocation}</Text>
+            {requiresLocation && presetDetails.exactLocation.trim() && (
+              <Box>
+                <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Location</Text>
+                <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
+                  <Text fontSize="13px" color="gray.800">{presetDetails.exactLocation}</Text>
+                </Box>
               </Box>
-            </Box>
+            )}
             <Box>
               <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Duration</Text>
               <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
@@ -205,7 +213,7 @@ export function HandshakeDetailsModal({
                 <Text fontSize="13px" color="gray.800">{formatEventDateTime(presetDetails.scheduledTime)}</Text>
               </Box>
             </Box>
-            {presetDetails.locationGuide?.trim() && (
+            {requiresLocation && presetDetails.locationGuide?.trim() && (
               <Box>
                 <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>Location Guide</Text>
                 <Box px={3} py={2.5} borderRadius="8px" bg="gray.50" border="1px solid" borderColor="gray.200">
@@ -216,19 +224,21 @@ export function HandshakeDetailsModal({
           </Stack>
         ) : (
           <Stack gap={4}>
-            <Box>
-              <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
-                Exact Location
-              </Text>
-              <LocationPickerMap
-                value={location}
-                onChange={(value, coords) => {
-                  setLocation(value)
-                  setLocationCoords(coords ?? null)
-                }}
-                height="220px"
-              />
-            </Box>
+            {requiresLocation && (
+              <Box>
+                <Text fontSize="13px" fontWeight={600} color="gray.700" mb={1}>
+                  Exact Location
+                </Text>
+                <LocationPickerMap
+                  value={location}
+                  onChange={(value, coords) => {
+                    setLocation(value)
+                    setLocationCoords(coords ?? null)
+                  }}
+                  height="220px"
+                />
+              </Box>
+            )}
 
             <Box>
               {useStrictDuration && serviceDuration != null && (

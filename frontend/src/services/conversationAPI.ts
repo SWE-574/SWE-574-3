@@ -58,6 +58,7 @@ export interface ChatConversation {
   exact_location_guide?: string | null
   exact_duration: number | null
   scheduled_time: string | null
+  service_location_type?: string | null
   service_location_area?: string | null
   service_exact_location?: string | null
   service_exact_location_maps_url?: string | null

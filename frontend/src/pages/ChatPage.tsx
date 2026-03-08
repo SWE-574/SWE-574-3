@@ -766,12 +766,17 @@ function ActionCard({
     scheduled_time, exact_location, exact_location_guide, exact_duration, provisioned_hours,
   } = conv
   const fixedGroupOffer = isFixedGroupOffer(conv)
+  const isOnlineService = conv.service_location_type === 'Online'
   const iAmServiceOwner = isServiceOwner(conv)
   const previewScheduledTime = scheduled_time ?? conv.service_scheduled_time ?? null
-  const previewLocation = fixedGroupOffer && status === 'pending'
+  const previewLocation = isOnlineService
+    ? null
+    : fixedGroupOffer && status === 'pending'
     ? (exact_location ?? conv.service_exact_location ?? conv.service_location_area ?? null)
     : (exact_location ?? conv.service_location_area ?? null)
-  const previewMapsUrl = fixedGroupOffer && status === 'pending'
+  const previewMapsUrl = isOnlineService
+    ? null
+    : fixedGroupOffer && status === 'pending'
     ? (
         conv.service_exact_location_maps_url
         || conv.exact_location_maps_url
@@ -880,7 +885,7 @@ function ActionCard({
                   </Flex>
                 </Box>
               )}
-              {exact_location && (
+              {!isOnlineService && exact_location && (
                 <Box>
                   <Text fontSize="10px" color={GRAY400} fontWeight={600} mb="2px">LOCATION</Text>
                   <Flex align="center" gap={1} flexWrap="wrap">
@@ -904,7 +909,7 @@ function ActionCard({
                   </Link>
                 </Box>
               )}
-              {exact_location_guide?.trim() && (
+              {!isOnlineService && exact_location_guide?.trim() && (
                 <Box>
                   <Text fontSize="10px" color={GRAY400} fontWeight={600} mb="2px">LOCATION GUIDE</Text>
                   <Text fontSize="13px" fontWeight={600} color={GRAY700}>
@@ -1095,8 +1100,8 @@ function ActionCard({
                 </Text>
                 <Text fontSize="12px" color={GRAY500}>
                   {fixedGroupOffer
-                    ? 'This offer already has a fixed location, date and duration.'
-                    : 'Set a location, date and duration'}
+                    ? (isOnlineService ? 'This offer already has a fixed date and duration.' : 'This offer already has a fixed location, date and duration.')
+                    : (isOnlineService ? 'Set a date and duration' : 'Set a location, date and duration')}
                 </Text>
               </Box>
             </Flex>
@@ -1163,7 +1168,7 @@ function ActionCard({
             <Box flex={1}>
               <Text fontSize="13px" fontWeight={700} color={GRAY800}>Waiting for the service owner</Text>
               <Text fontSize="12px" color={GRAY500}>
-                <b>{conv.other_user.name}</b> will {fixedGroupOffer ? 'share the fixed group-offer details' : 'propose a session time and location'}
+                <b>{conv.other_user.name}</b> will {fixedGroupOffer ? 'share the fixed group-offer details' : (isOnlineService ? 'propose the session time' : 'propose a session time and location')}
               </Text>
             </Box>
             <CancelBtn onClick={onCancel} loading={isCancelling} />
@@ -2158,6 +2163,7 @@ export default function ChatPage() {
         onClose={() => setShowInitiateModal(false)}
         onSubmit={handleInitiate}
         serviceType={selectedConv?.service_type}
+        serviceLocationType={selectedConv?.service_location_type ?? null}
         scheduledTime={selectedConv?.scheduled_time}
         defaultLocation={selectedConv?.service_location_area ?? null}
         serviceDuration={selectedConv?.provisioned_hours ?? undefined}
@@ -2174,6 +2180,7 @@ export default function ChatPage() {
         <ProviderDetailsModal
           isOpen={showApproveModal}
           onClose={() => setShowApproveModal(false)}
+          showLocation={selectedConv.service_location_type !== 'Online'}
           exactLocation={selectedConv.status === 'pending' && isFixedGroupOffer(selectedConv)
             ? (selectedConv.exact_location ?? selectedConv.service_exact_location ?? selectedConv.service_location_area ?? '')
             : (selectedConv.exact_location ?? '')}
