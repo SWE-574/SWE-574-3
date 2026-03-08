@@ -19,17 +19,15 @@
 
 import { test, expect } from '@playwright/test'
 import { loginAs, USERS } from './helpers/auth'
+import { DEMO_SERVICE_PATTERN } from './helpers/demo-data'
 
-const GROUP_SERVICE_TITLE = 'Traditional Manti Cooking Workshop'
-
-/** Ensure the Manti accordion is open and click the group-chat row. */
+/** Ensure the group-service accordion is open and click the group-chat row. */
 async function openGroupChat(page: import('@playwright/test').Page) {
-  // Wait for the accordion header to appear
-  const header = page.getByRole('button', { name: new RegExp(GROUP_SERVICE_TITLE, 'i') }).first()
+  const header = page.getByRole('button').filter({ hasText: DEMO_SERVICE_PATTERN }).first()
   await expect(header).toBeVisible({ timeout: 20_000 })
 
-  // The group row is inside the expanded accordion — a button with "participant" text
-  const groupRow = page.locator('button').filter({ hasText: /participant/i }).first()
+  // The group row is inside the expanded accordion — button with "member(s)" and GROUP
+  const groupRow = page.locator('button').filter({ hasText: /member/i }).filter({ hasText: /GROUP/i }).first()
 
   // If the accordion auto-opened (e.g. a conversation inside was selected), the group
   // row is already visible. Only click the header if we need to expand it.
@@ -47,8 +45,7 @@ test.describe('Group Chat', () => {
     await loginAs(page, USERS.elif)
     await page.goto('/messages')
 
-    // The service title should appear in the left sidebar accordion header
-    const header = page.getByRole('button', { name: new RegExp(GROUP_SERVICE_TITLE, 'i') }).first()
+    const header = page.getByRole('button').filter({ hasText: DEMO_SERVICE_PATTERN }).first()
     await expect(header).toBeVisible({ timeout: 20_000 })
 
     // The "GROUP" badge should be present on the header
@@ -111,7 +108,7 @@ test.describe('Group Chat', () => {
 
     // Expand and verify the group row is accessible
     await header.click()
-    const groupRow = page.locator('button').filter({ hasText: /participant/i }).first()
+    const groupRow = page.locator('button').filter({ hasText: /member/i }).filter({ hasText: /GROUP/i }).first()
     await expect(groupRow).toBeVisible({ timeout: 10_000 })
   })
 })

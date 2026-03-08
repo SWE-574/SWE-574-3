@@ -92,4 +92,20 @@ test.describe('Authentication', () => {
 
     await expect(page).toHaveURL(/\/login/, { timeout: 15_000 })
   })
+
+  test('register happy path: form submit → verify-email-sent or dashboard', async ({ page }) => {
+    await page.goto('/register')
+
+    const unique = `e2e-${Date.now()}@example.com`
+    await page.getByLabel(/first name/i).fill('E2E')
+    await page.getByLabel(/last name/i).fill('User')
+    await page.getByLabel(/email/i).fill(unique)
+    await page.locator('#password').fill('Demo1234')
+    await page.locator('#confirmPassword').fill('Demo1234')
+    await page.getByLabel(/I agree to the Terms/i).click()
+    await page.getByRole('button', { name: 'Create Account' }).click()
+
+    // Backend may redirect to verify-email-sent (email verification on) or dashboard
+    await expect(page).toHaveURL(/\/(verify-email-sent|dashboard)/, { timeout: 15_000 })
+  })
 })

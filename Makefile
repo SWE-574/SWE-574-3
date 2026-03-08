@@ -1,5 +1,6 @@
 .PHONY: help env setup setup-demo dev stop reset install test test-unit test-integration \
-        test-docker coverage coverage-backend coverage-frontend coverage-report \
+        test-docker test-e2e test-e2e-ui test-e2e-debug \
+        coverage coverage-backend coverage-frontend coverage-report \
         clean build \
         infra-up infra-down infra-reset infra-demo \
         docker-up docker-down docker-logs docker-build docker-reset docker-demo \
@@ -60,8 +61,8 @@ help: ## Show this help message
 	@echo 'Testing (native):'
 	@grep -E '^(test|test-unit|test-integration|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo 'Docker testing:'
-	@grep -E '^test-docker:.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo 'Docker / E2E testing:'
+	@grep -E '^test-docker:|^test-e2e.*:.*## ' $(firstword $(MAKEFILE_LIST)) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  LOCAL DEVELOPMENT  (infra via docker compose, backend/frontend natively)
@@ -285,9 +286,22 @@ prod-demo: _check_env ## Start production stack + seed demo data
 	@echo "  Login: elif@demo.com / demo123"
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  DOCKER TESTING
+#  DOCKER TESTING / E2E
 # ─────────────────────────────────────────────────────────────────────────────
 
 test-docker: _check_env ## Run backend tests inside Docker dev stack
 	@$(COMPOSE_DEV) up -d db redis backend
 	@docker compose exec -T backend pytest --cov=api --cov-report=term -q
+
+# E2E: Stack'ın ayakta olması gerekir (make dev veya make docker-up).
+# Base URL: nginx varsa http://localhost, sadece frontend varsa http://localhost:5173
+test-e2e: ## Run Playwright E2E (stack must be up; use PLAYWRIGHT_BASE_URL to override)
+	$(call _log,"Playwright E2E (baseURL defaults to http://localhost:5173)")
+	@cd frontend && npx playwright install --with-deps chromium 2>/dev/null || true
+	@cd frontend && PLAYWRIGHT_BASE_URL=$${PLAYWRIGHT_BASE_URL:-http://localhost:5173} npm run test:e2e
+
+test-e2e-ui: ## Run Playwright E2E with UI (stack must be up)
+	@cd frontend && PLAYWRIGHT_BASE_URL=$${PLAYWRIGHT_BASE_URL:-http://localhost:5173} npm run test:e2e:ui
+
+test-e2e-debug: ## Run Playwright E2E in debug mode (stack must be up)
+	@cd frontend && PLAYWRIGHT_BASE_URL=$${PLAYWRIGHT_BASE_URL:-http://localhost} npm run test:e2e:debug

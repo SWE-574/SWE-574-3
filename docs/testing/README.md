@@ -91,6 +91,8 @@ make coverage-report
   - Full user flow tests
   - Cross-browser tests
   - Visual regression tests
+  - **E2E test plan (ne yazılacak):** [E2E-TestPlan.md](E2E-TestPlan.md)
+  - **E2E sonuç raporu (agent çalıştırma çıktıları):** [E2E-TestResults.md](E2E-TestResults.md)
 
 ## Coverage Targets
 

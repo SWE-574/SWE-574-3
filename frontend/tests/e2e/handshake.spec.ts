@@ -19,19 +19,16 @@
 
 import { test, expect } from '@playwright/test'
 import { loginAs, expectToast, USERS } from './helpers/auth'
-
-const TARGET_SERVICE = 'Traditional Manti Cooking Workshop'
+import { DEMO_SERVICE_PATTERN } from './helpers/demo-data'
 
 test.describe('Handshake — express interest', () => {
   test('requester can request a service from the dashboard', async ({ page }) => {
     await loginAs(page, USERS.can)
     await page.goto('/dashboard')
 
-    // Wait for service cards to load
-    await expect(page.getByText(TARGET_SERVICE).first()).toBeVisible({ timeout: 20_000 })
-
-    // Click the card to open the service detail
-    await page.getByText(TARGET_SERVICE).first().click()
+    const serviceCard = page.getByText(DEMO_SERVICE_PATTERN).first()
+    await expect(serviceCard).toBeVisible({ timeout: 20_000 })
+    await serviceCard.click()
     await expect(page).toHaveURL(/\/service-detail\//)
 
     // The button text depends on whether a handshake already exists (idempotent test):
@@ -67,14 +64,35 @@ test.describe('Handshake — express interest', () => {
     await loginAs(page, USERS.elif)
     await page.goto('/dashboard')
 
-    // Elif owns this service
-    await expect(page.getByText(TARGET_SERVICE).first()).toBeVisible({ timeout: 20_000 })
-    await page.getByText(TARGET_SERVICE).first().click()
+    const serviceCard = page.getByText(DEMO_SERVICE_PATTERN).first()
+    await expect(serviceCard).toBeVisible({ timeout: 20_000 })
+    await serviceCard.click()
     await expect(page).toHaveURL(/\/service-detail\//)
 
     // The incoming requests / participants section should show at least one entry
     const sectionHeader = page.getByText(/Incoming Requests|Participants/i)
     await expect(sectionHeader.first()).toBeVisible({ timeout: 10_000 })
+  })
+})
+
+test.describe('Handshake — provider accept', () => {
+  test('provider Accept updates status and UI or shows toast', async ({ page }) => {
+    await loginAs(page, USERS.elif)
+    await page.goto('/dashboard')
+    const serviceCard = page.getByText(DEMO_SERVICE_PATTERN).first()
+    await expect(serviceCard).toBeVisible({ timeout: 20_000 })
+    await serviceCard.click()
+    await expect(page).toHaveURL(/\/service-detail\//)
+
+    const incomingSection = page.getByText(/Incoming Requests|Participants/i)
+    await expect(incomingSection.first()).toBeVisible({ timeout: 10_000 })
+
+    const acceptBtn = page.getByRole('button', { name: /Accept/i })
+    if (await acceptBtn.isVisible().catch(() => false)) {
+      await acceptBtn.click()
+      await expectToast(page, /accepted|Accepted/i)
+    }
+    await expect(page).toHaveURL(/\/service-detail\//)
   })
 })
 

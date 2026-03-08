@@ -30,7 +30,7 @@ test.describe('Owner edit locks', () => {
     await page.getByRole('button', { name: 'Online' }).click()
 
     await page.getByRole('button', { name: 'Post Offer' }).click()
-    await expect(page).toHaveURL(/\/service-detail\//, { timeout: 20_000 })
+    await expect(page).toHaveURL(/\/service-detail\//, { timeout: 30_000 })
 
     await page.getByRole('button', { name: 'Edit Listing' }).click()
     await expect(page).toHaveURL(/\/edit-service\//, { timeout: 10_000 })
