@@ -124,6 +124,77 @@ class TestServiceSerializer:
         assert service.title == 'New Service'
         assert service.user == user
 
+    def test_fixed_group_offer_requires_exact_coords(self):
+        """Fixed in-person group offers must include exact-address coordinates."""
+        serializer = ServiceSerializer(data={
+            'title': 'Fixed Group Offer',
+            'description': 'A fixed-location group offer for multiple people.',
+            'type': 'Offer',
+            'duration': 2.0,
+            'location_type': 'In-Person',
+            'location_area': 'Kadıköy',
+            'location_lat': 40.987654,
+            'location_lng': 29.123456,
+            'max_participants': 3,
+            'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
+            'session_exact_location': 'Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye',
+        })
+
+        assert serializer.is_valid() is False
+        assert 'session_exact_location' in serializer.errors
+
+    def test_non_owner_does_not_see_fixed_group_private_location_fields(self):
+        """Private fixed-group session fields should stay hidden from non-owners."""
+        owner = UserFactory()
+        stranger = UserFactory()
+        service = ServiceFactory(
+            user=owner,
+            type='Offer',
+            location_type='In-Person',
+            schedule_type='One-Time',
+            max_participants=3,
+            session_exact_location='Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye',
+            session_exact_location_lat=Decimal('40.987654'),
+            session_exact_location_lng=Decimal('29.123456'),
+            session_location_guide='Veterinerin olduğu bina',
+        )
+        request = APIRequestFactory().get('/')
+        request.user = stranger
+
+        serializer = ServiceSerializer(service, context={'request': request})
+        data = serializer.data
+
+        assert 'session_exact_location' not in data
+        assert 'session_exact_location_lat' not in data
+        assert 'session_exact_location_lng' not in data
+        assert 'session_location_guide' not in data
+
+    def test_owner_sees_fixed_group_private_location_fields(self):
+        """Service owner should receive private fixed-group session fields for editing."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner,
+            type='Offer',
+            location_type='In-Person',
+            schedule_type='One-Time',
+            max_participants=3,
+            session_exact_location='Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye',
+            session_exact_location_lat=Decimal('40.987654'),
+            session_exact_location_lng=Decimal('29.123456'),
+            session_location_guide='Veterinerin olduğu bina',
+        )
+        request = APIRequestFactory().get('/')
+        request.user = owner
+
+        serializer = ServiceSerializer(service, context={'request': request})
+        data = serializer.data
+
+        assert data['session_exact_location'] == service.session_exact_location
+        assert data['session_exact_location_lat'] == '40.987654'
+        assert data['session_exact_location_lng'] == '29.123456'
+        assert data['session_location_guide'] == 'Veterinerin olduğu bina'
+
     def test_service_creation_accepts_single_tag_id_string(self):
         """Test service creation accepts scalar tag_ids payload."""
         user = UserFactory()
@@ -393,6 +464,15 @@ class TestHandshakeSerializer:
         assert data['is_current_user_provider'] is False
         assert data['counterpart']['id'] == str(requester.id)
         assert data['counterpart']['email'] == requester.email
+
+    def test_handshake_serializes_exact_location_guide(self):
+        """Handshake serializer should expose optional location guide when present."""
+        handshake = HandshakeFactory(exact_location_guide='Veterinerin olduğu bina')
+
+        serializer = HandshakeSerializer(handshake)
+        data = serializer.data
+
+        assert data['exact_location_guide'] == 'Veterinerin olduğu bina'
 
 
 @pytest.mark.django_db

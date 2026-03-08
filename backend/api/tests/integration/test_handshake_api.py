@@ -172,6 +172,12 @@ class TestHandshakeViewSet:
             max_participants=3,
             duration=Decimal('2.00'),
             location_area='Kadıköy Youth Center',
+            location_lat=Decimal('40.987654'),
+            location_lng=Decimal('29.123456'),
+            session_exact_location='Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye',
+            session_exact_location_lat=Decimal('40.987654'),
+            session_exact_location_lng=Decimal('29.123456'),
+            session_location_guide='Veterinerin olduğu bina',
             scheduled_time=timezone.now() + timedelta(days=4),
         )
         handshake = HandshakeFactory(service=service, requester=requester, status='pending')
@@ -188,14 +194,17 @@ class TestHandshakeViewSet:
 
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
-        assert handshake.exact_location == service.location_area
+        assert handshake.exact_location == service.session_exact_location
+        assert handshake.exact_location_guide == service.session_location_guide
         assert handshake.exact_duration == service.duration
         assert handshake.scheduled_time == service.scheduled_time
+        assert handshake.exact_location_maps_url == 'https://www.google.com/maps?q=40.987654,29.123456'
 
         # Fixed-group initiate also posts session summary to chat
         summary_msgs = ChatMessage.objects.filter(handshake=handshake, sender=provider)
         assert summary_msgs.count() == 1
-        assert service.location_area in summary_msgs.first().body
+        assert service.session_exact_location in summary_msgs.first().body
+        assert service.session_location_guide in summary_msgs.first().body
         assert 'google.com/maps' in summary_msgs.first().body
 
     def test_approve_handshake(self):

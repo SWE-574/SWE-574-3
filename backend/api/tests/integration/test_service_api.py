@@ -615,3 +615,34 @@ class TestServiceRetrieveStatusVisibility:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         field_errors = response.data.get('field_errors', {})
         assert 'location_area' in field_errors or 'scheduled_time' in field_errors
+
+    def test_group_offer_create_persists_exact_location_coords_and_guide(self):
+        """One-time in-person group offers should persist exact session details for later handshakes."""
+        user = UserFactory()
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', {
+            'title': 'Exact Location Group Offer',
+            'description': 'Group offer with fixed exact address and an optional guide note.',
+            'type': 'Offer',
+            'duration': 2.0,
+            'location_type': 'In-Person',
+            'location_area': 'Kadıköy',
+            'location_lat': '40.987654',
+            'location_lng': '29.123456',
+            'max_participants': 3,
+            'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
+            'session_exact_location': 'Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye',
+            'session_exact_location_lat': '40.987654',
+            'session_exact_location_lng': '29.123456',
+            'session_location_guide': 'Veterinerin olduğu bina',
+        })
+
+        assert response.status_code == status.HTTP_201_CREATED
+        service = Service.objects.get(id=response.data['id'])
+        assert service.session_exact_location == 'Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye'
+        assert service.session_exact_location_lat == Decimal('40.987654')
+        assert service.session_exact_location_lng == Decimal('29.123456')
+        assert service.session_location_guide == 'Veterinerin olduğu bina'
