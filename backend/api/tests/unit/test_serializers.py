@@ -113,7 +113,7 @@ class TestServiceSerializer:
             'location_area': 'Beşiktaş',
             'location_lat': 41.0422,
             'location_lng': 29.0089,
-            'max_participants': 2,
+            'max_participants': 1,
             'schedule_type': 'One-Time',
             'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
             'status': 'Active',

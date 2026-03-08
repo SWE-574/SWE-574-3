@@ -66,7 +66,7 @@ class TestServiceViewSet:
             'location_area': 'Beşiktaş',
             'location_lat': 41.0422,
             'location_lng': 29.0089,
-            'max_participants': 2,
+            'max_participants': 1,
             'schedule_type': 'One-Time',
             'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
             'status': 'Active',
@@ -589,8 +589,7 @@ class TestServiceRetrieveStatusVisibility:
             'location_type': 'In-Person',
             'location_area': 'Beşiktaş Culture Center',
             'max_participants': 5,
-            'schedule_type': 'One-Time',
-            'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
+            'schedule_type': 'Recurrent',
         })
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data['max_participants'] == 5
