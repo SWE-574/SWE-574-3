@@ -184,16 +184,15 @@ class TestGroupChatViewSetAccessControl:
         with pytest.raises(PermissionDenied):
             vs._get_service_or_403(vs.request, str(service.id))
 
-    def test_recurrent_service_is_denied(self):
-        """Recurrent services are rejected regardless of user role."""
-        from rest_framework.exceptions import PermissionDenied
+    def test_recurrent_service_is_allowed(self):
+        """Recurrent services with group capacity are allowed."""
         owner = UserFactory()
         service = ServiceFactory(
             user=owner, schedule_type='Recurrent', max_participants=5
         )
         vs = self._viewset_with_user(owner)
-        with pytest.raises(PermissionDenied):
-            vs._get_service_or_403(vs.request, str(service.id))
+        result = vs._get_service_or_403(vs.request, str(service.id))
+        assert result == service
 
     def test_single_participant_service_is_denied(self):
         """max_participants=1 services are rejected."""

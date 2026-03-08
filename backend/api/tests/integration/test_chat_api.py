@@ -296,8 +296,8 @@ class TestGroupChatViewSet:
 
     # ── GET: eligibility guards ───────────────────────────────────────────────
 
-    def test_recurrent_service_is_not_eligible(self):
-        """Recurrent services do not have a group chat."""
+    def test_recurrent_service_is_eligible(self):
+        """Recurrent services with group capacity have group chat."""
         owner = UserFactory()
         service = ServiceFactory(
             user=owner, schedule_type='Recurrent', max_participants=5
@@ -307,7 +307,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(owner)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.status_code == status.HTTP_200_OK
 
     def test_single_participant_service_is_not_eligible(self):
         """One-Time services with max_participants=1 do not have a group chat."""

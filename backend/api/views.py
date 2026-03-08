@@ -5607,7 +5607,7 @@ class PublicChatViewSet(viewsets.ViewSet):
 
 class GroupChatViewSet(viewsets.ViewSet):
     """
-    Private group chat for one-time Offer/Need services with max_participants > 1.
+    Private group chat for Offer/Need services with max_participants > 1.
     Only users with an accepted handshake (or the service owner) may access.
 
     Endpoints:
