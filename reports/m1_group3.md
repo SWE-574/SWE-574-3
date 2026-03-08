@@ -67,6 +67,8 @@
 
 ### Standard Users
 
+All accounts use the password **`demo123`**.
+
 | Name | Email | Location | Profile Focus |
 |---|---|---|---|
 | Elif Yılmaz | `elif@demo.com` | Beşiktaş, Istanbul | Freelance designer, cooking & kitchen skills |
