@@ -2,12 +2,6 @@
 
 # The Hive (SWE-574-3 | Apiary)
 
-## Deployment
-
-| Endpoint | URL | Description |
-|---|---|---|
-| Web Application | [apiary.selmangunes.com](https://apiary.selmangunes.com) | Main production |
-
 ## Description
 The Hive is a full-stack, location-aware collaboration platform that enables users to publish offers, requests, and events, coordinate with other participants, and complete interactions with transparent feedback signals. The system addresses fragmented local coordination and trust discovery by combining structured service workflows, communication channels, and ranking mechanisms in a single product. The primary audience is community members who need dependable local exchange and student engineering teams operating and extending the platform across web, backend, and mobile clients.
 
@@ -29,9 +23,8 @@ This repository follows a monorepo, service-oriented architecture with clear pla
 ### Prerequisites
 - Git
 - Docker Engine and Docker Compose v2
-- Python 3.11+
-- Node.js v20+
-- npm v11+
+
+> **Local native development only:** Python 3.11+, Node.js v20+, npm v11+
 
 ## Installation
 1. Clone the repository and move into the project root:
@@ -91,35 +84,6 @@ make setup-demo
 ```
 
 
-## Demo Accounts (Testing)
-
-Seeded by `make setup-demo`. All accounts share the password **`demo123`**.
-
-### Standard Users
-
-| Name | Email | Location | Profile Focus | Suggested Test Flows |
-|---|---|---|---|---|
-| Elif Yılmaz | `elif@demo.com` | Beşiktaş, Istanbul | Freelance designer, cooking & kitchen skills | Offer creation, handshake initiation, evaluation flow |
-| Cem Demir | `cem@demo.com` | Kadıköy, Istanbul | Chess tutoring, genealogy research | Request browsing, handshake approval, post-transaction rating |
-| Ayşe Kaya | `ayse@demo.com` | Üsküdar, Istanbul | Urban gardening, community organizing | Event creation, participant management, check-in flow |
-| Mehmet Özkan | `mehmet@demo.com` | Şişli, Istanbul | Retired teacher, digital help & local history | Profile editing, skills listing, outgoing offer acceptance |
-| Zeynep Arslan | `zeynep@demo.com` | Beyoğlu, Istanbul | Language teaching (Turkish/English/French) | Search & discovery, ranking visibility, badge display |
-| Can Şahin | `can@demo.com` | Beşiktaş, Istanbul | Photography, community photo walks | New user onboarding, service posting, forum interaction |
-| Deniz Aydın | `deniz@demo.com` | Kadıköy, Istanbul | Tech support, smartphone & app help | Request fulfillment, handshake lifecycle, trust signals |
-| Burak Kurt | `burak@demo.com` | Kadıköy, Istanbul | Chess, music, low-pressure skill swaps | Chat flow, event join and completion, evaluation |
-| Selin Aksoy | `selin@demo.com` | Beyoğlu, Istanbul | Community host, reading circles | High-karma account, achievement/badge inspection |
-| Emre Taş | `emre@demo.com` | Üsküdar, Istanbul | Urban walks, civic neighbor activities | Location-based search, proximity filtering |
-| Yasemin Ergin | `yasemin@demo.com` | Fatih, Istanbul | Kitchen volunteer, storytelling, coffee rituals | Multi-participant event, post-event evaluation |
-| Murat Sezer | `murat@demo.com` | Kadıköy, Istanbul | New resident, board games & study sessions | New user journey, first handshake, notification flow |
-| Levent Yalçın | `levent@demo.com` | Beyoğlu, Istanbul | Retired musician, singalongs, museum mornings | Long-tenure profile, diverse service history |
-
-### Admin Account
-
-| Role | Email | Password | Access Scope |
-|---|---|---|---|
-| Admin / Moderator | `moderator@demo.com` | `demo123` | Django admin panel (`/admin/`), report queue, user moderation, audit logs, service/forum moderation, superuser operations |
-
-
 ## Testing
 Run full native test suite:
 
@@ -166,14 +130,6 @@ All pull requests must satisfy the following merge gates:
 - At least one code review approval is required before merge.
 
 For full contribution standards, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## Milestones & Customer Presentations
-
-| Milestone | Target Date | Scope | Release |
-|---|---|---|---|
-| **Milestone 1** — First Customer Presentation | Week 4 · March 9, 2026 | Requirements, design, team organization, development plan, and initial deployment | [v0.1.0-alpha](https://github.com/SWE-574/SWE-574-3/releases/tag/customer-milestone-1) · [mobile](https://github.com/SWE-574/mobile-client/releases/tag/customer-milestone-1) |
-| **Milestone 2** — Second Customer Presentation | Week 9 · April 13, 2026 | Deployed system with core features | — |
-| **Final Milestone** — Final Customer Presentation | Week 13 · May 12, 2026 | Complete deployed product with all artifacts | — |
 
 
 ## Contact
