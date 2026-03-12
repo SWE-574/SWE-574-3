@@ -134,9 +134,9 @@ class TestReportingAPI:
         )
 
         assert response.status_code == status.HTTP_201_CREATED
-        report = response.json()
-        assert report["issue_type"] == "harassment"
-        assert report["description"] == payload["description"]
+        report = Report.objects.get(id=response.data["report_id"])
+        assert report.type == "harassment"
+        assert report.description == payload["description"]
 
     def test_event_handshake_allows_behavior_reports_during_24h_window(self):
         organizer = UserFactory()
