@@ -63,6 +63,35 @@ function getReportedObjectLabel(report: AdminReport): string {
     || 'Content unavailable'
 }
 
+function hasPendingLinkedHandshake(report: AdminReport): boolean {
+  return Boolean(report.related_handshake) && report.handshake_status === 'pending'
+}
+
+function isEventNotStartedForNoShow(report: AdminReport): boolean {
+  if (report.reported_service_type !== 'Event') return false
+
+  if (report.handshake_scheduled_time) {
+    const startMs = new Date(report.handshake_scheduled_time).getTime()
+    if (!Number.isNaN(startMs) && startMs > Date.now()) return true
+  }
+
+  return ['pending', 'accepted', 'checked_in'].includes(report.handshake_status ?? '')
+}
+
+function canCloseReportedService(report: AdminReport): boolean {
+  if (!report.reported_service) return false
+  if (!report.reported_user || !report.reported_service_owner) return false
+  return report.reported_user === report.reported_service_owner
+}
+
+function canRemoveReportedUserFromEvent(report: AdminReport): boolean {
+  if (!report.related_handshake) return false
+  if (report.reported_service_type !== 'Event') return false
+  if (!report.reported_user) return false
+  if (report.reported_user === report.reported_service_owner) return false
+  return ['accepted', 'checked_in', 'reported', 'paused'].includes(report.handshake_status ?? '')
+}
+
 // ── Shared modal primitives ────────────────────────────────────────────────────
 const ModalBackdrop = ({ onClick, children }: { onClick: () => void; children: React.ReactNode }) => (
   <Box position="fixed" inset={0} zIndex={3000} display="flex" alignItems="center" justifyContent="center" p={4}
@@ -495,10 +524,23 @@ const AdminDashboard = () => {
       toast.error('This report has no linked handshake. Confirm no-show is disabled.')
       return
     }
+    if (action === 'confirm_no_show' && hasPendingLinkedHandshake(report)) {
+      toast.error('Confirm no-show is disabled while handshake status is pending.')
+      return
+    }
+    if (action === 'confirm_no_show' && isEventNotStartedForNoShow(report)) {
+      toast.error('Confirm no-show is disabled until the event has started.')
+      return
+    }
+    if (action === 'remove_from_event' && !canRemoveReportedUserFromEvent(report)) {
+      toast.error('Remove from event is only available for active reported event participants.')
+      return
+    }
 
     const labelMap: Record<string, { title: string; desc: string; label: string; accent: string; accentLt: string }> = {
       confirm_no_show: { title: 'Confirm No-Show', desc: 'Mark this as a no-show incident and resolve the report. This action cannot be undone.', label: 'Confirm no-show', accent: GREEN, accentLt: GREEN_LT },
       dismiss:         { title: 'Dismiss Report',  desc: 'Dismiss this report as unsubstantiated. The reported content will remain visible.', label: 'Dismiss', accent: BLUE, accentLt: BLUE_LT },
+      remove_from_event: { title: 'Remove From Event', desc: 'Remove the reported participant from this event and resolve the report.', label: 'Remove participant', accent: RED, accentLt: RED_LT },
     }
     const meta = labelMap[action] ?? { title: `Action: ${action}`, desc: 'Confirm this moderation action.', label: 'Confirm', accent: GREEN, accentLt: GREEN_LT }
 
@@ -535,6 +577,10 @@ const AdminDashboard = () => {
   const handlePauseReport = (report: AdminReport) => {
     if (!report.related_handshake) {
       toast.error('This report has no linked handshake. Pause is disabled.')
+      return
+    }
+    if (hasPendingLinkedHandshake(report)) {
+      toast.error('Pause handshake is disabled while handshake status is pending.')
       return
     }
 
@@ -610,9 +656,22 @@ const AdminDashboard = () => {
       toast.error('This report has no linked handshake. Confirm no-show is disabled.')
       return
     }
+    if (action === 'confirm_no_show' && hasPendingLinkedHandshake(openReport)) {
+      toast.error('Confirm no-show is disabled while handshake status is pending.')
+      return
+    }
+    if (action === 'confirm_no_show' && isEventNotStartedForNoShow(openReport)) {
+      toast.error('Confirm no-show is disabled until the event has started.')
+      return
+    }
+    if (action === 'remove_from_event' && !canRemoveReportedUserFromEvent(openReport)) {
+      toast.error('Remove from event is only available for active reported event participants.')
+      return
+    }
     const labelMap: Record<string, { title: string; desc: string; label: string; accent: string; accentLt: string }> = {
       confirm_no_show: { title: 'Confirm No-Show', desc: 'Mark this as a no-show incident and resolve the report.', label: 'Confirm no-show', accent: GREEN, accentLt: GREEN_LT },
       dismiss:         { title: 'Dismiss Report',  desc: 'Dismiss this report. The reported content will remain visible.', label: 'Dismiss', accent: BLUE, accentLt: BLUE_LT },
+      remove_from_event: { title: 'Remove From Event', desc: 'Remove the reported participant from this event and resolve the report.', label: 'Remove participant', accent: RED, accentLt: RED_LT },
     }
     const meta = labelMap[action] ?? { title: `Action: ${action}`, desc: 'Confirm this moderation action.', label: 'Confirm', accent: GREEN, accentLt: GREEN_LT }
     setConfirmModal({
@@ -635,6 +694,10 @@ const AdminDashboard = () => {
     if (!openReport) return
     if (!openReport.related_handshake) {
       toast.error('This report has no linked handshake. Pause is disabled.')
+      return
+    }
+    if (hasPendingLinkedHandshake(openReport)) {
+      toast.error('Pause handshake is disabled while handshake status is pending.')
       return
     }
     setConfirmModal({
@@ -1412,12 +1475,13 @@ const AdminDashboard = () => {
                         </Box>
 
                         {/* Actions — icon-only, label shown as native tooltip on hover */}
-                        <Flex w="108px" flexShrink={0} justify="flex-end" gap="4px" pl={2}
+                        <Flex w="136px" flexShrink={0} justify="flex-end" gap="4px" pl={2}
                           onClick={(e) => e.stopPropagation()}>
                           {mkBtn('Detail', <FiArrowUpRight size={11} />, GRAY700, GRAY100, GRAY200, () => requestOpenReport(report.id))}
-                          {mkBtn('No-show', <FiCheck size={11} />, GREEN, GREEN_LT, GREEN + '40', () => handleResolveReport(report, 'confirm_no_show'), !report.related_handshake)}
+                          {mkBtn('No-show', <FiCheck size={11} />, GREEN, GREEN_LT, GREEN + '40', () => handleResolveReport(report, 'confirm_no_show'), !report.related_handshake || hasPendingLinkedHandshake(report) || isEventNotStartedForNoShow(report))}
                           {mkBtn('Dismiss', <FiX size={11} />, BLUE, BLUE_LT, BLUE + '40', () => handleResolveReport(report, 'dismiss'))}
-                          {mkBtn('Pause', <FiPauseCircle size={11} />, AMBER, AMBER_LT, AMBER + '40', () => handlePauseReport(report), !report.related_handshake)}
+                          {mkBtn('Remove', <FiUserX size={11} />, RED, RED_LT, RED + '40', () => handleResolveReport(report, 'remove_from_event'), !canRemoveReportedUserFromEvent(report))}
+                          {mkBtn('Pause', <FiPauseCircle size={11} />, AMBER, AMBER_LT, AMBER + '40', () => handlePauseReport(report), !report.related_handshake || hasPendingLinkedHandshake(report))}
                         </Flex>
                       </Flex>
                     )
@@ -1893,6 +1957,7 @@ const AdminDashboard = () => {
                   )
                   const isForumReport = !!(openReport.reported_forum_topic || openReport.reported_forum_post)
                   const isServiceReport = !!openReport.reported_service
+                  const canCloseServiceFromReport = canCloseReportedService(openReport)
                   const isServiceAlreadyClosed = openReport.reported_service_status === 'Cancelled' || openReportService?.status === 'Cancelled'
                   const forumTopicPath = openReport.reported_forum_topic ? `/forum/topic/${openReport.reported_forum_topic}` : null
                   const hasHandshakeInfo = !!(openReport.related_handshake || openReport.handshake_status || openReport.handshake_scheduled_time || openReport.handshake_hours != null)
@@ -2142,11 +2207,14 @@ const AdminDashboard = () => {
                               {!isForumReport && (
                                 <PanelActionBtn label="Confirm no-show" icon={<FiCheck size={11} />} accent={GREEN} accentLt={GREEN_LT}
                                   onClick={() => resolveOpenReport('confirm_no_show')}
-                                  disabled={openReportActionLoading || !openReport.related_handshake} />
+                                  disabled={openReportActionLoading || !openReport.related_handshake || hasPendingLinkedHandshake(openReport) || isEventNotStartedForNoShow(openReport)} />
                               )}
                               <PanelActionBtn label="Dismiss" icon={<FiX size={11} />} accent={BLUE} accentLt={BLUE_LT}
                                 onClick={() => resolveOpenReport('dismiss')} disabled={openReportActionLoading} />
-                              {isServiceReport && (
+                              <PanelActionBtn label="Remove from event" icon={<FiUserX size={11} />} accent={RED} accentLt={RED_LT}
+                                onClick={() => resolveOpenReport('remove_from_event')}
+                                disabled={openReportActionLoading || !canRemoveReportedUserFromEvent(openReport)} />
+                              {isServiceReport && canCloseServiceFromReport && (
                                 <PanelActionBtn
                                   label={isServiceAlreadyClosed ? 'Already closed' : 'Close service'}
                                   icon={isServiceAlreadyClosed ? <FiSlash size={11} /> : <FiLock size={11} />}
@@ -2164,11 +2232,20 @@ const AdminDashboard = () => {
                               {!isForumReport && (
                                 <PanelActionBtn label="Pause handshake" icon={<FiPauseCircle size={11} />} accent={AMBER} accentLt={AMBER_LT}
                                   onClick={pauseOpenReport}
-                                  disabled={openReportActionLoading || !openReport.related_handshake} />
+                                  disabled={openReportActionLoading || !openReport.related_handshake || hasPendingLinkedHandshake(openReport)} />
                               )}
                             </Flex>
                             {!isForumReport && !openReport.related_handshake && (
                               <Text fontSize="11px" color={GRAY400} mt={2}>No linked handshake — no-show &amp; pause disabled.</Text>
+                            )}
+                            {!isForumReport && openReport.reported_service_type === 'Event' && !canRemoveReportedUserFromEvent(openReport) && (
+                              <Text fontSize="11px" color={GRAY400} mt={2}>Remove from event is available only for active reported event participants.</Text>
+                            )}
+                            {!isForumReport && hasPendingLinkedHandshake(openReport) && (
+                              <Text fontSize="11px" color={GRAY400} mt={2}>Pending handshake — no-show &amp; pause disabled.</Text>
+                            )}
+                            {!isForumReport && isEventNotStartedForNoShow(openReport) && (
+                              <Text fontSize="11px" color={GRAY400} mt={2}>Event not started — no-show confirm disabled.</Text>
                             )}
                           </Box>
                         </Box>

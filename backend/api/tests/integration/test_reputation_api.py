@@ -934,3 +934,77 @@ class TestAdminReportResolutionStatusMapping:
         assert response.status_code == status.HTTP_200_OK
         report.refresh_from_db()
         assert report.status == 'resolved'
+
+    def test_remove_from_event_action_cancels_participant_and_resolves_report(self):
+        organizer = UserFactory()
+        reporter = UserFactory()
+        reported_participant = UserFactory()
+        event = ServiceFactory(user=organizer, type='Event', status='Active')
+
+        reporter_handshake = HandshakeFactory(
+            service=event,
+            requester=reporter,
+            status='accepted',
+            provisioned_hours=0,
+        )
+        participant_handshake = HandshakeFactory(
+            service=event,
+            requester=reported_participant,
+            status='accepted',
+            provisioned_hours=0,
+        )
+
+        report = Report.objects.create(
+            reporter=reporter,
+            reported_user=reported_participant,
+            related_handshake=reporter_handshake,
+            reported_service=event,
+            type='harassment',
+            status='pending',
+            description='Participant sent abusive event chat messages.',
+        )
+
+        admin = UserFactory(role='admin', is_staff=True, is_superuser=True)
+        admin_client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = admin_client.post(
+            f'/api/admin/reports/{report.id}/resolve/',
+            {'action': 'remove_from_event', 'admin_notes': 'Removed after chat abuse report.'},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        report.refresh_from_db()
+        participant_handshake.refresh_from_db()
+        assert report.status == 'resolved'
+        assert participant_handshake.status == 'cancelled'
+
+    def test_remove_from_event_rejects_when_reported_user_is_event_organizer(self):
+        organizer = UserFactory()
+        reporter = UserFactory()
+        event = ServiceFactory(user=organizer, type='Event', status='Active')
+
+        reporter_handshake = HandshakeFactory(
+            service=event,
+            requester=reporter,
+            status='accepted',
+            provisioned_hours=0,
+        )
+
+        report = Report.objects.create(
+            reporter=reporter,
+            reported_user=organizer,
+            related_handshake=reporter_handshake,
+            reported_service=event,
+            type='harassment',
+            status='pending',
+            description='Organizer chat behavior report.',
+        )
+
+        admin = UserFactory(role='admin', is_staff=True, is_superuser=True)
+        admin_client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = admin_client.post(
+            f'/api/admin/reports/{report.id}/resolve/',
+            {'action': 'remove_from_event'},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'organizer cannot be removed' in (response.data.get('detail', '') or '').lower()

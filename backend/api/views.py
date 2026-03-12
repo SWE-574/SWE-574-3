@@ -2036,6 +2036,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 str(e), code=ErrorCodes.INVALID_STATE,
                 status_code=status.HTTP_400_BAD_REQUEST
             )
+        invalidate_service_lists()
         serializer = self.get_serializer(service)
         return Response(serializer.data)
 
@@ -3551,12 +3552,9 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         description = (request.data.get('description') or '').strip()
         is_event_handshake = handshake.service.type == 'Event'
 
-        # Event handshakes support broader behavior report types; non-event
-        # handshakes only support no-show/service-issue disputes.
-        if is_event_handshake:
-            allowed_types = {'no_show', 'service_issue', 'harassment', 'spam', 'scam', 'other'}
-        else:
-            allowed_types = {'no_show', 'service_issue'}
+        # Both event and non-event handshakes support behavior issue reports.
+        # Non-event handshakes still do not support target overrides.
+        allowed_types = {'no_show', 'service_issue', 'harassment', 'spam', 'scam', 'other'}
 
         if issue_type not in allowed_types:
             return create_error_response(
@@ -3578,7 +3576,7 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_403_FORBIDDEN
             )
 
-        if is_event_handshake:
+        if is_event_handshake and issue_type == 'no_show':
             event_start = handshake.service.scheduled_time or handshake.scheduled_time
             if not event_start:
                 return create_error_response(
@@ -3591,7 +3589,7 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             report_window_ends_at = event_start + timedelta(hours=24)
             if now < event_start or now > report_window_ends_at:
                 return create_error_response(
-                    'Event reports are allowed from event start time up to 24 hours after start.',
+                    'Event no-show reports are allowed from event start time up to 24 hours after start.',
                     code=ErrorCodes.VALIDATION_ERROR,
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
@@ -3672,8 +3670,16 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             description=description,
         )
 
-        handshake.status = 'reported'
-        handshake.save()
+        # Only mark the reporter's handshake as 'reported' when reporting the
+        # event organizer — participant-vs-participant reports should not affect
+        # the reporter's own event participation status.
+        reported_is_organizer = (
+            reported_user is not None
+            and str(reported_user.id) == str(handshake.service.user_id)
+        )
+        if is_event_handshake and reported_is_organizer and handshake.status != 'reported':
+            handshake.status = 'reported'
+            handshake.save(update_fields=['status', 'updated_at'])
 
         admins = User.objects.filter(role='admin')
         for admin in admins:
@@ -4764,7 +4770,111 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         from .utils import get_provider_and_receiver
         from django.utils import timezone
 
-        if action_type == 'confirm_no_show':
+        if action_type == 'remove_from_event':
+            handshake = report.related_handshake
+            if not handshake:
+                return create_error_response(
+                    'This report has no related handshake. Cannot remove participant from event.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if handshake.service.type != 'Event':
+                return create_error_response(
+                    'Remove from event is only available for event reports.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if not report.reported_user_id:
+                return create_error_response(
+                    'This report has no reported participant to remove.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if str(report.reported_user_id) == str(handshake.service.user_id):
+                return create_error_response(
+                    'Event organizer cannot be removed from their own event.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            with transaction.atomic():
+                target_handshake = (
+                    Handshake.objects
+                    .select_for_update()
+                    .select_related('service', 'requester')
+                    .filter(service=handshake.service, requester_id=report.reported_user_id)
+                    .order_by('-updated_at')
+                    .first()
+                )
+                if not target_handshake:
+                    return create_error_response(
+                        'Could not find an active event participant handshake for the reported user.',
+                        code=ErrorCodes.NOT_FOUND,
+                        status_code=status.HTTP_404_NOT_FOUND
+                    )
+
+                if target_handshake.status not in ['accepted', 'checked_in', 'reported', 'paused']:
+                    return create_error_response(
+                        f'Cannot remove participant with handshake status "{target_handshake.status}".',
+                        code=ErrorCodes.INVALID_STATE,
+                        status_code=status.HTTP_400_BAD_REQUEST
+                    )
+
+                target_handshake.status = 'cancelled'
+                target_handshake.save(update_fields=['status', 'updated_at'])
+
+                report.status = 'resolved'
+                report.resolved_by = request.user
+                report.resolved_at = timezone.now()
+                report.admin_notes = admin_notes or 'Reported participant removed from event by admin moderation'
+                report.save()
+
+                create_notification(
+                    user=target_handshake.requester,
+                    notification_type='admin_warning',
+                    title='Removed From Event',
+                    message=f'You were removed from the event "{target_handshake.service.title}" after moderator review.',
+                    handshake=target_handshake,
+                    service=target_handshake.service,
+                )
+
+                if report.reporter_id and report.reporter_id != target_handshake.requester_id:
+                    create_notification(
+                        user=report.reporter,
+                        notification_type='dispute_resolved',
+                        title='Report Resolved',
+                        message=f'Your report was upheld and the participant was removed from "{target_handshake.service.title}".',
+                        handshake=target_handshake,
+                        service=target_handshake.service,
+                    )
+
+                if target_handshake.service.user_id not in [target_handshake.requester_id, report.reporter_id]:
+                    create_notification(
+                        user=target_handshake.service.user,
+                        notification_type='admin_warning',
+                        title='Participant Removed',
+                        message=f'A participant was removed from your event "{target_handshake.service.title}" after moderation review.',
+                        handshake=target_handshake,
+                        service=target_handshake.service,
+                    )
+
+            invalidate_conversations(str(target_handshake.requester_id))
+            invalidate_conversations(str(target_handshake.service.user_id))
+            if report.reporter_id:
+                invalidate_conversations(str(report.reporter_id))
+
+            log_admin_action(
+                request.user,
+                'resolve_report',
+                'report',
+                report,
+                admin_notes or action_type,
+            )
+
+        elif action_type == 'confirm_no_show':
             # REQ-ADM-007: Handle no-show with correct financial action
             # REQ-ADM-008: Apply karma penalty to no-show user
             
@@ -4931,7 +5041,7 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         
         else:
             return create_error_response(
-                'Invalid action. Use "confirm_no_show" or "dismiss".',
+                'Invalid action. Use "confirm_no_show", "dismiss", or "remove_from_event".',
                 code=ErrorCodes.VALIDATION_ERROR,
                 status_code=status.HTTP_400_BAD_REQUEST
             )
