@@ -4,6 +4,7 @@ import { Box, Button, Flex, Text, Stack, Spinner, Link } from '@chakra-ui/react'
 import {
   FiSend,
   FiArrowLeft,
+  FiFlag,
   FiMessageSquare,
   FiWifiOff,
   FiCheck,
@@ -30,11 +31,12 @@ import {
   type GroupChatParticipant,
   type GroupChatMessage,
 } from '@/services/conversationAPI'
-import { handshakeAPI, type InitiatePayload } from '@/services/handshakeAPI'
+import { handshakeAPI, type InitiatePayload, type HandshakeIssueType } from '@/services/handshakeAPI'
 import { HandshakeDetailsModal } from '@/components/HandshakeDetailsModal'
 import { ProviderDetailsModal } from '@/components/ProviderDetailsModal'
 import { ServiceConfirmationModal } from '@/components/ServiceConfirmationModal'
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
+import ReportModal, { type ReportOption } from '@/components/ReportModal'
 
 import {
   GREEN, GREEN_LT, GREEN_MD,
@@ -52,6 +54,14 @@ const POLL_IN_DEV  = false // In dev, rely on WebSocket only to avoid hammering 
 
 const ACTIVE_STATUSES = new Set(['pending', 'accepted'])
 const CLOSED_STATUSES = new Set(['completed', 'cancelled', 'denied', 'reported', 'paused'])
+type ChatReportIssueType = Exclude<HandshakeIssueType, 'no_show'>
+const CHAT_REPORT_OPTIONS: ReportOption[] = [
+  { value: 'service_issue', label: 'Service issue', desc: 'Problem with quality, communication, or delivery' },
+  { value: 'harassment', label: 'Harassment', desc: 'Abusive, threatening, or unsafe behavior' },
+  { value: 'spam', label: 'Spam', desc: 'Repeated unwanted or disruptive messages' },
+  { value: 'scam', label: 'Scam or fraud', desc: 'Attempt to deceive or exploit' },
+  { value: 'other', label: 'Other', desc: 'Something else not listed above' },
+]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -742,7 +752,9 @@ function ActionCard({
   isRejectingCancellation,
   onOpenEvaluation,
   onReportNoShow,
+  onOpenReportIssue,
   isReportingNoShow,
+  isReportingIssue,
 }: {
   conv: ChatConversation
   onInitiate: () => void
@@ -758,7 +770,9 @@ function ActionCard({
   isRejectingCancellation: boolean
   onOpenEvaluation: () => void
   onReportNoShow: () => Promise<void>
+  onOpenReportIssue: () => void
   isReportingNoShow: boolean
+  isReportingIssue: boolean
 }) {
   const {
     status, is_provider, provider_initiated,
@@ -788,6 +802,37 @@ function ActionCard({
 
   const myConfirmed    = is_provider ? provider_confirmed_complete : receiver_confirmed_complete
   const otherConfirmed = is_provider ? receiver_confirmed_complete : provider_confirmed_complete
+
+  const reportFlagButton = (
+    <Box
+      as="button"
+      w="34px"
+      h="34px"
+      borderRadius="9px"
+      color={GRAY400}
+      bg="transparent"
+      display="flex"
+      alignItems="center"
+      justifyContent="center"
+      title="Report participant"
+      aria-label="Report participant"
+      onClick={() => {
+        if (!isReportingIssue) onOpenReportIssue()
+      }}
+      _hover={
+        isReportingIssue
+          ? undefined
+          : { color: RED, bg: RED_LT }
+      }
+      transition="all 0.15s"
+      style={{
+        cursor: isReportingIssue ? 'not-allowed' : 'pointer',
+        opacity: isReportingIssue ? 0.7 : 1,
+      }}
+    >
+      <FiFlag size={14} />
+    </Box>
+  )
 
   if (!['pending', 'accepted', 'completed'].includes(status)) return null
 
@@ -1011,11 +1056,11 @@ function ActionCard({
                 h="34px"
                 borderRadius="9px"
                 border={`1px solid ${RED}`}
-                color={RED}
-                bg={RED_LT}
+                color={WHITE}
+                bg={RED}
                 fontSize="12px"
                 fontWeight={700}
-                disabled={isRequestingCancellation || isReportingNoShow}
+                disabled={isRequestingCancellation || isReportingNoShow || isReportingIssue}
                 onClick={() => { void onRequestCancellation() }}
               >
                 {isRequestingCancellation ? 'Requesting...' : 'Request Cancellation'}
@@ -1030,12 +1075,13 @@ function ActionCard({
                   bg={RED_LT}
                   fontSize="12px"
                   fontWeight={700}
-                  disabled={isReportingNoShow || isRequestingCancellation}
+                  disabled={isReportingNoShow || isRequestingCancellation || isReportingIssue}
                   onClick={() => { void onReportNoShow() }}
                 >
                   {isReportingNoShow ? 'Reporting...' : 'Report No-Show'}
                 </Button>
               )}
+              {reportFlagButton}
             </Flex>
           </Flex>
         )}
@@ -1108,6 +1154,7 @@ function ActionCard({
             <Flex align="center" gap={2}>
               <CTA label={fixedGroupOffer ? 'Share Offer Details' : 'Initiate Handshake'} bg={GREEN} onClick={onInitiate} />
               <CancelBtn onClick={onCancel} loading={isCancelling} />
+              {reportFlagButton}
             </Flex>
           </Flex>
         )
@@ -1156,6 +1203,7 @@ function ActionCard({
             <Flex align="center" gap={2}>
               <CTA label="Review & Approve" bg={GREEN} onClick={onShowApprove} />
               <CancelBtn onClick={onCancel} loading={isCancelling} />
+              {reportFlagButton}
             </Flex>
           </Flex>
         ) : (
@@ -1172,6 +1220,7 @@ function ActionCard({
               </Text>
             </Box>
             <CancelBtn onClick={onCancel} loading={isCancelling} />
+            {reportFlagButton}
           </Flex>
         )
       )}
@@ -1600,6 +1649,7 @@ export default function ChatPage() {
   const [isApprovingCancellation, setIsApprovingCancellation] = useState(false)
   const [isRejectingCancellation, setIsRejectingCancellation] = useState(false)
   const [isReportingNoShow,    setIsReportingNoShow]    = useState(false)
+  const [isReportingIssue,     setIsReportingIssue]     = useState(false)
   const [isApproving,          setIsApproving]          = useState(false)
   const [isDeclining,          setIsDeclining]          = useState(false)
   const [mobileShowThread,     setMobileShowThread]     = useState(!!paramId)
@@ -1609,6 +1659,7 @@ export default function ChatPage() {
   const [showApproveModal,  setShowApproveModal]  = useState(false)
   const [showConfirmModal,  setShowConfirmModal]  = useState(false)
   const [showEvaluationModal, setShowEvaluationModal] = useState(false)
+  const [showReportIssueModal, setShowReportIssueModal] = useState(false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLTextAreaElement>(null)
@@ -2004,6 +2055,27 @@ export default function ChatPage() {
     }
   }, [isReportingNoShow, refreshConversations, selectedId])
 
+  const handleSubmitReportIssue = useCallback(async (issueType: string) => {
+    if (!selectedId || isReportingIssue) return
+    setIsReportingIssue(true)
+    try {
+      const selectedIssue = CHAT_REPORT_OPTIONS.find((option) => option.value === issueType)
+      const selectedIssueType = (selectedIssue?.value ?? 'service_issue') as ChatReportIssueType
+      const autoDescription = selectedIssue
+        ? `${selectedIssue.label}. ${selectedIssue.desc}`
+        : 'Service issue reported by participant'
+      await handshakeAPI.report(selectedId, selectedIssueType, autoDescription)
+      toast.success('Issue report submitted for admin review.')
+      setShowReportIssueModal(false)
+      refreshConversations()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(err?.response?.data?.detail ?? err?.message ?? 'Failed to submit issue report.')
+    } finally {
+      setIsReportingIssue(false)
+    }
+  }, [isReportingIssue, refreshConversations, selectedId])
+
   const showConvList = !mobileShowThread
   const showThread   = mobileShowThread || !!selectedId
 
@@ -2160,7 +2232,9 @@ export default function ChatPage() {
                 isRejectingCancellation={isRejectingCancellation}
                 onOpenEvaluation={() => setShowEvaluationModal(true)}
                 onReportNoShow={handleReportNoShow}
+                onOpenReportIssue={() => setShowReportIssueModal(true)}
                 isReportingNoShow={isReportingNoShow}
+                isReportingIssue={isReportingIssue}
               />
 
               {/* Messages */}
@@ -2307,6 +2381,16 @@ export default function ChatPage() {
           onSubmitted={async () => {
             refreshConversations()
           }}
+        />
+      )}
+      {showReportIssueModal && selectedConv && (
+        <ReportModal
+          onClose={() => !isReportingIssue && setShowReportIssueModal(false)}
+          onSubmit={handleSubmitReportIssue}
+          loading={isReportingIssue}
+          options={CHAT_REPORT_OPTIONS}
+          title={`Report ${selectedConv.other_user.name}`}
+          subtitle="Select a reason. Moderators will review your report."
         />
       )}
     </Box>

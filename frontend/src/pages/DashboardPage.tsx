@@ -397,7 +397,7 @@ const DashboardPage = () => {
     } else {
       raw = await serviceAPI.list(undefined, signal)
     }
-    const active = raw.filter((s) => s.status === 'Active')
+    const active = raw.filter((s) => s.status === 'Active' && s.is_visible)
     const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
     setAllActiveServices(unique)
     let filtered = unique
@@ -478,6 +478,16 @@ const DashboardPage = () => {
   // ── Derived ───────────────────────────────────────────────────────────────
   const ownServiceHandshakes = Array.from(incomingMap.values()).flat()
   const myServices         = allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id })
+
+  // Hide events from the browse feed where the logged-in user was removed
+  // (i.e. their handshake was cancelled by an admin after a report).
+  const displayServices = isAuthenticated
+    ? services.filter((s) => {
+        if (s.type !== 'Event') return true
+        const hs = handshakeMap.get(s.id)
+        return hs?.status !== 'cancelled'
+      })
+    : services
   const pendingHs          = myServices.filter((service) => {
     const incoming = incomingMap.get(service.id) ?? []
     return incoming.some((h) => h.status === 'pending')
@@ -653,7 +663,7 @@ const DashboardPage = () => {
                 )}
               </Flex>
               <MapView
-                services={services}
+                services={displayServices}
                 height="280px"
                 onServiceClick={(id) => navigate(`/service-detail/${id}`)}
                 userLocation={userLocation}
@@ -664,20 +674,20 @@ const DashboardPage = () => {
           {/* Results count */}
           <Box px={{ base: 4, md: 6 }} pt={4} pb={2} flexShrink={0} bgColor={TRANSPARENT}>
             <Text fontSize="12px" color={GRAY400}>
-              {isLoading && services.length === 0 ? 'Loading…' : `${services.length} service${services.length !== 1 ? 's' : ''}`}
+              {isLoading && displayServices.length === 0 ? 'Loading…' : `${displayServices.length} service${displayServices.length !== 1 ? 's' : ''}`}
             </Text>
           </Box>
 
           {/* Grid */}
           <Box flex={1} overflowY="auto" px={{ base: 3, md: 6 }} pt={2} pb={8}>
-            {isLoading && services.length === 0 ? (
+            {isLoading && displayServices.length === 0 ? (
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
-            ) : fetchError && services.length === 0 ? (
+            ) : fetchError && displayServices.length === 0 ? (
               <Flex direction="column" align="center" py={16} gap={3}>
                 <Text fontSize="2xl">⚡</Text>
                 <Text color="red.500" fontSize="13px">{fetchError}</Text>
               </Flex>
-            ) : services.length === 0 ? (
+            ) : displayServices.length === 0 ? (
               <Flex direction="column" align="center" py={16} gap={3}>
                 <Text fontSize="3xl">🔍</Text>
                 <Text color={GRAY500} fontSize="13px">No services found. Be the first to post one!</Text>
@@ -696,7 +706,7 @@ const DashboardPage = () => {
                 gap={4}
                 alignItems="stretch"
               >
-                {services.map((service) => {
+                {displayServices.map((service) => {
                   const owner    = service.user ?? service.provider
                   const isOwn    = !!user && owner?.id === user.id
                   const hs       = handshakeMap.get(service.id)

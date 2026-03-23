@@ -7,6 +7,7 @@ export type AuditTargetFilter = 'user' | 'report' | 'handshake' | 'comment' | 'f
 export type ReportResolveAction =
   | 'confirm_no_show'
   | 'dismiss'
+  | 'remove_from_event'
   | 'uphold_no_show'
   | 'overturn_no_show'
 
