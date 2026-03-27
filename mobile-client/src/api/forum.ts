@@ -10,30 +10,50 @@ import { apiRequest } from './client';
 import type { PaginatedResponse } from './types';
 
 export interface ForumCategory {
+  id: string;
   slug: string;
-  name?: string;
-  description?: string;
-  [key: string]: unknown;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  display_order: number;
+  is_active: boolean;
+  topic_count: number;
+  post_count: number;
+  last_activity: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ForumTopic {
   id: string;
-  title?: string;
-  category?: string;
-  author?: string | object;
-  created_at?: string;
-  is_pinned?: boolean;
-  is_locked?: boolean;
-  [key: string]: unknown;
+  category: string;
+  category_name: string;
+  category_slug: string;
+  author_id: string;
+  author_name: string;
+  author_avatar_url: string | null;
+  title: string;
+  body: string;
+  is_pinned: boolean;
+  is_locked: boolean;
+  view_count: number;
+  reply_count: number;
+  last_activity: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ForumPost {
   id: string;
-  topic?: string;
-  author?: string | object;
-  content?: string;
-  created_at?: string;
-  [key: string]: unknown;
+  topic: string;
+  author_id: string;
+  author_name: string;
+  author_avatar_url: string | null;
+  body: string;
+  is_deleted: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CategoryRequest {
@@ -45,15 +65,15 @@ export interface CategoryRequest {
 export interface TopicRequest {
   title: string;
   category: string;
-  content?: string;
+  body: string;
 }
 
 export interface PostRequest {
   content: string;
 }
 
-export function listCategories(): Promise<ForumCategory[] | PaginatedResponse<ForumCategory>> {
-  return apiRequest('/forum/categories/');
+export function listCategories(): Promise<ForumCategory[]> {
+  return apiRequest<ForumCategory[]>('/forum/categories/');
 }
 
 export function createCategory(body: CategoryRequest): Promise<ForumCategory> {

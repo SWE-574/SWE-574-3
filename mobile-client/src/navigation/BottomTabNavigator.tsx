@@ -6,7 +6,8 @@ import {
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import HomeStack from "./HomeStack";
 import type { HomeStackParamList } from "./HomeStack";
-import ForumScreen from "../presentation/screens/ForumScreen";
+import ForumStack from "./ForumStack";
+import type { ForumStackParamList } from "./ForumStack";
 import PostServiceScreen from "../presentation/screens/PostServiceScreen";
 import MessagesStack from "./MessagesStack";
 import type { MessagesStackParamList } from "./MessagesStack";
@@ -19,7 +20,7 @@ import ProfileStack, { ProfileStackParamList } from "./ProfileStack";
 
 export type BottomTabParamList = {
   Home: NavigatorScreenParams<HomeStackParamList>;
-  Forum: undefined;
+  Forum: NavigatorScreenParams<ForumStackParamList>;
   Profile: NavigatorScreenParams<ProfileStackParamList>;
   PostService: undefined;
   Messages: NavigatorScreenParams<MessagesStackParamList>;
@@ -61,7 +62,7 @@ export default function BottomTabNavigator() {
       />
       <Tab.Screen
         name="Forum"
-        component={ForumScreen}
+        component={ForumStack}
         options={{
           title: "Forum",
           tabBarLabel: "Forum",
