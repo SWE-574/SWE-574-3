@@ -208,7 +208,10 @@ export default function ForumScreen() {
         data={topics}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <TopicCard topic={item} onPress={() => {}} />
+          <TopicCard
+            topic={item}
+            onPress={() => navigation.navigate("TopicDetail", { id: item.id, title: item.title })}
+          />
         )}
         ListHeaderComponent={
           <FlatList

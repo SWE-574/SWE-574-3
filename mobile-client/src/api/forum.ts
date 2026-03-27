@@ -69,7 +69,7 @@ export interface TopicRequest {
 }
 
 export interface PostRequest {
-  content: string;
+  body: string;
 }
 
 export function listCategories(): Promise<ForumCategory[]> {
