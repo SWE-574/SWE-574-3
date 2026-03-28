@@ -485,6 +485,33 @@ class TestGroupChatViewSet:
         response = client.get(f'/api/group-chat/{service.id}/', {'session_id': str(session_b.id)})
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
+    def test_recurrent_participant_without_scheduled_time_cannot_access_session(self):
+        """Accepted requester without matching scheduled_time cannot access recurrent session chat."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner, schedule_type='Recurrent', max_participants=5
+        )
+        target_time = timezone.now() + timedelta(days=1)
+        session, _ = GroupChatSession.objects.get_or_create(
+            service=service, scheduled_time=target_time, defaults={}
+        )
+        participant = UserFactory()
+        # Explicitly accepted but not tied to a specific recurrence.
+        HandshakeFactory(
+            service=service,
+            requester=participant,
+            status='accepted',
+            scheduled_time=None,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+        response = client.get(
+            f'/api/group-chat/{service.id}/',
+            {'session_id': str(session.id)},
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
     def test_one_time_group_chat_unchanged_without_session_id(self):
         """One-Time group chat GET without session_id still returns 200 (backward compat)."""
         owner = UserFactory()

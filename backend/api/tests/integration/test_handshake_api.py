@@ -116,10 +116,6 @@ class TestExpressInterestView:
             for message in provider_messages
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason='FR-10f gap: opening message is persisted but not websocket-broadcast on express-interest path.',
-    )
     def test_express_interest_broadcasts_opening_message_via_websocket(self):
         """FR-10f: opening message should be delivered in real time when thread is created."""
         provider = UserFactory(timebank_balance=Decimal('5.00'))
@@ -132,11 +128,24 @@ class TestExpressInterestView:
         fake_channel_layer = type('FakeChannelLayer', (), {})()
         fake_channel_layer.group_send = AsyncMock(return_value=None)
 
-        with patch('channels.layers.get_channel_layer', return_value=fake_channel_layer):
+        with (
+            patch('channels.layers.get_channel_layer', return_value=fake_channel_layer),
+            patch('api.services.transaction.on_commit', side_effect=lambda callback: callback()),
+        ):
             response = client.post(f'/api/services/{service.id}/interest/')
 
         assert response.status_code == status.HTTP_201_CREATED
-        fake_channel_layer.group_send.assert_awaited_once()
+        assert fake_channel_layer.group_send.await_count >= 1
+        chat_group_name = f"chat_{response.data['id']}"
+        chat_events = [
+            call.args for call in fake_channel_layer.group_send.await_args_list
+            if call.args and call.args[0] == chat_group_name
+        ]
+        assert chat_events, f'No websocket event was sent to {chat_group_name}'
+
+        _, called_payload = chat_events[-1]
+        assert called_payload['type'] == 'chat_message'
+        assert 'interested in your service' in called_payload['message']['body']
 
 
 @pytest.mark.django_db
