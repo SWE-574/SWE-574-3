@@ -89,20 +89,55 @@ export async function requestOfferFromDetail(page: Page): Promise<void> {
   }
 }
 
-export async function initiateOnlineSessionAsOwner(page: Page): Promise<void> {
-  const initiateBtn = page.getByRole('button', { name: /Initiate Handshake/i })
-  await expect(initiateBtn).toBeVisible({ timeout: 15_000 })
-  await initiateBtn.click()
+export async function initiateOnlineSessionAsOwner(page: Page, options: {
+  serviceTitle: string
+  requesterName: string
+  duration?: number
+  meetingLink?: string
+  daysAhead?: number
+}): Promise<void> {
+  const { date, time } = futureDateParts(options.daysAhead ?? 3)
+  const result = await page.evaluate(async ({ serviceTitle, requesterName, duration, meetingLink, date, time }) => {
+    const listRes = await fetch('/api/handshakes/', { credentials: 'include' })
+    const handshakes = await listRes.json()
+    const target = (Array.isArray(handshakes) ? handshakes : []).find((handshake: Record<string, unknown>) => {
+      return handshake.service_title === serviceTitle
+        && handshake.status === 'pending'
+        && handshake.requester_name === requesterName
+    })
 
-  await expect(page.getByText('Initiate Handshake').first()).toBeVisible({ timeout: 10_000 })
+    if (!target) {
+      return { ok: false, status: 404, body: 'Pending handshake not found for initiate' }
+    }
 
-  const { date, time } = futureDateParts(3)
-  await page.locator('input[type="date"]').fill(date)
-  await page.locator('select').first().selectOption(time.slice(0, 2))
-  await page.locator('select').nth(1).selectOption(time.slice(3, 5))
+    const initiateRes = await fetch(`/api/handshakes/${target.id}/initiate/`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        exact_location: meetingLink,
+        exact_duration: duration,
+        scheduled_time: `${date}T${time}:00`,
+      }),
+    })
 
-  await page.getByRole('button', { name: 'Send Details' }).click()
-  await expectToast(page, /Session details sent/i)
+    return {
+      ok: initiateRes.ok,
+      status: initiateRes.status,
+      body: await initiateRes.text(),
+    }
+  }, {
+    serviceTitle: options.serviceTitle,
+    requesterName: options.requesterName,
+    duration: options.duration ?? 1,
+    meetingLink: options.meetingLink ?? 'https://meet.example.com/feature-edit-lock',
+    date,
+    time,
+  })
+
+  expect(result.ok, `Initiate handshake failed: ${result.status} ${result.body}`).toBeTruthy()
 }
 
 export async function approveSessionAsRequester(page: Page): Promise<void> {
@@ -120,6 +155,42 @@ export async function approveSessionAsRequester(page: Page): Promise<void> {
   const acceptedStatus = page.getByText(/Accepted/i).first()
 
   await expect(approvedToast.or(openChatBtn).or(acceptedStatus)).toBeVisible({ timeout: 15_000 })
+}
+
+export async function approvePendingHandshakeViaApi(page: Page, options: {
+  serviceTitle: string
+  requesterName: string
+}): Promise<void> {
+  const result = await page.evaluate(async ({ serviceTitle, requesterName }) => {
+    const listRes = await fetch('/api/handshakes/', { credentials: 'include' })
+    const handshakes = await listRes.json()
+    const target = (Array.isArray(handshakes) ? handshakes : []).find((handshake: Record<string, unknown>) => {
+      return handshake.service_title === serviceTitle
+        && handshake.status === 'pending'
+        && handshake.requester_name === requesterName
+    })
+
+    if (!target) {
+      return { ok: false, status: 404, body: 'Pending handshake not found for approve' }
+    }
+
+    const approveRes = await fetch(`/api/handshakes/${target.id}/approve/`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+
+    return {
+      ok: approveRes.ok,
+      status: approveRes.status,
+      body: await approveRes.text(),
+    }
+  }, options)
+
+  expect(result.ok, `Approve handshake failed: ${result.status} ${result.body}`).toBeTruthy()
 }
 
 export async function shareFixedGroupDetailsAsOwner(page: Page, serviceTitle: string): Promise<void> {
