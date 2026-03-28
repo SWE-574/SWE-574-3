@@ -6,6 +6,7 @@ from rest_framework import status
 from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
+from unittest.mock import AsyncMock, patch
 
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
@@ -73,6 +74,69 @@ class TestExpressInterestView:
         
         response = client.post(f'/api/services/{service.id}/interest/')
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_express_interest_creates_chat_thread_with_opening_message(self):
+        """FR-10a/10b: expressing interest creates private thread and opening message."""
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+
+        interest_response = client.post(f'/api/services/{service.id}/interest/')
+        assert interest_response.status_code == status.HTTP_201_CREATED
+
+        handshake_id = interest_response.data['id']
+        assert str(interest_response.data['status']).lower() == 'pending'
+
+        # Requester can see the conversation in chat list.
+        requester_list = client.get('/api/chats/')
+        assert requester_list.status_code == status.HTTP_200_OK
+        requester_rows = requester_list.data.get('results', requester_list.data)
+        assert any(row['handshake_id'] == str(handshake_id) for row in requester_rows)
+
+        # Requester can fetch messages and sees the auto opening text.
+        requester_thread = client.get(f'/api/chats/{handshake_id}/')
+        assert requester_thread.status_code == status.HTTP_200_OK
+        requester_messages = requester_thread.data.get('results', [])
+        assert len(requester_messages) >= 1
+        assert any(
+            'interested in your service' in message['body']
+            for message in requester_messages
+        )
+
+        # Provider can also fetch the same thread.
+        client.authenticate_user(provider)
+        provider_thread = client.get(f'/api/chats/{handshake_id}/')
+        assert provider_thread.status_code == status.HTTP_200_OK
+        provider_messages = provider_thread.data.get('results', [])
+        assert any(
+            'interested in your service' in message['body']
+            for message in provider_messages
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason='FR-10f gap: opening message is persisted but not websocket-broadcast on express-interest path.',
+    )
+    def test_express_interest_broadcasts_opening_message_via_websocket(self):
+        """FR-10f: opening message should be delivered in real time when thread is created."""
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+
+        fake_channel_layer = type('FakeChannelLayer', (), {})()
+        fake_channel_layer.group_send = AsyncMock(return_value=None)
+
+        with patch('channels.layers.get_channel_layer', return_value=fake_channel_layer):
+            response = client.post(f'/api/services/{service.id}/interest/')
+
+        assert response.status_code == status.HTTP_201_CREATED
+        fake_channel_layer.group_send.assert_awaited_once()
 
 
 @pytest.mark.django_db

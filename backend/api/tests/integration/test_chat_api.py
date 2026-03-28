@@ -3,6 +3,7 @@ Integration tests for chat API endpoints
 """
 import pytest
 from rest_framework import status
+from unittest.mock import AsyncMock, patch
 
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory, ChatMessageFactory,
@@ -89,6 +90,32 @@ class TestChatViewSet:
             handshake=handshake,
             body='Hello, I am interested!'
         ).exists()
+
+    def test_send_message_broadcasts_over_websocket_channel_layer(self):
+        """FR-10f: API message send should publish to the chat websocket group."""
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner)
+        handshake = HandshakeFactory(service=service, requester=requester)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+
+        fake_channel_layer = type('FakeChannelLayer', (), {})()
+        fake_channel_layer.group_send = AsyncMock(return_value=None)
+
+        with patch('channels.layers.get_channel_layer', return_value=fake_channel_layer):
+            response = client.post('/api/chats/', {
+                'handshake_id': str(handshake.id),
+                'body': 'WS broadcast check'
+            })
+
+        assert response.status_code == status.HTTP_201_CREATED
+        fake_channel_layer.group_send.assert_awaited_once()
+        called_group_name, called_payload = fake_channel_layer.group_send.await_args.args
+        assert called_group_name == f'chat_{handshake.id}'
+        assert called_payload['type'] == 'chat_message'
+        assert called_payload['message']['body'] == 'WS broadcast check'
     
     def test_send_message_unauthorized(self):
         """Test cannot send message to unrelated handshake"""
@@ -106,6 +133,87 @@ class TestChatViewSet:
             'body': 'Unauthorized message'
         })
         assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_completed_handshake_messages_accessible_to_both_parties(self):
+        """FR-10c: private chat remains accessible after handshake is completed."""
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner)
+        handshake = HandshakeFactory(service=service, requester=requester, status='completed')
+        ChatMessageFactory(handshake=handshake, sender=requester, body='History must remain visible')
+
+        client = AuthenticatedAPIClient()
+
+        client.authenticate_user(owner)
+        owner_response = client.get(f'/api/chats/{handshake.id}/')
+        assert owner_response.status_code == status.HTTP_200_OK
+        assert owner_response.data['count'] == 1
+
+        client.authenticate_user(requester)
+        requester_response = client.get(f'/api/chats/{handshake.id}/')
+        assert requester_response.status_code == status.HTTP_200_OK
+        assert requester_response.data['count'] == 1
+
+    def test_cancelled_handshake_messages_accessible_to_both_parties(self):
+        """FR-10c: private chat remains accessible after handshake is cancelled."""
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner)
+        handshake = HandshakeFactory(service=service, requester=requester, status='cancelled')
+        ChatMessageFactory(handshake=handshake, sender=owner, body='Cancelled history must remain visible')
+
+        client = AuthenticatedAPIClient()
+
+        client.authenticate_user(owner)
+        owner_response = client.get(f'/api/chats/{handshake.id}/')
+        assert owner_response.status_code == status.HTTP_200_OK
+        assert owner_response.data['count'] == 1
+
+        client.authenticate_user(requester)
+        requester_response = client.get(f'/api/chats/{handshake.id}/')
+        assert requester_response.status_code == status.HTTP_200_OK
+        assert requester_response.data['count'] == 1
+
+    def test_group_offer_participant_cannot_read_other_private_thread(self):
+        """FR-10e: participant cannot access another participant's private thread."""
+        owner = UserFactory()
+        service = _group_service(owner)
+        participant_a = UserFactory()
+        participant_b = UserFactory()
+
+        handshake_a = HandshakeFactory(service=service, requester=participant_a, status='accepted')
+        HandshakeFactory(service=service, requester=participant_b, status='accepted')
+        ChatMessageFactory(handshake=handshake_a, sender=participant_a, body='Private thread A')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant_b)
+
+        response = client.get(f'/api/chats/{handshake_a.id}/')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_group_offer_participant_cannot_send_to_other_private_thread(self):
+        """FR-10e: participant cannot send messages into another participant's private thread."""
+        owner = UserFactory()
+        service = _group_service(owner)
+        participant_a = UserFactory()
+        participant_b = UserFactory()
+
+        handshake_a = HandshakeFactory(service=service, requester=participant_a, status='accepted')
+        HandshakeFactory(service=service, requester=participant_b, status='accepted')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant_b)
+
+        response = client.post('/api/chats/', {
+            'handshake_id': str(handshake_a.id),
+            'body': 'I should not be able to write here',
+        })
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert not ChatMessage.objects.filter(
+            handshake=handshake_a,
+            sender=participant_b,
+            body='I should not be able to write here',
+        ).exists()
 
 
 @pytest.mark.django_db
