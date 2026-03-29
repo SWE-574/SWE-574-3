@@ -228,6 +228,8 @@ logs/
 
 backend/tests/reports/
 frontend/tests/reports/
+tests/reports/
+
 
 # Allow frontend src lib (validation helpers)
 !frontend/src/lib/
