@@ -21,7 +21,7 @@ function tinyPngFile() {
   return {
     name: 'avatar.png',
     mimeType: 'image/png',
-    buffer: NodeBuffer.from(base64, 'base64') as any,
+    buffer: NodeBuffer.from(base64, 'base64') as Uint8Array,
   }
 }
 
