@@ -1434,16 +1434,17 @@ class UserVerifiedReviewsView(APIView):
 
 class UserFollowView(APIView):
     """
-    Follow another user.
+    Follow or unfollow another user.
 
-    **POST /api/users/{id}/follow/** — Authenticated user follows the user identified by `id`.
+    **POST /api/users/{id}/follow/** — Create ``UserFollow`` and a ``follow`` event.
 
-    Creates a ``UserFollow`` row and a ``UserFollowEvent`` with action ``follow``.
+    **DELETE /api/users/{id}/follow/** — Remove ``UserFollow`` and append an ``unfollow`` event.
 
-    **Errors:**
-    - 404: target user does not exist
-    - 400: self-follow or relationship already exists
-    - 401: not authenticated
+    **Errors (POST):** 404 unknown user; 400 self-follow or already following.
+
+    **Errors (DELETE):** 404 unknown user; 400 self-unfollow or not following.
+
+    **401:** not authenticated
     """
 
     permission_classes = [permissions.IsAuthenticated]
@@ -1508,6 +1509,56 @@ class UserFollowView(APIView):
                 'follow': serializer.data,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        summary='Unfollow user',
+        description=(
+            'Removes the active follow from the current user to the user specified by URL id '
+            'and records an unfollow event. Returns 400 if there is no follow relationship.'
+        ),
+        responses={
+            200: OpenApiResponse(description='Unfollowed successfully.'),
+        },
+        tags=['Users'],
+    )
+    def delete(self, request, id):
+        try:
+            target = User.objects.get(id=id)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        if target.id == request.user.id:
+            return create_error_response(
+                'You cannot unfollow yourself.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            follow = UserFollow.objects.get(follower=request.user, following=target)
+        except UserFollow.DoesNotExist:
+            return create_error_response(
+                'You are not following this user.',
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            follow.delete()
+            UserFollowEvent.objects.create(
+                follower=request.user,
+                following=target,
+                action=UserFollowEvent.ACTION_UNFOLLOW,
+            )
+
+        return Response(
+            {'message': 'Successfully unfollowed user.'},
+            status=status.HTTP_200_OK,
         )
 
 
