@@ -518,7 +518,10 @@ class TestPublicUserProfile:
         response = client.get(f'/api/users/{other_user.id}/')
         assert response.status_code == status.HTTP_200_OK
         assert 'email' not in response.data
+        assert 'role' not in response.data
         assert 'timebank_balance' not in response.data
+        assert 'is_verified' not in response.data
+        assert 'is_onboarded' not in response.data
 
     def test_public_profile_includes_created_and_joined_events(self):
         viewer = UserFactory()
