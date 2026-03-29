@@ -101,8 +101,8 @@ class AdminUserListSerializer(serializers.ModelSerializer):
 class UserFollowRelationshipSerializer(serializers.ModelSerializer):
     """Serialized UserFollow row for follow/unfollow API responses."""
 
-    follower_id = serializers.UUIDField(source='follower_id', read_only=True)
-    following_id = serializers.UUIDField(source='following_id', read_only=True)
+    follower_id = serializers.UUIDField(read_only=True)
+    following_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = UserFollow
@@ -1129,8 +1129,12 @@ class ProfileEventFieldsMixin:
         return self._serialize_handshakes(invited)
 
 
-class ProfileFollowStatsMixin:
-    """Read-only follow counts and viewer-specific is_following for profile serializers."""
+class ProfileFollowStatsMixin(serializers.Serializer):
+    """Read-only follow counts and viewer-specific is_following for profile serializers.
+
+    Must subclass Serializer so DRF's metaclass registers SerializerMethodField
+    declarations; a plain mixin class would leave them out of _declared_fields.
+    """
 
     followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
