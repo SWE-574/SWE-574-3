@@ -313,11 +313,20 @@ class TestUserProfileSerializer:
     
     def test_user_profile_serialization(self):
         """Test user profile serialization"""
-        user = UserFactory()
+        user = UserFactory(
+            first_name='Elif',
+            last_name='Yilmaz',
+            bio='Community-focused learner',
+            avatar_url='https://example.com/avatars/elif.jpg',
+        )
         serializer = UserProfileSerializer(user)
         data = serializer.data
         assert data['email'] == user.email
         assert data['first_name'] == user.first_name
+        assert data['last_name'] == user.last_name
+        assert data['bio'] == user.bio
+        assert data['avatar_url'] == user.avatar_url
+        assert data['date_joined'].startswith(user.date_joined.date().isoformat())
         assert float(data['timebank_balance']) == float(user.timebank_balance)
     
     def test_user_profile_bio_validation(self):

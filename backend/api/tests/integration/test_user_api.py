@@ -19,7 +19,12 @@ class TestUserProfileView:
     
     def test_get_current_user_profile(self):
         """Test retrieving current user profile"""
-        user = UserFactory()
+        user = UserFactory(
+            first_name='Elif',
+            last_name='Yilmaz',
+            bio='I like helping people with design feedback.',
+            avatar_url='https://example.com/avatars/elif.jpg',
+        )
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
         
@@ -27,6 +32,10 @@ class TestUserProfileView:
         assert response.status_code == status.HTTP_200_OK
         assert response.data['email'] == user.email
         assert response.data['first_name'] == user.first_name
+        assert response.data['last_name'] == user.last_name
+        assert response.data['bio'] == user.bio
+        assert response.data['avatar_url'] == user.avatar_url
+        assert response.data['date_joined'].startswith(user.date_joined.date().isoformat())
         assert 'achievements' in response.data
 
     def test_get_current_user_profile_includes_event_sections(self):
