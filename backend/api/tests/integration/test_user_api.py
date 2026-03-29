@@ -798,3 +798,52 @@ class TestUserFollowView:
         client = APIClient()
         response = client.delete(f'/api/users/{target.id}/follow/')
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestUserFollowListViews:
+    """GET /api/users/{id}/followers/ and /following/"""
+
+    def test_followers_list_returns_user_summaries(self):
+        target = UserFactory()
+        follower_a = UserFactory()
+        follower_b = UserFactory()
+        UserFollow.objects.create(follower=follower_a, following=target)
+        UserFollow.objects.create(follower=follower_b, following=target)
+        client = AuthenticatedAPIClient().authenticate_user(UserFactory())
+        response = client.get(f'/api/users/{target.id}/followers/')
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 2
+        ids = {row['id'] for row in response.data}
+        assert str(follower_a.id) in ids
+        assert str(follower_b.id) in ids
+        assert 'first_name' in response.data[0]
+        assert 'avatar_url' in response.data[0]
+
+    def test_following_list_returns_user_summaries(self):
+        source = UserFactory()
+        u1 = UserFactory()
+        u2 = UserFactory()
+        UserFollow.objects.create(follower=source, following=u1)
+        UserFollow.objects.create(follower=source, following=u2)
+        client = AuthenticatedAPIClient().authenticate_user(UserFactory())
+        response = client.get(f'/api/users/{source.id}/following/')
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 2
+        ids = {row['id'] for row in response.data}
+        assert str(u1.id) in ids
+        assert str(u2.id) in ids
+
+    def test_followers_list_user_not_found(self):
+        client = AuthenticatedAPIClient().authenticate_user(UserFactory())
+        response = client.get(f'/api/users/{uuid.uuid4()}/followers/')
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.data['code'] == 'NOT_FOUND'
+
+    def test_followers_list_requires_authentication(self):
+        from rest_framework.test import APIClient
+
+        target = UserFactory()
+        response = APIClient().get(f'/api/users/{target.id}/followers/')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
