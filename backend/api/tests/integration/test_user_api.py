@@ -82,14 +82,27 @@ class TestUserProfileView:
         
         response = client.patch('/api/users/me/', {
             'bio': 'Updated bio',
-            'first_name': 'Updated'
+            'first_name': 'Updated',
+            'last_name': 'Profile',
+            'avatar_url': 'https://example.com/avatars/updated.jpg',
+            'show_history': False,
+            'email': 'should-not-change@example.com',
         })
         assert response.status_code == status.HTTP_200_OK
         assert response.data['bio'] == 'Updated bio'
         assert response.data['first_name'] == 'Updated'
+        assert response.data['last_name'] == 'Profile'
+        assert response.data['avatar_url'] == 'https://example.com/avatars/updated.jpg'
+        assert response.data['show_history'] is False
+        assert response.data['email'] == user.email
         
         user.refresh_from_db()
         assert user.bio == 'Updated bio'
+        assert user.first_name == 'Updated'
+        assert user.last_name == 'Profile'
+        assert user.avatar_url == 'https://example.com/avatars/updated.jpg'
+        assert user.show_history is False
+        assert user.email != 'should-not-change@example.com'
     
     def test_update_user_profile_validation(self):
         """Test profile update validation"""
