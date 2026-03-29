@@ -388,6 +388,26 @@ class TestUserProfileSerializer:
         assert user.show_history is False
         assert user.email != 'should-not-change@example.com'
 
+    @pytest.mark.parametrize(
+        'payload,expected_field',
+        [
+            ({'first_name': 'x' * 151}, 'first_name'),
+            ({'last_name': 'x' * 151}, 'last_name'),
+            ({'avatar_url': 'javascript:alert(1)'}, 'avatar_url'),
+        ],
+    )
+    def test_user_profile_rejects_invalid_profile_inputs(self, payload, expected_field):
+        """Invalid profile inputs should fail validation before update/save."""
+        user = UserFactory(
+            first_name='Elif',
+            last_name='Yilmaz',
+            avatar_url='https://example.com/avatars/original.jpg',
+        )
+        serializer = UserProfileSerializer(user, data=payload, partial=True)
+
+        assert serializer.is_valid() is False
+        assert expected_field in serializer.errors
+
 
 @pytest.mark.django_db
 @pytest.mark.unit

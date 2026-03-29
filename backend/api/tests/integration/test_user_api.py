@@ -106,7 +106,7 @@ class TestUserProfileView:
     
     def test_update_user_profile_validation(self):
         """Test profile update validation"""
-        user = UserFactory()
+        user = UserFactory(bio='Initial bio')
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
         
@@ -114,6 +114,10 @@ class TestUserProfileView:
             'bio': 'x' * 1001  # Exceeds limit
         })
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'field_errors' in response.data
+        assert 'bio' in response.data['field_errors']
+        user.refresh_from_db()
+        assert user.bio == 'Initial bio'
 
 
 @pytest.mark.django_db
