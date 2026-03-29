@@ -71,6 +71,7 @@ from .serializers import (
     ForumTopicDetailSerializer,
     ForumPostSerializer,
     UserFollowRelationshipSerializer,
+    UserSummarySerializer,
 )
 from .achievement_utils import get_achievement_progress
 from .utils import (
@@ -1560,6 +1561,83 @@ class UserFollowView(APIView):
             {'message': 'Successfully unfollowed user.'},
             status=status.HTTP_200_OK,
         )
+
+
+def _user_follow_list_response(request, user_id, list_kind):
+    """
+    Return a JSON array of UserSummarySerializer data for followers or following.
+    list_kind: 'followers' | 'following'
+    """
+    try:
+        target = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return create_error_response(
+            'User not found.',
+            code=ErrorCodes.NOT_FOUND,
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    badge_prefetch = Prefetch(
+        'badges',
+        queryset=UserBadge.objects.select_related('badge'),
+    )
+    if list_kind == 'followers':
+        qs = (
+            User.objects.filter(follows__following=target)
+            .distinct()
+            .prefetch_related(badge_prefetch)
+            .order_by('first_name', 'last_name', 'id')
+        )
+    else:
+        qs = (
+            User.objects.filter(followed_by__follower=target)
+            .distinct()
+            .prefetch_related(badge_prefetch)
+            .order_by('first_name', 'last_name', 'id')
+        )
+
+    serializer = UserSummarySerializer(qs, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+class UserFollowersListView(APIView):
+    """
+    List users who follow the user identified by ``id`` (active ``UserFollow`` rows).
+
+    **GET /api/users/{id}/followers/**
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [UserRateThrottle]
+
+    @extend_schema(
+        summary='List followers',
+        description='Returns user summaries for accounts that follow the given user.',
+        responses={200: OpenApiResponse(description='JSON array of user summary objects.')},
+        tags=['Users'],
+    )
+    def get(self, request, id):
+        return _user_follow_list_response(request, id, 'followers')
+
+
+class UserFollowingListView(APIView):
+    """
+    List users that the user identified by ``id`` is following.
+
+    **GET /api/users/{id}/following/**
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [UserRateThrottle]
+
+    @extend_schema(
+        summary='List following',
+        description='Returns user summaries for accounts followed by the given user.',
+        responses={200: OpenApiResponse(description='JSON array of user summary objects.')},
+        tags=['Users'],
+    )
+    def get(self, request, id):
+        return _user_follow_list_response(request, id, 'following')
 
 
 class ServiceViewSet(viewsets.ModelViewSet):
