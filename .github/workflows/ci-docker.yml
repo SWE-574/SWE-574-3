@@ -23,7 +23,7 @@ jobs:
   lint-dockerfiles:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install hadolint
         run: |
@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-dockerfiles
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Write .env
         run: cp .env.example .env
@@ -78,7 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: infra
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Write .env
         run: |
@@ -181,7 +181,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: full-local
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Generate self-signed TLS certificate for CI
         # Run openssl inside a throw-away container so the cert lands on the

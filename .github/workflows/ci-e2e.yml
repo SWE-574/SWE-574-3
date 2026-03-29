@@ -30,7 +30,7 @@ jobs:
 
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────────────
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # ── 2. Write environment file ──────────────────────────────────────────
       - name: Write .env

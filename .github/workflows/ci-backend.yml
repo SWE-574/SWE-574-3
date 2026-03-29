@@ -56,7 +56,7 @@ jobs:
       DJANGO_SETTINGS_MODULE: hive_project.settings
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start MinIO
         run: |
