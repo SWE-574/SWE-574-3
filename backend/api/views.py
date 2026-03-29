@@ -44,6 +44,7 @@ from .models import (
     AdminAuditLog,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
     EmailVerificationToken, PasswordResetToken,
+    UserFollow, UserFollowEvent,
 )
 from .serializers import (
     UserRegistrationSerializer, 
@@ -68,7 +69,8 @@ from .serializers import (
     ForumCategorySerializer,
     ForumTopicSerializer,
     ForumTopicDetailSerializer,
-    ForumPostSerializer
+    ForumPostSerializer,
+    UserFollowRelationshipSerializer,
 )
 from .achievement_utils import get_achievement_progress
 from .utils import (
@@ -1422,6 +1424,85 @@ class UserVerifiedReviewsView(APIView):
         
         serializer = CommentSerializer(comments, many=True)
         return Response({'results': serializer.data, 'count': len(serializer.data)})
+
+
+class UserFollowView(APIView):
+    """
+    Follow another user.
+
+    **POST /api/users/{id}/follow/** — Authenticated user follows the user identified by `id`.
+
+    Creates a ``UserFollow`` row and a ``UserFollowEvent`` with action ``follow``.
+
+    **Errors:**
+    - 404: target user does not exist
+    - 400: self-follow or relationship already exists
+    - 401: not authenticated
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [UserRateThrottle]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    @extend_schema(
+        summary='Follow user',
+        description=(
+            'Creates an active follow from the current user to the user specified by URL id. '
+            'Duplicate follows return 400.'
+        ),
+        request=None,
+        responses={
+            201: OpenApiResponse(description='Created with message and follow relationship payload.'),
+        },
+        tags=['Users'],
+    )
+    def post(self, request, id):
+        try:
+            target = User.objects.get(id=id)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        if target.id == request.user.id:
+            return create_error_response(
+                'You cannot follow yourself.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if UserFollow.objects.filter(follower=request.user, following=target).exists():
+            return create_error_response(
+                'You are already following this user.',
+                code=ErrorCodes.ALREADY_EXISTS,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                follow = UserFollow.objects.create(follower=request.user, following=target)
+                UserFollowEvent.objects.create(
+                    follower=request.user,
+                    following=target,
+                    action=UserFollowEvent.ACTION_FOLLOW,
+                )
+        except IntegrityError:
+            return create_error_response(
+                'You are already following this user.',
+                code=ErrorCodes.ALREADY_EXISTS,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = UserFollowRelationshipSerializer(follow)
+        return Response(
+            {
+                'message': 'Successfully followed user.',
+                'follow': serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ServiceViewSet(viewsets.ModelViewSet):

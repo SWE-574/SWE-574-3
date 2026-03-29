@@ -5,7 +5,7 @@ from .models import (
     User, Service, Tag, Handshake, ChatMessage, 
     Notification, ReputationRep, Badge, UserBadge, Report, TransactionHistory,
     ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
-    ForumCategory, ForumTopic, ForumPost, ServiceMedia
+    ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow,
 )
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
@@ -95,6 +95,18 @@ class AdminUserListSerializer(serializers.ModelSerializer):
             'timebank_balance', 'karma_score', 'role', 
             'is_active', 'date_joined'
         ]
+        read_only_fields = fields
+
+
+class UserFollowRelationshipSerializer(serializers.ModelSerializer):
+    """Serialized UserFollow row for follow/unfollow API responses."""
+
+    follower_id = serializers.UUIDField(source='follower_id', read_only=True)
+    following_id = serializers.UUIDField(source='following_id', read_only=True)
+
+    class Meta:
+        model = UserFollow
+        fields = ['id', 'follower_id', 'following_id', 'created_at']
         read_only_fields = fields
 
 
