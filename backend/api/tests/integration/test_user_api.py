@@ -689,7 +689,7 @@ class TestEventCommentsHistoryOnProfile:
 @pytest.mark.django_db
 @pytest.mark.integration
 class TestUserFollowView:
-    """POST /api/users/{id}/follow/"""
+    """POST/DELETE /api/users/{id}/follow/"""
 
     def test_follow_success_creates_follow_and_event(self):
         follower = UserFactory()
@@ -737,4 +737,48 @@ class TestUserFollowView:
         target = UserFactory()
         client = APIClient()
         response = client.post(f'/api/users/{target.id}/follow/')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_unfollow_success_removes_follow_and_creates_event(self):
+        follower = UserFactory()
+        target = UserFactory()
+        UserFollow.objects.create(follower=follower, following=target)
+        client = AuthenticatedAPIClient().authenticate_user(follower)
+        response = client.delete(f'/api/users/{target.id}/follow/')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['message'] == 'Successfully unfollowed user.'
+        assert not UserFollow.objects.filter(follower=follower, following=target).exists()
+        assert UserFollowEvent.objects.filter(
+            follower=follower,
+            following=target,
+            action=UserFollowEvent.ACTION_UNFOLLOW,
+        ).count() == 1
+
+    def test_unfollow_target_not_found(self):
+        client = AuthenticatedAPIClient().authenticate_user(UserFactory())
+        response = client.delete(f'/api/users/{uuid.uuid4()}/follow/')
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.data['code'] == 'NOT_FOUND'
+
+    def test_unfollow_self_returns_400(self):
+        user = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        response = client.delete(f'/api/users/{user.id}/follow/')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data['code'] == 'VALIDATION_ERROR'
+
+    def test_unfollow_when_not_following_returns_400(self):
+        follower = UserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(follower)
+        response = client.delete(f'/api/users/{target.id}/follow/')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data['code'] == 'INVALID_STATE'
+
+    def test_unfollow_requires_authentication(self):
+        from rest_framework.test import APIClient
+
+        target = UserFactory()
+        client = APIClient()
+        response = client.delete(f'/api/users/{target.id}/follow/')
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
