@@ -28,6 +28,7 @@ import {
 import { getErrorMessage } from '@/services/api'
 import ImageCropModal from '@/components/ImageCropModal'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
+import FollowListModal from '@/components/FollowListModal'
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
 const avatarBg   = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
@@ -270,6 +271,10 @@ const UserProfile = () => {
   const navigate = useNavigate()
   const { user, updateUserOptimistically, refreshUser } = useAuthStore()
 
+  useEffect(() => {
+    void refreshUser()
+  }, [refreshUser])
+
   // ── Edit state ───────────────────────────────────────────────────────────────
   const [editing, setEditing]           = useState(false)
   const [saving, setSaving]             = useState(false)
@@ -305,6 +310,7 @@ const UserProfile = () => {
   const [eventsLoading, setEventsLoading]     = useState(true)
   const [activeTab, setActiveTab]         = useState<ServiceTab>('offers')
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
+  const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
 
   // ── Settings / password-change state ─────────────────────────────────────────
   const [pwCurrent, setPwCurrent]       = useState('')
@@ -609,6 +615,43 @@ const UserProfile = () => {
                 )}
                 <Flex align="center" gap="4px" fontSize="12px" color={GREEN} fontWeight={600}>
                   <FiStar size={11} />{user.karma_score ?? 0} karma
+                </Flex>
+                <Flex align="center" gap={1} fontSize="12px" color={GRAY500} flexWrap="wrap">
+                  <Box
+                    as="button"
+                    onClick={() => setFollowListModal('followers')}
+                    title="View followers"
+                    style={{
+                      cursor: 'pointer',
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      font: 'inherit',
+                      color: 'inherit',
+                      textDecoration: 'underline',
+                      textUnderlineOffset: '2px',
+                    }}
+                  >
+                    {user.followers_count ?? 0} followers
+                  </Box>
+                  <Text as="span" color={GRAY400}>·</Text>
+                  <Box
+                    as="button"
+                    onClick={() => setFollowListModal('following')}
+                    title="View following"
+                    style={{
+                      cursor: 'pointer',
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      font: 'inherit',
+                      color: 'inherit',
+                      textDecoration: 'underline',
+                      textUnderlineOffset: '2px',
+                    }}
+                  >
+                    {user.following_count ?? 0} following
+                  </Box>
                 </Flex>
               </Flex>
             </Box>
@@ -1125,6 +1168,13 @@ const UserProfile = () => {
             navigate(`/public-profile/${item.partner_id}`)
           },
         }))}
+      />
+
+      <FollowListModal
+        isOpen={followListModal !== null}
+        listKind={followListModal}
+        userId={user.id}
+        onClose={() => setFollowListModal(null)}
       />
     </Box>
   )
