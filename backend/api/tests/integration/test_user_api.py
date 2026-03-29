@@ -1,6 +1,8 @@
 """
 Integration tests for user API endpoints
 """
+import uuid
+
 import pytest
 from rest_framework import status
 from decimal import Decimal
@@ -9,7 +11,16 @@ from django.utils import timezone
 
 from api.tests.helpers.factories import UserFactory, ServiceFactory, HandshakeFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Handshake, TransactionHistory, Badge, UserBadge, Comment, ReputationRep
+from api.models import (
+    Handshake,
+    TransactionHistory,
+    Badge,
+    UserBadge,
+    Comment,
+    ReputationRep,
+    UserFollow,
+    UserFollowEvent,
+)
 
 
 @pytest.mark.django_db
@@ -644,3 +655,57 @@ class TestEventCommentsHistoryOnProfile:
         assert visible_response.data['event_comments_history'][0]['comments'][0]['body'] == (
             'Should stay hidden until organizer also evaluates.'
         )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestUserFollowView:
+    """POST /api/users/{id}/follow/"""
+
+    def test_follow_success_creates_follow_and_event(self):
+        follower = UserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(follower)
+        response = client.post(f'/api/users/{target.id}/follow/')
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data['message'] == 'Successfully followed user.'
+        assert response.data['follow']['follower_id'] == str(follower.id)
+        assert response.data['follow']['following_id'] == str(target.id)
+        assert 'id' in response.data['follow']
+        assert 'created_at' in response.data['follow']
+        assert UserFollow.objects.filter(follower=follower, following=target).count() == 1
+        assert UserFollowEvent.objects.filter(
+            follower=follower,
+            following=target,
+            action=UserFollowEvent.ACTION_FOLLOW,
+        ).count() == 1
+
+    def test_follow_target_not_found(self):
+        client = AuthenticatedAPIClient().authenticate_user(UserFactory())
+        response = client.post(f'/api/users/{uuid.uuid4()}/follow/')
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.data['code'] == 'NOT_FOUND'
+
+    def test_follow_self_returns_400(self):
+        user = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        response = client.post(f'/api/users/{user.id}/follow/')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data['code'] == 'VALIDATION_ERROR'
+
+    def test_follow_duplicate_returns_400(self):
+        follower = UserFactory()
+        target = UserFactory()
+        UserFollow.objects.create(follower=follower, following=target)
+        client = AuthenticatedAPIClient().authenticate_user(follower)
+        response = client.post(f'/api/users/{target.id}/follow/')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data['code'] == 'ALREADY_EXISTS'
+
+    def test_follow_requires_authentication(self):
+        from rest_framework.test import APIClient
+
+        target = UserFactory()
+        client = APIClient()
+        response = client.post(f'/api/users/{target.id}/follow/')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
