@@ -104,6 +104,30 @@ class TestUserProfileView:
         })
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
+    def test_me_profile_includes_follow_fields(self):
+        user = UserFactory()
+        peer = UserFactory()
+        UserFollow.objects.create(follower=peer, following=user)
+        UserFollow.objects.create(follower=user, following=peer)
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        response = client.get('/api/users/me/')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['followers_count'] == 1
+        assert response.data['following_count'] == 1
+        assert response.data['is_following'] is False
+
+    def test_other_user_profile_is_following_and_counts(self):
+        viewer = UserFactory()
+        target = UserFactory()
+        UserFollow.objects.create(follower=viewer, following=target)
+        UserFollow.objects.create(follower=UserFactory(), following=target)
+        client = AuthenticatedAPIClient().authenticate_user(viewer)
+        response = client.get(f'/api/users/{target.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['is_following'] is True
+        assert response.data['followers_count'] == 2
+        assert response.data['following_count'] == 0
+
 
 @pytest.mark.django_db
 @pytest.mark.integration
@@ -709,6 +733,27 @@ class TestUserFollowView:
         client = APIClient()
         response = client.post(f'/api/users/{target.id}/follow/')
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_follow_invalidates_cached_me_profile(self):
+        follower = UserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(follower)
+        first = client.get('/api/users/me/')
+        assert first.data['following_count'] == 0
+        client.post(f'/api/users/{target.id}/follow/')
+        second = client.get('/api/users/me/')
+        assert second.data['following_count'] == 1
+
+    def test_unfollow_invalidates_cached_me_profile(self):
+        follower = UserFactory()
+        target = UserFactory()
+        UserFollow.objects.create(follower=follower, following=target)
+        client = AuthenticatedAPIClient().authenticate_user(follower)
+        first = client.get('/api/users/me/')
+        assert first.data['following_count'] == 1
+        client.delete(f'/api/users/{target.id}/follow/')
+        second = client.get('/api/users/me/')
+        assert second.data['following_count'] == 0
 
     def test_unfollow_success_removes_follow_and_creates_event(self):
         follower = UserFactory()
