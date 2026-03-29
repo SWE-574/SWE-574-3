@@ -411,6 +411,25 @@ class TestUserProfileSerializer:
 
 @pytest.mark.django_db
 @pytest.mark.unit
+class TestPublicUserProfileSerializer:
+    """Test PublicUserProfileSerializer"""
+
+    def test_public_profile_serializer_hides_sensitive_fields(self):
+        """Public serializer should not expose email, role internals, or security metadata."""
+        user = UserFactory()
+        serializer = PublicUserProfileSerializer(user)
+        data = serializer.data
+
+        assert data['id'] == str(user.id)
+        assert 'email' not in data
+        assert 'role' not in data
+        assert 'timebank_balance' not in data
+        assert 'is_verified' not in data
+        assert 'is_onboarded' not in data
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
 class TestCommentSerializer:
     """Test CommentSerializer"""
     
