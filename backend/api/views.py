@@ -1109,6 +1109,8 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
                 punctual_count=Count('received_reps', filter=Q(received_reps__is_punctual=True)),
                 helpful_count=Count('received_reps', filter=Q(received_reps__is_helpful=True)),
                 kind_count=Count('received_reps', filter=Q(received_reps__is_kind=True)),
+                followers_count=Count('followed_by', distinct=True),
+                following_count=Count('follows', distinct=True),
             )
         )
     
@@ -1497,6 +1499,8 @@ class UserFollowView(APIView):
             )
 
         serializer = UserFollowRelationshipSerializer(follow)
+        invalidate_user_profile(str(request.user.id))
+        invalidate_user_profile(str(target.id))
         return Response(
             {
                 'message': 'Successfully followed user.',
@@ -1550,6 +1554,8 @@ class UserFollowView(APIView):
                 action=UserFollowEvent.ACTION_UNFOLLOW,
             )
 
+        invalidate_user_profile(str(request.user.id))
+        invalidate_user_profile(str(target.id))
         return Response(
             {'message': 'Successfully unfollowed user.'},
             status=status.HTTP_200_OK,
