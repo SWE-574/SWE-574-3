@@ -37,6 +37,8 @@ test.describe('Self-profile (FR-02b)', () => {
     const meBeforeRes = await page.context().request.get('/api/users/me/')
     expect(meBeforeRes.ok()).toBeTruthy()
     const meBefore = await meBeforeRes.json()
+    const displayNameBefore =
+      `${meBefore.first_name || ''} ${meBefore.last_name || ''}`.trim() || String(meBefore.email || '')
     const targetShowHistory = !(meBefore.show_history ?? false)
 
     const stamp = Date.now().toString().slice(-6)
@@ -44,7 +46,7 @@ test.describe('Self-profile (FR-02b)', () => {
     const lastName = `FR02b${stamp}`
     const updatedBio = `FR-02b bio update ${stamp}`
 
-    const avatarImg = page.getByRole('img', { name: /Elif/i }).first()
+    const avatarImg = page.getByRole('img', { name: displayNameBefore }).first()
     await expect(avatarImg).toBeVisible()
     const oldAvatarSrc = await avatarImg.getAttribute('src')
 
@@ -69,7 +71,7 @@ test.describe('Self-profile (FR-02b)', () => {
     // Avatar preview should now be a local cropped data URL
     // In edit mode, profile header still renders displayName from current user state
     // until Save updates the backend/user store.
-    const previewAvatar = page.getByRole('img', { name: /Elif Yılmaz/i }).first()
+    const previewAvatar = page.getByRole('img', { name: displayNameBefore }).first()
     await expect(previewAvatar).toBeVisible()
     await expect(previewAvatar).toHaveAttribute('src', /data:image\/jpeg/)
 
