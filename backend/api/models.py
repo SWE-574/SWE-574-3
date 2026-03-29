@@ -234,6 +234,57 @@ class UserFollow(models.Model):
         ]
 
 
+class UserFollowEvent(models.Model):
+    """
+    Append-only history of follow and unfollow actions (multiple rows per pair allowed).
+    """
+
+    ACTION_FOLLOW = 'follow'
+    ACTION_UNFOLLOW = 'unfollow'
+    ACTION_CHOICES = (
+        (ACTION_FOLLOW, 'Follow'),
+        (ACTION_UNFOLLOW, 'Unfollow'),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    follower = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='follow_events_as_follower',
+        help_text='User who performed the action',
+    )
+    following = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='follow_events_as_target',
+        help_text='User who was followed or unfollowed',
+    )
+    action = models.CharField(max_length=16, choices=ACTION_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        super().clean()
+        if self.follower_id and self.following_id and self.follower_id == self.following_id:
+            raise ValidationError('Follow events cannot target the same user as the actor.')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        action_label = dict(self.ACTION_CHOICES).get(self.action, self.action)
+        return f'{self.follower} {action_label.lower()} {self.following}'
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(follower=models.F('following')),
+                name='api_userfollowevent_no_self_action',
+            ),
+        ]
+
+
 class Service(models.Model):
     TYPE_CHOICES = (
         ('Offer', 'Offer'),
