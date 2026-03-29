@@ -1827,7 +1827,10 @@ export default function ChatPage() {
     if (!msg?.id) return
     if ((msg.handshake_id ?? msg.handshake) !== selectedId) return
     setMessages((prev) => mergeMessages(prev, [msg]))
-  }, [selectedId])
+    // State changes like "details proposed" arrive as chat messages, so refresh
+    // the conversation metadata too or the action panel can lag behind the thread.
+    refreshConversations()
+  }, [refreshConversations, selectedId])
 
   const { isConnected: wsConnected, sendMessage: wsSend } = useWebSocket({
     url: wsUrl,
