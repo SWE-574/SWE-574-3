@@ -229,6 +229,9 @@ logs/
 backend/tests/reports/
 frontend/tests/reports/
 
+# Test reports when pytest/coverage is run from repo root (outputs under ./tests/reports/)
+tests/reports/
+
 # Allow frontend src lib (validation helpers)
 !frontend/src/lib/
 !frontend/src/lib/**
