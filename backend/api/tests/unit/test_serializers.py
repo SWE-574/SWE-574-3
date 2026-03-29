@@ -360,6 +360,34 @@ class TestUserProfileSerializer:
         assert 'achievements' in data
         assert 'test-achievement' in data['achievements']
 
+    def test_user_profile_partial_update_fields_and_read_only_email(self):
+        """Editable fields update; email remains read-only."""
+        user = UserFactory(
+            first_name='Before',
+            last_name='User',
+            bio='Before bio',
+            avatar_url='https://example.com/avatars/before.jpg',
+            show_history=True,
+        )
+        serializer = UserProfileSerializer(user, data={
+            'first_name': 'After',
+            'last_name': 'Profile',
+            'bio': 'After bio',
+            'avatar_url': 'https://example.com/avatars/after.jpg',
+            'show_history': False,
+            'email': 'should-not-change@example.com',
+        }, partial=True)
+        assert serializer.is_valid(), serializer.errors
+        serializer.save()
+
+        user.refresh_from_db()
+        assert user.first_name == 'After'
+        assert user.last_name == 'Profile'
+        assert user.bio == 'After bio'
+        assert user.avatar_url == 'https://example.com/avatars/after.jpg'
+        assert user.show_history is False
+        assert user.email != 'should-not-change@example.com'
+
 
 @pytest.mark.django_db
 @pytest.mark.unit
