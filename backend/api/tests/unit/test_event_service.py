@@ -373,3 +373,178 @@ class TestCancelEvent:
         service = ServiceFactory(type='Offer', status='Active')
         with pytest.raises(ValueError, match='not an event'):
             EventHandshakeService.cancel_event(service, service.user)
+
+
+# ─── FR-19i: QR + GPS dual-factor check-in (xfail — not yet implemented) ──────
+
+try:
+    from api.services import EventHandshakeService as _EHS_qr
+    _qr_checkin = getattr(_EHS_qr, 'checkin_with_qr', None)
+    _gps_checkin = getattr(_EHS_qr, 'checkin_with_proximity', None)
+except ImportError:
+    _qr_checkin = None
+    _gps_checkin = None
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+@pytest.mark.xfail(
+    reason="FR-19i: QR token validation not yet implemented in EventHandshakeService",
+    strict=False,
+)
+class TestCheckinQRValidation:
+    """
+    FR-19i requires a valid QR token as the first factor of attendance verification.
+
+    These tests are xfail because:
+    - No QR token is generated when a handshake is accepted.
+    - EventHandshakeService has no checkin_with_qr() method.
+    - The check-in endpoint does not validate any token.
+    """
+
+    def setUp(self):
+        if _qr_checkin is None:
+            pytest.xfail("checkin_with_qr not yet implemented — FR-19i")
+
+    def test_checkin_with_valid_qr_token_succeeds(self):
+        """Valid QR token issued for the handshake should allow check-in."""
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        # The token should have been generated when the handshake was accepted
+        assert hasattr(hs, 'qr_token') and hs.qr_token, "No QR token generated on accepted handshake."
+        result = _qr_checkin(hs, participant, qr_token=hs.qr_token)
+        assert result.status == 'checked_in'
+
+    def test_checkin_with_invalid_qr_token_raises(self):
+        """An incorrect QR token must be rejected."""
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        with pytest.raises((ValueError, PermissionError), match='[Ii]nvalid.*[Tt]oken|[Qq][Rr]'):
+            _qr_checkin(hs, participant, qr_token='bad-token-value')
+
+    def test_qr_token_is_single_use(self):
+        """Using the same QR token twice must fail on the second attempt."""
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        p1 = UserFactory()
+        p2 = UserFactory()
+        hs1 = EventHandshakeService.join_event(service, p1)
+        hs2 = EventHandshakeService.join_event(service, p2)
+
+        _qr_checkin(hs1, p1, qr_token=hs1.qr_token)
+
+        # Reusing hs1's token for a different handshake must fail
+        with pytest.raises((ValueError, PermissionError)):
+            _qr_checkin(hs2, p2, qr_token=hs1.qr_token)
+
+    def test_qr_token_belongs_to_correct_handshake(self):
+        """A token generated for one handshake cannot be used for a different participant."""
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        p1 = UserFactory()
+        p2 = UserFactory()
+        hs1 = EventHandshakeService.join_event(service, p1)
+        hs2 = EventHandshakeService.join_event(service, p2)
+
+        with pytest.raises((ValueError, PermissionError)):
+            _qr_checkin(hs2, p2, qr_token=hs1.qr_token)
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+@pytest.mark.xfail(
+    reason="FR-19i: GPS proximity check not yet implemented in EventHandshakeService",
+    strict=False,
+)
+class TestCheckinGPSProximity:
+    """
+    FR-19i requires the check-in request to include GPS coordinates that are within
+    100m of the event's real location. Online events skip the GPS check.
+
+    These tests are xfail because no proximity validation exists in the codebase.
+    """
+
+    def setUp(self):
+        if _gps_checkin is None:
+            pytest.xfail("checkin_with_proximity not yet implemented — FR-19i")
+
+    def test_checkin_within_100m_succeeds(self):
+        """GPS coordinates within 100m of the event location should pass the proximity check."""
+        organizer = UserFactory()
+        service = ServiceFactory(
+            user=organizer, type='Event', status='Active',
+            max_participants=10, schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=12),
+            duration=Decimal('1.00'),
+            location_type='In-Person',
+            location_lat=Decimal('41.012345'),
+            location_lng=Decimal('28.974321'),
+        )
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        # Coordinates ~50m away (well within 100m)
+        result = _gps_checkin(hs, participant, lat=41.012345, lng=28.974800)
+        assert result.status == 'checked_in'
+
+    def test_checkin_beyond_100m_raises(self):
+        """GPS coordinates more than 100m from the event location must be rejected."""
+        organizer = UserFactory()
+        service = ServiceFactory(
+            user=organizer, type='Event', status='Active',
+            max_participants=10, schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=12),
+            duration=Decimal('1.00'),
+            location_type='In-Person',
+            location_lat=Decimal('41.012345'),
+            location_lng=Decimal('28.974321'),
+        )
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        # Coordinates ~2km away
+        with pytest.raises((ValueError, PermissionError), match='[Pp]roximity|[Dd]istance|[Ll]ocation'):
+            _gps_checkin(hs, participant, lat=41.030000, lng=28.974321)
+
+    def test_online_event_skips_proximity_check(self):
+        """Online events should not require GPS coordinates for check-in."""
+        organizer = UserFactory()
+        service = ServiceFactory(
+            user=organizer, type='Event', status='Active',
+            max_participants=10, schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=12),
+            duration=Decimal('1.00'),
+            location_type='Online',
+            location_lat=None,
+            location_lng=None,
+        )
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        # No GPS required for online events
+        result = _gps_checkin(hs, participant, lat=None, lng=None)
+        assert result.status == 'checked_in'
+
+    def test_missing_gps_coordinates_for_inperson_event_raises(self):
+        """Submitting no GPS for an in-person event must be rejected."""
+        organizer = UserFactory()
+        service = ServiceFactory(
+            user=organizer, type='Event', status='Active',
+            max_participants=10, schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=12),
+            duration=Decimal('1.00'),
+            location_type='In-Person',
+            location_lat=Decimal('41.012345'),
+            location_lng=Decimal('28.974321'),
+        )
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        with pytest.raises((ValueError, TypeError)):
+            _gps_checkin(hs, participant, lat=None, lng=None)
