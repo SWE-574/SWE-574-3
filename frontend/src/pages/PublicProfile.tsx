@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Box, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
+import { Box, Button, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
 import {
   FiArrowLeft, FiClock, FiMapPin, FiCalendar,
   FiStar, FiCheckCircle, FiThumbsUp, FiUser, FiAlertCircle,
-  FiZap, FiLayers, FiRepeat, FiAward,
+  FiZap, FiLayers, FiRepeat, FiAward, FiUserPlus,
 } from 'react-icons/fi'
+import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
 import { userAPI } from '@/services/userAPI'
+import { getErrorMessage } from '@/services/api'
 import { serviceAPI } from '@/services/serviceAPI'
 import type { User, Service, BadgeProgress, ProfileReview } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
@@ -21,6 +23,7 @@ import {
   WHITE,
 } from '@/theme/tokens'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
+import FollowListModal from '@/components/FollowListModal'
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, TEAL, ORANGE]
 const avatarBg    = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
@@ -223,7 +226,8 @@ function NotFoundState({ onBack }: { onBack: () => void }) {
 const PublicProfile = () => {
   const { userId } = useParams<{ userId: string }>()
   const navigate   = useNavigate()
-  const { user: currentUser } = useAuthStore()
+  const currentUser = useAuthStore((s) => s.user)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
   const [profileUser, setProfileUser] = useState<User | null>(null)
   const [services, setServices]       = useState<Service[]>([])
@@ -235,6 +239,8 @@ const PublicProfile = () => {
   const [loading, setLoading]         = useState(true)
   const [notFound, setNotFound]       = useState(false)
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
+  const [followActionLoading, setFollowActionLoading] = useState(false)
+  const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
 
   useEffect(() => {
     if (!userId) return
@@ -280,6 +286,32 @@ const PublicProfile = () => {
 
   const ownHistory = history.filter(isOwnHistoryItem)
   const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
+
+  const showFollowButton =
+    isAuthenticated &&
+    currentUser &&
+    userId &&
+    currentUser.id !== userId
+
+  const handleFollowToggle = async () => {
+    if (!userId || !profileUser || followActionLoading) return
+    setFollowActionLoading(true)
+    try {
+      if (profileUser.is_following) {
+        await userAPI.unfollowUser(userId)
+        toast.success('You unfollowed this user.')
+      } else {
+        await userAPI.followUser(userId)
+        toast.success('You are now following this user.')
+      }
+      const refreshed = await userAPI.getUser(userId)
+      setProfileUser(refreshed)
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not update follow status.'))
+    } finally {
+      setFollowActionLoading(false)
+    }
+  }
 
   if (loading || (!notFound && !profileUser)) {
     return <Flex h="calc(100vh - 64px)" align="center" justify="center"><Spinner color={GREEN} size="lg" /></Flex>
@@ -366,8 +398,94 @@ const PublicProfile = () => {
                   <Flex align="center" gap="4px" fontSize="12px" color={GRAY500}><FiCalendar size={11} />Member since {joinedYear(profileUser.date_joined)}</Flex>
                 )}
                 <Flex align="center" gap="4px" fontSize="12px" color={GREEN} fontWeight={600}><FiStar size={11} />{profileUser.karma_score ?? 0} karma</Flex>
+                <Flex align="center" gap={1} fontSize="12px" color={GRAY500} flexWrap="wrap">
+                  <Box
+                    as="button"
+                    onClick={() => {
+                      if (!userId) return
+                      if (!isAuthenticated) {
+                        toast.info('Sign in to see who follows this user.')
+                        return
+                      }
+                      setFollowListModal('followers')
+                    }}
+                    title={isAuthenticated ? 'View followers' : undefined}
+                    style={{
+                      cursor: isAuthenticated ? 'pointer' : 'default',
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      font: 'inherit',
+                      color: 'inherit',
+                      textDecoration: isAuthenticated ? 'underline' : 'none',
+                      textUnderlineOffset: '2px',
+                    }}
+                  >
+                    {profileUser.followers_count ?? 0} followers
+                  </Box>
+                  <Text as="span" color={GRAY400}>·</Text>
+                  <Box
+                    as="button"
+                    onClick={() => {
+                      if (!userId) return
+                      if (!isAuthenticated) {
+                        toast.info('Sign in to see who this user follows.')
+                        return
+                      }
+                      setFollowListModal('following')
+                    }}
+                    title={isAuthenticated ? 'View following' : undefined}
+                    style={{
+                      cursor: isAuthenticated ? 'pointer' : 'default',
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      font: 'inherit',
+                      color: 'inherit',
+                      textDecoration: isAuthenticated ? 'underline' : 'none',
+                      textUnderlineOffset: '2px',
+                    }}
+                  >
+                    {profileUser.following_count ?? 0} following
+                  </Box>
+                </Flex>
               </Flex>
             </Box>
+            {showFollowButton && (
+              <Flex flexShrink={0} align="center">
+                {profileUser.is_following ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    borderColor={GRAY300}
+                    color={GRAY700}
+                    loading={followActionLoading}
+                    disabled={followActionLoading}
+                    onClick={handleFollowToggle}
+                  >
+                    <Flex as="span" align="center" gap={2}>
+                      <FiCheckCircle size={14} />
+                      Unfollow
+                    </Flex>
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    bg={GREEN}
+                    color={WHITE}
+                    loading={followActionLoading}
+                    disabled={followActionLoading}
+                    _hover={{ bg: GREEN_DARK }}
+                    onClick={handleFollowToggle}
+                  >
+                    <Flex as="span" align="center" gap={2}>
+                      <FiUserPlus size={14} />
+                      Follow
+                    </Flex>
+                  </Button>
+                )}
+              </Flex>
+            )}
           </Flex>
 
           {/* ── Stats strip ──────────────────────────────────────────────────── */}
@@ -530,6 +648,13 @@ const PublicProfile = () => {
             navigate(`/public-profile/${item.partner_id}`)
           } : undefined,
         }))}
+      />
+
+      <FollowListModal
+        isOpen={followListModal !== null}
+        listKind={followListModal}
+        userId={userId ?? null}
+        onClose={() => setFollowListModal(null)}
       />
     </Box>
   )
