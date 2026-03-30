@@ -8,6 +8,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -16,55 +17,157 @@ import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import type { ForumTopic, ForumPost } from "../../api/forum";
-import { getTopic, listTopicPosts, createTopicPost } from "../../api/forum";
+import {
+  getTopic,
+  listTopicPosts,
+  createTopicPost,
+  patchTopic,
+  deleteTopic,
+  patchPost,
+  deletePost,
+} from "../../api/forum";
 import { colors } from "../../constants/colors";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
+import { getInitials } from "../../utils/getInitials";
 import { useAuth } from "../../context/AuthContext";
 import { ChatInputBar } from "../components/chat/ChatInputBar";
 import type { ForumStackParamList } from "../../navigation/ForumStack";
+import type { UserSummary } from "../../api/types";
 
 type NavProp = NativeStackNavigationProp<ForumStackParamList, "TopicDetail">;
 type RouteParam = RouteProp<ForumStackParamList, "TopicDetail">;
 
 const PAGE_SIZE = 20;
 
-function getInitials(name: string): string {
-  return (name || "?")
-    .trim()
-    .split(" ")
-    .map((w) => w.charAt(0).toUpperCase())
-    .slice(0, 2)
-    .join("");
+function parseApiError(err: unknown): string {
+  if (err && typeof err === "object") {
+    const e = err as Record<string, unknown>;
+    if (e.status === 403 || e.status === "403") {
+      return "You don't have permission to do this.";
+    }
+    if (typeof e.detail === "string") return e.detail;
+    if (typeof e.body === "string") return e.body;
+    if (typeof e.title === "string") return e.title;
+  }
+  return "Something went wrong. Please try again.";
 }
 
-function TopicHeader({ topic }: { topic: ForumTopic }) {
+function EditActionButtons({
+  saving,
+  onSave,
+  onCancel,
+}: {
+  saving: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <View style={styles.editActions}>
+      <Pressable
+        style={[styles.editBtn, styles.editBtnSave, saving && styles.editBtnDisabled]}
+        onPress={onSave}
+        disabled={saving}
+      >
+        {saving ? (
+          <ActivityIndicator size="small" color={colors.WHITE} />
+        ) : (
+          <Text style={styles.editBtnSaveText}>Save</Text>
+        )}
+      </Pressable>
+      <Pressable style={[styles.editBtn, styles.editBtnCancel]} onPress={onCancel}>
+        <Text style={styles.editBtnCancelText}>Cancel</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+// ─── TopicHeader ─────────────────────────────────────────────────────────────
+
+interface TopicHeaderProps {
+  topic: ForumTopic;
+  user: UserSummary | null;
+  isEditing: boolean;
+  editTitle: string;
+  editBody: string;
+  saving: boolean;
+  onEditTitleChange: (v: string) => void;
+  onEditBodyChange: (v: string) => void;
+  onMenu: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+}
+
+function TopicHeader({
+  topic,
+  user,
+  isEditing,
+  editTitle,
+  editBody,
+  saving,
+  onEditTitleChange,
+  onEditBodyChange,
+  onMenu,
+  onSave,
+  onCancel,
+}: TopicHeaderProps) {
+  const isOwner = !!user && user.id === topic.author_id;
+
   return (
     <View style={styles.topicHeader}>
-      <View style={styles.categoryChip}>
-        <Text style={styles.categoryText} numberOfLines={1}>
-          {topic.category_name}
-        </Text>
-      </View>
-
-      <Text style={styles.topicTitle}>{topic.title}</Text>
-
-      <View style={styles.authorRow}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{getInitials(topic.author_name)}</Text>
+      <View style={styles.topicHeaderTop}>
+        <View style={styles.categoryChip}>
+          <Text style={styles.categoryText} numberOfLines={1}>
+            {topic.category_name}
+          </Text>
         </View>
-        <Text style={styles.authorName}>{topic.author_name}</Text>
-        <Text style={styles.dot}>·</Text>
-        <Text style={styles.timeAgo}>{formatTimeAgo(topic.created_at)}</Text>
+        {isOwner && !isEditing && (
+          <Pressable style={styles.menuButton} onPress={onMenu} hitSlop={8}>
+            <Ionicons name="ellipsis-vertical" size={18} color={colors.GRAY500} />
+          </Pressable>
+        )}
       </View>
 
-      <Text style={styles.topicBody}>{topic.body}</Text>
+      {isEditing ? (
+        <>
+          <TextInput
+            style={styles.editTitleInput}
+            value={editTitle}
+            onChangeText={onEditTitleChange}
+            placeholder="Topic title"
+            placeholderTextColor={colors.GRAY400}
+            maxLength={200}
+          />
+          <TextInput
+            style={styles.editBodyInput}
+            value={editBody}
+            onChangeText={onEditBodyChange}
+            placeholder="Topic body"
+            placeholderTextColor={colors.GRAY400}
+            multiline
+            maxLength={10000}
+            textAlignVertical="top"
+          />
+          <EditActionButtons saving={saving} onSave={onSave} onCancel={onCancel} />
+        </>
+      ) : (
+        <>
+          <Text style={styles.topicTitle}>{topic.title}</Text>
+          <View style={styles.authorRow}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{getInitials(topic.author_name)}</Text>
+            </View>
+            <Text style={styles.authorName}>{topic.author_name}</Text>
+            <Text style={styles.dot}>·</Text>
+            <Text style={styles.timeAgo}>{formatTimeAgo(topic.created_at)}</Text>
+          </View>
+          <Text style={styles.topicBody}>{topic.body}</Text>
+        </>
+      )}
 
       <View style={styles.repliesDivider}>
         <View style={styles.dividerLine} />
         <Text style={styles.repliesLabel}>
-          {topic.reply_count === 1
-            ? "1 Reply"
-            : `${topic.reply_count} Replies`}
+          {topic.reply_count === 1 ? "1 Reply" : `${topic.reply_count} Replies`}
         </Text>
         <View style={styles.dividerLine} />
       </View>
@@ -72,26 +175,83 @@ function TopicHeader({ topic }: { topic: ForumTopic }) {
   );
 }
 
-function PostItem({ post }: { post: ForumPost }) {
+// ─── PostItem ────────────────────────────────────────────────────────────────
+
+interface PostItemProps {
+  post: ForumPost;
+  user: UserSummary | null;
+  isEditing: boolean;
+  editingPostBody: string;
+  savingPost: boolean;
+  onEditBodyChange: (v: string) => void;
+  onMenu: (post: ForumPost) => void;
+  onSave: (postId: string) => void;
+  onCancel: () => void;
+}
+
+function PostItem({
+  post,
+  user,
+  isEditing,
+  editingPostBody,
+  savingPost,
+  onEditBodyChange,
+  onMenu,
+  onSave,
+  onCancel,
+}: PostItemProps) {
+  const isOwner = !!user && user.id === post.author_id;
+
   return (
     <View style={styles.postItem}>
-      <View style={styles.authorRow}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{getInitials(post.author_name)}</Text>
+      <View style={styles.postHeaderRow}>
+        <View style={styles.authorRow}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{getInitials(post.author_name)}</Text>
+          </View>
+          <Text style={styles.authorName}>{post.author_name}</Text>
+          <Text style={styles.dot}>·</Text>
+          <Text style={styles.timeAgo}>{formatTimeAgo(post.created_at)}</Text>
         </View>
-        <Text style={styles.authorName}>{post.author_name}</Text>
-        <Text style={styles.dot}>·</Text>
-        <Text style={styles.timeAgo}>{formatTimeAgo(post.created_at)}</Text>
+        {isOwner && !isEditing && (
+          <Pressable style={styles.menuButton} onPress={() => onMenu(post)} hitSlop={8}>
+            <Ionicons name="ellipsis-vertical" size={16} color={colors.GRAY500} />
+          </Pressable>
+        )}
       </View>
-      <Text style={styles.postBody}>{post.body}</Text>
+
+      {isEditing ? (
+        <>
+          <TextInput
+            style={styles.editBodyInput}
+            value={editingPostBody}
+            onChangeText={onEditBodyChange}
+            placeholder="Edit your reply…"
+            placeholderTextColor={colors.GRAY400}
+            multiline
+            maxLength={5000}
+            textAlignVertical="top"
+            autoFocus
+          />
+          <EditActionButtons
+            saving={savingPost}
+            onSave={() => onSave(post.id)}
+            onCancel={onCancel}
+          />
+        </>
+      ) : (
+        <Text style={styles.postBody}>{post.body}</Text>
+      )}
     </View>
   );
 }
 
+// ─── TopicDetailScreen ───────────────────────────────────────────────────────
+
 export default function TopicDetailScreen() {
   const navigation = useNavigation<NavProp>();
   const { id, title } = useRoute<RouteParam>().params;
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   const [topic, setTopic] = useState<ForumTopic | null>(null);
   const [posts, setPosts] = useState<ForumPost[]>([]);
@@ -102,9 +262,24 @@ export default function TopicDetailScreen() {
   const [replyText, setReplyText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+
+  const [isEditingTopic, setIsEditingTopic] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [savingTopic, setSavingTopic] = useState(false);
+
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [editingPostBody, setEditingPostBody] = useState("");
+  const [savingPost, setSavingPost] = useState(false);
 
   const listRef = useRef<FlatList<ForumPost>>(null);
   const loadingMoreRef = useRef(false);
+  const topicRef = useRef<ForumTopic | null>(null);
+
+  useEffect(() => {
+    topicRef.current = topic;
+  }, [topic]);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,7 +304,9 @@ export default function TopicDetailScreen() {
     }
     load();
     return () => { cancelled = true; };
-  }, [id]);
+  }, [id, retryKey]);
+
+  const handleRetry = useCallback(() => setRetryKey((k) => k + 1), []);
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMore) return;
@@ -156,25 +333,140 @@ export default function TopicDetailScreen() {
       const newPost = await createTopicPost(id, { body: text });
       setReplyText("");
       setPosts((prev) => [...prev, newPost as ForumPost]);
-      // Scroll to the new post after state settles
       requestAnimationFrame(() => {
         listRef.current?.scrollToEnd({ animated: true });
       });
-    } catch {
-      Alert.alert("Error", "Failed to send reply. Please try again.");
+    } catch (err) {
+      Alert.alert("Error", parseApiError(err));
     } finally {
       setSubmitting(false);
     }
   }, [id, replyText]);
 
+  const handleTopicMenu = useCallback(() => {
+    Alert.alert("Topic Options", undefined, [
+      {
+        text: "Edit Topic",
+        onPress: () => {
+          const t = topicRef.current;
+          if (!t) return;
+          setEditTitle(t.title);
+          setEditBody(t.body);
+          setIsEditingTopic(true);
+        },
+      },
+      {
+        text: "Delete Topic",
+        style: "destructive",
+        onPress: () =>
+          Alert.alert("Delete Topic", "This cannot be undone.", [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: async () => {
+                try {
+                  await deleteTopic(id);
+                  navigation.goBack();
+                } catch (err) {
+                  Alert.alert("Error", parseApiError(err));
+                }
+              },
+            },
+          ]),
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [id, navigation]);
+
+  const handleSaveTopic = useCallback(async () => {
+    const title = editTitle.trim();
+    const body = editBody.trim();
+    if (!title || !body) {
+      Alert.alert("Error", "Title and body cannot be empty.");
+      return;
+    }
+    setSavingTopic(true);
+    try {
+      const updated = await patchTopic(id, { title, body });
+      setTopic(updated as ForumTopic);
+      setIsEditingTopic(false);
+    } catch (err) {
+      Alert.alert("Error", parseApiError(err));
+    } finally {
+      setSavingTopic(false);
+    }
+  }, [id, editTitle, editBody]);
+
+  const handleCancelTopicEdit = useCallback(() => {
+    setIsEditingTopic(false);
+    setEditTitle("");
+    setEditBody("");
+  }, []);
+
+  const handlePostMenu = useCallback((post: ForumPost) => {
+    Alert.alert("Reply Options", undefined, [
+      {
+        text: "Edit",
+        onPress: () => {
+          setEditingPostId(post.id);
+          setEditingPostBody(post.body);
+        },
+      },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () =>
+          Alert.alert("Delete Reply", "This cannot be undone.", [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: async () => {
+                try {
+                  await deletePost(post.id);
+                  setPosts((prev) => prev.filter((p) => p.id !== post.id));
+                } catch (err) {
+                  Alert.alert("Error", parseApiError(err));
+                }
+              },
+            },
+          ]),
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, []);
+
+  const handleSavePost = useCallback(async (postId: string) => {
+    const body = editingPostBody.trim();
+    if (!body) {
+      Alert.alert("Error", "Reply cannot be empty.");
+      return;
+    }
+    setSavingPost(true);
+    try {
+      const updated = await patchPost(postId, { body });
+      setPosts((prev) =>
+        prev.map((p) => (p.id === postId ? (updated as ForumPost) : p))
+      );
+      setEditingPostId(null);
+      setEditingPostBody("");
+    } catch (err) {
+      Alert.alert("Error", parseApiError(err));
+    } finally {
+      setSavingPost(false);
+    }
+  }, [editingPostBody]);
+
+  const handleCancelPostEdit = useCallback(() => {
+    setEditingPostId(null);
+    setEditingPostBody("");
+  }, []);
+
   const renderFooter = () => {
     if (!loadingMore) return null;
     return (
-      <ActivityIndicator
-        size="small"
-        color={colors.GREEN}
-        style={styles.footerSpinner}
-      />
+      <ActivityIndicator size="small" color={colors.GREEN} style={styles.footerSpinner} />
     );
   };
 
@@ -182,17 +474,7 @@ export default function TopicDetailScreen() {
     if (loading) return null;
     if (error) {
       return (
-        <Pressable
-          style={styles.emptyContainer}
-          onPress={() => {
-            setError(null);
-            setLoading(true);
-            getTopic(id)
-              .then((t) => setTopic(t as ForumTopic))
-              .catch(() => setError("Failed to load topic."))
-              .finally(() => setLoading(false));
-          }}
-        >
+        <Pressable style={styles.emptyContainer} onPress={handleRetry}>
           <Ionicons name="alert-circle-outline" size={36} color={colors.RED} />
           <Text style={styles.emptyText}>{error}</Text>
           <Text style={styles.retryText}>Tap to retry</Text>
@@ -242,7 +524,6 @@ export default function TopicDetailScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color={colors.GRAY900} />
@@ -253,11 +534,7 @@ export default function TopicDetailScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator
-          size="large"
-          color={colors.GREEN}
-          style={styles.fullScreenSpinner}
-        />
+        <ActivityIndicator size="large" color={colors.GREEN} style={styles.fullScreenSpinner} />
       ) : (
         <KeyboardAvoidingView
           style={styles.flex}
@@ -267,9 +544,35 @@ export default function TopicDetailScreen() {
             ref={listRef}
             data={posts}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => <PostItem post={item} />}
+            renderItem={({ item }) => (
+              <PostItem
+                post={item}
+                user={user}
+                isEditing={editingPostId === item.id}
+                editingPostBody={editingPostBody}
+                savingPost={savingPost}
+                onEditBodyChange={setEditingPostBody}
+                onMenu={handlePostMenu}
+                onSave={handleSavePost}
+                onCancel={handleCancelPostEdit}
+              />
+            )}
             ListHeaderComponent={
-              topic ? <TopicHeader topic={topic} /> : null
+              topic ? (
+                <TopicHeader
+                  topic={topic}
+                  user={user}
+                  isEditing={isEditingTopic}
+                  editTitle={editTitle}
+                  editBody={editBody}
+                  saving={savingTopic}
+                  onEditTitleChange={setEditTitle}
+                  onEditBodyChange={setEditBody}
+                  onMenu={handleTopicMenu}
+                  onSave={handleSaveTopic}
+                  onCancel={handleCancelTopicEdit}
+                />
+              ) : null
             }
             ListEmptyComponent={renderEmpty}
             ListFooterComponent={renderFooter}
@@ -284,6 +587,8 @@ export default function TopicDetailScreen() {
     </SafeAreaView>
   );
 }
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
@@ -326,18 +631,25 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.GRAY200,
   },
+  topicHeaderTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
   categoryChip: {
-    alignSelf: "flex-start",
     backgroundColor: "#D1FAE5",
     paddingVertical: 3,
     paddingHorizontal: 10,
     borderRadius: 6,
-    marginBottom: 10,
   },
   categoryText: {
     fontSize: 12,
     fontWeight: "600",
     color: colors.GREEN,
+  },
+  menuButton: {
+    padding: 6,
   },
   topicTitle: {
     fontSize: 20,
@@ -349,6 +661,7 @@ const styles = StyleSheet.create({
   authorRow: {
     flexDirection: "row",
     alignItems: "center",
+    flex: 1,
     marginBottom: 12,
   },
   avatar: {
@@ -390,6 +703,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    marginTop: 4,
   },
   dividerLine: {
     flex: 1,
@@ -407,6 +721,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
+  postHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
   postBody: {
     fontSize: 14,
     color: colors.GRAY900,
@@ -418,6 +738,60 @@ const styles = StyleSheet.create({
   },
   footerSpinner: {
     paddingVertical: 16,
+  },
+  // Inline edit
+  editTitleInput: {
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 16,
+    fontWeight: "600",
+    color: colors.GRAY900,
+    backgroundColor: colors.GRAY50,
+    marginBottom: 10,
+  },
+  editBodyInput: {
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 14,
+    color: colors.GRAY900,
+    backgroundColor: colors.GRAY50,
+    minHeight: 100,
+    marginBottom: 10,
+  },
+  editActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  editBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 70,
+  },
+  editBtnSave: {
+    backgroundColor: colors.GREEN,
+  },
+  editBtnCancel: {
+    backgroundColor: colors.GRAY100,
+  },
+  editBtnDisabled: {
+    opacity: 0.6,
+  },
+  editBtnSaveText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.WHITE,
+  },
+  editBtnCancelText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.GRAY700,
   },
   // Empty / error
   emptyContainer: {

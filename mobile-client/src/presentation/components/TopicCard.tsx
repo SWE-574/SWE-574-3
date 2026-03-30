@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import type { ForumTopic } from "../../api/forum";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
+import { getInitials } from "../../utils/getInitials";
 import { colors } from "../../constants/colors";
 
 export interface TopicCardProps {
@@ -11,12 +12,7 @@ export interface TopicCardProps {
 }
 
 export default function TopicCard({ topic, onPress }: TopicCardProps) {
-  const initials = (topic.author_name || "?")
-    .trim()
-    .split(" ")
-    .map((w) => w.charAt(0).toUpperCase())
-    .slice(0, 2)
-    .join("");
+  const initials = getInitials(topic.author_name);
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
