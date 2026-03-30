@@ -1110,8 +1110,16 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
                 punctual_count=Count('received_reps', filter=Q(received_reps__is_punctual=True)),
                 helpful_count=Count('received_reps', filter=Q(received_reps__is_helpful=True)),
                 kind_count=Count('received_reps', filter=Q(received_reps__is_kind=True)),
-                followers_count=Count('followed_by', distinct=True),
-                following_count=Count('follows', distinct=True),
+                followers_count=Count(
+                    'followed_by',
+                    filter=Q(followed_by__follower__is_active=True),
+                    distinct=True,
+                ),
+                following_count=Count(
+                    'follows',
+                    filter=Q(follows__following__is_active=True),
+                    distinct=True,
+                ),
             )
         )
     
@@ -1583,14 +1591,14 @@ def _user_follow_list_response(request, user_id, list_kind):
     )
     if list_kind == 'followers':
         qs = (
-            User.objects.filter(follows__following=target)
+            User.objects.filter(follows__following=target, is_active=True)
             .distinct()
             .prefetch_related(badge_prefetch)
             .order_by('first_name', 'last_name', 'id')
         )
     else:
         qs = (
-            User.objects.filter(followed_by__follower=target)
+            User.objects.filter(followed_by__follower=target, is_active=True)
             .distinct()
             .prefetch_related(badge_prefetch)
             .order_by('first_name', 'last_name', 'id')
