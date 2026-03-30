@@ -20,16 +20,11 @@ export default function FollowListModal({
   onClose: () => void
 }) {
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(false)
   const [users, setUsers] = useState<UserSummary[]>([])
 
   useEffect(() => {
-    if (!isOpen || !listKind || !userId) {
-      setUsers([])
-      return
-    }
+    if (!isOpen || !listKind || !userId) return
     const ac = new AbortController()
-    setLoading(true)
     const req =
       listKind === 'followers'
         ? userAPI.getFollowers(userId, ac.signal)
@@ -40,7 +35,6 @@ export default function FollowListModal({
         toast.error(getErrorMessage(err, 'Could not load list.'))
         setUsers([])
       })
-      .finally(() => setLoading(false))
     return () => ac.abort()
   }, [isOpen, listKind, userId])
 
@@ -67,10 +61,10 @@ export default function FollowListModal({
     <MultiUseDetailsModal
       isOpen
       title={title}
-      subtitle={!loading ? `${users.length} ${listKind === 'followers' ? 'followers' : 'following'}` : undefined}
+      subtitle={`${users.length} ${listKind === 'followers' ? 'followers' : 'following'}`}
       items={items}
       onClose={onClose}
-      loading={loading}
+      loading={false}
       emptyMessage="No users to show."
       listMaxHeight={listMaxHeight}
     />
