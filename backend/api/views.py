@@ -1579,7 +1579,7 @@ class UserFollowView(APIView):
 
 def _user_follow_list_response(request, user_id, list_kind):
     """
-    Return a JSON array of UserSummarySerializer data for followers or following.
+    Return a paginated list of UserSummarySerializer data for followers or following.
     list_kind: 'followers' | 'following'
     """
     try:
@@ -1610,6 +1610,11 @@ def _user_follow_list_response(request, user_id, list_kind):
             .order_by('first_name', 'last_name', 'id')
         )
 
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    if page is not None:
+        serializer = UserSummarySerializer(page, many=True, context={'request': request})
+        return paginator.get_paginated_response(serializer.data)
     serializer = UserSummarySerializer(qs, many=True, context={'request': request})
     return Response(serializer.data)
 

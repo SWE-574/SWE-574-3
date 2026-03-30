@@ -150,13 +150,13 @@ export const userAPI = {
   },
 
   getFollowers: async (userId: string, signal?: AbortSignal): Promise<UserSummary[]> => {
-    const res = await apiClient.get<UserSummary[]>(`/users/${userId}/followers/`, { signal })
-    return res.data
+    const res = await apiClient.get<{ results: UserSummary[] }>(`/users/${userId}/followers/`, { signal })
+    return res.data.results
   },
 
   getFollowing: async (userId: string, signal?: AbortSignal): Promise<UserSummary[]> => {
-    const res = await apiClient.get<UserSummary[]>(`/users/${userId}/following/`, { signal })
-    return res.data
+    const res = await apiClient.get<{ results: UserSummary[] }>(`/users/${userId}/following/`, { signal })
+    return res.data.results
   },
 
   getHistory: async (userId: string, signal?: AbortSignal): Promise<UserHistoryItem[]> => {

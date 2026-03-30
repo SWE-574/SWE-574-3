@@ -20,7 +20,9 @@ export default function FollowListModal({
   onClose: () => void
 }) {
   const navigate = useNavigate()
-  const [users, setUsers] = useState<UserSummary[]>([])
+  // null = loading/not-yet-fetched, [] = done (possibly empty)
+  const [users, setUsers] = useState<UserSummary[] | null>(null)
+  const loading = users === null
 
   useEffect(() => {
     if (!isOpen || !listKind || !userId) return
@@ -32,16 +34,20 @@ export default function FollowListModal({
     req
       .then(setUsers)
       .catch((err) => {
+        if ((err as { name?: string }).name === 'CanceledError') return
         toast.error(getErrorMessage(err, 'Could not load list.'))
         setUsers([])
       })
-    return () => ac.abort()
+    return () => {
+      ac.abort()
+      setUsers(null)
+    }
   }, [isOpen, listKind, userId])
 
   if (!isOpen || !listKind || !userId) return null
 
   const title = listKind === 'followers' ? 'Followers' : 'Following'
-  const items = users.map((u) => {
+  const items = (users ?? []).map((u) => {
     const name = `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email || 'User'
     return {
       id: u.id,
@@ -54,17 +60,17 @@ export default function FollowListModal({
     }
   })
 
-  // ~5 satır yüksekliği; daha fazla kullanıcıda liste içinde kaydırma
+  // Cap list height to ~5 rows; longer lists scroll inside the modal
   const listMaxHeight = 'min(300px, calc(80vh - 140px))'
 
   return (
     <MultiUseDetailsModal
       isOpen
       title={title}
-      subtitle={`${users.length} ${listKind === 'followers' ? 'followers' : 'following'}`}
+      subtitle={loading ? undefined : `${users.length} ${listKind === 'followers' ? 'followers' : 'following'}`}
       items={items}
       onClose={onClose}
-      loading={false}
+      loading={loading}
       emptyMessage="No users to show."
       listMaxHeight={listMaxHeight}
     />
