@@ -1145,14 +1145,18 @@ class ProfileFollowStatsMixin(serializers.Serializer):
         v = getattr(obj, 'followers_count', None)
         if v is not None:
             return v
-        return UserFollow.objects.filter(following_id=obj.pk).count()
+        return UserFollow.objects.filter(
+            following_id=obj.pk, follower__is_active=True
+        ).count()
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_following_count(self, obj):
         v = getattr(obj, 'following_count', None)
         if v is not None:
             return v
-        return UserFollow.objects.filter(follower_id=obj.pk).count()
+        return UserFollow.objects.filter(
+            follower_id=obj.pk, following__is_active=True
+        ).count()
 
     @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_following(self, obj):
