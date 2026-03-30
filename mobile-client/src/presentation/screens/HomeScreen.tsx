@@ -7,6 +7,7 @@ import {
   Image,
   TextInput,
   Pressable,
+  TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -17,6 +18,7 @@ import { Service } from "../../api/types";
 import ServiceCard from "../components/ServiceCard";
 import QuickFilters, { type QuickFilterId } from "../components/QuickFilters";
 import { colors } from "../../constants/colors";
+import Ionicons from "@expo/vector-icons/Ionicons";
 
 export default function HomeScreen() {
   const navigation =
@@ -81,8 +83,19 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Image source={require("../../assets/icon.png")} style={styles.logo} />
-        <Text style={styles.title}>The Hive</Text>
+        <View style={styles.headerLeft}>
+          <Image
+            source={require("../../assets/icon.png")}
+            style={styles.logo}
+          />
+          <Text style={styles.title}>The Hive</Text>
+        </View>
+        <View style={styles.headerRight}>
+          <Text>Map</Text>
+          <TouchableOpacity onPress={() => navigation.navigate("Map")}>
+            <Ionicons name="map" size={24} color={colors.GREEN} />
+          </TouchableOpacity>
+        </View>
       </View>
       <View style={styles.searchContainer}>
         <TextInput
@@ -125,6 +138,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.WHITE,
     borderBottomWidth: 1,
     borderBottomColor: colors.GRAY200,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerRight: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
