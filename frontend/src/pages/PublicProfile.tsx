@@ -457,6 +457,7 @@ const PublicProfile = () => {
                   <Button
                     size="sm"
                     variant="outline"
+                    borderRadius="10px"
                     borderColor={GRAY300}
                     color={GRAY700}
                     loading={followActionLoading}
@@ -473,6 +474,7 @@ const PublicProfile = () => {
                     size="sm"
                     bg={GREEN}
                     color={WHITE}
+                    borderRadius="10px"
                     loading={followActionLoading}
                     disabled={followActionLoading}
                     _hover={{ bg: GREEN_DARK }}
