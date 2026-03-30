@@ -6,7 +6,8 @@
 
 import { clearStoredTokens } from "./storage";
 
-const BASE_URL = "https://apiary.selmangunes.com/api";
+const BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL ?? "https://apiary.selmangunes.com/api";
 
 let authToken: string | null = null;
 let refreshToken: string | null = null;
