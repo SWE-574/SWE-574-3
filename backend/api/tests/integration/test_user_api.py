@@ -814,12 +814,13 @@ class TestUserFollowListViews:
         client = AuthenticatedAPIClient().authenticate_user(UserFactory())
         response = client.get(f'/api/users/{target.id}/followers/')
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 2
-        ids = {row['id'] for row in response.data}
+        results = response.data['results']
+        assert len(results) == 2
+        ids = {row['id'] for row in results}
         assert str(follower_a.id) in ids
         assert str(follower_b.id) in ids
-        assert 'first_name' in response.data[0]
-        assert 'avatar_url' in response.data[0]
+        assert 'first_name' in results[0]
+        assert 'avatar_url' in results[0]
 
     def test_following_list_returns_user_summaries(self):
         source = UserFactory()
@@ -830,8 +831,9 @@ class TestUserFollowListViews:
         client = AuthenticatedAPIClient().authenticate_user(UserFactory())
         response = client.get(f'/api/users/{source.id}/following/')
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 2
-        ids = {row['id'] for row in response.data}
+        results = response.data['results']
+        assert len(results) == 2
+        ids = {row['id'] for row in results}
         assert str(u1.id) in ids
         assert str(u2.id) in ids
 
@@ -847,3 +849,38 @@ class TestUserFollowListViews:
         target = UserFactory()
         response = APIClient().get(f'/api/users/{target.id}/followers/')
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_following_list_requires_authentication(self):
+        from rest_framework.test import APIClient
+
+        source = UserFactory()
+        response = APIClient().get(f'/api/users/{source.id}/following/')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_inactive_follower_excluded_from_list_and_count(self):
+        target = UserFactory()
+        active_follower = UserFactory()
+        inactive_follower = UserFactory(is_active=False)
+        UserFollow.objects.create(follower=active_follower, following=target)
+        UserFollow.objects.create(follower=inactive_follower, following=target)
+        client = AuthenticatedAPIClient().authenticate_user(UserFactory())
+        response = client.get(f'/api/users/{target.id}/followers/')
+        assert response.status_code == status.HTTP_200_OK
+        results = response.data['results']
+        ids = {row['id'] for row in results}
+        assert str(active_follower.id) in ids
+        assert str(inactive_follower.id) not in ids
+
+    def test_inactive_following_excluded_from_list(self):
+        source = UserFactory()
+        active_target = UserFactory()
+        inactive_target = UserFactory(is_active=False)
+        UserFollow.objects.create(follower=source, following=active_target)
+        UserFollow.objects.create(follower=source, following=inactive_target)
+        client = AuthenticatedAPIClient().authenticate_user(UserFactory())
+        response = client.get(f'/api/users/{source.id}/following/')
+        assert response.status_code == status.HTTP_200_OK
+        results = response.data['results']
+        ids = {row['id'] for row in results}
+        assert str(active_target.id) in ids
+        assert str(inactive_target.id) not in ids
