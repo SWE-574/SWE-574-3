@@ -19,7 +19,12 @@ class TestUserProfileView:
     
     def test_get_current_user_profile(self):
         """Test retrieving current user profile"""
-        user = UserFactory()
+        user = UserFactory(
+            first_name='Elif',
+            last_name='Yilmaz',
+            bio='I like helping people with design feedback.',
+            avatar_url='https://example.com/avatars/elif.jpg',
+        )
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
         
@@ -27,6 +32,10 @@ class TestUserProfileView:
         assert response.status_code == status.HTTP_200_OK
         assert response.data['email'] == user.email
         assert response.data['first_name'] == user.first_name
+        assert response.data['last_name'] == user.last_name
+        assert response.data['bio'] == user.bio
+        assert response.data['avatar_url'] == user.avatar_url
+        assert response.data['date_joined'].startswith(user.date_joined.date().isoformat())
         assert 'achievements' in response.data
 
     def test_get_current_user_profile_includes_event_sections(self):
@@ -73,18 +82,31 @@ class TestUserProfileView:
         
         response = client.patch('/api/users/me/', {
             'bio': 'Updated bio',
-            'first_name': 'Updated'
+            'first_name': 'Updated',
+            'last_name': 'Profile',
+            'avatar_url': 'https://example.com/avatars/updated.jpg',
+            'show_history': False,
+            'email': 'should-not-change@example.com',
         })
         assert response.status_code == status.HTTP_200_OK
         assert response.data['bio'] == 'Updated bio'
         assert response.data['first_name'] == 'Updated'
+        assert response.data['last_name'] == 'Profile'
+        assert response.data['avatar_url'] == 'https://example.com/avatars/updated.jpg'
+        assert response.data['show_history'] is False
+        assert response.data['email'] == user.email
         
         user.refresh_from_db()
         assert user.bio == 'Updated bio'
+        assert user.first_name == 'Updated'
+        assert user.last_name == 'Profile'
+        assert user.avatar_url == 'https://example.com/avatars/updated.jpg'
+        assert user.show_history is False
+        assert user.email != 'should-not-change@example.com'
     
     def test_update_user_profile_validation(self):
         """Test profile update validation"""
-        user = UserFactory()
+        user = UserFactory(bio='Initial bio')
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
         
@@ -92,6 +114,10 @@ class TestUserProfileView:
             'bio': 'x' * 1001  # Exceeds limit
         })
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'field_errors' in response.data
+        assert 'bio' in response.data['field_errors']
+        user.refresh_from_db()
+        assert user.bio == 'Initial bio'
 
 
 @pytest.mark.django_db
@@ -492,7 +518,10 @@ class TestPublicUserProfile:
         response = client.get(f'/api/users/{other_user.id}/')
         assert response.status_code == status.HTTP_200_OK
         assert 'email' not in response.data
+        assert 'role' not in response.data
         assert 'timebank_balance' not in response.data
+        assert 'is_verified' not in response.data
+        assert 'is_onboarded' not in response.data
 
     def test_public_profile_includes_created_and_joined_events(self):
         viewer = UserFactory()
