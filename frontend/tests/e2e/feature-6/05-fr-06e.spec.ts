@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
+
 import {
   approvePendingHandshakeViaApi,
-  createOffer,
+  createNeed,
   initiateOnlineSessionAsOwner,
   loginAs,
   openConversationForService,
@@ -11,19 +12,17 @@ import {
   USERS,
 } from '../helpers'
 
-test('FR-05e: group offer owner sees edit lock once an approved exchange is active', async ({ page }) => {
-  const title = uniqueTitle('FR-05e Offer')
+test('FR-06e: request owner sees edit lock once an approved exchange is active', async ({ page }) => {
+  const title = uniqueTitle('FR-06e Need')
 
-  // Create a simple online offer so the approval flow can be completed through chat.
+  // Create the original request as the owner.
   await loginAs(page, USERS.elif)
-  const { detailUrl } = await createOffer(page, {
+  const { detailUrl } = await createNeed(page, {
     title,
-    description: 'Feature 5 FR-05e initial description for editable online offer.',
-    duration: 1,
-    online: true,
+    description: 'Feature 6 FR-06e initial request description.',
   })
 
-  // A second user creates an incoming exchange on the offer.
+  // Another user responds so the owner edits while an application already exists.
   await switchUser(page, USERS.mehmet)
   await page.goto(detailUrl)
   await requestOfferFromDetail(page)
@@ -34,6 +33,7 @@ test('FR-05e: group offer owner sees edit lock once an approved exchange is acti
   await initiateOnlineSessionAsOwner(page, {
     serviceTitle: title,
     requesterName: USERS.mehmet.name,
+    daysAhead: 5,
   })
 
   await switchUser(page, USERS.mehmet)
@@ -43,7 +43,7 @@ test('FR-05e: group offer owner sees edit lock once an approved exchange is acti
     requesterName: USERS.mehmet.name,
   })
 
-  // The owner should remain on detail page and see the edit lock instead of the edit form.
+  // Once the request is approved, the owner should stay on the detail page and see the edit lock.
   await switchUser(page, USERS.elif)
   await page.goto(detailUrl)
   const editButton = page.getByRole('button', { name: 'Edit Listing' })
