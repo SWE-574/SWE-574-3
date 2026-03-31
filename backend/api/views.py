@@ -6529,6 +6529,10 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         else:
             # Only show topics from active categories
             queryset = queryset.filter(category__is_active=True)
+
+        author_id = self.request.query_params.get('author')
+        if author_id:
+            queryset = queryset.filter(author_id=author_id)
         
         # Annotate with reply count
         queryset = queryset.annotate(

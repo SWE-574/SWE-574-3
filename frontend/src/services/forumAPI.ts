@@ -23,7 +23,7 @@ export const forumAPI = {
   },
 
   // ── Topics ────────────────────────────────────────────────────────────────
-  listTopics: async (params: { category?: string; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<PaginatedResponse<ForumTopic>> => {
+  listTopics: async (params: { category?: string; author?: string; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<PaginatedResponse<ForumTopic>> => {
     const res = await apiClient.get<PaginatedResponse<ForumTopic>>('/forum/topics/', { params, signal })
     return res.data
   },
