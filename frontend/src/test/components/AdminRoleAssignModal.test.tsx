@@ -23,7 +23,11 @@ import system from '@/theme'
 
 // ── mock adminAPI ─────────────────────────────────────────────────────────────
 
-const assignUserRoleMock = vi.fn()
+const { assignUserRoleMock, toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
+  assignUserRoleMock: vi.fn(),
+  toastSuccessMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+}))
 
 vi.mock('@/services/adminAPI', () => ({
   adminAPI: {
@@ -32,9 +36,6 @@ vi.mock('@/services/adminAPI', () => ({
 }))
 
 // ── mock toast ────────────────────────────────────────────────────────────────
-
-const toastSuccessMock = vi.fn()
-const toastErrorMock = vi.fn()
 
 vi.mock('sonner', () => ({
   toast: {
@@ -260,7 +261,7 @@ describe('RoleAssignModal', () => {
 
     await waitFor(() => {
       expect(assignUserRoleMock).toHaveBeenCalledOnce()
-      expect(assignUserRoleMock).toHaveBeenCalledWith('user-42', 'moderator', undefined)
+      expect(assignUserRoleMock).toHaveBeenCalledWith('user-42', 'moderator')
     })
 
     expect(toastSuccessMock).toHaveBeenCalledWith('Role updated to Moderator')
