@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Box, Flex, Spinner, Text } from '@chakra-ui/react'
 import {
   FiArrowLeft, FiAlertCircle, FiSlash, FiCheck, FiBarChart2,
@@ -313,7 +313,11 @@ function KarmaModal({ userId, currentKarma, onClose, onDone }: { userId: string;
 export default function AdminUserDetailPage() {
   const { userId } = useParams<{ userId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const { user: adminUser } = useAuthStore()
+
+  const fromTab = (location.state as { from?: string } | null)?.from ?? 'users'
+  const backLabel = fromTab === 'reports' ? 'Back to Reports & Flags' : 'Back to Users'
 
   const [user, setUser] = useState<AdminUserDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -376,7 +380,7 @@ export default function AdminUserDetailPage() {
   const hasOrganizerBan = user.is_organizer_banned_until && new Date(user.is_organizer_banned_until) > new Date()
 
   return (
-    <AdminLayout activeTab="users" onTabChange={(tab) => navigate(`/admin?tab=${tab}`)}>
+    <AdminLayout activeTab={fromTab === 'reports' ? 'reports' : 'users'} onTabChange={(tab) => navigate(`/admin?tab=${tab}`)}>
       <Box p={{ base: 3, md: 5 }} maxW="960px" mx="auto">
 
         {/* Back */}
@@ -384,12 +388,12 @@ export default function AdminUserDetailPage() {
           as="button"
           align="center" gap={2} mb={4}
           fontSize="13px" fontWeight={500} color={GRAY600}
-          onClick={() => navigate('/admin?tab=users')}
+          onClick={() => navigate(-1)}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = GRAY800 }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = GRAY600 }}
         >
-          <FiArrowLeft size={14} /> Back to Users
+          <FiArrowLeft size={14} /> {backLabel}
         </Flex>
 
         {/* Header card — profile info + stats unified */}
