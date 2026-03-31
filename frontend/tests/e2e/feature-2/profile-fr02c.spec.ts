@@ -7,7 +7,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { expectToast, loginAs, USERS } from './helpers/auth'
+import { expectToast, loginAs, USERS } from '../helpers/auth'
 
 test.describe('Self-profile (FR-02c)', () => {
   test('rejects overlong bio and keeps stored profile unchanged', async ({ page }) => {
