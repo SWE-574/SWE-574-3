@@ -68,8 +68,8 @@ test.describe('NFR-01a: Passwords not exposed in API responses', () => {
     const confirm = page.locator('[name="confirmPassword"], #confirmPassword').first()
     if (await confirm.isVisible().catch(() => false)) await confirm.fill('TestPass123')
 
-    // Chakra UI v3 Checkbox — click the <label> to trigger the react-hook-form Controller
-    await page.locator('label[for="agreeToTerms"]').click()
+    // Chakra UI v3 (Ark UI): id prop goes to HiddenInput, not root. Click the visible Control.
+    await page.locator('[data-scope="checkbox"][data-part="control"]').first().click()
 
     await page.getByRole('button', { name: /sign up|register|create/i }).click()
 

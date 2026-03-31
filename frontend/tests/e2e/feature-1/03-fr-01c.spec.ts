@@ -38,13 +38,23 @@ test.describe('FR-01c: Logout invalidates session and redirects', () => {
       const initials = USERS.cem.name.split(' ').map(n => n[0]).join('')
       await page.locator('nav').getByText(initials).click()
     }
-    await page.getByText('Log Out').click()
+
+    // Capture the logout response to assert the backend sends a cookie-deletion header
+    const [logoutResponse] = await Promise.all([
+      page.waitForResponse(
+        (resp) => resp.url().includes('/api/auth/logout') && resp.request().method() === 'POST',
+        { timeout: 10_000 }
+      ),
+      page.getByText('Log Out').click(),
+    ])
+
     await expect(page).not.toHaveURL(/\/dashboard/, { timeout: 10_000 })
 
-    // The access_token cookie must be deleted by logout — directly verify the session is invalidated
-    const cookies = await page.context().cookies()
-    const accessToken = cookies.find(c => c.name === 'access_token')
-    expect(accessToken).toBeUndefined()
+    // Backend must instruct the browser to delete the access_token cookie (Max-Age=0).
+    // response.allHeaders() uses CDP ExtraInfo events and includes Set-Cookie (response.headers() does not).
+    const allHeaders = await logoutResponse.allHeaders()
+    const setCookieHeader = allHeaders['set-cookie'] ?? ''
+    expect(setCookieHeader).toMatch(/access_token=.*[Mm]ax-[Aa]ge=0/)
   })
 
   test('after logout the login page is accessible (public redirect works)', async ({ page }) => {

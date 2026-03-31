@@ -25,8 +25,9 @@ async function fillRegistrationForm(
     await confirm.fill(opts.confirmPassword ?? opts.password)
   }
 
-  // Chakra UI v3 Checkbox renders a hidden <input> — interact via the <label> instead
-  await page.locator('label[for="agreeToTerms"]').click()
+  // Chakra UI v3 (Ark UI): Checkbox.Root renders as <label data-part="root">;
+  // the id prop goes to the HiddenInput, not the root. Click the visible Control span.
+  await page.locator('[data-scope="checkbox"][data-part="control"]').first().click()
 }
 
 test.describe('FR-01e: Registration with unique email constraints', () => {

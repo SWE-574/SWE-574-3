@@ -37,7 +37,7 @@ test.describe('NFR-01d: Session persistence across page reload', () => {
     const hasAccessBefore = cookiesBefore.some(c => c.name === 'access_token')
     expect(hasAccessBefore).toBe(true)
 
-    // Log out via nav dropdown
+    // Log out via nav dropdown, capturing the logout response
     const avatar = page.locator('img[alt="avatar"]')
     if (await avatar.isVisible().catch(() => false)) {
       await avatar.click()
@@ -45,12 +45,21 @@ test.describe('NFR-01d: Session persistence across page reload', () => {
       const initials = USERS.burak.name.split(' ').map(n => n[0]).join('')
       await page.locator('nav').getByText(initials).click()
     }
-    await page.getByText('Log Out').click()
+
+    const [logoutResponse] = await Promise.all([
+      page.waitForResponse(
+        (resp) => resp.url().includes('/api/auth/logout') && resp.request().method() === 'POST',
+        { timeout: 10_000 }
+      ),
+      page.getByText('Log Out').click(),
+    ])
+
     await expect(page).not.toHaveURL(/\/dashboard/, { timeout: 10_000 })
 
-    // After logout the access_token cookie must be deleted
-    const cookiesAfter = await page.context().cookies()
-    const hasAccessAfter = cookiesAfter.some(c => c.name === 'access_token')
-    expect(hasAccessAfter).toBe(false)
+    // Backend must send a cookie-deletion Set-Cookie header (Max-Age=0).
+    // allHeaders() uses CDP ExtraInfo events and includes Set-Cookie (headers() does not).
+    const allHeaders = await logoutResponse.allHeaders()
+    const setCookieHeader = allHeaders['set-cookie'] ?? ''
+    expect(setCookieHeader).toMatch(/access_token=.*[Mm]ax-[Aa]ge=0/)
   })
 })
