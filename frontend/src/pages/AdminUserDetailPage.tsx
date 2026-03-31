@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import {
+  ResponsiveContainer, LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, Tooltip, ReferenceLine,
+} from 'recharts'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Box, Flex, Spinner, Text } from '@chakra-ui/react'
 import {
@@ -69,6 +73,120 @@ const InfoRow = ({ icon: Icon, label, value, color }: { icon: React.ElementType;
     <Text fontSize="13px" fontWeight={500} color={color ?? GRAY800}>{value ?? '—'}</Text>
   </Flex>
 )
+
+// ─── Inline chart on hover ────────────────────────────────────────────────────
+
+type ChartPoint = { label: string; value: number; source?: string }
+
+function HoverChart({
+  children, data, color, chartType = 'line', scoreData,
+}: {
+  children: React.ReactNode
+  data: ChartPoint[]
+  color: string
+  chartType?: 'line' | 'bar'
+  scoreData?: ChartPoint[]
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const anchorRef = useRef<HTMLSpanElement | null>(null)
+
+  const handleEnter = () => {
+    if (anchorRef.current) {
+      const r = anchorRef.current.getBoundingClientRect()
+      setPos({ top: r.bottom + window.scrollY - 4, left: r.left + window.scrollX + r.width / 2 })
+    }
+    setOpen(true)
+  }
+
+  const chart = open && data.length > 0 && createPortal(
+    <div
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      style={{
+        position: 'absolute', top: pos.top, left: pos.left,
+        transform: 'translateX(-50%)', zIndex: 9999, paddingTop: '4px',
+      }}
+    >
+      <div style={{
+        background: WHITE, border: `1px solid ${GRAY200}`, borderRadius: '10px',
+        padding: '12px 14px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+        width: '220px',
+      }}>
+        {chartType === 'bar' && (
+          <>
+            <div style={{ fontSize: '10px', color: GRAY400, marginBottom: '2px' }}>Δ change</div>
+            <ResponsiveContainer width="100%" height={80}>
+              <BarChart data={data} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
+                <XAxis dataKey="label" tick={{ fontSize: 9, fill: GRAY400 }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fontSize: 9, fill: GRAY400 }} tickLine={false} axisLine={false} tickFormatter={(v: number) => Math.round(v).toString()} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{ fontSize: '11px', borderRadius: '6px', border: `1px solid ${GRAY200}`, padding: '4px 8px' }}
+                  formatter={(v: number, _name: string, props: { payload?: ChartPoint }) => {
+                    const rounded = Math.round(v)
+                    const src = props?.payload?.source === 'admin' ? 'admin' : 'evaluation'
+                    return [rounded > 0 ? `+${rounded}` : `${rounded}`, `Δ karma (${src})`]
+                  }}
+                  labelStyle={{ color: GRAY600 }}
+                />
+                <ReferenceLine y={0} stroke={GRAY200} />
+                <Bar dataKey="value" fill={color} radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            {scoreData && scoreData.length > 0 && (
+              <>
+                <div style={{ fontSize: '10px', color: GRAY400, margin: '6px 0 2px' }}>Score over time</div>
+                <ResponsiveContainer width="100%" height={80}>
+                  <LineChart data={scoreData} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
+                    <XAxis dataKey="label" tick={{ fontSize: 9, fill: GRAY400 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 9, fill: GRAY400 }} tickLine={false} axisLine={false} allowDecimals={false} tickFormatter={(v: number) => Math.round(v).toString()} />
+                    <Tooltip
+                      contentStyle={{ fontSize: '11px', borderRadius: '6px', border: `1px solid ${GRAY200}`, padding: '4px 8px' }}
+                      formatter={(v: number) => [Math.round(v), 'Karma score']}
+                      labelStyle={{ color: GRAY600 }}
+                    />
+                    <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={{ r: 2, fill: color }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </>
+            )}
+          </>
+        )}
+        {chartType === 'line' && (
+          <ResponsiveContainer width="100%" height={90}>
+            <LineChart data={data} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
+              <XAxis dataKey="label" tick={{ fontSize: 9, fill: GRAY400 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 9, fill: GRAY400 }} tickLine={false} axisLine={false} />
+              <Tooltip
+                contentStyle={{ fontSize: '11px', borderRadius: '6px', border: `1px solid ${GRAY200}`, padding: '4px 8px' }}
+                formatter={(v: number) => [`${v} hrs`, 'Balance']}
+                labelStyle={{ color: GRAY600 }}
+              />
+              <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={{ r: 2, fill: color }} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+
+  return (
+    <span
+      ref={anchorRef}
+      onMouseEnter={data.length > 0 ? handleEnter : undefined}
+      onMouseLeave={() => setOpen(false)}
+      style={{
+        cursor: data.length > 0 ? 'default' : undefined,
+        borderBottom: data.length > 0 ? `1px dashed ${GRAY400}` : undefined,
+        paddingBottom: data.length > 0 ? '1px' : undefined,
+      }}
+    >
+      {children}
+      {chart}
+    </span>
+  )
+}
 
 // ─── Hoverable stat box with lazy-loaded item popover ────────────────────────
 
@@ -536,8 +654,35 @@ export default function AdminUserDetailPage() {
                 value={user.is_onboarded ? 'Yes' : 'No'}
                 color={user.is_onboarded ? GREEN : GRAY500}
               />
-              <InfoRow icon={FiBarChart2} label="Karma Score" value={user.karma_score} />
-              <InfoRow icon={FiList} label="Time Bank Balance" value={`${Math.floor(user.timebank_balance)} hrs`} />
+              <InfoRow icon={FiBarChart2} label="Karma Score" value={
+                <HoverChart
+                  color={PURPLE}
+                  chartType="bar"
+                  data={(user.karma_adjustments ?? []).map(p => ({
+                    label: fmtDate(p.created_at),
+                    value: p.delta,
+                    source: p.label,
+                  }))}
+                  scoreData={(user.karma_adjustments ?? []).map(p => ({
+                    label: fmtDate(p.created_at),
+                    value: p.karma,
+                  }))}
+                >
+                  {user.karma_score}
+                </HoverChart>
+              } />
+              <InfoRow icon={FiList} label="Time Bank Balance" value={
+                <HoverChart
+                  color={GREEN}
+                  chartType="line"
+                  data={[...transactions].reverse().map(t => ({
+                    label: fmtDate(t.created_at),
+                    value: parseFloat(t.balance_after),
+                  }))}
+                >
+                  {`${Math.floor(user.timebank_balance)} hrs`}
+                </HoverChart>
+              } />
               <InfoRow icon={FiAlertTriangle} label="No-show Count"
                 value={user.no_show_count}
                 color={user.no_show_count > 0 ? AMBER : GRAY800}

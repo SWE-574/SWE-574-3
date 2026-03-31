@@ -478,6 +478,7 @@ export interface AdminUserDetail {
   recent_forum_topics?: { id: string; title: string }[]
   recent_handshakes_as_requester?: { id: string; title: string; service_id: string }[]
   recent_handshakes_as_provider?: { id: string; title: string; service_id: string }[]
+  karma_adjustments?: { delta: number; karma: number; created_at: string; label: string }[]
 }
 
 export interface AdminMetrics {
