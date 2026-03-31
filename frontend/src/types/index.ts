@@ -428,6 +428,17 @@ export interface AdminUserSummary {
   date_joined: string
 }
 
+export interface AdminTransaction {
+  id: string
+  transaction_type: 'provision' | 'transfer' | 'refund' | 'adjustment'
+  amount: string
+  balance_after: string
+  description: string
+  service_title: string | null
+  service_id: string | null
+  created_at: string
+}
+
 export interface AdminUserDetailAction {
   action_type: string
   reason: string | null

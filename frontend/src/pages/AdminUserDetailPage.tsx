@@ -12,7 +12,7 @@ import { adminAPI } from '@/services/adminAPI'
 import { getErrorMessage } from '@/services/api'
 import AdminLayout from '@/components/AdminLayout'
 import { useAuthStore } from '@/store/useAuthStore'
-import type { AdminUserDetail } from '@/types'
+import type { AdminTransaction, AdminUserDetail } from '@/types'
 import {
   AMBER, AMBER_LT,
   BLUE, BLUE_LT,
@@ -324,6 +324,27 @@ export default function AdminUserDetailPage() {
   const [modal, setModal] = useState<'warn' | 'karma' | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
 
+  const [transactions, setTransactions] = useState<AdminTransaction[]>([])
+  const [txLoading, setTxLoading] = useState(false)
+  const [txPage, setTxPage] = useState(1)
+  const [txTotal, setTxTotal] = useState(0)
+  const TX_PAGE_SIZE = 10
+
+  const loadTransactions = async (page: number) => {
+    if (!userId) return
+    setTxLoading(true)
+    try {
+      const res = await adminAPI.getUserTransactions(userId, page, TX_PAGE_SIZE)
+      setTransactions(res.results)
+      setTxTotal(res.count)
+      setTxPage(page)
+    } catch {
+      // silently ignore — non-critical
+    } finally {
+      setTxLoading(false)
+    }
+  }
+
   const isSelf = adminUser?.id === userId
 
   const load = async () => {
@@ -341,6 +362,7 @@ export default function AdminUserDetailPage() {
   }
 
   useEffect(() => { load() }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadTransactions(1) }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleToggleSuspend = async () => {
     if (!user || isSelf) return
@@ -583,6 +605,98 @@ export default function AdminUserDetailPage() {
 
           </Box>
         </Flex>
+
+        {/* Transaction History */}
+        <Box mt={4}>
+          <Card>
+            <SectionHead label="Transaction History" />
+            {txLoading ? (
+              <Flex justify="center" py={4}><Spinner color={GREEN} /></Flex>
+            ) : transactions.length === 0 ? (
+              <Box px={4} py={3}>
+                <Text fontSize="12px" color={GRAY400}>No transactions recorded.</Text>
+              </Box>
+            ) : (
+              <>
+                {transactions.map((tx, i) => {
+                  const isCredit = parseFloat(tx.amount) > 0
+                  const amountColor = isCredit ? GREEN : RED
+                  const typeLabel: Record<string, string> = {
+                    provision: 'Reserved',
+                    transfer: 'Transferred',
+                    refund: 'Refunded',
+                    adjustment: 'Adjusted',
+                  }
+                  return (
+                    <Flex key={tx.id} align="center" gap={3} px={4} py="10px"
+                      borderBottom={i < transactions.length - 1 ? `1px solid ${GRAY100}` : 'none'}>
+                      <Box w="80px" flexShrink={0}>
+                        <Box px={2} py="2px" borderRadius="6px" display="inline-block"
+                          bg={isCredit ? GREEN_LT : RED_LT}
+                          style={{ border: `1px solid ${amountColor}30` }}>
+                          <Text fontSize="10px" fontWeight={600} color={amountColor}>
+                            {typeLabel[tx.transaction_type] ?? tx.transaction_type}
+                          </Text>
+                        </Box>
+                      </Box>
+                      <Box flex={1} minW={0}>
+                        <Text fontSize="12px" color={GRAY700}
+                          style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {tx.description}
+                        </Text>
+                        {tx.service_title && (
+                          <Text fontSize="11px" color={GRAY400} mt="1px"
+                            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {tx.service_title}
+                          </Text>
+                        )}
+                      </Box>
+                      <Box textAlign="right" flexShrink={0}>
+                        <Text fontSize="13px" fontWeight={700} color={amountColor}>
+                          {isCredit ? '+' : ''}{parseFloat(tx.amount).toFixed(1)} hrs
+                        </Text>
+                        <Text fontSize="10px" color={GRAY400}>
+                          bal: {parseFloat(tx.balance_after).toFixed(1)} hrs
+                        </Text>
+                      </Box>
+                      <Box w="90px" textAlign="right" flexShrink={0}>
+                        <Text fontSize="11px" color={GRAY500}>{fmtDate(tx.created_at)}</Text>
+                      </Box>
+                    </Flex>
+                  )
+                })}
+
+                {/* Pagination */}
+                {txTotal > TX_PAGE_SIZE && (
+                  <Flex align="center" justify="space-between" px={4} py="10px"
+                    borderTop={`1px solid ${GRAY100}`}>
+                    <Text fontSize="12px" color={GRAY500}>
+                      {(txPage - 1) * TX_PAGE_SIZE + 1}–{Math.min(txPage * TX_PAGE_SIZE, txTotal)} of {txTotal}
+                    </Text>
+                    <Flex gap={2}>
+                      <Box as="button"
+                        aria-disabled={txPage === 1}
+                        onClick={txPage > 1 ? () => loadTransactions(txPage - 1) : undefined}
+                        px={3} py="4px" borderRadius="7px" fontSize="12px" fontWeight={500}
+                        bg={GRAY100} color={GRAY600}
+                        style={{ border: `1px solid ${GRAY200}`, cursor: txPage === 1 ? 'not-allowed' : 'pointer', opacity: txPage === 1 ? 0.4 : 1 }}>
+                        Prev
+                      </Box>
+                      <Box as="button"
+                        aria-disabled={txPage * TX_PAGE_SIZE >= txTotal}
+                        onClick={txPage * TX_PAGE_SIZE < txTotal ? () => loadTransactions(txPage + 1) : undefined}
+                        px={3} py="4px" borderRadius="7px" fontSize="12px" fontWeight={500}
+                        bg={GRAY100} color={GRAY600}
+                        style={{ border: `1px solid ${GRAY200}`, cursor: txPage * TX_PAGE_SIZE >= txTotal ? 'not-allowed' : 'pointer', opacity: txPage * TX_PAGE_SIZE >= txTotal ? 0.4 : 1 }}>
+                        Next
+                      </Box>
+                    </Flex>
+                  </Flex>
+                )}
+              </>
+            )}
+          </Card>
+        </Box>
       </Box>
 
       {modal === 'warn' && (

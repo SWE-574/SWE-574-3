@@ -5360,6 +5360,53 @@ class AdminUserViewSet(viewsets.ViewSet):
             'message': f'Karma adjusted by {adjustment}'
         })
 
+    @action(detail=True, methods=['get'], url_path='transactions')
+    def transactions(self, request, pk=None):
+        """Return paginated transaction history for a user (admin only)."""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        try:
+            user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        qs = TransactionHistory.objects.filter(user=user).select_related(
+            'handshake__service'
+        ).order_by('-created_at')
+
+        page_size = min(int(request.query_params.get('page_size', 20)), 100)
+        page = max(int(request.query_params.get('page', 1)), 1)
+        total = qs.count()
+        start = (page - 1) * page_size
+        items = qs[start:start + page_size]
+
+        data = [
+            {
+                'id': str(t.id),
+                'transaction_type': t.transaction_type,
+                'amount': str(t.amount),
+                'balance_after': str(t.balance_after),
+                'description': t.description,
+                'service_title': t.handshake.service.title if t.handshake and t.handshake.service else None,
+                'service_id': str(t.handshake.service_id) if t.handshake and t.handshake.service_id else None,
+                'created_at': t.created_at.isoformat(),
+            }
+            for t in items
+        ]
+
+        return Response({
+            'count': total,
+            'page': page,
+            'page_size': page_size,
+            'results': data,
+        })
+
 
 class AdminCommentViewSet(viewsets.ViewSet):
     """Admin-only moderation endpoints for service comments/reviews."""
