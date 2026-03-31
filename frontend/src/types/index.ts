@@ -528,6 +528,12 @@ export interface AdminUserDetail {
   handshakes_as_provider_count: number
   forum_topics_count: number
   recent_admin_actions: AdminUserDetailAction[]
+  recent_offers?: { id: string; title: string }[]
+  recent_requests?: { id: string; title: string }[]
+  recent_events?: { id: string; title: string }[]
+  recent_forum_topics?: { id: string; title: string }[]
+  recent_handshakes_as_requester?: { id: string; title: string; service_id: string }[]
+  recent_handshakes_as_provider?: { id: string; title: string; service_id: string }[]
 }
 
 export interface AdminMetrics {
