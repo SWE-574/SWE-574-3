@@ -7,6 +7,7 @@ from .models import (
     ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia
 )
+from django.db.models import Q
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -107,6 +108,12 @@ class AdminUserDetailSerializer(serializers.ModelSerializer):
     handshakes_as_provider_count = serializers.SerializerMethodField()
     forum_topics_count = serializers.SerializerMethodField()
     recent_admin_actions = serializers.SerializerMethodField()
+    recent_offers = serializers.SerializerMethodField()
+    recent_requests = serializers.SerializerMethodField()
+    recent_events = serializers.SerializerMethodField()
+    recent_forum_topics = serializers.SerializerMethodField()
+    recent_handshakes_as_requester = serializers.SerializerMethodField()
+    recent_handshakes_as_provider = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -119,6 +126,8 @@ class AdminUserDetailSerializer(serializers.ModelSerializer):
             'offers_count', 'requests_count', 'events_count',
             'handshakes_as_requester_count', 'handshakes_as_provider_count',
             'forum_topics_count', 'recent_admin_actions',
+            'recent_offers', 'recent_requests', 'recent_events', 'recent_forum_topics',
+            'recent_handshakes_as_requester', 'recent_handshakes_as_provider',
         ]
         read_only_fields = fields
 
@@ -132,13 +141,63 @@ class AdminUserDetailSerializer(serializers.ModelSerializer):
         return obj.services.filter(type='Event').count()
 
     def get_handshakes_as_requester_count(self, obj):
-        return obj.requested_handshakes.count()
+        # Requester = consuming a service
+        # On Offers: the person who requested the offer (Handshake.requester)
+        # On Wants:  the person who created the Want (service__user) — they are seeking help
+        return Handshake.objects.filter(
+            Q(service__type='Offer', requester=obj) |
+            Q(service__type='Need', service__user=obj)
+        ).count()
 
     def get_handshakes_as_provider_count(self, obj):
-        return Handshake.objects.filter(service__user=obj).exclude(service__type='Event').count()
+        # Provider = delivering a service
+        # On Offers: the person who created the Offer (service__user)
+        # On Wants:  the person who responded to the Want (Handshake.requester)
+        return Handshake.objects.filter(
+            Q(service__type='Offer', service__user=obj) |
+            Q(service__type='Need', requester=obj)
+        ).count()
 
     def get_forum_topics_count(self, obj):
         return obj.forum_topics.count()
+
+    def _service_preview(self, qs):
+        return [{'id': str(s.id), 'title': s.title} for s in qs.only('id', 'title').order_by('-created_at')[:5]]
+
+    def get_recent_offers(self, obj):
+        return self._service_preview(obj.services.filter(type='Offer'))
+
+    def get_recent_requests(self, obj):
+        return self._service_preview(obj.services.filter(type='Need'))
+
+    def get_recent_events(self, obj):
+        return self._service_preview(obj.services.filter(type='Event'))
+
+    def get_recent_forum_topics(self, obj):
+        qs = obj.forum_topics.only('id', 'title').order_by('-created_at')[:5]
+        return [{'id': str(t.id), 'title': t.title} for t in qs]
+
+    def get_recent_handshakes_as_requester(self, obj):
+        qs = (
+            Handshake.objects.filter(
+                Q(service__type='Offer', requester=obj) |
+                Q(service__type='Need', service__user=obj)
+            )
+            .select_related('service')
+            .order_by('-created_at')[:5]
+        )
+        return [{'id': str(h.id), 'title': h.service.title, 'service_id': str(h.service_id)} for h in qs]
+
+    def get_recent_handshakes_as_provider(self, obj):
+        qs = (
+            Handshake.objects.filter(
+                Q(service__type='Offer', service__user=obj) |
+                Q(service__type='Need', requester=obj)
+            )
+            .select_related('service')
+            .order_by('-created_at')[:5]
+        )
+        return [{'id': str(h.id), 'title': h.service.title, 'service_id': str(h.service_id)} for h in qs]
 
     def get_recent_admin_actions(self, obj):
         from .models import AdminAuditLog

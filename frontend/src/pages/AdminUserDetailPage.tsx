@@ -1,16 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Box, Flex, Spinner, Text } from '@chakra-ui/react'
 import {
   FiArrowLeft, FiAlertCircle, FiSlash, FiCheck, FiBarChart2,
   FiUser, FiMail, FiCalendar, FiClock, FiActivity, FiShield,
-  FiMessageSquare, FiList, FiAlertTriangle,
+  FiMessageSquare, FiList, FiAlertTriangle, FiExternalLink,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { adminAPI } from '@/services/adminAPI'
 import { getErrorMessage } from '@/services/api'
 import AdminLayout from '@/components/AdminLayout'
-import AdminReauthBanner from '@/components/AdminReauthBanner'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { AdminUserDetail } from '@/types'
 import {
@@ -70,12 +70,113 @@ const InfoRow = ({ icon: Icon, label, value, color }: { icon: React.ElementType;
   </Flex>
 )
 
-const StatBox = ({ value, label, color }: { value: number; label: string; color: string }) => (
-  <Box flex={1} textAlign="center" py={3} px={2}>
-    <Text fontSize="20px" fontWeight={700} color={color}>{value}</Text>
-    <Text fontSize="11px" color={GRAY500} mt="2px">{label}</Text>
-  </Box>
-)
+// ─── Hoverable stat box with lazy-loaded item popover ────────────────────────
+
+interface StatItem { id: string; title: string; href: string }
+
+function HoverStatBox({
+  value, label, color, items,
+}: {
+  value: number
+  label: string
+  color: string
+  items?: StatItem[]
+}) {
+  const [open, setOpen] = useState(false)
+  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0, width: 0 })
+  const anchorRef = useRef<HTMLDivElement | null>(null)
+  const navigate = useNavigate()
+
+  const handleEnter = () => {
+    if (anchorRef.current) {
+      const rect = anchorRef.current.getBoundingClientRect()
+      setPopoverPos({
+        top: rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX + rect.width / 2,
+        width: rect.width,
+      })
+    }
+    setOpen(true)
+  }
+
+  const handleLeave = () => setOpen(false)
+
+  const canHover = !!items && value > 0
+
+  const popover = open && canHover && createPortal(
+    <div
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={handleLeave}
+      style={{
+        position: 'absolute',
+        // Extend upward by 4px so there's no gap between anchor and popover
+        top: popoverPos.top - 4,
+        left: popoverPos.left,
+        transform: 'translateX(-50%)',
+        zIndex: 9999,
+        // 4px transparent padding at top bridges the visual gap
+        paddingTop: '4px',
+      }}
+    >
+      <div style={{
+        background: WHITE,
+        border: `1px solid ${GRAY200}`,
+        borderRadius: '10px',
+        minWidth: '200px',
+        maxWidth: '280px',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+        overflow: 'hidden',
+      }}>
+        {items!.length > 0 ? (
+          items!.map((item, i) => (
+            <div
+              key={item.id}
+              onClick={() => { setOpen(false); navigate(item.href) }}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 12px',
+                borderBottom: i < items!.length - 1 ? `1px solid ${GRAY100}` : 'none',
+                cursor: 'pointer',
+                background: WHITE,
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = GRAY50 }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = WHITE }}
+            >
+              <span style={{
+                fontSize: '12px', color: GRAY700, fontWeight: 500,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '210px',
+              }}>
+                {item.title}
+              </span>
+              <span style={{ color, flexShrink: 0, marginLeft: '8px', display: 'flex' }}>
+                <FiExternalLink size={12} />
+              </span>
+            </div>
+          ))
+        ) : (
+          <div style={{ fontSize: '12px', color: GRAY500, padding: '10px 12px' }}>No items</div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+
+  return (
+    <Box
+      ref={anchorRef}
+      flex={1} textAlign="center" py={3} px={2}
+      cursor={canHover ? 'default' : undefined}
+      onMouseEnter={canHover ? handleEnter : undefined}
+      onMouseLeave={canHover ? handleLeave : undefined}
+      bg={open && canHover ? GRAY50 : undefined}
+      transition="background 0.1s"
+    >
+      <Text fontSize="20px" fontWeight={700} color={color}>{value}</Text>
+      <Text fontSize="11px" color={GRAY500} mt="2px">{label}</Text>
+      {popover}
+    </Box>
+  )
+}
 
 // ─── Action button ────────────────────────────────────────────────────────────
 
@@ -89,8 +190,8 @@ function ActionBtn({
     <Box
       as="button"
       title={label}
-      disabled={disabled}
-      onClick={onClick}
+      aria-disabled={disabled}
+      onClick={disabled ? undefined : onClick}
       display="inline-flex" alignItems="center" gap="6px"
       px={3} py="6px" borderRadius="8px" fontSize="12px" fontWeight={600}
       bg={bg} color={color} border={`1px solid ${hoverBg}`}
@@ -276,7 +377,6 @@ export default function AdminUserDetailPage() {
 
   return (
     <AdminLayout activeTab="users" onTabChange={(tab) => navigate(`/admin?tab=${tab}`)}>
-      <AdminReauthBanner />
       <Box p={{ base: 3, md: 5 }} maxW="960px" mx="auto">
 
         {/* Back */}
@@ -292,14 +392,14 @@ export default function AdminUserDetailPage() {
           <FiArrowLeft size={14} /> Back to Users
         </Flex>
 
-        {/* Header card */}
+        {/* Header card — profile info + stats unified */}
         <Card>
           <Box p={5}>
             <Flex align="flex-start" gap={4} wrap="wrap">
               {/* Avatar */}
               <Flex w="56px" h="56px" borderRadius="50%" bg={GREEN} align="center" justify="center" flexShrink={0}>
                 {user.avatar_url
-                  ? <Box as="img" src={user.avatar_url} w="56px" h="56px" borderRadius="50%" objectFit="cover" />
+                  ? <img src={user.avatar_url} style={{ width: '56px', height: '56px', borderRadius: '50%', objectFit: 'cover' }} alt="" />
                   : <Text fontSize="20px" fontWeight={700} color={WHITE}>{userInitials(user)}</Text>
                 }
               </Flex>
@@ -356,22 +456,38 @@ export default function AdminUserDetailPage() {
               </Flex>
             </Flex>
           </Box>
-        </Card>
 
-        {/* Stats row */}
-        <Card>
-          <Flex borderBottom={`1px solid ${GRAY100}`} wrap="wrap">
-            {[
-              { value: user.offers_count, label: 'Offers', color: GREEN },
-              { value: user.requests_count, label: 'Requests', color: BLUE },
-              { value: user.events_count, label: 'Events', color: AMBER },
-              { value: user.handshakes_as_requester_count, label: 'As Requester', color: PURPLE },
-              { value: user.handshakes_as_provider_count, label: 'As Provider', color: '#0D9488' },
-              { value: user.forum_topics_count, label: 'Forum Topics', color: GRAY600 },
-            ].map((s, i, arr) => (
+          {/* Stats strip inside the same card */}
+          <Flex borderTop={`1px solid ${GRAY100}`} wrap="wrap">
+            {([
+              {
+                value: user.offers_count, label: 'Offers', color: GREEN,
+                items: (user.recent_offers ?? []).map(s => ({ id: s.id, title: s.title, href: `/service-detail/${s.id}` })),
+              },
+              {
+                value: user.requests_count, label: 'Requests', color: BLUE,
+                items: (user.recent_requests ?? []).map(s => ({ id: s.id, title: s.title, href: `/service-detail/${s.id}` })),
+              },
+              {
+                value: user.events_count, label: 'Events', color: AMBER,
+                items: (user.recent_events ?? []).map(s => ({ id: s.id, title: s.title, href: `/service-detail/${s.id}` })),
+              },
+              {
+                value: user.handshakes_as_requester_count, label: 'As Requester', color: PURPLE,
+                items: (user.recent_handshakes_as_requester ?? []).map(h => ({ id: h.id, title: h.title, href: `/service-detail/${h.service_id}` })),
+              },
+              {
+                value: user.handshakes_as_provider_count, label: 'As Provider', color: '#0D9488',
+                items: (user.recent_handshakes_as_provider ?? []).map(h => ({ id: h.id, title: h.title, href: `/service-detail/${h.service_id}` })),
+              },
+              {
+                value: user.forum_topics_count, label: 'Forum Topics', color: GRAY600,
+                items: (user.recent_forum_topics ?? []).map(t => ({ id: t.id, title: t.title, href: `/forum/topic/${t.id}` })),
+              },
+            ] as Array<{ value: number; label: string; color: string; items?: StatItem[] }>).map((s, i, arr) => (
               <Box key={s.label} flex={1} minW="80px"
                 borderRight={i < arr.length - 1 ? `1px solid ${GRAY100}` : 'none'}>
-                <StatBox {...s} />
+                <HoverStatBox {...s} />
               </Box>
             ))}
           </Flex>
@@ -395,7 +511,7 @@ export default function AdminUserDetailPage() {
                 color={user.is_onboarded ? GREEN : GRAY500}
               />
               <InfoRow icon={FiBarChart2} label="Karma Score" value={user.karma_score} />
-              <InfoRow icon={FiList} label="Time Bank Balance" value={`${user.timebank_balance} hrs`} />
+              <InfoRow icon={FiList} label="Time Bank Balance" value={`${Math.floor(user.timebank_balance)} hrs`} />
               <InfoRow icon={FiAlertTriangle} label="No-show Count"
                 value={user.no_show_count}
                 color={user.no_show_count > 0 ? AMBER : GRAY800}
