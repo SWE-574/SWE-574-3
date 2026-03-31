@@ -421,6 +421,7 @@ export interface AdminUserSummary {
   email: string
   first_name: string
   last_name: string
+  avatar_url: string | null
   timebank_balance: number
   karma_score: number
   role: string
@@ -539,6 +540,10 @@ export interface AdminAuditLog {
     | 'restore_comment'
     | 'lock_topic'
     | 'pin_topic'
+    | 'assign_role'
+  previous_role?: string | null
+  new_role?: string | null
+  ip_address?: string | null
   target_entity: 'user' | 'report' | 'handshake' | 'comment' | 'forum_topic'
   target_id: string
   reason?: string | null

@@ -1243,8 +1243,10 @@ const AdminDashboard = () => {
                       {/* User */}
                       <Flex flex={1} minW={0} align="center" gap="10px" pr={3}>
                         <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center"
-                          style={{ background:avatarColor, color:WHITE, fontSize:'12px', fontWeight:700 }}>
-                          {initials}
+                          style={{ background:avatarColor, color:WHITE, fontSize:'12px', fontWeight:700, overflow:'hidden' }}>
+                          {user.avatar_url
+                            ? <img src={user.avatar_url} alt={initials} style={{ width:'32px', height:'32px', objectFit:'cover' }} />
+                            : initials}
                         </Flex>
                         <Box minW={0}>
                           <Text fontSize="13px" fontWeight={600} color={GRAY800}
@@ -1255,10 +1257,20 @@ const AdminDashboard = () => {
                       </Flex>
                       {/* Role */}
                       <Box w="90px" flexShrink={0}>
-                        <Box display="inline-flex" px="7px" py="2px" borderRadius="6px" fontSize="11px" fontWeight={500}
-                          style={{ background:user.role==='admin'?PURPLE_LT:GRAY100, color:user.role==='admin'?PURPLE:GRAY600 }}>
-                          {user.role === 'admin' ? 'Admin' : 'Member'}
-                        </Box>
+                        {(() => {
+                          const roleMeta: Record<string, { label: string; bg: string; color: string }> = {
+                            super_admin: { label: 'Super Admin', bg: RED_LT,    color: RED    },
+                            admin:       { label: 'Admin',       bg: PURPLE_LT, color: PURPLE },
+                            moderator:   { label: 'Moderator',   bg: AMBER_LT,  color: AMBER  },
+                          }
+                          const meta = roleMeta[user.role] ?? { label: 'Member', bg: GRAY100, color: GRAY600 }
+                          return (
+                            <Box display="inline-flex" px="7px" py="2px" borderRadius="6px" fontSize="11px" fontWeight={500}
+                              style={{ background: meta.bg, color: meta.color }}>
+                              {meta.label}
+                            </Box>
+                          )
+                        })()}
                       </Box>
                       {/* Status */}
                       <Box w="100px" flexShrink={0}>

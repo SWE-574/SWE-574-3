@@ -93,7 +93,7 @@ class AdminUserListSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'email', 'first_name', 'last_name',
-            'timebank_balance', 'karma_score', 'role',
+            'avatar_url', 'timebank_balance', 'karma_score', 'role',
             'is_active', 'date_joined'
         ]
         read_only_fields = fields

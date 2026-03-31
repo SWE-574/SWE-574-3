@@ -426,6 +426,146 @@ function KarmaModal({ userId, currentKarma, onClose, onDone }: { userId: string;
   )
 }
 
+// ─── Role assign modal ────────────────────────────────────────────────────────
+
+// Roles an actor with the given role may assign.  The backend enforces the same
+// policy; this list gates the UI options for a good UX.
+const ASSIGNABLE_ROLES_BY_ACTOR: Record<string, { value: string; label: string }[]> = {
+  super_admin: [
+    { value: 'admin', label: 'Admin' },
+    { value: 'moderator', label: 'Moderator' },
+    { value: 'member', label: 'Member' },
+  ],
+  admin: [
+    { value: 'moderator', label: 'Moderator' },
+    { value: 'member', label: 'Member' },
+  ],
+}
+
+const ROLE_TIER: Record<string, number> = {
+  super_admin: 3,
+  admin: 2,
+  moderator: 1,
+  member: 0,
+}
+
+function RoleAssignModal({
+  userId,
+  currentRole,
+  actorRole,
+  onClose,
+  onDone,
+}: {
+  userId: string
+  currentRole: string
+  actorRole: string
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [selectedRole, setSelectedRole] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  const assignableRoles = (ASSIGNABLE_ROLES_BY_ACTOR[actorRole] ?? []).filter(
+    (r) => r.value !== currentRole,
+  )
+
+  // Actors may not change the role of a peer or superior
+  const targetTier = ROLE_TIER[currentRole] ?? 0
+  const actorTier = ROLE_TIER[actorRole] ?? 0
+  const canAct = actorTier > targetTier && assignableRoles.length > 0
+
+  const selectedLabel = assignableRoles.find((r) => r.value === selectedRole)?.label ?? selectedRole
+
+  const submit = async () => {
+    if (!selectedRole || !confirmed) return
+    setLoading(true)
+    try {
+      await adminAPI.assignUserRole(userId, selectedRole)
+      toast.success(`Role updated to ${selectedLabel}`)
+      onDone()
+    } catch (e) {
+      toast.error(getErrorMessage(e) ?? 'Failed to assign role')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Flex position="fixed" inset={0} zIndex={200} align="center" justify="center"
+      bg="rgba(0,0,0,0.45)" onClick={onClose}>
+      <Box bg={WHITE} borderRadius="16px" p={6} w="420px" maxW="90vw"
+        boxShadow="0 8px 40px rgba(0,0,0,0.18)"
+        onClick={(e) => e.stopPropagation()}>
+        <Text fontSize="15px" fontWeight={700} color={GRAY800} mb={1}>Assign Role</Text>
+        <Text fontSize="12px" color={GRAY500} mb={4}>Current role: <strong>{currentRole}</strong></Text>
+
+        {!canAct ? (
+          <Text fontSize="13px" color={RED} mb={4}>
+            You do not have permission to change this user's role.
+          </Text>
+        ) : (
+          <>
+            <Text fontSize="12px" color={GRAY600} mb={2}>New role</Text>
+            <select
+              value={selectedRole}
+              onChange={(e) => { setSelectedRole(e.target.value); setConfirmed(false) }}
+              style={{
+                width: '100%', padding: '10px 12px', borderRadius: '8px',
+                border: `1px solid ${GRAY200}`, fontSize: '13px', color: GRAY800,
+                outline: 'none', fontFamily: 'inherit', background: WHITE,
+                marginBottom: '16px',
+              }}
+            >
+              <option value="">Select a role…</option>
+              {assignableRoles.map((r) => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+
+            {selectedRole && (
+              <Box
+                bg={AMBER_LT} border={`1px solid ${AMBER}30`} borderRadius="8px"
+                p={3} mb={4}
+              >
+                <Text fontSize="12px" color={GRAY700}>
+                  Are you sure you want to change this user's role to{' '}
+                  <strong>{selectedLabel}</strong>? This action will be logged in the audit trail.
+                </Text>
+                <Flex align="center" gap={2} mt={2}>
+                  <input
+                    id="role-confirm"
+                    type="checkbox"
+                    checked={confirmed}
+                    onChange={(e) => setConfirmed(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <label htmlFor="role-confirm" style={{ fontSize: '12px', color: GRAY700, cursor: 'pointer' }}>
+                    I understand this will change the user's permissions
+                  </label>
+                </Flex>
+              </Box>
+            )}
+          </>
+        )}
+
+        <Flex gap={2} justify="flex-end" mt={2}>
+          <ActionBtn label="Cancel" icon={FiCheck} bg={GRAY100} hoverBg={GRAY200} color={GRAY600} onClick={onClose} />
+          {canAct && (
+            <ActionBtn
+              label={loading ? 'Saving…' : 'Assign Role'}
+              icon={FiShield}
+              bg={AMBER_LT} hoverBg={AMBER + '40'} color={AMBER}
+              onClick={submit}
+              disabled={loading || !selectedRole || !confirmed}
+            />
+          )}
+        </Flex>
+      </Box>
+    </Flex>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AdminUserDetailPage() {
@@ -439,7 +579,7 @@ export default function AdminUserDetailPage() {
 
   const [user, setUser] = useState<AdminUserDetail | null>(null)
   const [loading, setLoading] = useState(true)
-  const [modal, setModal] = useState<'warn' | 'karma' | null>(null)
+  const [modal, setModal] = useState<'warn' | 'karma' | 'role' | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
 
   const [transactions, setTransactions] = useState<AdminTransaction[]>([])
@@ -558,11 +698,21 @@ export default function AdminUserDetailPage() {
                     border={`1px solid ${statusColor}30`}>
                     <Text fontSize="11px" fontWeight={600} color={statusColor}>{statusLabel}</Text>
                   </Box>
-                  {user.role === 'admin' && (
-                    <Box px={2} py="2px" borderRadius="6px" bg={AMBER_LT} border={`1px solid ${AMBER}30`}>
-                      <Text fontSize="11px" fontWeight={600} color={AMBER}>Admin</Text>
-                    </Box>
-                  )}
+                  {/* Role badge — shown for every non-member role */}
+                  {user.role !== 'member' && (() => {
+                    const roleColors: Record<string, { bg: string; border: string; text: string; label: string }> = {
+                      super_admin: { bg: RED_LT,    border: RED + '30',    text: RED,    label: 'Super Admin' },
+                      admin:       { bg: AMBER_LT,  border: AMBER + '30',  text: AMBER,  label: 'Admin' },
+                      moderator:   { bg: PURPLE_LT, border: PURPLE + '30', text: PURPLE, label: 'Moderator' },
+                    }
+                    const c = roleColors[user.role]
+                    if (!c) return null
+                    return (
+                      <Box px={2} py="2px" borderRadius="6px" bg={c.bg} border={`1px solid ${c.border}`}>
+                        <Text fontSize="11px" fontWeight={600} color={c.text}>{c.label}</Text>
+                      </Box>
+                    )
+                  })()}
                   {!user.is_verified && (
                     <Box px={2} py="2px" borderRadius="6px" bg={GRAY100} border={`1px solid ${GRAY200}`}>
                       <Text fontSize="11px" fontWeight={600} color={GRAY500}>Unverified</Text>
@@ -597,6 +747,16 @@ export default function AdminUserDetailPage() {
                   bg={PURPLE_LT} hoverBg={PURPLE + '40'} color={PURPLE}
                   onClick={() => setModal('karma')}
                 />
+                {/* Role button: hidden when the logged-in admin cannot possibly
+                    change the target's role (self or insufficient tier). */}
+                {!isSelf && (ROLE_TIER[adminUser?.role ?? ''] ?? 0) > (ROLE_TIER[user.role] ?? 0) && (
+                  <ActionBtn
+                    label="Role"
+                    icon={FiShield}
+                    bg={AMBER_LT} hoverBg={AMBER + '40'} color={AMBER}
+                    onClick={() => setModal('role')}
+                  />
+                )}
               </Flex>
             </Flex>
           </Box>
@@ -850,6 +1010,15 @@ export default function AdminUserDetailPage() {
       {modal === 'karma' && (
         <KarmaModal userId={user.id} currentKarma={user.karma_score}
           onClose={() => setModal(null)} onDone={() => { setModal(null); load() }} />
+      )}
+      {modal === 'role' && (
+        <RoleAssignModal
+          userId={user.id}
+          currentRole={user.role}
+          actorRole={adminUser?.role ?? ''}
+          onClose={() => setModal(null)}
+          onDone={() => { setModal(null); load() }}
+        />
       )}
     </AdminLayout>
   )

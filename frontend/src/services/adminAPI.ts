@@ -163,6 +163,20 @@ export const adminAPI = {
     return res.data
   },
 
+  assignUserRole: async (
+    userId: string,
+    newRole: string,
+    signal?: AbortSignal,
+  ): Promise<{ status: string; message: string; previous_role: string; new_role: string }> => {
+    const res = await apiClient.post<{
+      status: string
+      message: string
+      previous_role: string
+      new_role: string
+    }>(`/admin/users/${userId}/assign-role/`, { role: newRole }, { signal })
+    return res.data
+  },
+
   getComments: async (
     status: CommentStatusFilter = 'active',
     page = 1,

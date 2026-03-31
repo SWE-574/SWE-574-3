@@ -504,3 +504,216 @@ class TestAdminManagementApi:
         assert len(data['recent_handshakes_as_provider']) == 1
         assert data['recent_handshakes_as_provider'][0]['title'] == 'Need a Plumber'
         assert len(data['recent_handshakes_as_requester']) == 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Role Assignment Tests
+# POST /api/admin/users/{id}/assign-role/
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAdminRoleAssignment:
+    """Integration tests for the assign_role admin action.
+
+    Business rules exercised:
+    1. Successful assignment by an authorised admin.
+    2. Self-assignment is rejected (403).
+    3. An admin cannot modify another admin (same or higher tier).
+    4. An admin cannot elevate a user to admin (same tier).
+    5. Unauthenticated requests are rejected (401).
+    6. Member-role users are rejected (403).
+    7. Audit log is written on success, and contains the expected fields.
+    8. A super_admin can promote a member all the way to admin.
+    """
+
+    ASSIGN_ROLE_URL = '/api/admin/users/{id}/assign-role/'
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _url(self, user_id):
+        return self.ASSIGN_ROLE_URL.format(id=user_id)
+
+    def _post(self, client, user_id, role):
+        return client.post(self._url(user_id), {'role': role}, format='json')
+
+    # ── authentication / authorisation guard ─────────────────────────────────
+
+    def test_unauthenticated_request_is_rejected(self):
+        """Endpoint requires a valid session."""
+        target = UserFactory()
+        response = APIClient().post(self._url(target.id), {'role': 'moderator'}, format='json')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_member_cannot_assign_roles(self):
+        """A standard member must not access admin endpoints."""
+        member = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(member)
+        target = UserFactory()
+
+        response = self._post(client, target.id, 'moderator')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        target.refresh_from_db()
+        assert target.role == 'member'
+
+    # ── self-assignment ───────────────────────────────────────────────────────
+
+    def test_admin_cannot_assign_own_role(self):
+        """Self-modification is prohibited regardless of tier (FR-RBAC-3)."""
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, admin.id, 'member')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        admin.refresh_from_db()
+        assert admin.role == 'admin'  # unchanged
+
+    # ── peer / superior modification ──────────────────────────────────────────
+
+    def test_admin_cannot_modify_another_admin(self):
+        """An admin may not change the role of a peer (same tier) (FR-RBAC-2)."""
+        admin = AdminUserFactory()
+        peer_admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, peer_admin.id, 'member')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        peer_admin.refresh_from_db()
+        assert peer_admin.role == 'admin'  # unchanged
+
+    def test_admin_cannot_elevate_user_to_admin_tier(self):
+        """An admin cannot grant a role equal to their own tier (FR-RBAC-2)."""
+        admin = AdminUserFactory()
+        target = UserFactory()  # member by default
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, target.id, 'admin')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        target.refresh_from_db()
+        assert target.role == 'member'  # unchanged
+
+    # ── successful assignments ────────────────────────────────────────────────
+
+    def test_admin_can_promote_member_to_moderator(self):
+        """Happy path: admin promotes a member to moderator."""
+        admin = AdminUserFactory()
+        target = UserFactory()  # member
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, target.id, 'moderator')
+
+        assert response.status_code == status.HTTP_200_OK
+        payload = response.json()
+        assert payload['status'] == 'success'
+        assert payload['previous_role'] == 'member'
+        assert payload['new_role'] == 'moderator'
+        target.refresh_from_db()
+        assert target.role == 'moderator'
+
+    def test_admin_can_demote_moderator_to_member(self):
+        """An admin can demote a moderator back to member."""
+        admin = AdminUserFactory()
+        target = UserFactory(role='moderator')
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, target.id, 'member')
+
+        assert response.status_code == status.HTTP_200_OK
+        target.refresh_from_db()
+        assert target.role == 'member'
+
+    # ── super_admin privileges ────────────────────────────────────────────────
+
+    def test_super_admin_can_promote_member_to_admin(self):
+        """A super_admin can assign any role, including admin (FR-RBAC-2)."""
+        super_admin = UserFactory(role='super_admin')
+        target = UserFactory()  # member
+        client = AuthenticatedAPIClient().authenticate_user(super_admin)
+
+        response = self._post(client, target.id, 'admin')
+
+        assert response.status_code == status.HTTP_200_OK
+        target.refresh_from_db()
+        assert target.role == 'admin'
+
+    def test_super_admin_cannot_modify_another_super_admin(self):
+        """Even a super_admin may not change a peer super_admin's role."""
+        super_admin = UserFactory(role='super_admin')
+        peer = UserFactory(role='super_admin')
+        client = AuthenticatedAPIClient().authenticate_user(super_admin)
+
+        response = self._post(client, peer.id, 'admin')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        peer.refresh_from_db()
+        assert peer.role == 'super_admin'
+
+    # ── audit log ─────────────────────────────────────────────────────────────
+
+    def test_audit_log_is_created_on_successful_assignment(self):
+        """An immutable audit record must be written for every role change."""
+        admin = AdminUserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_log_count = AdminAuditLog.objects.filter(action_type='assign_role').count()
+        response = self._post(client, target.id, 'moderator')
+        assert response.status_code == status.HTTP_200_OK
+
+        logs = AdminAuditLog.objects.filter(action_type='assign_role')
+        assert logs.count() == initial_log_count + 1
+
+        log = logs.latest('created_at')
+        assert log.admin == admin
+        assert str(log.target_id) == str(target.id)
+        assert log.previous_role == 'member'
+        assert log.new_role == 'moderator'
+        assert log.target_entity == 'user'
+
+    def test_audit_log_is_not_created_on_failed_assignment(self):
+        """A rejected request must not create an audit record."""
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='assign_role').count()
+        # Attempt self-assignment — must fail
+        self._post(client, admin.id, 'member')
+
+        assert AdminAuditLog.objects.filter(action_type='assign_role').count() == initial_count
+
+    # ── input validation ──────────────────────────────────────────────────────
+
+    def test_invalid_role_value_returns_400(self):
+        """Unrecognised role strings must be rejected before any DB write."""
+        admin = AdminUserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, target.id, 'superuser')  # not a valid role
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        target.refresh_from_db()
+        assert target.role == 'member'
+
+    def test_missing_role_field_returns_400(self):
+        """A request without a role body field must be rejected."""
+        admin = AdminUserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.post(self._url(target.id), {}, format='json')
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_unknown_user_id_returns_404(self):
+        """A non-existent target user must return 404."""
+        import uuid
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, uuid.uuid4(), 'member')
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
