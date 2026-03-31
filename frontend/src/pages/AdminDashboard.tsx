@@ -1276,7 +1276,7 @@ const AdminDashboard = () => {
                       </Box>
                       {/* Actions */}
                       <Flex w="108px" flexShrink={0} justify="flex-end" gap="4px">
-                        {mkUserBtn('View profile', <FiArrowUpRight size={11}/>, GRAY100, GRAY200, GRAY600, () => navigate(`/public-profile/${user.id}`))}
+                        {mkUserBtn('View profile', <FiArrowUpRight size={11}/>, GRAY100, GRAY200, GRAY600, () => navigate(`/admin/users/${user.id}`))}
                         {mkUserBtn('Warn user', <FiAlertCircle size={11}/>, BLUE_LT, BLUE+'40', BLUE, () => handleWarnUser(user), isSelf)}
                         {mkUserBtn(user.is_active?'Suspend user':'Activate user',
                           user.is_active ? <FiSlash size={11}/> : <FiCheck size={11}/>,

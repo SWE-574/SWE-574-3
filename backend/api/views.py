@@ -49,6 +49,7 @@ from .serializers import (
     UserRegistrationSerializer, 
     UserProfileSerializer,
     AdminUserListSerializer,
+    AdminUserDetailSerializer,
     AdminCommentSerializer,
     AdminAuditLogSerializer,
     ServiceSerializer,
@@ -5212,6 +5213,24 @@ class AdminUserViewSet(viewsets.ViewSet):
             return paginator.get_paginated_response(serializer.data)
         
         serializer = AdminUserListSerializer(queryset[:100], many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        """Return comprehensive user detail for admin review (admin only)"""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        try:
+            user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = AdminUserDetailSerializer(user)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='warn', throttle_classes=[ConfirmationThrottle])
