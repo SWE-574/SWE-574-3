@@ -1,5 +1,5 @@
 import { apiClient } from './api'
-import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, PaginatedResponse } from '@/types'
+import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserDetail, AdminUserSummary, PaginatedResponse } from '@/types'
 
 export type ReportStatusFilter = 'pending' | 'resolved' | 'dismissed'
 export type CommentStatusFilter = 'active' | 'removed' | 'all'
@@ -93,6 +93,11 @@ export const adminAPI = {
     })
 
     return toPaginated(res.data)
+  },
+
+  getUserDetail: async (userId: string, signal?: AbortSignal): Promise<AdminUserDetail> => {
+    const res = await apiClient.get<AdminUserDetail>(`/admin/users/${userId}/`, { signal })
+    return res.data
   },
 
   warnUser: async (

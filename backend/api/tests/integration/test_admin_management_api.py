@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from api.models import AdminAuditLog, Report
-from api.tests.helpers.factories import AdminUserFactory, HandshakeFactory, ServiceFactory, UserFactory
+from api.tests.helpers.factories import AdminUserFactory, ForumTopicFactory, HandshakeFactory, ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 
 
@@ -269,3 +269,103 @@ class TestAdminManagementApi:
         assert pause_response.status_code == status.HTTP_200_OK
         handshake.refresh_from_db()
         assert handshake.status == 'paused'
+
+    # ── Admin User Detail ──────────────────────────────────────────────────────
+
+    def test_admin_user_detail_requires_authentication(self):
+        target = UserFactory()
+        response = APIClient().get(f'/api/admin/users/{target.id}/')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_non_admin_cannot_retrieve_user_detail(self):
+        member = UserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(member)
+        response = client.get(f'/api/admin/users/{target.id}/')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_admin_can_retrieve_user_detail(self):
+        admin = AdminUserFactory()
+        target = UserFactory(
+            first_name='Jane', last_name='Doe',
+            karma_score=25, is_active=True, is_verified=True,
+        )
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.get(f'/api/admin/users/{target.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data
+        assert data['id'] == str(target.id)
+        assert data['email'] == target.email
+        assert data['first_name'] == 'Jane'
+        assert data['last_name'] == 'Doe'
+        assert data['karma_score'] == 25
+        assert data['is_active'] is True
+        assert data['is_verified'] is True
+        assert 'date_joined' in data
+        assert 'last_login' in data
+        assert 'timebank_balance' in data
+        assert 'no_show_count' in data
+        assert 'is_event_banned_until' in data
+        assert 'is_organizer_banned_until' in data
+        assert 'offers_count' in data
+        assert 'requests_count' in data
+        assert 'events_count' in data
+        assert 'handshakes_as_requester_count' in data
+        assert 'handshakes_as_provider_count' in data
+        assert 'forum_topics_count' in data
+        assert 'recent_admin_actions' in data
+
+    def test_admin_user_detail_counts_are_accurate(self):
+        admin = AdminUserFactory()
+        target = UserFactory()
+
+        ServiceFactory(user=target, type='Offer')
+        ServiceFactory(user=target, type='Offer')
+        ServiceFactory(user=target, type='Need')
+        ServiceFactory(user=target, type='Event')
+
+        provider_service = ServiceFactory(user=UserFactory(), type='Offer')
+        HandshakeFactory(service=provider_service, requester=target, status='completed')
+
+        ForumTopicFactory(author=target)
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = client.get(f'/api/admin/users/{target.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data
+        assert data['offers_count'] == 2
+        assert data['requests_count'] == 1
+        assert data['events_count'] == 1
+        assert data['handshakes_as_requester_count'] == 1
+        assert data['forum_topics_count'] == 1
+
+    def test_admin_user_detail_includes_recent_admin_actions(self):
+        admin = AdminUserFactory()
+        target = UserFactory()
+        AdminAuditLog.objects.create(
+            admin=admin,
+            action_type='warn_user',
+            target_entity='user',
+            target_id=target.id,
+            reason='Test warning',
+        )
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = client.get(f'/api/admin/users/{target.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        actions = response.data['recent_admin_actions']
+        assert len(actions) == 1
+        assert actions[0]['action_type'] == 'warn_user'
+        assert actions[0]['reason'] == 'Test warning'
+
+    def test_admin_user_detail_returns_404_for_unknown_user(self):
+        import uuid
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.get(f'/api/admin/users/{uuid.uuid4()}/')
+        assert response.status_code == status.HTTP_404_NOT_FOUND

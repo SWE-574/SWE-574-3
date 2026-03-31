@@ -91,11 +91,68 @@ class AdminUserListSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'first_name', 'last_name', 
-            'timebank_balance', 'karma_score', 'role', 
+            'id', 'email', 'first_name', 'last_name',
+            'timebank_balance', 'karma_score', 'role',
             'is_active', 'date_joined'
         ]
         read_only_fields = fields
+
+
+class AdminUserDetailSerializer(serializers.ModelSerializer):
+    """Comprehensive serializer for admin user detail view"""
+    offers_count = serializers.SerializerMethodField()
+    requests_count = serializers.SerializerMethodField()
+    events_count = serializers.SerializerMethodField()
+    handshakes_as_requester_count = serializers.SerializerMethodField()
+    handshakes_as_provider_count = serializers.SerializerMethodField()
+    forum_topics_count = serializers.SerializerMethodField()
+    recent_admin_actions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'email', 'first_name', 'last_name', 'bio', 'avatar_url',
+            'location', 'role', 'is_active', 'is_verified', 'is_onboarded',
+            'date_joined', 'last_login',
+            'timebank_balance', 'karma_score', 'no_show_count',
+            'is_event_banned_until', 'is_organizer_banned_until', 'locked_until',
+            'offers_count', 'requests_count', 'events_count',
+            'handshakes_as_requester_count', 'handshakes_as_provider_count',
+            'forum_topics_count', 'recent_admin_actions',
+        ]
+        read_only_fields = fields
+
+    def get_offers_count(self, obj):
+        return obj.services.filter(type='Offer').count()
+
+    def get_requests_count(self, obj):
+        return obj.services.filter(type='Need').count()
+
+    def get_events_count(self, obj):
+        return obj.services.filter(type='Event').count()
+
+    def get_handshakes_as_requester_count(self, obj):
+        return obj.requested_handshakes.count()
+
+    def get_handshakes_as_provider_count(self, obj):
+        return Handshake.objects.filter(service__user=obj).exclude(service__type='Event').count()
+
+    def get_forum_topics_count(self, obj):
+        return obj.forum_topics.count()
+
+    def get_recent_admin_actions(self, obj):
+        from .models import AdminAuditLog
+        logs = AdminAuditLog.objects.filter(
+            target_entity='user', target_id=obj.id
+        ).order_by('-created_at')[:5]
+        return [
+            {
+                'action_type': log.action_type,
+                'reason': log.reason,
+                'created_at': log.created_at.isoformat(),
+            }
+            for log in logs
+        ]
 
 
 class AdminCommentSerializer(serializers.ModelSerializer):
