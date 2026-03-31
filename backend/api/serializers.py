@@ -114,6 +114,7 @@ class AdminUserDetailSerializer(serializers.ModelSerializer):
     recent_forum_topics = serializers.SerializerMethodField()
     recent_handshakes_as_requester = serializers.SerializerMethodField()
     recent_handshakes_as_provider = serializers.SerializerMethodField()
+    karma_adjustments = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -128,6 +129,7 @@ class AdminUserDetailSerializer(serializers.ModelSerializer):
             'forum_topics_count', 'recent_admin_actions',
             'recent_offers', 'recent_requests', 'recent_events', 'recent_forum_topics',
             'recent_handshakes_as_requester', 'recent_handshakes_as_provider',
+            'karma_adjustments',
         ]
         read_only_fields = fields
 
@@ -198,6 +200,57 @@ class AdminUserDetailSerializer(serializers.ModelSerializer):
             .order_by('-created_at')[:5]
         )
         return [{'id': str(h.id), 'title': h.service.title, 'service_id': str(h.service_id)} for h in qs]
+
+    def get_karma_adjustments(self, obj):
+        """Return up to 20 karma change events oldest-first with reconstructed cumulative value.
+
+        Sources:
+        - ReputationRep (service evaluations): +1 per True trait (is_punctual, is_helpful, is_kind)
+        - NegativeRep (service evaluations): -2 per True trait (is_late, is_unhelpful, is_rude)
+        - AdminAuditLog adjust_karma: admin manual adjustments
+        """
+        events = []
+
+        # Positive evaluations
+        for rep in ReputationRep.objects.filter(receiver=obj).only('is_punctual', 'is_helpful', 'is_kind', 'created_at'):
+            delta = sum([rep.is_punctual, rep.is_helpful, rep.is_kind])
+            if delta != 0:
+                events.append({'delta': delta, 'created_at': rep.created_at, 'label': 'evaluation'})
+
+        # Negative evaluations
+        for rep in NegativeRep.objects.filter(receiver=obj).only('is_late', 'is_unhelpful', 'is_rude', 'created_at'):
+            delta = -2 * sum([rep.is_late, rep.is_unhelpful, rep.is_rude])
+            if delta != 0:
+                events.append({'delta': delta, 'created_at': rep.created_at, 'label': 'evaluation'})
+
+        # Admin manual adjustments
+        for log in AdminAuditLog.objects.filter(target_entity='user', target_id=obj.id, action_type='adjust_karma'):
+            try:
+                delta = float(log.reason.replace('Adjustment:', '').strip())
+            except (ValueError, AttributeError):
+                delta = 0
+            if delta != 0:
+                events.append({'delta': delta, 'created_at': log.created_at, 'label': 'admin'})
+
+        if not events:
+            return []
+
+        # Sort newest-first, take last 20, reconstruct karma backwards from current value
+        events.sort(key=lambda e: e['created_at'], reverse=True)
+        events = events[:20]
+
+        running = obj.karma_score
+        points = []
+        for e in events:
+            points.append({
+                'delta': e['delta'],
+                'karma': running,
+                'created_at': e['created_at'].isoformat(),
+                'label': e['label'],
+            })
+            running -= e['delta']
+        points.reverse()  # oldest-first for the chart
+        return points
 
     def get_recent_admin_actions(self, obj):
         from .models import AdminAuditLog
