@@ -369,3 +369,138 @@ class TestAdminManagementApi:
 
         response = client.get(f'/api/admin/users/{uuid.uuid4()}/')
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    # ── Role-aware handshake counts ───────────────────────────────────────────
+
+    def test_offer_requester_counts_as_requester(self):
+        """When a user requests an Offer, they count as Requester (not Provider)."""
+        admin = AdminUserFactory()
+        user = UserFactory()
+        offer = ServiceFactory(user=UserFactory(), type='Offer')
+        HandshakeFactory(service=offer, requester=user)
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{user.id}/').data
+
+        assert data['handshakes_as_requester_count'] == 1
+        assert data['handshakes_as_provider_count'] == 0
+
+    def test_offer_owner_counts_as_provider(self):
+        """When a user owns an Offer that receives a handshake, they count as Provider."""
+        admin = AdminUserFactory()
+        provider = UserFactory()
+        offer = ServiceFactory(user=provider, type='Offer')
+        HandshakeFactory(service=offer, requester=UserFactory())
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{provider.id}/').data
+
+        assert data['handshakes_as_provider_count'] == 1
+        assert data['handshakes_as_requester_count'] == 0
+
+    def test_want_owner_counts_as_requester(self):
+        """When a user creates a Want (Need), they count as Requester because they seek the service."""
+        admin = AdminUserFactory()
+        seeker = UserFactory()
+        want = ServiceFactory(user=seeker, type='Need')
+        HandshakeFactory(service=want, requester=UserFactory())
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{seeker.id}/').data
+
+        assert data['handshakes_as_requester_count'] == 1
+        assert data['handshakes_as_provider_count'] == 0
+
+    def test_want_responder_counts_as_provider(self):
+        """When a user responds to a Want (their handshake.requester on a Need), they count as Provider."""
+        admin = AdminUserFactory()
+        responder = UserFactory()
+        want = ServiceFactory(user=UserFactory(), type='Need')
+        HandshakeFactory(service=want, requester=responder)
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{responder.id}/').data
+
+        assert data['handshakes_as_provider_count'] == 1
+        assert data['handshakes_as_requester_count'] == 0
+
+    def test_events_excluded_from_handshake_counts(self):
+        """Event handshakes must not appear in provider/requester counts."""
+        admin = AdminUserFactory()
+        organizer = UserFactory()
+        event = ServiceFactory(user=organizer, type='Event')
+        HandshakeFactory(service=event, requester=UserFactory())
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{organizer.id}/').data
+
+        assert data['handshakes_as_provider_count'] == 0
+        assert data['handshakes_as_requester_count'] == 0
+
+    def test_mixed_roles_counted_independently(self):
+        """A user can be both requester and provider across different services."""
+        admin = AdminUserFactory()
+        user = UserFactory()
+
+        # user requests an offer → counts as requester
+        offer = ServiceFactory(user=UserFactory(), type='Offer')
+        HandshakeFactory(service=offer, requester=user)
+
+        # user responds to a want → counts as provider
+        want = ServiceFactory(user=UserFactory(), type='Need')
+        HandshakeFactory(service=want, requester=user)
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{user.id}/').data
+
+        assert data['handshakes_as_requester_count'] == 1
+        assert data['handshakes_as_provider_count'] == 1
+
+    # ── Recent service and topic previews ─────────────────────────────────────
+
+    def test_recent_offers_returned_in_detail(self):
+        admin = AdminUserFactory()
+        user = UserFactory()
+        s1 = ServiceFactory(user=user, type='Offer', title='Offer One')
+        s2 = ServiceFactory(user=user, type='Offer', title='Offer Two')
+
+        data = AuthenticatedAPIClient().authenticate_admin(admin).get(f'/api/admin/users/{user.id}/').data
+
+        ids = {str(item['id']) for item in data['recent_offers']}
+        assert str(s1.id) in ids
+        assert str(s2.id) in ids
+
+    def test_recent_forum_topics_returned_in_detail(self):
+        admin = AdminUserFactory()
+        user = UserFactory()
+        topic = ForumTopicFactory(author=user)
+
+        data = AuthenticatedAPIClient().authenticate_admin(admin).get(f'/api/admin/users/{user.id}/').data
+
+        assert any(str(item['id']) == str(topic.id) for item in data['recent_forum_topics'])
+
+    def test_recent_handshakes_as_requester_preview(self):
+        """Preview shows the offer the user requested."""
+        admin = AdminUserFactory()
+        user = UserFactory()
+        offer = ServiceFactory(user=UserFactory(), type='Offer', title='Piano Lessons')
+        HandshakeFactory(service=offer, requester=user)
+
+        data = AuthenticatedAPIClient().authenticate_admin(admin).get(f'/api/admin/users/{user.id}/').data
+
+        assert len(data['recent_handshakes_as_requester']) == 1
+        assert data['recent_handshakes_as_requester'][0]['title'] == 'Piano Lessons'
+        assert len(data['recent_handshakes_as_provider']) == 0
+
+    def test_recent_handshakes_as_provider_preview(self):
+        """Preview shows the want the user responded to."""
+        admin = AdminUserFactory()
+        user = UserFactory()
+        want = ServiceFactory(user=UserFactory(), type='Need', title='Need a Plumber')
+        HandshakeFactory(service=want, requester=user)
+
+        data = AuthenticatedAPIClient().authenticate_admin(admin).get(f'/api/admin/users/{user.id}/').data
+
+        assert len(data['recent_handshakes_as_provider']) == 1
+        assert data['recent_handshakes_as_provider'][0]['title'] == 'Need a Plumber'
+        assert len(data['recent_handshakes_as_requester']) == 0

@@ -52,7 +52,7 @@ function asLabel(value: string | null | undefined, fallback = 'N/A') {
 function getReportedObjectPath(report: AdminReport): string | null {
   if (report.reported_service) return `/service-detail/${report.reported_service}`
   if (report.reported_forum_topic) return `/forum/topic/${report.reported_forum_topic}`
-  if (report.reported_user) return `/public-profile/${report.reported_user}`
+  if (report.reported_user) return `/admin/users/${report.reported_user}`
   return null
 }
 
@@ -862,8 +862,9 @@ const AdminDashboard = () => {
     const tabParam = searchParams.get('tab')
     const reportIdParam = searchParams.get('reportId')
 
-    if (tabParam === 'reports' && activeTab !== 'reports') {
-      setActiveTab('reports')
+    const validTabs: AdminTab[] = ['dashboard', 'users', 'reports', 'comments', 'moderation', 'audit']
+    if (tabParam && validTabs.includes(tabParam as AdminTab) && activeTab !== tabParam) {
+      setActiveTab(tabParam as AdminTab)
     }
 
     if (reportIdParam) {
@@ -883,16 +884,13 @@ const AdminDashboard = () => {
 
   const handleTabChange = useCallback((tab: AdminTab) => {
     setActiveTab(tab)
-    if (tab === 'reports') {
-      if (!searchParams.get('tab')) {
-        navigate('/admin?tab=reports', { replace: true })
-      }
-      return
-    }
-
     closeOpenReport()
-    navigate('/admin', { replace: true })
-  }, [closeOpenReport, navigate, searchParams])
+    if (tab === 'dashboard') {
+      navigate('/admin', { replace: true })
+    } else {
+      navigate(`/admin?tab=${tab}`, { replace: true })
+    }
+  }, [closeOpenReport, navigate])
 
   const handleLockTopic = async (topicId: string) => {
     try {
@@ -1278,7 +1276,7 @@ const AdminDashboard = () => {
                       </Box>
                       {/* Actions */}
                       <Flex w="108px" flexShrink={0} justify="flex-end" gap="4px">
-                        {mkUserBtn('View profile', <FiArrowUpRight size={11}/>, GRAY100, GRAY200, GRAY600, () => navigate(`/admin/users/${user.id}`))}
+                        {mkUserBtn('View profile', <FiArrowUpRight size={11}/>, GRAY100, GRAY200, GRAY600, () => navigate(`/admin/users/${user.id}`, { state: { from: 'users' } }))}
                         {mkUserBtn('Warn user', <FiAlertCircle size={11}/>, BLUE_LT, BLUE+'40', BLUE, () => handleWarnUser(user), isSelf)}
                         {mkUserBtn(user.is_active?'Suspend user':'Activate user',
                           user.is_active ? <FiSlash size={11}/> : <FiCheck size={11}/>,
@@ -1922,7 +1920,8 @@ const AdminDashboard = () => {
             ) : (
               <>
                 {(() => {
-                  const reportedProfilePath = openReport.reported_user ? `/public-profile/${openReport.reported_user}` : null
+                  const reportedProfilePath = openReport.reported_user ? `/admin/users/${openReport.reported_user}` : null
+                  const reporterProfilePath = openReport.reporter ? `/admin/users/${openReport.reporter}` : null
                   const reportedServicePath = openReport.reported_service ? `/service-detail/${openReport.reported_service}` : null
                   const ownerUserId = openReport.reported_service_owner || openReport.reported_user || null
                   const hasReportedUserInfo = !!(openReport.reported_user_name || openReport.reported_user_email || openReport.reported_user_karma_score != null)
@@ -2028,7 +2027,16 @@ const AdminDashboard = () => {
                         {/* Reporter */}
                         <Box flex={1} minW={0} display="flex" flexDirection="column">
                           <PanelCard mb={0} fill>
-                            <PanelSectionHead label="Reporter" />
+                            <PanelSectionHead label="Reporter"
+                              right={reporterProfilePath && (
+                                <Box as="button" title="View admin profile"
+                                  style={{ background:GRAY100, border:`1px solid ${GRAY200}`, color:GRAY600, cursor:'pointer', width:'24px', height:'24px', display:'inline-flex', alignItems:'center', justifyContent:'center', borderRadius:'6px' }}
+                                  onMouseEnter={(e)=>{(e.currentTarget as HTMLElement).style.filter='brightness(0.88)'}}
+                                  onMouseLeave={(e)=>{(e.currentTarget as HTMLElement).style.filter='none'}}
+                                  onClick={() => navigate(reporterProfilePath, { state: { from: 'reports' } })}>
+                                  <FiArrowUpRight size={11} />
+                                </Box>
+                              )} />
                             <Box px={4} py={3}>
                               <Flex align="center" gap="10px" mb={3}>
                                 <Box w="34px" h="34px" borderRadius="9px" display="flex" alignItems="center" justifyContent="center" flexShrink={0}
@@ -2063,11 +2071,11 @@ const AdminDashboard = () => {
                             <PanelCard mb={0} fill>
                               <PanelSectionHead label="Reported user"
                                 right={reportedProfilePath && (
-                                  <Box as="button" title="View profile"
+                                  <Box as="button" title="View admin profile"
                                     style={{ background:GRAY100, border:`1px solid ${GRAY200}`, color:GRAY600, cursor:'pointer', width:'24px', height:'24px', display:'inline-flex', alignItems:'center', justifyContent:'center', borderRadius:'6px' }}
                                     onMouseEnter={(e)=>{(e.currentTarget as HTMLElement).style.filter='brightness(0.88)'}}
                                     onMouseLeave={(e)=>{(e.currentTarget as HTMLElement).style.filter='none'}}
-                                    onClick={() => navigate(reportedProfilePath)}>
+                                    onClick={() => navigate(reportedProfilePath, { state: { from: 'reports' } })}>
                                     <FiArrowUpRight size={11} />
                                   </Box>
                                 )} />
