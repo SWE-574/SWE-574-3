@@ -1,7 +1,17 @@
+import io
+from unittest.mock import patch
+
 import pytest
+from django.conf import settings
+from django.core.management import call_command
+from django.db import connection
+from django.db.utils import DatabaseError, InternalError
+from django.utils import timezone
+from datetime import timedelta
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from api.exceptions import AuditLogImmutabilityError
 from api.models import AdminAuditLog, Report
 from api.tests.helpers.factories import AdminUserFactory, ForumTopicFactory, HandshakeFactory, ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
@@ -889,3 +899,93 @@ class TestAdminForumTopicLockPin:
         topic.refresh_from_db()
         assert topic.is_locked is True
         assert topic.is_pinned is True
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAdminAuditLogImmutability:
+    """
+    Verifies that AdminAuditLog records cannot be modified or deleted at the
+    application layer (model overrides) and at the database layer (PostgreSQL
+    trigger).
+    """
+
+    def _make_log(self):
+        admin = AdminUserFactory()
+        target = UserFactory()
+        return AdminAuditLog.objects.create(
+            admin=admin,
+            action_type='warn_user',
+            target_entity='user',
+            target_id=target.id,
+            reason='Test entry',
+        )
+
+    def test_audit_log_cannot_be_deleted(self):
+        """Model.delete() must raise AuditLogImmutabilityError."""
+        log = self._make_log()
+        with pytest.raises(AuditLogImmutabilityError):
+            log.delete()
+        assert AdminAuditLog.objects.filter(pk=log.pk).exists()
+
+    def test_audit_log_cannot_be_modified(self):
+        """Model.save() on an existing record must raise AuditLogImmutabilityError."""
+        log = self._make_log()
+        log.reason = 'Tampered reason'
+        with pytest.raises(AuditLogImmutabilityError):
+            log.save()
+        log.refresh_from_db()
+        assert log.reason == 'Test entry'
+
+    @pytest.mark.django_db(transaction=True)
+    def test_audit_log_db_level_delete_rejected(self):
+        """
+        Raw SQL DELETE against api_adminauditlog must be rejected by the
+        PostgreSQL trigger. Skipped on non-PostgreSQL backends.
+        """
+        if connection.vendor != 'postgresql':
+            pytest.skip('PostgreSQL-only test: immutability trigger not present on this backend.')
+
+        log = self._make_log()
+        log_pk = str(log.pk)
+
+        from django.db import transaction as db_transaction
+
+        with pytest.raises((InternalError, DatabaseError)):
+            with db_transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        'DELETE FROM api_adminauditlog WHERE id = %s::uuid',
+                        [log_pk],
+                    )
+
+        assert AdminAuditLog.objects.filter(pk=log.pk).exists()
+
+    def test_audit_log_retention_policy_enforced(self):
+        """
+        The archive_audit_logs management command reports records older than
+        AUDIT_RETENTION_DAYS with --dry-run without writing any files.
+        """
+        admin = AdminUserFactory()
+        target = UserFactory()
+        past_date = timezone.now() - timedelta(days=settings.AUDIT_RETENTION_DAYS + 10)
+
+        with patch('django.utils.timezone.now', return_value=past_date):
+            AdminAuditLog.objects.create(
+                admin=admin,
+                action_type='ban_user',
+                target_entity='user',
+                target_id=target.id,
+                reason='Old record for retention test',
+            )
+
+        out = io.StringIO()
+        call_command(
+            'archive_audit_logs',
+            '--dry-run',
+            f'--days={settings.AUDIT_RETENTION_DAYS}',
+            stdout=out,
+        )
+        output = out.getvalue()
+        assert 'DRY RUN' in output
+        assert '1' in output
