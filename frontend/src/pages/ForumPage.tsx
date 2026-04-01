@@ -19,7 +19,7 @@ import {
   FiPlus, FiArrowLeft, FiEdit2, FiTrash2, FiSend, FiCheck, FiX,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
-import { forumAPI, type ForumReportType } from '@/services/forumAPI'
+import { forumAPI, type ForumReportType, type TopicSortOption } from '@/services/forumAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { ForumCategory, ForumTopic, ForumPost, User } from '@/types'
 import {
@@ -363,6 +363,7 @@ function TopicListView({
   const [topics, setTopics] = useState<ForumTopic[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [sort, setSort] = useState<TopicSortOption>('newest')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const totalPages = Math.max(1, Math.ceil(total / TOPICS_PAGE_SIZE))
@@ -370,9 +371,8 @@ function TopicListView({
   const load = useCallback(async (p: number, signal: AbortSignal) => {
     setLoading(true); setError(null)
     try {
-      const res = await forumAPI.listTopics({ category: category.slug, page: p, page_size: TOPICS_PAGE_SIZE }, signal)
-      const sorted = [...res.results].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
-      setTopics(sorted); setTotal(res.count)
+      const res = await forumAPI.listTopics({ category: category.slug, page: p, page_size: TOPICS_PAGE_SIZE, sort }, signal)
+      setTopics(res.results); setTotal(res.count)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : ''
       const isAbort = e instanceof Error && (e.name?.includes('Abort') || e.message === 'canceled' || e.message === 'CanceledError')
@@ -380,11 +380,15 @@ function TopicListView({
     } finally {
       setLoading(false)
     }
-  }, [category.slug])
+  }, [category.slug, sort])
 
   useEffect(() => {
     setPage(1)
   }, [category.slug])
+
+  useEffect(() => {
+    setPage(1)
+  }, [sort])
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -454,9 +458,28 @@ function TopicListView({
           </Box>
         ) : (
           <>
-            <Box px={4} py={3} borderBottom={`1px solid ${GRAY100}`}>
+            <Flex px={4} py={3} borderBottom={`1px solid ${GRAY100}`} align="center" justify="space-between">
               <Text fontSize="11px" color={GRAY400} fontWeight={500}>{total} topic{total !== 1 ? 's' : ''}</Text>
-            </Box>
+              <Flex gap={1} bg={GRAY100} borderRadius="8px" p="3px">
+                {(['newest', 'most_active'] as TopicSortOption[]).map((opt) => (
+                  <Box
+                    key={opt}
+                    as="button"
+                    px={3} py="3px"
+                    fontSize="10px" fontWeight={600}
+                    borderRadius="6px"
+                    bg={sort === opt ? WHITE : 'transparent'}
+                    color={sort === opt ? GRAY800 : GRAY500}
+                    boxShadow={sort === opt ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'}
+                    cursor="pointer"
+                    transition="all 0.13s"
+                    onClick={() => setSort(opt)}
+                  >
+                    {opt === 'newest' ? 'Newest' : 'Most Active'}
+                  </Box>
+                ))}
+              </Flex>
+            </Flex>
             {topics.map((t) => (
               <Flex
                 key={t.id} as="div" w="full" align="flex-start" gap={3}

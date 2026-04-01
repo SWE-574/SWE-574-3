@@ -5,7 +5,7 @@ import {
   FiArrowLeft, FiPlus, FiMessageSquare, FiEye, FiMapPin, FiLock,
   FiClock, FiChevronLeft, FiChevronRight,
 } from 'react-icons/fi'
-import { forumAPI } from '@/services/forumAPI'
+import { forumAPI, type TopicSortOption } from '@/services/forumAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { ForumCategory, ForumTopic } from '@/types'
 import {
@@ -131,6 +131,7 @@ export default function ForumTopicList() {
   const [topics, setTopics]     = useState<ForumTopic[]>([])
   const [total, setTotal]       = useState(0)
   const [page, setPage]         = useState(1)
+  const [sort, setSort]         = useState<TopicSortOption>('newest')
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
 
@@ -143,19 +144,21 @@ export default function ForumTopicList() {
     try {
       const [cat, res] = await Promise.all([
         forumAPI.getCategory(slug, signal),
-        forumAPI.listTopics({ category: slug, page: p, page_size: PAGE_SIZE }, signal),
+        forumAPI.listTopics({ category: slug, page: p, page_size: PAGE_SIZE, sort }, signal),
       ])
       setCategory(cat)
-      // pinned topics float to the top
-      const sorted = [...res.results].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
-      setTopics(sorted)
+      setTopics(res.results)
       setTotal(res.count)
     } catch (e: unknown) {
       if (!signal.aborted) setError((e as Error).message ?? 'Failed to load')
     } finally {
       if (!signal.aborted) setLoading(false)
     }
-  }, [slug])
+  }, [slug, sort])
+
+  useEffect(() => {
+    setPage(1)
+  }, [sort])
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -252,10 +255,29 @@ export default function ForumTopicList() {
               </Box>
             ) : (
               <>
-                {/* Count header */}
-                <Box px={5} py={3} borderBottom={`1px solid ${GRAY100}`}>
+                {/* Count + sort header */}
+                <Flex px={5} py={3} borderBottom={`1px solid ${GRAY100}`} align="center" justify="space-between">
                   <Text fontSize="12px" color={GRAY400} fontWeight={500}>{total} topic{total !== 1 ? 's' : ''}</Text>
-                </Box>
+                  <Flex gap={1} bg={GRAY100} borderRadius="8px" p="3px">
+                    {(['newest', 'most_active'] as TopicSortOption[]).map((opt) => (
+                      <Box
+                        key={opt}
+                        as="button"
+                        px={3} py="4px"
+                        fontSize="11px" fontWeight={600}
+                        borderRadius="6px"
+                        bg={sort === opt ? WHITE : 'transparent'}
+                        color={sort === opt ? GRAY800 : GRAY500}
+                        boxShadow={sort === opt ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'}
+                        cursor="pointer"
+                        transition="all 0.13s"
+                        onClick={() => setSort(opt)}
+                      >
+                        {opt === 'newest' ? 'Newest' : 'Most Active'}
+                      </Box>
+                    ))}
+                  </Flex>
+                </Flex>
                 {topics.map((t) => (
                   <TopicRow key={t.id} topic={t} onClick={() => navigate(`/forum/topic/${t.id}`)} />
                 ))}

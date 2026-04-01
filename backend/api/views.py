@@ -83,7 +83,8 @@ from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Max
+from django.db.models.functions import Coalesce
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -6731,7 +6732,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         queryset = ForumTopic.objects.select_related('author', 'category')
-        
+
         # Filter by category if provided
         category_slug = self.request.query_params.get('category')
         if category_slug:
@@ -6739,12 +6740,19 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         else:
             # Only show topics from active categories
             queryset = queryset.filter(category__is_active=True)
-        
-        # Annotate with reply count
+
+        # Annotate with reply count and last activity timestamp
         queryset = queryset.annotate(
-            reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False))
+            reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False)),
+            last_activity_annotated=Coalesce(
+                Max('posts__created_at', filter=Q(posts__is_deleted=False)),
+                'created_at',
+            ),
         )
-        
+
+        sort = self.request.query_params.get('sort', 'newest')
+        if sort == 'most_active':
+            return queryset.order_by('-is_pinned', '-last_activity_annotated', '-reply_count_annotated')
         return queryset.order_by('-is_pinned', '-created_at')
     
     def get_serializer_class(self):
