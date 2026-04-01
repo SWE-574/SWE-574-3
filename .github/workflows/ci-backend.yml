@@ -157,7 +157,12 @@ jobs:
 
       - name: Audit Python dependencies
         working-directory: backend
-        run: .venv/bin/pip-audit --skip-editable
+        # Temporary unblock: CVE-2026-4539 currently affects the latest available
+        # Pygments release (2.19.2), so there is no patch version to upgrade to yet.
+        run: >
+          .venv/bin/pip-audit
+          --skip-editable
+          --ignore-vuln CVE-2026-4539
 
       - name: Run migrations
         working-directory: backend
