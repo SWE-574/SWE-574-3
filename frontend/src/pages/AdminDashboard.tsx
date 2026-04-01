@@ -861,10 +861,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     const tabParam = searchParams.get('tab')
     const reportIdParam = searchParams.get('reportId')
-
-    if (tabParam === 'reports' && activeTab !== 'reports') {
-      setActiveTab('reports')
-    }
+    const validTabs: AdminTab[] = ['dashboard', 'users', 'reports', 'comments', 'moderation', 'audit']
 
     if (reportIdParam) {
       if (activeTab !== 'reports') {
@@ -879,20 +876,21 @@ const AdminDashboard = () => {
     if (!reportIdParam && openReportId) {
       closeOpenReport()
     }
+
+    if (tabParam && validTabs.includes(tabParam as AdminTab) && activeTab !== tabParam) {
+      setActiveTab(tabParam as AdminTab)
+    }
   }, [activeTab, closeOpenReport, openReportId, openReportPanel, searchParams])
 
   const handleTabChange = useCallback((tab: AdminTab) => {
     setActiveTab(tab)
-    if (tab === 'reports') {
-      if (!searchParams.get('tab')) {
-        navigate('/admin?tab=reports', { replace: true })
-      }
-      return
-    }
-
     closeOpenReport()
-    navigate('/admin', { replace: true })
-  }, [closeOpenReport, navigate, searchParams])
+    if (tab === 'dashboard') {
+      navigate('/admin', { replace: true })
+    } else {
+      navigate(`/admin?tab=${tab}`, { replace: true })
+    }
+  }, [closeOpenReport, navigate])
 
   const handleLockTopic = async (topicId: string) => {
     try {
