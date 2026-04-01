@@ -5,7 +5,7 @@ from .models import (
     User, Service, Tag, Handshake, ChatMessage, 
     Notification, ReputationRep, Badge, UserBadge, Report, TransactionHistory,
     ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
-    ForumCategory, ForumTopic, ForumPost, ServiceMedia
+    ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow,
 )
 from django.db.models import Q
 from django.contrib.auth.hashers import make_password
@@ -265,6 +265,17 @@ class AdminUserDetailSerializer(serializers.ModelSerializer):
             }
             for log in logs
         ]
+
+class UserFollowRelationshipSerializer(serializers.ModelSerializer):
+    """Serialized UserFollow row for follow/unfollow API responses."""
+
+    follower_id = serializers.UUIDField(read_only=True)
+    following_id = serializers.UUIDField(read_only=True)
+
+    class Meta:
+        model = UserFollow
+        fields = ['id', 'follower_id', 'following_id', 'created_at']
+        read_only_fields = fields
 
 
 class AdminCommentSerializer(serializers.ModelSerializer):
@@ -1286,7 +1297,49 @@ class ProfileEventFieldsMixin:
         return self._serialize_handshakes(invited)
 
 
-class UserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer):
+class ProfileFollowStatsMixin(serializers.Serializer):
+    """Read-only follow counts and viewer-specific is_following for profile serializers.
+
+    Must subclass Serializer so DRF's metaclass registers SerializerMethodField
+    declarations; a plain mixin class would leave them out of _declared_fields.
+    """
+
+    followers_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_followers_count(self, obj):
+        v = getattr(obj, 'followers_count', None)
+        if v is not None:
+            return v
+        return UserFollow.objects.filter(
+            following_id=obj.pk, follower__is_active=True
+        ).count()
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_following_count(self, obj):
+        v = getattr(obj, 'following_count', None)
+        if v is not None:
+            return v
+        return UserFollow.objects.filter(
+            follower_id=obj.pk, following__is_active=True
+        ).count()
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_is_following(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        if request.user.pk == obj.pk:
+            return False
+        return UserFollow.objects.filter(
+            follower_id=request.user.pk,
+            following_id=obj.pk,
+        ).exists()
+
+
+class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     created_events = serializers.SerializerMethodField()
     joined_events = serializers.SerializerMethodField()
@@ -1325,6 +1378,7 @@ class UserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer
             'portfolio_images', 'show_history', 'featured_achievement_id',
             'is_onboarded', 'is_verified',
             'skills', 'skill_ids',
+            'followers_count', 'following_count', 'is_following',
         ]
         read_only_fields = [
             'id', 'email', 'timebank_balance', 'karma_score', 'role', 'services',
@@ -1332,6 +1386,7 @@ class UserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_file_url', 'featured_achievement_id', 'is_verified',
             'skills',
+            'followers_count', 'following_count', 'is_following',
         ]
         extra_kwargs = {
             'video_intro_file': {'write_only': True, 'required': False}
@@ -1491,7 +1546,7 @@ class UserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer
             instance.skills.set(tags_to_set)
         return instance
 
-class PublicUserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer):
+class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     created_events = serializers.SerializerMethodField()
     joined_events = serializers.SerializerMethodField()
@@ -1511,6 +1566,7 @@ class PublicUserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSeri
             'created_events', 'joined_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
+            'followers_count', 'following_count', 'is_following',
         ]
         read_only_fields = [
             'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
@@ -1518,6 +1574,7 @@ class PublicUserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSeri
             'created_events', 'joined_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
+            'followers_count', 'following_count', 'is_following',
         ]
 
     def get_skills(self, obj):
