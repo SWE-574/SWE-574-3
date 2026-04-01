@@ -228,6 +228,8 @@ logs/
 
 backend/tests/reports/
 frontend/tests/reports/
+tests/reports/
+
 
 # Test reports when pytest/coverage is run from repo root (outputs under ./tests/reports/)
 tests/reports/
