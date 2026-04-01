@@ -717,3 +717,175 @@ class TestAdminRoleAssignment:
         response = self._post(client, uuid.uuid4(), 'member')
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAdminForumTopicLockPin:
+    """Integration tests for admin lock/pin operations on forum topics (FR-03d)."""
+
+    def _lock_url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/lock/'
+
+    def _pin_url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/pin/'
+
+    # ── lock ──────────────────────────────────────────────────────────────────
+
+    def test_admin_can_lock_topic(self):
+        """POST lock/ on an unlocked topic sets is_locked=True and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='lock_topic').count()
+        response = client.post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+
+        logs = AdminAuditLog.objects.filter(action_type='lock_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.admin == admin
+        assert str(log.target_id) == str(topic.id)
+        assert log.target_entity == 'forum_topic'
+        assert log.reason == 'Locked'
+
+    def test_admin_can_unlock_topic(self):
+        """POST lock/ on a locked topic sets is_locked=False and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=True)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='lock_topic').count()
+        response = client.post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_locked is False
+
+        logs = AdminAuditLog.objects.filter(action_type='lock_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.reason == 'Unlocked'
+
+    def test_non_admin_cannot_lock_topic(self):
+        """Regular members must receive 403 on POST lock/."""
+        member = UserFactory()
+        topic = ForumTopicFactory(is_locked=False)
+        client = AuthenticatedAPIClient().authenticate_user(member)
+
+        response = client.post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        topic.refresh_from_db()
+        assert topic.is_locked is False
+
+    def test_unauthenticated_cannot_lock_topic(self):
+        """Unauthenticated requests must receive 401 on POST lock/."""
+        topic = ForumTopicFactory(is_locked=False)
+
+        response = APIClient().post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # ── pin ───────────────────────────────────────────────────────────────────
+
+    def test_admin_can_pin_topic(self):
+        """POST pin/ on an unpinned topic sets is_pinned=True and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='pin_topic').count()
+        response = client.post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_pinned is True
+
+        logs = AdminAuditLog.objects.filter(action_type='pin_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.admin == admin
+        assert str(log.target_id) == str(topic.id)
+        assert log.target_entity == 'forum_topic'
+        assert log.reason == 'Pinned'
+
+    def test_admin_can_unpin_topic(self):
+        """POST pin/ on a pinned topic sets is_pinned=False and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_pinned=True)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='pin_topic').count()
+        response = client.post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_pinned is False
+
+        logs = AdminAuditLog.objects.filter(action_type='pin_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.reason == 'Unpinned'
+
+    def test_non_admin_cannot_pin_topic(self):
+        """Regular members must receive 403 on POST pin/."""
+        member = UserFactory()
+        topic = ForumTopicFactory(is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_user(member)
+
+        response = client.post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        topic.refresh_from_db()
+        assert topic.is_pinned is False
+
+    def test_unauthenticated_cannot_pin_topic(self):
+        """Unauthenticated requests must receive 401 on POST pin/."""
+        topic = ForumTopicFactory(is_pinned=False)
+
+        response = APIClient().post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # ── idempotency / multiple toggles ────────────────────────────────────────
+
+    def test_lock_and_pin_are_idempotent(self):
+        """Toggling lock then lock again returns the topic to its original state."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=False, is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        # Lock → unlocked → locked: three round-trips
+        for expected in [True, False, True]:
+            response = client.post(self._lock_url(topic.id), format='json')
+            assert response.status_code == status.HTTP_200_OK
+            topic.refresh_from_db()
+            assert topic.is_locked is expected
+
+        # Pin → unpinned → pinned: three round-trips
+        for expected in [True, False, True]:
+            response = client.post(self._pin_url(topic.id), format='json')
+            assert response.status_code == status.HTTP_200_OK
+            topic.refresh_from_db()
+            assert topic.is_pinned is expected
+
+    def test_lock_and_pin_are_independent(self):
+        """Locking a topic must not affect its pin state and vice versa."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=False, is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        client.post(self._lock_url(topic.id), format='json')
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+        assert topic.is_pinned is False
+
+        client.post(self._pin_url(topic.id), format='json')
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+        assert topic.is_pinned is True
