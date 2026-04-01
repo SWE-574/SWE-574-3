@@ -46,7 +46,7 @@ test('FR-03d: admin can toggle the lock state on a forum topic', async ({ page }
 
   await page.waitForTimeout(2_000)
 
-  const lockBtn = page.getByRole('button', { name: /^lock topic$/i }).first()
+  const lockBtn = page.getByRole('button', { name: /^(un)?lock topic$/i }).first()
   if (!(await lockBtn.isVisible().catch(() => false))) {
     test.skip()
     return
@@ -65,7 +65,7 @@ test('FR-03d: admin can toggle the pin state on a forum topic', async ({ page })
 
   await page.waitForTimeout(2_000)
 
-  const pinBtn = page.getByRole('button', { name: /^pin topic$/i }).first()
+  const pinBtn = page.getByRole('button', { name: /^(un)?pin topic$/i }).first()
   if (!(await pinBtn.isVisible().catch(() => false))) {
     test.skip()
     return

@@ -876,6 +876,10 @@ const AdminDashboard = () => {
     if (!reportIdParam && openReportId) {
       closeOpenReport()
     }
+
+    if (tabParam && validTabs.includes(tabParam as AdminTab) && activeTab !== tabParam) {
+      setActiveTab(tabParam as AdminTab)
+    }
   }, [activeTab, closeOpenReport, openReportId, openReportPanel, searchParams])
 
   const handleTabChange = useCallback((tab: AdminTab) => {
