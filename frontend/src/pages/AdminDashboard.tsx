@@ -876,10 +876,6 @@ const AdminDashboard = () => {
     if (!reportIdParam && openReportId) {
       closeOpenReport()
     }
-
-    if (tabParam && validTabs.includes(tabParam as AdminTab) && activeTab !== tabParam) {
-      setActiveTab(tabParam as AdminTab)
-    }
   }, [activeTab, closeOpenReport, openReportId, openReportPanel, searchParams])
 
   const handleTabChange = useCallback((tab: AdminTab) => {
@@ -1250,7 +1246,9 @@ const AdminDashboard = () => {
                         </Flex>
                         <Box minW={0}>
                           <Text fontSize="13px" fontWeight={600} color={GRAY800}
-                            style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{name}</Text>
+                            style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}
+                            onClick={() => navigate(`/admin/users/${user.id}`, { state: { from: 'users' } })}
+                            _hover={{ color: GREEN }}>{name}</Text>
                           <Text fontSize="11px" color={GRAY400}
                             style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user.email}</Text>
                         </Box>

@@ -9,15 +9,20 @@ test('FR-03e: Comment Moderation tab loads with the active comments view', async
   await loginAsAdmin(page, ADMIN_USERS.admin)
   await goToAdminTab(page, 'comments')
 
-  // Either comment rows or an empty state must be present.
+  // Wait for the loading spinner to disappear and data to settle.
+  await page.waitForTimeout(2_000)
+
+  // The comment table uses <Flex> rows (no role="row"), so detect data presence
+  // via the "Author" column header which only renders when rows exist.
   const hasRows = await page
-    .locator('table tr, [role="row"]')
-    .nth(1)
+    .getByText('Author', { exact: true })
+    .first()
     .isVisible()
     .catch(() => false)
 
   const hasEmpty = await page
-    .getByText(/no comments/i)
+    .getByText(/no comments match/i)
+    .first()
     .isVisible()
     .catch(() => false)
 
@@ -30,7 +35,7 @@ test('FR-03e: admin can open the remove-comment confirmation dialog', async ({ p
 
   await page.waitForTimeout(2_000)
 
-  const removeBtn = page.getByRole('button', { name: /remove/i }).first()
+  const removeBtn = page.getByRole('button', { name: /remove comment/i }).first()
   if (!(await removeBtn.isVisible().catch(() => false))) {
     test.skip()
     return
@@ -57,7 +62,7 @@ test('FR-03e: admin can switch to the "removed" comments filter', async ({ page 
     // Some implementations use a select instead of buttons.
     const select = page.locator('select').first()
     if (await select.isVisible().catch(() => false)) {
-      await select.selectOption({ label: /removed/i })
+      await select.selectOption({ label: 'Removed' })
     }
   } else {
     await removedFilter.click()

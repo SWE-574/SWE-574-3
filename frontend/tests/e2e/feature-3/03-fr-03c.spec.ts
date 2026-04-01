@@ -25,7 +25,7 @@ test('FR-03c: admin can open the suspend confirmation dialog for a user', async 
 
   await expect(page.getByText(/Elif|Cem|Ayşe/i).first()).toBeVisible({ timeout: 15_000 })
 
-  const suspendBtn = page.getByRole('button', { name: /suspend/i }).first()
+  const suspendBtn = page.getByRole('button', { name: /suspend user/i }).first()
   await expect(suspendBtn).toBeVisible({ timeout: 10_000 })
   await suspendBtn.click()
 

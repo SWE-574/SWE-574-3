@@ -26,11 +26,13 @@ test('NFR-03a: unauthenticated user visiting /admin/users/<id> is redirected to 
 
 test('NFR-03a: regular member cannot access the admin panel', async ({ page }) => {
   // Log in as a regular member and attempt to visit /admin.
-  await loginAs(page, USERS.cem)
+  await loginAs(page, USERS.deniz)
   await page.goto('/admin')
 
-  // Must be redirected away — dashboard or login, but never the admin shell.
-  await expect(page).not.toHaveURL(/^.*\/admin$/, { timeout: 15_000 })
+  // AdminProtectedRoute redirects non-admins to /dashboard.
+  // Use a positive assertion so the test waits for the redirect rather than
+  // relying on the URL not matching an exact pattern (race-prone).
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
   await expect(page.getByText('Admin Mode')).not.toBeVisible()
 })
 
@@ -38,7 +40,7 @@ test('NFR-03a: regular member cannot access the users tab directly', async ({ pa
   await loginAs(page, USERS.elif)
   await page.goto('/admin?tab=users')
 
-  await expect(page).not.toHaveURL(/\/admin\?tab=users/, { timeout: 15_000 })
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
 })
 
 test('NFR-03a: back navigation from a user detail page returns to the admin panel', async ({ page }) => {
