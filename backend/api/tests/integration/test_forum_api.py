@@ -11,7 +11,7 @@ from api.tests.helpers.factories import (
     UserFactory, AdminUserFactory, ForumCategoryFactory, ForumTopicFactory, ForumPostFactory
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import ForumCategory, ForumTopic, ForumPost
+from api.models import ForumCategory, ForumTopic, ForumPost, Report
 
 
 @pytest.mark.django_db
@@ -333,3 +333,277 @@ class TestForumTopicSorting:
 
         response = APIClient().get('/api/forum/topics/?sort=garbage')
         assert response.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestForumTopicReport:
+    """Integration tests for POST /api/forum/topics/<pk>/report/"""
+
+    def _url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/report/'
+
+    def test_authenticated_user_can_report_another_users_topic(self):
+        """Valid report on someone else's topic returns 201 and persists the record."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(topic.id), {'type': 'spam'})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Report.objects.filter(
+            reporter=reporter,
+            reported_forum_topic=topic,
+            type='spam',
+        ).exists()
+
+    def test_report_with_explicit_description_persists_it(self):
+        """A description provided in the payload is stored on the report."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(topic.id), {
+            'type': 'inappropriate_content',
+            'description': 'This topic contains offensive language.',
+        })
+
+        assert response.status_code == status.HTTP_201_CREATED
+        report = Report.objects.get(reporter=reporter, reported_forum_topic=topic)
+        assert report.description == 'This topic contains offensive language.'
+
+    def test_report_without_description_gets_auto_description(self):
+        """When description is omitted the backend fills in a default."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author, title='Test Topic Title')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        client.post(self._url(topic.id), {'type': 'inappropriate_content'})
+
+        report = Report.objects.get(reporter=reporter, reported_forum_topic=topic)
+        assert 'Test Topic Title' in report.description
+
+    def test_report_response_schema(self):
+        """Response body includes expected fields from ReportSerializer."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(topic.id), {'type': 'harassment'})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.data
+        assert 'id' in data
+        assert data['type'] == 'harassment'
+        assert data['status'] == 'pending'
+        assert str(topic.id) == str(data['reported_forum_topic'])
+
+    def test_invalid_report_type_returns_400(self):
+        """A report type not in TYPE_CHOICES is rejected with a validation error."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(topic.id), {'type': 'not_a_valid_type'})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_self_report_on_own_topic_is_rejected(self):
+        """A user cannot report a topic they authored."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+        response = client.post(self._url(topic.id), {'type': 'spam'})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert not Report.objects.filter(reported_forum_topic=topic).exists()
+
+    def test_unauthenticated_report_is_blocked(self):
+        """Anonymous users receive 401/403 and no report is created."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+
+        response = APIClient().post(self._url(topic.id), {'type': 'spam'})
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+        assert not Report.objects.filter(reported_forum_topic=topic).exists()
+
+    def test_report_nonexistent_topic_returns_404(self):
+        """Reporting a topic UUID that does not exist returns 404."""
+        import uuid
+        reporter = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(uuid.uuid4()), {'type': 'spam'})
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestForumPostReport:
+    """Integration tests for POST /api/forum/posts/<pk>/report/"""
+
+    def _url(self, post_id):
+        return f'/api/forum/posts/{post_id}/report/'
+
+    def test_authenticated_user_can_report_another_users_post(self):
+        """Valid report on someone else's post returns 201 and persists the record."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(post.id), {'type': 'harassment'})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Report.objects.filter(
+            reporter=reporter,
+            reported_forum_post=post,
+            type='harassment',
+        ).exists()
+
+    def test_report_post_with_optional_description(self):
+        """A description supplied alongside the type is stored on the report."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(post.id), {
+            'type': 'spam',
+            'description': 'This reply is promotional content.',
+        })
+
+        assert response.status_code == status.HTTP_201_CREATED
+        report = Report.objects.get(reporter=reporter, reported_forum_post=post)
+        assert report.description == 'This reply is promotional content.'
+
+    def test_report_post_without_description_gets_auto_description(self):
+        """Omitting description triggers the backend default referencing the topic title."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category, title='Discussion About X')
+        post = ForumPostFactory(topic=topic, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        client.post(self._url(post.id), {'type': 'inappropriate_content'})
+
+        report = Report.objects.get(reporter=reporter, reported_forum_post=post)
+        assert 'Discussion About X' in report.description
+
+    def test_post_report_links_both_topic_and_post(self):
+        """The persisted report references both the post and its parent topic."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        client.post(self._url(post.id), {'type': 'spam'})
+
+        report = Report.objects.get(reporter=reporter, reported_forum_post=post)
+        assert report.reported_forum_topic == topic
+        assert report.reported_forum_post == post
+
+    def test_post_report_response_schema(self):
+        """Response body includes expected fields from ReportSerializer."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(post.id), {'type': 'scam'})
+
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.data
+        assert 'id' in data
+        assert data['type'] == 'scam'
+        assert data['status'] == 'pending'
+        assert str(post.id) == str(data['reported_forum_post'])
+        assert str(topic.id) == str(data['reported_forum_topic'])
+
+    def test_invalid_report_type_returns_400(self):
+        """A report type not in TYPE_CHOICES is rejected with a validation error."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        reporter = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(post.id), {'type': 'gibberish'})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_self_report_on_own_post_is_rejected(self):
+        """A user cannot report a post they authored."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=author)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+        response = client.post(self._url(post.id), {'type': 'spam'})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert not Report.objects.filter(reported_forum_post=post).exists()
+
+    def test_unauthenticated_post_report_is_blocked(self):
+        """Anonymous users receive 401/403 and no report is created."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=author)
+
+        response = APIClient().post(self._url(post.id), {'type': 'spam'})
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+        assert not Report.objects.filter(reported_forum_post=post).exists()
+
+    def test_report_nonexistent_post_returns_404(self):
+        """Reporting a post UUID that does not exist returns 404."""
+        import uuid
+        reporter = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(reporter)
+        response = client.post(self._url(uuid.uuid4()), {'type': 'spam'})
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
