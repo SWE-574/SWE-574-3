@@ -956,6 +956,27 @@ class ForumPost(models.Model):
         ]
 
 
+class UserFollow(models.Model):
+    """Directed follow relationship between users (social graph edge)."""
+    follower = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='following'
+    )
+    following = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='followers'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('follower', 'following')
+        indexes = [
+            models.Index(fields=['follower']),
+            models.Index(fields=['following']),
+        ]
+
+    def __str__(self):
+        return f"{self.follower.email} → {self.following.email}"
+
+
 class ServiceMedia(models.Model):
     """Media files (images/videos) attached to services"""
     MEDIA_TYPE_CHOICES = (

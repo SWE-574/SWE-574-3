@@ -14,7 +14,7 @@ from api.models import (
     ChatMessage, Handshake, Notification, ReputationRep, Comment,
     Service, Tag, User, UserBadge, ForumCategory, ForumTopic, ForumPost,
     Report, AdminAuditLog, ServiceMedia, PublicChatMessage,
-    ServiceGroupChatMessage, NegativeRep,
+    ServiceGroupChatMessage, NegativeRep, UserFollow,
 )
 from api.achievement_utils import check_and_assign_badges
 from api.services import HandshakeService, EventHandshakeService, EventEvaluationService
@@ -60,6 +60,7 @@ if demo_users.exists():
     ForumPost.objects.filter(author_id__in=user_ids).delete()
     ChatMessage.objects.filter(sender_id__in=user_ids).delete()
     Report.objects.filter(Q(reporter_id__in=user_ids) | Q(reported_user_id__in=user_ids)).delete()
+    UserFollow.objects.filter(Q(follower_id__in=user_ids) | Q(following_id__in=user_ids)).delete()
     demo_users.delete()
 
 orphaned_handshakes = Handshake.objects.filter(service__isnull=True)
@@ -472,6 +473,68 @@ levent = create_or_update_user(
 )
 
 all_users = [elif_user, cem, ayse, mehmet, zeynep, can, deniz, burak, selin, emre, yasemin, murat, levent]
+
+print("\n[3b/8] Creating social follow graph...")
+
+def follow(follower, following):
+    UserFollow.objects.get_or_create(follower=follower, following=following)
+
+# Elif (main demo user) — community hub, followed by many, follows her close circle
+follow(elif_user, ayse);     follow(elif_user, zeynep);   follow(elif_user, selin)
+follow(elif_user, levent);   follow(elif_user, yasemin)
+
+# Ayse — follows wellness/women's circle
+follow(ayse, elif_user);     follow(ayse, zeynep);        follow(ayse, selin)
+follow(ayse, yasemin);       follow(ayse, deniz)
+
+# Zeynep — follows community organizers
+follow(zeynep, elif_user);   follow(zeynep, ayse);        follow(zeynep, selin)
+follow(zeynep, cem);         follow(zeynep, deniz)
+
+# Cem — tech/youth cluster
+follow(cem, can);            follow(cem, burak);          follow(cem, emre)
+follow(cem, mehmet);         follow(cem, zeynep)
+
+# Mehmet — cross-generation bridge
+follow(mehmet, cem);         follow(mehmet, levent);      follow(mehmet, murat)
+follow(mehmet, can);         follow(mehmet, elif_user)
+
+# Can — young tech crowd
+follow(can, cem);            follow(can, burak);          follow(can, emre)
+follow(can, mehmet)
+
+# Deniz — photography & outdoor community
+follow(deniz, selin);        follow(deniz, zeynep);       follow(deniz, ayse)
+follow(deniz, can);          follow(deniz, elif_user)
+
+# Burak — startup / tech
+follow(burak, can);          follow(burak, cem);          follow(burak, emre)
+follow(burak, mehmet)
+
+# Selin — wellness & arts
+follow(selin, elif_user);    follow(selin, ayse);         follow(selin, zeynep)
+follow(selin, yasemin);      follow(selin, deniz)
+
+# Emre — tech newcomer
+follow(emre, can);           follow(emre, burak);         follow(emre, cem)
+follow(emre, mehmet)
+
+# Yasemin — cultural & women's community
+follow(yasemin, elif_user);  follow(yasemin, ayse);       follow(yasemin, selin)
+follow(yasemin, zeynep);     follow(yasemin, levent)
+
+# Murat — older gen, board games & culture
+follow(murat, levent);       follow(murat, mehmet);       follow(murat, cem)
+follow(murat, elif_user)
+
+# Levent — retired musician, intergenerational
+follow(levent, murat);       follow(levent, mehmet);      follow(levent, elif_user)
+follow(levent, yasemin);     follow(levent, ayse)
+
+total_follows = UserFollow.objects.filter(
+    follower__email__in=[u.email for u in all_users]
+).count()
+print(f"  Created {total_follows} follow relationships across {len(all_users)} users")
 
 print("\n[4/8] Creating realistic services...")
 
