@@ -266,7 +266,6 @@ class AdminUserDetailSerializer(serializers.ModelSerializer):
             for log in logs
         ]
 
-
 class UserFollowRelationshipSerializer(serializers.ModelSerializer):
     """Serialized UserFollow row for follow/unfollow API responses."""
 
