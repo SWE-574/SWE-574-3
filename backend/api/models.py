@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.contrib.gis.db import models as gis_models
 from django.contrib.gis.geos import Point
@@ -957,24 +958,99 @@ class ForumPost(models.Model):
 
 
 class UserFollow(models.Model):
-    """Directed follow relationship between users (social graph edge)."""
+    """
+    Active follow relationship: follower follows following (no self-follow).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     follower = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='following'
+        User,
+        on_delete=models.CASCADE,
+        related_name='follows',
+        help_text='User who follows',
     )
     following = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='followers'
+        User,
+        on_delete=models.CASCADE,
+        related_name='followed_by',
+        help_text='User being followed',
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        unique_together = ('follower', 'following')
-        indexes = [
-            models.Index(fields=['follower']),
-            models.Index(fields=['following']),
-        ]
+    def clean(self):
+        super().clean()
+        if self.follower_id and self.following_id and self.follower_id == self.following_id:
+            raise ValidationError('A user cannot follow themselves.')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.follower.email} → {self.following.email}"
+        return f'{self.follower} follows {self.following}'
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['follower', 'following'],
+                name='api_userfollow_follower_following_uniq',
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(follower=models.F('following')),
+                name='api_userfollow_no_self_follow',
+            ),
+        ]
+
+
+class UserFollowEvent(models.Model):
+    """
+    Append-only history of follow and unfollow actions (multiple rows per pair allowed).
+    """
+
+    ACTION_FOLLOW = 'follow'
+    ACTION_UNFOLLOW = 'unfollow'
+    ACTION_CHOICES = (
+        (ACTION_FOLLOW, 'Follow'),
+        (ACTION_UNFOLLOW, 'Unfollow'),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    follower = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='follow_events_as_follower',
+        help_text='User who performed the action',
+    )
+    following = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='follow_events_as_target',
+        help_text='User who was followed or unfollowed',
+    )
+    action = models.CharField(max_length=16, choices=ACTION_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        super().clean()
+        if self.follower_id and self.following_id and self.follower_id == self.following_id:
+            raise ValidationError('Follow events cannot target the same user as the actor.')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        action_label = dict(self.ACTION_CHOICES).get(self.action, self.action)
+        return f'{self.follower} {action_label.lower()} {self.following}'
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(follower=models.F('following')),
+                name='api_userfollowevent_no_self_action',
+            ),
+        ]
 
 
 class ServiceMedia(models.Model):

@@ -43,7 +43,8 @@ from .models import (
     ChatRoom, PublicChatMessage, ServiceGroupChatMessage, GroupChatSession, Comment, NegativeRep,
     AdminAuditLog,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
-    EmailVerificationToken, PasswordResetToken, UserFollow,
+    EmailVerificationToken, PasswordResetToken,
+    UserFollow, UserFollowEvent,
 )
 from .serializers import (
     UserRegistrationSerializer, 
@@ -68,7 +69,9 @@ from .serializers import (
     ForumCategorySerializer,
     ForumTopicSerializer,
     ForumTopicDetailSerializer,
-    ForumPostSerializer
+    ForumPostSerializer,
+    UserFollowRelationshipSerializer,
+    UserSummarySerializer,
 )
 from .achievement_utils import get_achievement_progress
 from .utils import (
@@ -1107,6 +1110,16 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
                 punctual_count=Count('received_reps', filter=Q(received_reps__is_punctual=True)),
                 helpful_count=Count('received_reps', filter=Q(received_reps__is_helpful=True)),
                 kind_count=Count('received_reps', filter=Q(received_reps__is_kind=True)),
+                followers_count=Count(
+                    'followed_by',
+                    filter=Q(followed_by__follower__is_active=True),
+                    distinct=True,
+                ),
+                following_count=Count(
+                    'follows',
+                    filter=Q(follows__following__is_active=True),
+                    distinct=True,
+                ),
             )
         )
     
@@ -1426,67 +1439,218 @@ class UserVerifiedReviewsView(APIView):
 
 class UserFollowView(APIView):
     """
-    Follow / Unfollow a user.
+    Follow or unfollow another user.
 
-    **POST /api/users/{id}/follow/** — Follow the user with the given id.
-    **DELETE /api/users/{id}/follow/** — Unfollow the user with the given id.
+    **POST /api/users/{id}/follow/** — Create ``UserFollow`` and a ``follow`` event.
+
+    **DELETE /api/users/{id}/follow/** — Remove ``UserFollow`` and append an ``unfollow`` event.
+
+    **Errors (POST):** 404 unknown user; 400 self-follow or already following.
+
+    **Errors (DELETE):** 404 unknown user; 400 self-unfollow or not following.
+
+    **401:** not authenticated
     """
+
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [UserRateThrottle]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
+    @extend_schema(
+        summary='Follow user',
+        description=(
+            'Creates an active follow from the current user to the user specified by URL id. '
+            'Duplicate follows return 400.'
+        ),
+        request=None,
+        responses={
+            201: OpenApiResponse(description='Created with message and follow relationship payload.'),
+        },
+        tags=['Users'],
+    )
     def post(self, request, id):
-        if str(id) == str(request.user.id):
-            return Response({'detail': 'You cannot follow yourself.'}, status=status.HTTP_400_BAD_REQUEST)
-        target = get_object_or_404(User, id=id)
-        _, created = UserFollow.objects.get_or_create(follower=request.user, following=target)
-        if not created:
-            return Response({'detail': 'Already following.'}, status=status.HTTP_200_OK)
-        return Response({'detail': 'Followed.'}, status=status.HTTP_201_CREATED)
+        try:
+            target = User.objects.get(id=id)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
 
+        if target.id == request.user.id:
+            return create_error_response(
+                'You cannot follow yourself.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if UserFollow.objects.filter(follower=request.user, following=target).exists():
+            return create_error_response(
+                'You are already following this user.',
+                code=ErrorCodes.ALREADY_EXISTS,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                follow = UserFollow.objects.create(follower=request.user, following=target)
+                UserFollowEvent.objects.create(
+                    follower=request.user,
+                    following=target,
+                    action=UserFollowEvent.ACTION_FOLLOW,
+                )
+        except IntegrityError:
+            return create_error_response(
+                'You are already following this user.',
+                code=ErrorCodes.ALREADY_EXISTS,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = UserFollowRelationshipSerializer(follow)
+        invalidate_user_profile(str(request.user.id))
+        invalidate_user_profile(str(target.id))
+        return Response(
+            {
+                'message': 'Successfully followed user.',
+                'follow': serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        summary='Unfollow user',
+        description=(
+            'Removes the active follow from the current user to the user specified by URL id '
+            'and records an unfollow event. Returns 400 if there is no follow relationship.'
+        ),
+        responses={
+            200: OpenApiResponse(description='Unfollowed successfully.'),
+        },
+        tags=['Users'],
+    )
     def delete(self, request, id):
-        deleted, _ = UserFollow.objects.filter(follower=request.user, following_id=id).delete()
-        if not deleted:
-            return Response({'detail': 'Not following.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        try:
+            target = User.objects.get(id=id)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        if target.id == request.user.id:
+            return create_error_response(
+                'You cannot unfollow yourself.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            follow = UserFollow.objects.get(follower=request.user, following=target)
+        except UserFollow.DoesNotExist:
+            return create_error_response(
+                'You are not following this user.',
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            follow.delete()
+            UserFollowEvent.objects.create(
+                follower=request.user,
+                following=target,
+                action=UserFollowEvent.ACTION_UNFOLLOW,
+            )
+
+        invalidate_user_profile(str(request.user.id))
+        invalidate_user_profile(str(target.id))
+        return Response(
+            {'message': 'Successfully unfollowed user.'},
+            status=status.HTTP_200_OK,
+        )
 
 
-class UserFollowersView(APIView):
+def _user_follow_list_response(request, user_id, list_kind):
     """
-    List followers of a user.
-
-    **GET /api/users/{id}/followers/** — Returns paginated list of users who follow this user.
+    Return a paginated list of UserSummarySerializer data for followers or following.
+    list_kind: 'followers' | 'following'
     """
-    permission_classes = [permissions.AllowAny]
-    pagination_class = StandardResultsSetPagination
+    try:
+        target = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return create_error_response(
+            'User not found.',
+            code=ErrorCodes.NOT_FOUND,
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
 
+    badge_prefetch = Prefetch(
+        'badges',
+        queryset=UserBadge.objects.select_related('badge'),
+    )
+    if list_kind == 'followers':
+        qs = (
+            User.objects.filter(follows__following=target, is_active=True)
+            .distinct()
+            .prefetch_related(badge_prefetch)
+            .order_by('first_name', 'last_name', 'id')
+        )
+    else:
+        qs = (
+            User.objects.filter(followed_by__follower=target, is_active=True)
+            .distinct()
+            .prefetch_related(badge_prefetch)
+            .order_by('first_name', 'last_name', 'id')
+        )
+
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    if page is not None:
+        serializer = UserSummarySerializer(page, many=True, context={'request': request})
+        return paginator.get_paginated_response(serializer.data)
+    serializer = UserSummarySerializer(qs, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+class UserFollowersListView(APIView):
+    """
+    List users who follow the user identified by ``id`` (active ``UserFollow`` rows).
+
+    **GET /api/users/{id}/followers/**
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [UserRateThrottle]
+
+    @extend_schema(
+        summary='List followers',
+        description='Returns user summaries for accounts that follow the given user.',
+        responses={200: OpenApiResponse(description='JSON array of user summary objects.')},
+        tags=['Users'],
+    )
     def get(self, request, id):
-        get_object_or_404(User, id=id)
-        from .serializers import UserFollowSerializer
-        qs = UserFollow.objects.filter(following_id=id).select_related('follower', 'following').order_by('-created_at')
-        paginator = self.pagination_class()
-        page = paginator.paginate_queryset(qs, request)
-        if page is not None:
-            return paginator.get_paginated_response(UserFollowSerializer(page, many=True).data)
-        return Response(UserFollowSerializer(qs, many=True).data)
+        return _user_follow_list_response(request, id, 'followers')
 
 
-class UserFollowingView(APIView):
+class UserFollowingListView(APIView):
     """
-    List users that a user follows.
+    List users that the user identified by ``id`` is following.
 
-    **GET /api/users/{id}/following/** — Returns paginated list of users this user follows.
+    **GET /api/users/{id}/following/**
     """
-    permission_classes = [permissions.AllowAny]
-    pagination_class = StandardResultsSetPagination
 
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [UserRateThrottle]
+
+    @extend_schema(
+        summary='List following',
+        description='Returns user summaries for accounts followed by the given user.',
+        responses={200: OpenApiResponse(description='JSON array of user summary objects.')},
+        tags=['Users'],
+    )
     def get(self, request, id):
-        get_object_or_404(User, id=id)
-        from .serializers import UserFollowSerializer
-        qs = UserFollow.objects.filter(follower_id=id).select_related('follower', 'following').order_by('-created_at')
-        paginator = self.pagination_class()
-        page = paginator.paginate_queryset(qs, request)
-        if page is not None:
-            return paginator.get_paginated_response(UserFollowSerializer(page, many=True).data)
-        return Response(UserFollowSerializer(qs, many=True).data)
+        return _user_follow_list_response(request, id, 'following')
 
 
 class ServiceViewSet(viewsets.ModelViewSet):

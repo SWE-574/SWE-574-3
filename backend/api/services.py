@@ -9,7 +9,7 @@ from django.db.models import Q
 from django.db.utils import OperationalError
 from django.utils import timezone
 
-from .models import Handshake, Service, User, ChatMessage, ReputationRep, NegativeRep, EventEvaluationSummary, Report, UserFollow
+from .models import Handshake, Service, User, ChatMessage, ReputationRep, NegativeRep, EventEvaluationSummary, Report
 from .utils import create_notification
 from .cache_utils import invalidate_conversations
 
