@@ -1,35 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { loginAs, uniqueTitle, USERS, createTopicViaApi, createReplyViaApi, goToTopic } from '../helpers'
 
-/**
- * Delete the given user account via API (requires the user's own session).
- */
-async function deleteUserViaApi(page: import('@playwright/test').Page, userId: string): Promise<void> {
-  const result = await page.evaluate(async (id) => {
-    const res = await fetch(`/api/users/${id}/`, {
-      method: 'DELETE',
-      credentials: 'include',
-    })
-    return { status: res.status }
-  }, userId)
-  // 204 = deleted, 404 = already gone — both acceptable for setup purposes.
-  if (result.status !== 204 && result.status !== 404) {
-    throw new Error(`deleteUserViaApi: unexpected status ${result.status}`)
-  }
-}
-
-/**
- * Fetch the current user's id from the session.
- */
-async function getCurrentUserId(page: import('@playwright/test').Page): Promise<string> {
-  const id = await page.evaluate(async () => {
-    const res = await fetch('/api/auth/user/', { credentials: 'include' })
-    const data = await res.json() as { id?: string }
-    return data.id ?? ''
-  })
-  return id
-}
-
 test('FR-04g: forum topic persists after author account is deleted', async ({ page }) => {
   // Use a dedicated demo account to avoid interfering with other tests.
   // We test the behaviour by checking what the API returns — not by actually
