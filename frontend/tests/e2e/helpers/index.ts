@@ -1,4 +1,5 @@
 export * from './auth'
+export * from './feature4'
 export * from './common'
 export * from './navigation'
 export * from './session'
