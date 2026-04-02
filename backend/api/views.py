@@ -7113,6 +7113,28 @@ class ForumPostViewSet(viewsets.ViewSet):
         post.save(update_fields=['is_deleted'])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @action(detail=True, methods=['post'], url_path='restore')
+    @track_performance
+    def restore(self, request, pk=None):
+        """Restore a soft-deleted forum post (admin only)."""
+        if not request.user.is_staff:
+            return create_error_response(
+                'Admin access required',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            post = ForumPost.objects.select_related('topic', 'author').get(pk=pk, is_deleted=True)
+        except ForumPost.DoesNotExist:
+            return create_error_response(
+                'Post not found or not deleted',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        post.is_deleted = False
+        post.save(update_fields=['is_deleted'])
+        return Response(ForumPostSerializer(post).data)
+
     @action(detail=True, methods=['post'], url_path='report', throttle_classes=[ConfirmationThrottle])
     @track_performance
     def report(self, request, pk=None):

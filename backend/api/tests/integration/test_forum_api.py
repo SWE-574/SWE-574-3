@@ -607,3 +607,304 @@ class TestForumPostReport:
         response = client.post(self._url(uuid.uuid4()), {'type': 'spam'})
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestForumTopicLockUnlock:
+    """Integration tests for POST /api/forum/topics/<pk>/lock/ (admin-only toggle)"""
+
+    def _url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/lock/'
+
+    def test_admin_can_lock_an_unlocked_topic(self):
+        """Admin locking an unlocked topic sets is_locked=True and returns updated topic."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=False)
+        admin = AdminUserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        response = client.post(self._url(topic.id))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['is_locked'] is True
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+
+    def test_admin_can_unlock_a_locked_topic(self):
+        """Admin locking an already-locked topic toggles it back to unlocked."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=True)
+        admin = AdminUserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        response = client.post(self._url(topic.id))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['is_locked'] is False
+        topic.refresh_from_db()
+        assert topic.is_locked is False
+
+    def test_lock_creates_audit_log_entry(self):
+        """Locking a topic writes an AdminAuditLog record with action_type=lock_topic."""
+        from api.models import AdminAuditLog
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=False)
+        admin = AdminUserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        client.post(self._url(topic.id))
+
+        assert AdminAuditLog.objects.filter(
+            admin=admin,
+            action_type='lock_topic',
+            target_id=topic.id,
+        ).exists()
+
+    def test_unlock_creates_audit_log_entry(self):
+        """Unlocking a topic also writes an AdminAuditLog record."""
+        from api.models import AdminAuditLog
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=True)
+        admin = AdminUserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        client.post(self._url(topic.id))
+
+        assert AdminAuditLog.objects.filter(
+            admin=admin,
+            action_type='lock_topic',
+            target_id=topic.id,
+        ).exists()
+
+    def test_regular_user_cannot_lock_topic(self):
+        """Non-admin authenticated user receives 403."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=False)
+        user = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+        response = client.post(self._url(topic.id))
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        topic.refresh_from_db()
+        assert topic.is_locked is False
+
+    def test_unauthenticated_user_cannot_lock_topic(self):
+        """Anonymous request is rejected."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=False)
+
+        response = APIClient().post(self._url(topic.id))
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+        topic.refresh_from_db()
+        assert topic.is_locked is False
+
+    def test_lock_nonexistent_topic_returns_404(self):
+        """Locking a UUID that does not exist returns 404."""
+        import uuid
+        admin = AdminUserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        response = client.post(f'/api/forum/topics/{uuid.uuid4()}/lock/')
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestPostingToLockedThread:
+    """Behavior tests: locked threads block new replies."""
+
+    def test_posting_to_locked_topic_returns_403(self):
+        """Creating a reply on a locked topic is rejected with 403."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=True)
+        user = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+        response = client.post(
+            f'/api/forum/topics/{topic.id}/posts/',
+            {'body': 'This should not be allowed.'},
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert not ForumPost.objects.filter(topic=topic).exists()
+
+    def test_posting_to_unlocked_topic_succeeds(self):
+        """Creating a reply on an unlocked topic is permitted."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=False)
+        user = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+        response = client.post(
+            f'/api/forum/topics/{topic.id}/posts/',
+            {'body': 'A valid reply.'},
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ForumPost.objects.filter(topic=topic).exists()
+
+    def test_lock_then_post_is_rejected(self):
+        """Admin locks topic; subsequent reply attempt by another user is rejected."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=False)
+        admin = AdminUserFactory()
+        user = UserFactory()
+
+        admin_client = AuthenticatedAPIClient()
+        admin_client.authenticate_user(admin)
+        admin_client.post(f'/api/forum/topics/{topic.id}/lock/')
+
+        user_client = AuthenticatedAPIClient()
+        user_client.authenticate_user(user)
+        response = user_client.post(
+            f'/api/forum/topics/{topic.id}/posts/',
+            {'body': 'Trying to post after lock.'},
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_unlock_then_post_succeeds(self):
+        """Admin unlocks a previously locked topic; reply is then accepted."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_locked=True)
+        admin = AdminUserFactory()
+        user = UserFactory()
+
+        admin_client = AuthenticatedAPIClient()
+        admin_client.authenticate_user(admin)
+        admin_client.post(f'/api/forum/topics/{topic.id}/lock/')  # toggles to unlocked
+
+        user_client = AuthenticatedAPIClient()
+        user_client.authenticate_user(user)
+        response = user_client.post(
+            f'/api/forum/topics/{topic.id}/posts/',
+            {'body': 'Now this should work.'},
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestForumPostRestore:
+    """Integration tests for POST /api/forum/posts/<pk>/restore/ (admin-only).
+
+    Forum topics are hard-deleted and have no restore path.
+    Forum posts use is_deleted soft-delete and are restorable by admins.
+    """
+
+    def _url(self, post_id):
+        return f'/api/forum/posts/{post_id}/restore/'
+
+    def test_admin_can_restore_soft_deleted_post(self):
+        """Admin restoring a soft-deleted post sets is_deleted=False and returns 200."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, is_deleted=True)
+        admin = AdminUserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        response = client.post(self._url(post.id))
+
+        assert response.status_code == status.HTTP_200_OK
+        post.refresh_from_db()
+        assert post.is_deleted is False
+
+    def test_restore_response_schema(self):
+        """Restored post response body includes expected fields."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, is_deleted=True)
+        admin = AdminUserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        response = client.post(self._url(post.id))
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data
+        assert str(post.id) == str(data['id'])
+        assert data['is_deleted'] is False
+
+    def test_restore_post_that_was_soft_deleted_via_destroy(self):
+        """End-to-end: soft-delete via DELETE then restore via restore endpoint."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category)
+        author = UserFactory()
+        post = ForumPostFactory(topic=topic, author=author)
+        admin = AdminUserFactory()
+
+        admin_client = AuthenticatedAPIClient()
+        admin_client.authenticate_user(admin)
+        admin_client.delete(f'/api/forum/posts/{post.id}/')
+        post.refresh_from_db()
+        assert post.is_deleted is True
+
+        response = admin_client.post(self._url(post.id))
+        assert response.status_code == status.HTTP_200_OK
+        post.refresh_from_db()
+        assert post.is_deleted is False
+
+    def test_regular_user_cannot_restore_post(self):
+        """Non-admin user is denied with 403."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, is_deleted=True)
+        user = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+        response = client.post(self._url(post.id))
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        post.refresh_from_db()
+        assert post.is_deleted is True
+
+    def test_unauthenticated_user_cannot_restore_post(self):
+        """Anonymous request is rejected."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, is_deleted=True)
+
+        response = APIClient().post(self._url(post.id))
+
+        assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+        post.refresh_from_db()
+        assert post.is_deleted is True
+
+    def test_restore_non_deleted_post_returns_404(self):
+        """Restoring a post that is not deleted returns 404 (nothing to restore)."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, is_deleted=False)
+        admin = AdminUserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        response = client.post(self._url(post.id))
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_restore_nonexistent_post_returns_404(self):
+        """Restoring a UUID that does not exist returns 404."""
+        import uuid
+        admin = AdminUserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        response = client.post(self._url(uuid.uuid4()))
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
