@@ -25,7 +25,10 @@ import {
   deleteTopic,
   patchPost,
   deletePost,
+  reportTopic,
+  reportPost,
 } from "../../api/forum";
+import ReportModal from "../components/ReportModal";
 import { colors } from "../../constants/colors";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import { getInitials } from "../../utils/getInitials";
@@ -93,6 +96,7 @@ interface TopicHeaderProps {
   onEditTitleChange: (v: string) => void;
   onEditBodyChange: (v: string) => void;
   onMenu: () => void;
+  onReport: () => void;
   onSave: () => void;
   onCancel: () => void;
 }
@@ -107,10 +111,12 @@ function TopicHeader({
   onEditTitleChange,
   onEditBodyChange,
   onMenu,
+  onReport,
   onSave,
   onCancel,
 }: TopicHeaderProps) {
   const isOwner = !!user && user.id === topic.author_id;
+  const canReport = !!user && !isOwner;
 
   return (
     <View style={styles.topicHeader}>
@@ -123,6 +129,11 @@ function TopicHeader({
         {isOwner && !isEditing && (
           <Pressable style={styles.menuButton} onPress={onMenu} hitSlop={8}>
             <Ionicons name="ellipsis-vertical" size={18} color={colors.GRAY500} />
+          </Pressable>
+        )}
+        {canReport && !isEditing && (
+          <Pressable style={styles.menuButton} onPress={onReport} hitSlop={8}>
+            <Ionicons name="flag-outline" size={18} color={colors.GRAY500} />
           </Pressable>
         )}
       </View>
@@ -185,6 +196,7 @@ interface PostItemProps {
   savingPost: boolean;
   onEditBodyChange: (v: string) => void;
   onMenu: (post: ForumPost) => void;
+  onReport: (post: ForumPost) => void;
   onSave: (postId: string) => void;
   onCancel: () => void;
 }
@@ -197,10 +209,12 @@ function PostItem({
   savingPost,
   onEditBodyChange,
   onMenu,
+  onReport,
   onSave,
   onCancel,
 }: PostItemProps) {
   const isOwner = !!user && user.id === post.author_id;
+  const canReport = !!user && !isOwner;
 
   return (
     <View style={styles.postItem}>
@@ -216,6 +230,11 @@ function PostItem({
         {isOwner && !isEditing && (
           <Pressable style={styles.menuButton} onPress={() => onMenu(post)} hitSlop={8}>
             <Ionicons name="ellipsis-vertical" size={16} color={colors.GRAY500} />
+          </Pressable>
+        )}
+        {canReport && !isEditing && (
+          <Pressable style={styles.menuButton} onPress={() => onReport(post)} hitSlop={8}>
+            <Ionicons name="flag-outline" size={16} color={colors.GRAY500} />
           </Pressable>
         )}
       </View>
@@ -272,6 +291,12 @@ export default function TopicDetailScreen() {
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [editingPostBody, setEditingPostBody] = useState("");
   const [savingPost, setSavingPost] = useState(false);
+
+  const [reportTarget, setReportTarget] = useState<
+    | { kind: "topic" }
+    | { kind: "post"; post: ForumPost }
+    | null
+  >(null);
 
   const listRef = useRef<FlatList<ForumPost>>(null);
   const loadingMoreRef = useRef(false);
@@ -463,6 +488,24 @@ export default function TopicDetailScreen() {
     setEditingPostBody("");
   }, []);
 
+  const handleReportSubmit = useCallback(
+    async (req: import("../../api/forum").ReportRequest) => {
+      if (!reportTarget) return;
+      try {
+        if (reportTarget.kind === "topic") {
+          await reportTopic(id, req);
+        } else {
+          await reportPost(reportTarget.post.id, req);
+        }
+        setReportTarget(null);
+        Alert.alert("Report Submitted", "Thank you. Our moderators will review this report.");
+      } catch (err) {
+        Alert.alert("Error", parseApiError(err));
+      }
+    },
+    [id, reportTarget]
+  );
+
   const renderFooter = () => {
     if (!loadingMore) return null;
     return (
@@ -553,6 +596,7 @@ export default function TopicDetailScreen() {
                 savingPost={savingPost}
                 onEditBodyChange={setEditingPostBody}
                 onMenu={handlePostMenu}
+                onReport={(post) => setReportTarget({ kind: "post", post })}
                 onSave={handleSavePost}
                 onCancel={handleCancelPostEdit}
               />
@@ -569,6 +613,7 @@ export default function TopicDetailScreen() {
                   onEditTitleChange={setEditTitle}
                   onEditBodyChange={setEditBody}
                   onMenu={handleTopicMenu}
+                  onReport={() => setReportTarget({ kind: "topic" })}
                   onSave={handleSaveTopic}
                   onCancel={handleCancelTopicEdit}
                 />
@@ -584,6 +629,13 @@ export default function TopicDetailScreen() {
           {renderComposer()}
         </KeyboardAvoidingView>
       )}
+
+      <ReportModal
+        visible={reportTarget !== null}
+        onClose={() => setReportTarget(null)}
+        onSubmit={handleReportSubmit}
+        targetLabel={reportTarget?.kind === "topic" ? "topic" : "reply"}
+      />
     </SafeAreaView>
   );
 }

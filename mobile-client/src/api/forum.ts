@@ -72,6 +72,19 @@ export interface PostRequest {
   body: string;
 }
 
+export interface ReportRequest {
+  type: 'inappropriate_content' | 'spam' | 'harassment' | 'scam' | 'other';
+  description?: string;
+}
+
+export interface ReportResponse {
+  id: string;
+  type: string;
+  status: string;
+  description: string;
+  created_at: string;
+}
+
 export function listCategories(): Promise<ForumCategory[]> {
   return apiRequest<ForumCategory[]>('/forum/categories/');
 }
@@ -138,4 +151,12 @@ export function deletePost(id: string): Promise<void> {
 
 export function listRecentPosts(params?: { limit?: number }): Promise<ForumPost[]> {
   return apiRequest<ForumPost[]>('/forum/posts/recent/', { params: params as Record<string, number | undefined> });
+}
+
+export function reportTopic(id: string, body: ReportRequest): Promise<ReportResponse> {
+  return apiRequest<ReportResponse>(`/forum/topics/${id}/report/`, { method: 'POST', body });
+}
+
+export function reportPost(id: string, body: ReportRequest): Promise<ReportResponse> {
+  return apiRequest<ReportResponse>(`/forum/posts/${id}/report/`, { method: 'POST', body });
 }
