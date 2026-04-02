@@ -2138,28 +2138,43 @@ admin_password = 'demo123'
 
 existing_admin = User.objects.filter(email=admin_email).first()
 if existing_admin:
-    existing_admin.delete()
-    print(f"  Removed existing admin account")
-
-admin_user = User.objects.create_superuser(
-    email=admin_email,
-    password=admin_password,
-    first_name='Moderator',
-    last_name='Admin',
-    bio='Platform moderator and administrator',
-    avatar_url=dicebear_avatar('moderator'),
-    banner_url=picsum_image('moderator-banner', 1200, 400),
-    location='Beyoğlu, Istanbul',
-    timebank_balance=Decimal('10.00'),
-    karma_score=100,
-    role='admin',
-    is_staff=True,
-    is_superuser=True,
-    is_verified=True,
-    is_onboarded=True,
-)
+    admin_user = existing_admin
+    admin_user.first_name = 'Moderator'
+    admin_user.last_name = 'Admin'
+    admin_user.bio = 'Platform moderator and administrator'
+    admin_user.avatar_url = dicebear_avatar('moderator')
+    admin_user.banner_url = picsum_image('moderator-banner', 1200, 400)
+    admin_user.location = 'Beyoğlu, Istanbul'
+    admin_user.timebank_balance = Decimal('10.00')
+    admin_user.karma_score = 100
+    admin_user.role = 'admin'
+    admin_user.is_staff = True
+    admin_user.is_superuser = True
+    admin_user.is_verified = True
+    admin_user.is_onboarded = True
+    admin_user.set_password(admin_password)
+    admin_user.save()
+    print(f"  Updated existing admin account")
+else:
+    admin_user = User.objects.create_superuser(
+        email=admin_email,
+        password=admin_password,
+        first_name='Moderator',
+        last_name='Admin',
+        bio='Platform moderator and administrator',
+        avatar_url=dicebear_avatar('moderator'),
+        banner_url=picsum_image('moderator-banner', 1200, 400),
+        location='Beyoğlu, Istanbul',
+        timebank_balance=Decimal('10.00'),
+        karma_score=100,
+        role='admin',
+        is_staff=True,
+        is_superuser=True,
+        is_verified=True,
+        is_onboarded=True,
+    )
 admin_user.skills.set([technology_tag, education_tag])
-print(f"  Created: {admin_email} (Admin account)")
+print(f"  Prepared: {admin_email} (Admin account)")
 
 print("\n[10/11] Creating super admin account...")
 super_admin_email = 'superadmin@demo.com'
@@ -2167,28 +2182,43 @@ super_admin_password = 'demo123'
 
 existing_super_admin = User.objects.filter(email=super_admin_email).first()
 if existing_super_admin:
-    existing_super_admin.delete()
-    print(f"  Removed existing super admin account")
-
-super_admin_user = User.objects.create_superuser(
-    email=super_admin_email,
-    password=super_admin_password,
-    first_name='Super',
-    last_name='Admin',
-    bio='Platform super administrator with full access to all roles and settings.',
-    avatar_url=dicebear_avatar('superadmin'),
-    banner_url=picsum_image('superadmin-banner', 1200, 400),
-    location='Beşiktaş, Istanbul',
-    timebank_balance=Decimal('10.00'),
-    karma_score=200,
-    role='super_admin',
-    is_staff=True,
-    is_superuser=True,
-    is_verified=True,
-    is_onboarded=True,
-)
+    super_admin_user = existing_super_admin
+    super_admin_user.first_name = 'Super'
+    super_admin_user.last_name = 'Admin'
+    super_admin_user.bio = 'Platform super administrator with full access to all roles and settings.'
+    super_admin_user.avatar_url = dicebear_avatar('superadmin')
+    super_admin_user.banner_url = picsum_image('superadmin-banner', 1200, 400)
+    super_admin_user.location = 'Beşiktaş, Istanbul'
+    super_admin_user.timebank_balance = Decimal('10.00')
+    super_admin_user.karma_score = 200
+    super_admin_user.role = 'super_admin'
+    super_admin_user.is_staff = True
+    super_admin_user.is_superuser = True
+    super_admin_user.is_verified = True
+    super_admin_user.is_onboarded = True
+    super_admin_user.set_password(super_admin_password)
+    super_admin_user.save()
+    print(f"  Updated existing super admin account")
+else:
+    super_admin_user = User.objects.create_superuser(
+        email=super_admin_email,
+        password=super_admin_password,
+        first_name='Super',
+        last_name='Admin',
+        bio='Platform super administrator with full access to all roles and settings.',
+        avatar_url=dicebear_avatar('superadmin'),
+        banner_url=picsum_image('superadmin-banner', 1200, 400),
+        location='Beşiktaş, Istanbul',
+        timebank_balance=Decimal('10.00'),
+        karma_score=200,
+        role='super_admin',
+        is_staff=True,
+        is_superuser=True,
+        is_verified=True,
+        is_onboarded=True,
+    )
 super_admin_user.skills.set([technology_tag, education_tag])
-print(f"  Created: {super_admin_email} (Super Admin account)")
+print(f"  Prepared: {super_admin_email} (Super Admin account)")
 
 print("\n[11/11] Creating admin-testable data (reports + audit logs)...")
 
@@ -2276,68 +2306,65 @@ print(f"  Created 7 test reports (4 pending, 2 resolved, 1 dismissed)")
 
 # ── Audit Logs ───────────────────────────────────────────────────────────────
 
-audit1 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='warn_user',
-    target_entity='user',
-    target_id=burak.id,
-    reason='Multiple community members reported aggressive follow-up messages. Issued formal warning and reminded of platform code of conduct.',
-)
-AdminAuditLog.objects.filter(pk=audit1.pk).update(created_at=timezone.now() - timedelta(days=8))
-
-audit2 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='adjust_karma',
-    target_entity='user',
-    target_id=can.id,
-    reason='Manually corrected karma score (+10) after a system error failed to record three completed exchanges from last month.',
-)
-AdminAuditLog.objects.filter(pk=audit2.pk).update(created_at=timezone.now() - timedelta(days=5))
-
-audit3 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='resolve_report',
-    target_entity='report',
-    target_id=report4.id,
-    reason='Reviewed evidence and closed service_issue report. Both parties confirmed mutual agreement. No policy violation.',
-)
-AdminAuditLog.objects.filter(pk=audit3.pk).update(created_at=timezone.now() - timedelta(days=2))
-
-audit4 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='lock_topic',
-    target_entity='forum_topic',
-    target_id=forum_topics[1].id,
-    reason='Thread derailed into off-topic arguments. Locked after moderator warning was ignored by participants.',
-)
-AdminAuditLog.objects.filter(pk=audit4.pk).update(created_at=timezone.now() - timedelta(days=14))
-
-audit5 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='pin_topic',
-    target_entity='forum_topic',
-    target_id=forum_topics[0].id,
-    reason='Pinned welcome thread to top of General Discussion for better visibility for new members.',
-)
-AdminAuditLog.objects.filter(pk=audit5.pk).update(created_at=timezone.now() - timedelta(days=20))
-
-audit6 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='resolve_report',
-    target_entity='report',
-    target_id=report6.id,
-    reason='Resolved forum spam report and documented removal of duplicate post in event planning thread.',
-)
-AdminAuditLog.objects.filter(pk=audit6.pk).update(created_at=timezone.now() - timedelta(days=1))
-
-audit7 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='warn_user',
-    target_entity='user',
-    target_id=deniz.id,
-    reason='Issued gentle warning after repeated last-minute cancellations and one unresolved no-show appeal required moderation follow-up.',
-)
-AdminAuditLog.objects.filter(pk=audit7.pk).update(created_at=timezone.now() - timedelta(hours=12))
+now = timezone.now()
+AdminAuditLog.objects.bulk_create([
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='warn_user',
+        target_entity='user',
+        target_id=burak.id,
+        reason='Multiple community members reported aggressive follow-up messages. Issued formal warning and reminded of platform code of conduct.',
+        created_at=now - timedelta(days=8),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='adjust_karma',
+        target_entity='user',
+        target_id=can.id,
+        reason='Manually corrected karma score (+10) after a system error failed to record three completed exchanges from last month.',
+        created_at=now - timedelta(days=5),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='resolve_report',
+        target_entity='report',
+        target_id=report4.id,
+        reason='Reviewed evidence and closed service_issue report. Both parties confirmed mutual agreement. No policy violation.',
+        created_at=now - timedelta(days=2),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='lock_topic',
+        target_entity='forum_topic',
+        target_id=forum_topics[1].id,
+        reason='Thread derailed into off-topic arguments. Locked after moderator warning was ignored by participants.',
+        created_at=now - timedelta(days=14),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='pin_topic',
+        target_entity='forum_topic',
+        target_id=forum_topics[0].id,
+        reason='Pinned welcome thread to top of General Discussion for better visibility for new members.',
+        created_at=now - timedelta(days=20),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='resolve_report',
+        target_entity='report',
+        target_id=report6.id,
+        reason='Resolved forum spam report and documented removal of duplicate post in event planning thread.',
+        created_at=now - timedelta(days=1),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='warn_user',
+        target_entity='user',
+        target_id=deniz.id,
+        reason='Issued gentle warning after repeated last-minute cancellations and one unresolved no-show appeal required moderation follow-up.',
+        created_at=now - timedelta(hours=12),
+    ),
+])
 
 print(f"  Created 7 audit log entries")
 
