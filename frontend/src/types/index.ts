@@ -87,6 +87,10 @@ export interface User {
   punctual_count?: number
   helpful_count?: number
   kind_count?: number
+  // ─── Follow system (profile detail) ───────────────────────────────────────
+  followers_count?: number
+  following_count?: number
+  is_following?: boolean
   location?: string
   skills?: Tag[]
   // ─── Event System ───────────────────────────────────────────────────────────
@@ -96,6 +100,15 @@ export interface User {
   created_events?: Service[]
   joined_events?: ProfileEventHandshake[]
   invited_events?: ProfileEventHandshake[]
+}
+
+/** Minimal user row from GET /users/:id/followers/ and .../following/ */
+export interface UserSummary {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  avatar_url?: string | null
 }
 
 export interface ProfileEventHandshake {

@@ -65,6 +65,25 @@ function imageMediaOnly(media: ServiceMedia[] | undefined): ServiceMedia[] {
   return (media ?? []).filter((item) => item.media_type === 'image')
 }
 
+function normalizeComparableText(value: string | null | undefined): string {
+  return (value ?? '').trim()
+}
+
+function normalizeComparableCoord(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return null
+  return Number(numeric.toFixed(6))
+}
+
+function sortedTagIds(tags: Tag[] | undefined): string[] {
+  return (tags ?? []).map((tag) => tag.id).sort()
+}
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
 // ─── Mapbox geocoding types ───────────────────────────────────────────────────
 
 interface GeoContext {
@@ -444,10 +463,11 @@ export default function ServiceForm({
   const [eventDateTimeError, setEventDateTimeError] = useState<string | undefined>()
 
   const schema = useMemo(() => getSchema(type), [type])
-  const { register, handleSubmit, control, watch, trigger, reset, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, control, watch, trigger, reset, formState } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: { location_type: 'In-Person', schedule_type: 'One-Time', max_participants: 1 },
   })
+  const { errors, dirtyFields } = formState
 
   const locType   = watch('location_type')
   const schedType = watch('schedule_type')
@@ -722,53 +742,91 @@ export default function ServiceForm({
 
       if (isEditMode && serviceId) {
         const fd = new FormData()
-        fd.append('title', values.title)
-        fd.append('description', values.description)
-        fd.append('duration', String(values.duration))
-        fd.append('location_type', values.location_type)
-        fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
-        fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
-        fd.append('schedule_details', values.schedule_details ?? '')
-        if (values.location_type === 'In-Person' && locationValue) {
+        const initialTagIds = sortedTagIds(initialService?.tags)
+        const currentTagIds = sortedTagIds(selectedTags)
+        const tagsChanged = !sameStringArray(initialTagIds, currentTagIds)
+        const locationTypeChanged = !!dirtyFields.location_type
+        const scheduleTypeChanged = !!dirtyFields.schedule_type
+        const maxParticipantsChanged = !!dirtyFields.max_participants
+        const publicLocationChanged = values.location_type === 'In-Person'
+          ? normalizeComparableText(locationValue?.label) !== normalizeComparableText(initialService?.location_area)
+            || normalizeComparableCoord(locationValue?.lat) !== normalizeComparableCoord(initialService?.location_lat)
+            || normalizeComparableCoord(locationValue?.lng) !== normalizeComparableCoord(initialService?.location_lng)
+          : normalizeComparableText(onlineLocation) !== normalizeComparableText(initialService?.location_area)
+        const sessionExactLocationChanged = normalizeComparableText(sessionExactLocation) !== normalizeComparableText(initialService?.session_exact_location)
+        const sessionExactCoordsChanged = normalizeComparableCoord(sessionExactLocationCoords?.lat) !== normalizeComparableCoord(initialService?.session_exact_location_lat)
+          || normalizeComparableCoord(sessionExactLocationCoords?.lng) !== normalizeComparableCoord(initialService?.session_exact_location_lng)
+        const sessionLocationGuideChanged = normalizeComparableText(sessionLocationGuide) !== normalizeComparableText(initialService?.session_location_guide)
+        const existingScheduledTime = initialService?.scheduled_time ? new Date(initialService.scheduled_time) : null
+        const initialEventDate = existingScheduledTime && !Number.isNaN(existingScheduledTime.getTime())
+          ? existingScheduledTime.toISOString().slice(0, 10)
+          : ''
+        const initialEventTime = existingScheduledTime && !Number.isNaN(existingScheduledTime.getTime())
+          ? existingScheduledTime.toISOString().slice(11, 16)
+          : ''
+        const eventDateTimeChanged = eventDate !== initialEventDate || eventTime !== initialEventTime
+        const fixedOfferShapeChanged = locationTypeChanged || scheduleTypeChanged || maxParticipantsChanged
+
+        if (dirtyFields.title) fd.append('title', values.title)
+        if (dirtyFields.description) fd.append('description', values.description)
+        if (dirtyFields.duration) fd.append('duration', String(values.duration))
+        if (locationTypeChanged) fd.append('location_type', values.location_type)
+        if (maxParticipantsChanged) {
+          fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
+        }
+        if (scheduleTypeChanged || type === 'Event') {
+          fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
+        }
+        if (dirtyFields.schedule_details || scheduleTypeChanged) {
+          fd.append('schedule_details', values.schedule_details ?? '')
+        }
+
+        if (values.location_type === 'In-Person' && locationValue && (locationTypeChanged || publicLocationChanged)) {
           fd.append('location_area', locationValue.label.slice(0, 100))
-          if (isFixedGroupOffer && sessionExactLocation.trim()) {
-            fd.append('session_exact_location', sessionExactLocation.trim().slice(0, 255))
-            if (sessionExactLocationCoords) {
-              fd.append('session_exact_location_lat', sessionExactLocationCoords.lat.toFixed(6))
-              fd.append('session_exact_location_lng', sessionExactLocationCoords.lng.toFixed(6))
-            } else {
-              fd.append('session_exact_location_lat', '')
-              fd.append('session_exact_location_lng', '')
-            }
-            fd.append('session_location_guide', sessionLocationGuide.trim().slice(0, 255))
-          } else {
-            fd.append('session_exact_location', '')
-            fd.append('session_exact_location_lat', '')
-            fd.append('session_exact_location_lng', '')
-            fd.append('session_location_guide', '')
-          }
           fd.append('location_lat', locationValue.lat.toFixed(6))
           fd.append('location_lng', locationValue.lng.toFixed(6))
-        } else if (values.location_type === 'Online' && isFixedGroupOffer) {
+        } else if ((locationTypeChanged || publicLocationChanged) && values.location_type === 'Online') {
           fd.append('location_area', onlineLocation.trim().slice(0, 100))
-          fd.append('session_exact_location', '')
-          fd.append('session_exact_location_lat', '')
-          fd.append('session_exact_location_lng', '')
-          fd.append('session_location_guide', '')
-        } else {
-          fd.append('location_area', '')
+        }
+
+        if (isFixedGroupOffer && values.location_type === 'In-Person' && (
+          fixedOfferShapeChanged
+          || sessionExactLocationChanged
+          || sessionExactCoordsChanged
+          || sessionLocationGuideChanged
+        )) {
+          fd.append('session_exact_location', sessionExactLocation.trim().slice(0, 255))
+          if (sessionExactLocationCoords) {
+            fd.append('session_exact_location_lat', sessionExactLocationCoords.lat.toFixed(6))
+            fd.append('session_exact_location_lng', sessionExactLocationCoords.lng.toFixed(6))
+          }
+          fd.append('session_location_guide', sessionLocationGuide.trim().slice(0, 255))
+        } else if ((fixedOfferShapeChanged || locationTypeChanged) && (
+          initialService?.session_exact_location
+          || initialService?.session_exact_location_lat != null
+          || initialService?.session_exact_location_lng != null
+          || initialService?.session_location_guide
+        )) {
           fd.append('session_exact_location', '')
           fd.append('session_exact_location_lat', '')
           fd.append('session_exact_location_lng', '')
           fd.append('session_location_guide', '')
         }
-        if ((type === 'Event' || isFixedGroupOffer) && eventDate && eventTime) {
+
+        if ((type === 'Event' || isFixedGroupOffer) && eventDate && eventTime && (
+          type === 'Event'
+          || fixedOfferShapeChanged
+          || eventDateTimeChanged
+        )) {
           fd.append('scheduled_time', new Date(`${eventDate}T${eventTime}:00`).toISOString())
         }
-        tagIds.forEach((id) => fd.append('tag_ids', id))
-        tagNames.forEach((name) => fd.append('tag_names', name))
-        if (Object.keys(wikidataLabelMap).length > 0) {
-          fd.append('wikidata_labels_json', JSON.stringify(wikidataLabelMap))
+
+        if (tagsChanged) {
+          tagIds.forEach((id) => fd.append('tag_ids', id))
+          tagNames.forEach((name) => fd.append('tag_names', name))
+          if (Object.keys(wikidataLabelMap).length > 0) {
+            fd.append('wikidata_labels_json', JSON.stringify(wikidataLabelMap))
+          }
         }
         if (mediaDirty) {
           fd.append('replace_media', 'true')
