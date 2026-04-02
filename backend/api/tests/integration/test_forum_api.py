@@ -908,3 +908,198 @@ class TestForumPostRestore:
         response = client.post(self._url(uuid.uuid4()))
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+# ---------------------------------------------------------------------------
+# Deleted-author traceability tests (FR-04g)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestDeletedAuthorTraceability:
+    """
+    Verify that deleting a user preserves forum topics/posts and that the API
+    returns stable placeholder identity for the deleted author.
+
+    ForumTopic.author and ForumPost.author use SET_NULL so deleting the user
+    sets the FK column to NULL without touching the content rows.
+    """
+
+    # ── Data survival ────────────────────────────────────────────────────────
+
+    def test_deleting_author_preserves_forum_topic(self):
+        """Topic row survives after its author account is deleted."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+        topic_id = topic.id
+
+        author.delete()
+
+        assert ForumTopic.objects.filter(id=topic_id).exists()
+
+    def test_deleting_author_preserves_forum_post(self):
+        """Post row survives after its author account is deleted."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=author)
+        post_id = post.id
+
+        author.delete()
+
+        assert ForumPost.objects.filter(id=post_id).exists()
+
+    def test_deleting_author_sets_topic_author_null(self):
+        """After deletion the topic's author FK is NULL in the database."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+
+        author.delete()
+
+        topic.refresh_from_db()
+        assert topic.author_id is None
+
+    def test_deleting_author_sets_post_author_null(self):
+        """After deletion the post's author FK is NULL in the database."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=author)
+
+        author.delete()
+
+        post.refresh_from_db()
+        assert post.author_id is None
+
+    def test_deleting_one_author_does_not_affect_other_topics(self):
+        """Deleting user A does not touch topics authored by user B."""
+        category = ForumCategoryFactory(is_active=True)
+        author_a = UserFactory()
+        author_b = UserFactory()
+        topic_a = ForumTopicFactory(category=category, author=author_a)
+        topic_b = ForumTopicFactory(category=category, author=author_b)
+
+        author_a.delete()
+
+        topic_b.refresh_from_db()
+        assert topic_b.author_id == author_b.id
+
+    # ── API serialization with placeholder ───────────────────────────────────
+
+    def test_topic_list_returns_placeholder_for_deleted_author(self):
+        """Topic list endpoint returns '[Deleted User]' for author_name when author is gone."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+        topic_id = str(topic.id)
+
+        author.delete()
+
+        response = APIClient().get('/api/forum/topics/')
+        assert response.status_code == status.HTTP_200_OK
+
+        result = next(t for t in response.data['results'] if t['id'] == topic_id)
+        assert result['author_name'] == '[Deleted User]'
+        assert result['author_id'] is None
+        assert result['author_avatar_url'] is None
+
+    def test_topic_detail_returns_placeholder_for_deleted_author(self):
+        """Topic detail endpoint returns placeholder identity for deleted author."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory()
+        topic = ForumTopicFactory(category=category, author=author)
+
+        author.delete()
+
+        response = APIClient().get(f'/api/forum/topics/{topic.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['author_name'] == '[Deleted User]'
+        assert response.data['author_id'] is None
+        assert response.data['author_avatar_url'] is None
+
+    def test_post_list_returns_placeholder_for_deleted_author(self):
+        """Post list for a topic returns placeholder when that post's author is deleted."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category)
+        author = UserFactory()
+        post = ForumPostFactory(topic=topic, author=author)
+
+        author.delete()
+
+        response = APIClient().get(f'/api/forum/topics/{topic.id}/posts/')
+        assert response.status_code == status.HTTP_200_OK
+
+        result = next(p for p in response.data['results'] if str(p['id']) == str(post.id))
+        assert result['author_name'] == '[Deleted User]'
+        assert result['author_id'] is None
+        assert result['author_avatar_url'] is None
+
+    def test_topic_detail_inline_posts_return_placeholder_for_deleted_author(self):
+        """Inline posts in topic detail endpoint also return placeholder."""
+        category = ForumCategoryFactory(is_active=True)
+        post_author = UserFactory()
+        topic = ForumTopicFactory(category=category)
+        post = ForumPostFactory(topic=topic, author=post_author)
+
+        post_author.delete()
+
+        response = APIClient().get(f'/api/forum/topics/{topic.id}/')
+        assert response.status_code == status.HTTP_200_OK
+
+        inline_post = next(p for p in response.data['posts'] if str(p['id']) == str(post.id))
+        assert inline_post['author_name'] == '[Deleted User]'
+        assert inline_post['author_id'] is None
+
+    # ── Regression: active-author serialization unchanged ────────────────────
+
+    def test_active_author_topic_serialization_unchanged(self):
+        """Topics with living authors still return real name and id."""
+        category = ForumCategoryFactory(is_active=True)
+        author = UserFactory(first_name='Alice', last_name='Smith')
+        ForumTopicFactory(category=category, author=author)
+
+        response = APIClient().get('/api/forum/topics/')
+        assert response.status_code == status.HTTP_200_OK
+
+        result = next(t for t in response.data['results'] if t['author_id'] == str(author.id))
+        assert result['author_name'] == 'Alice Smith'
+        assert result['author_id'] == str(author.id)
+
+    def test_active_author_post_serialization_unchanged(self):
+        """Posts with living authors still return real name and id."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category)
+        author = UserFactory(first_name='Bob', last_name='Jones')
+        post = ForumPostFactory(topic=topic, author=author)
+
+        response = APIClient().get(f'/api/forum/topics/{topic.id}/posts/')
+        assert response.status_code == status.HTTP_200_OK
+
+        result = next(p for p in response.data['results'] if str(p['id']) == str(post.id))
+        assert result['author_name'] == 'Bob Jones'
+        assert result['author_id'] == str(author.id)
+
+    def test_mixed_topic_list_active_and_deleted_authors(self):
+        """Topic list with both active and deleted authors returns correct identity for each."""
+        category = ForumCategoryFactory(is_active=True)
+        active_author = UserFactory(first_name='Carol', last_name='White')
+        deleted_author = UserFactory()
+
+        active_topic = ForumTopicFactory(category=category, author=active_author)
+        deleted_topic = ForumTopicFactory(category=category, author=deleted_author)
+        deleted_topic_id = str(deleted_topic.id)
+
+        deleted_author.delete()
+
+        response = APIClient().get('/api/forum/topics/')
+        assert response.status_code == status.HTTP_200_OK
+
+        results = {t['id']: t for t in response.data['results']}
+
+        assert results[str(active_topic.id)]['author_name'] == 'Carol White'
+        assert results[str(active_topic.id)]['author_id'] == str(active_author.id)
+
+        assert results[deleted_topic_id]['author_name'] == '[Deleted User]'
+        assert results[deleted_topic_id]['author_id'] is None

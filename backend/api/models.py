@@ -1000,8 +1000,9 @@ class ForumTopic(models.Model):
         related_name='topics'
     )
     author = models.ForeignKey(
-        User, 
-        on_delete=models.CASCADE, 
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
         related_name='forum_topics'
     )
     title = models.CharField(max_length=200)
@@ -1033,8 +1034,9 @@ class ForumPost(models.Model):
         related_name='posts'
     )
     author = models.ForeignKey(
-        User, 
-        on_delete=models.CASCADE, 
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
         related_name='forum_posts'
     )
     body = models.TextField(max_length=5000)
@@ -1043,7 +1045,8 @@ class ForumPost(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Post by {self.author.email} in {self.topic.title[:30]}"
+        author_label = self.author.email if self.author_id else '[deleted]'
+        return f"Post by {author_label} in {self.topic.title[:30]}"
 
     class Meta:
         ordering = ['created_at']
