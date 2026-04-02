@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.conf import settings
 from django.db import models
 from django.contrib.gis.db import models as gis_models
 from django.contrib.gis.geos import Point
@@ -1061,13 +1062,13 @@ class UserFollow(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     follower = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='follows',
         help_text='User who follows',
     )
     following = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='followed_by',
         help_text='User being followed',
@@ -1097,6 +1098,10 @@ class UserFollow(models.Model):
                 name='api_userfollow_no_self_follow',
             ),
         ]
+        indexes = [
+            models.Index(fields=['follower'], name='api_userfollow_follower_idx'),
+            models.Index(fields=['following'], name='api_userfollow_following_idx'),
+        ]
 
 
 class UserFollowEvent(models.Model):
@@ -1113,13 +1118,13 @@ class UserFollowEvent(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     follower = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='follow_events_as_follower',
         help_text='User who performed the action',
     )
     following = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='follow_events_as_target',
         help_text='User who was followed or unfollowed',
