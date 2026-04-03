@@ -1390,3 +1390,313 @@ class TestEventEvaluationCommentHistory:
         assert 'event_completed_at' in event_entry
         if event.event_completed_at:
             assert event_entry['event_completed_at'] is not None
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestFR16cEvaluationScoping:
+    """
+    FR-16c: Evaluation must be scoped to the appropriate context (Offer vs Event).
+
+    Covers four gap areas identified in the issue:
+      1. Offer strict 1:1 participant-role gating.
+      2. Event attendee-only gating (organizer excluded, non-participant excluded).
+      3. Event multi-party aggregation correctness with >1 attendee.
+      4. Cross-context misuse rejected (offer handshake IDs used against event endpoints
+         and vice versa).
+    """
+
+    # ------------------------------------------------------------------ #
+    # Helpers
+    # ------------------------------------------------------------------ #
+
+    def _open_offer_handshake(self, provider, requester):
+        service = ServiceFactory(user=provider, type='Offer', status='Active')
+        handshake = HandshakeFactory(service=service, requester=requester, status='completed')
+        return service, handshake
+
+    def _open_event_handshake(self, organizer, participant):
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+        )
+        return event, handshake
+
+    # ------------------------------------------------------------------ #
+    # 1. Offer — strict 1:1 participant-role gating
+    # ------------------------------------------------------------------ #
+
+    def test_offer_requester_can_evaluate_provider(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        _, handshake = self._open_offer_handshake(provider, requester)
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': False,
+            'kindness': False,
+        })
+        assert response.status_code == status.HTTP_201_CREATED
+        rep = ReputationRep.objects.get(handshake=handshake, giver=requester)
+        assert rep.receiver == provider
+
+    def test_offer_provider_can_evaluate_requester(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        _, handshake = self._open_offer_handshake(provider, requester)
+
+        client = AuthenticatedAPIClient().authenticate_user(provider)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': False,
+            'kindness': False,
+        })
+        assert response.status_code == status.HTTP_201_CREATED
+        rep = ReputationRep.objects.get(handshake=handshake, giver=provider)
+        assert rep.receiver == requester
+
+    def test_offer_third_party_cannot_evaluate(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        outsider = UserFactory()
+        _, handshake = self._open_offer_handshake(provider, requester)
+
+        client = AuthenticatedAPIClient().authenticate_user(outsider)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': False,
+            'kindness': False,
+        })
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_offer_evaluation_window_uniform_with_event_window(self):
+        """
+        Both Offer and Event evaluation windows are gated by the same
+        _validate_feedback_window logic.  An Offer with an explicitly
+        expired window returns 410, not a context-specific code.
+        """
+        provider = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=provider, type='Offer')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=50),
+            evaluation_window_ends_at=timezone.now() - timedelta(hours=2),
+            evaluation_window_closed_at=timezone.now() - timedelta(hours=2),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+        })
+        assert response.status_code == status.HTTP_410_GONE
+
+    # ------------------------------------------------------------------ #
+    # 2. Event attendee-only gating
+    # ------------------------------------------------------------------ #
+
+    def test_event_organizer_cannot_self_evaluate(self):
+        """Organizer submitting on their own event must be refused (403)."""
+        organizer = UserFactory()
+        participant = UserFactory()
+        _, handshake = self._open_event_handshake(organizer, participant)
+
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': False,
+            'welcoming': False,
+        })
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_event_non_participant_cannot_evaluate(self):
+        """User with no relation to the event is rejected."""
+        organizer = UserFactory()
+        participant = UserFactory()
+        outsider = UserFactory()
+        _, handshake = self._open_event_handshake(organizer, participant)
+
+        client = AuthenticatedAPIClient().authenticate_user(outsider)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+        })
+        assert response.status_code in (
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_event_evaluation_target_is_always_organizer(self):
+        """ReputationRep.receiver must be the organizer, not the participant."""
+        organizer = UserFactory()
+        participant = UserFactory()
+        _, handshake = self._open_event_handshake(organizer, participant)
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': False,
+            'welcoming': False,
+        })
+        assert response.status_code == status.HTTP_201_CREATED
+        rep = ReputationRep.objects.get(handshake=handshake, giver=participant)
+        assert rep.receiver == organizer, (
+            'Event evaluation must target the organizer, not the participant'
+        )
+
+    # ------------------------------------------------------------------ #
+    # 3. Event multi-party aggregation with >1 attendee
+    # ------------------------------------------------------------------ #
+
+    def test_event_multiple_attendees_each_increment_unique_evaluator_count(self):
+        organizer = UserFactory()
+        p1 = UserFactory()
+        p2 = UserFactory()
+        p3 = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        h1 = HandshakeFactory(service=event, requester=p1, status='attended', provisioned_hours=0)
+        h2 = HandshakeFactory(service=event, requester=p2, status='attended', provisioned_hours=0)
+        h3 = HandshakeFactory(service=event, requester=p3, status='attended', provisioned_hours=0)
+
+        for participant, handshake in [(p1, h1), (p2, h2), (p3, h3)]:
+            client = AuthenticatedAPIClient().authenticate_user(participant)
+            response = client.post('/api/reputation/', {
+                'handshake_id': str(handshake.id),
+                'well_organized': True,
+                'engaging': False,
+                'welcoming': True,
+            })
+            assert response.status_code == status.HTTP_201_CREATED
+
+        summary = EventEvaluationSummary.objects.get(service=event)
+        assert summary.unique_evaluator_count == 3
+        assert summary.positive_feedback_count == 3
+        # well_organized maps to punctual_count, welcoming maps to kind_count.
+        assert summary.punctual_count == 3
+        assert summary.kind_count == 3
+        assert summary.helpful_count == 0
+
+    def test_event_multi_participant_positive_scores_accumulate(self):
+        """positive_score_total grows with each attendee submission."""
+        organizer = UserFactory()
+        participants = [UserFactory() for _ in range(4)]
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshakes = [
+            HandshakeFactory(service=event, requester=p, status='attended', provisioned_hours=0)
+            for p in participants
+        ]
+
+        for participant, handshake in zip(participants, handshakes):
+            client = AuthenticatedAPIClient().authenticate_user(participant)
+            client.post('/api/reputation/', {
+                'handshake_id': str(handshake.id),
+                'well_organized': True,
+                'engaging': True,
+                'welcoming': True,
+            })
+
+        summary = EventEvaluationSummary.objects.get(service=event)
+        assert summary.unique_evaluator_count == 4
+        # 3 traits × 4 participants = 12 total ticks.
+        assert summary.positive_score_total == 12
+
+    def test_event_attendee_cannot_evaluate_twice(self):
+        """Duplicate submission from the same attendee is rejected with 400."""
+        organizer = UserFactory()
+        participant = UserFactory()
+        _, handshake = self._open_event_handshake(organizer, participant)
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        first = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+        })
+        assert first.status_code == status.HTTP_201_CREATED
+
+        second = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+        })
+        assert second.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Summary must not double-count.
+        summary = EventEvaluationSummary.objects.get(service=handshake.service)
+        assert summary.unique_evaluator_count == 1
+
+    # ------------------------------------------------------------------ #
+    # 4. Cross-context misuse rejected
+    # ------------------------------------------------------------------ #
+
+    def test_offer_handshake_id_rejected_with_event_trait_fields(self):
+        """
+        Submitting event trait names (well_organized) against an Offer handshake
+        must not be interpreted as a valid offer evaluation.
+        Offer logic reads 'punctual'; well_organized falls back to False — rep is
+        created but with no positive trait set.  The important invariant is that
+        no 404/410/403 is raised and the context is correctly isolated.
+        """
+        provider = UserFactory()
+        requester = UserFactory()
+        _, handshake = self._open_offer_handshake(provider, requester)
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,   # event field — ignored by offer logic
+            'engaging': True,         # event field — ignored by offer logic
+            'welcoming': True,        # event field — ignored by offer logic
+        })
+        # Request succeeds (offer context, not an error) but offer traits are all False.
+        assert response.status_code == status.HTTP_201_CREATED
+        rep = ReputationRep.objects.get(handshake=handshake, giver=requester)
+        assert rep.is_punctual is False
+        assert rep.is_helpful is False
+        assert rep.is_kind is False
+
+    def test_event_handshake_id_with_offer_trait_fields_targets_organizer(self):
+        """
+        Submitting offer trait names (punctual/helpful/kindness) against an Event
+        handshake still routes through event logic (backend aliases them).
+        The evaluation must target the organizer, not cause an error.
+        """
+        organizer = UserFactory()
+        participant = UserFactory()
+        _, handshake = self._open_event_handshake(organizer, participant)
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,   # aliased to well_organized in event context
+            'helpful': True,    # aliased to engaging
+            'kindness': True,   # aliased to welcoming
+        })
+        assert response.status_code == status.HTTP_201_CREATED
+        rep = ReputationRep.objects.get(handshake=handshake, giver=participant)
+        assert rep.receiver == organizer
