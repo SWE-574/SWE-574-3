@@ -2001,3 +2001,298 @@ class TestFR16eWindowCloseHotScoreContract:
 
         organizer.refresh_from_db()
         assert organizer.event_hot_score == score_first
+
+
+# ===========================================================================
+# NFR-16a: Exactly-once score processing for window close
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestNFR16aExactlyOnceScoreProcessing:
+    """
+    Contract under test (NFR-16a)
+    ------------------------------
+    The ``process_feedback_windows`` management command must process score
+    effects exactly once per expired evaluation window:
+
+      1. Re-running the command after the window is already closed must not
+         re-apply or change any score values.
+      2. Running the command twice in sequence (simulated concurrent/retry)
+         must leave aggregates and scores in the same state as a single run.
+      3. EventEvaluationSummary fields (unique_evaluator_count,
+         positive_score_total, negative_score_total) are set by refresh_summary
+         at first close; subsequent closes must not alter them.
+      4. user.event_hot_score is stable after the first close and invariant
+         under re-runs.
+
+    The window-close timestamp guard (evaluation_window_closed_at__isnull=True)
+    in the batch query is the mechanism that enforces exactly-once semantics.
+    These tests prove that the guard is effective for score processing, not
+    just for window marking and notification creation.
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _make_expired_event(self, organizer, participants, pos_traits=None, neg_traits=None):
+        """
+        Create a completed event with all participants having attended status
+        and an already-expired (but not yet closed) evaluation window.
+        Each participant in ``participants`` submits an evaluation via the API
+        before the window is expired so that scores are populated.
+        Returns (service, handshakes).
+        """
+        from api.tests.helpers.test_client import AuthenticatedAPIClient
+
+        pos_traits = pos_traits or {'well_organized': True, 'engaging': True, 'welcoming': True}
+        neg_traits = neg_traits or {}
+
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now() - timedelta(hours=50),
+        )
+        handshakes = []
+        for participant in participants:
+            h = HandshakeFactory(
+                service=service,
+                requester=participant,
+                status='attended',
+                provisioned_hours=0,
+                evaluation_window_starts_at=timezone.now() - timedelta(hours=50),
+                evaluation_window_ends_at=timezone.now() + timedelta(hours=10),
+                evaluation_window_closed_at=None,
+            )
+            handshakes.append(h)
+
+            # Submit evaluation while window is open.
+            client = AuthenticatedAPIClient().authenticate_user(participant)
+            if pos_traits:
+                client.post('/api/reputation/', {'handshake_id': str(h.id), **pos_traits})
+            if neg_traits:
+                client.post('/api/reputation/negative/', {'handshake_id': str(h.id), **neg_traits})
+
+        # Expire the windows so the batch command will pick them up.
+        for h in handshakes:
+            h.evaluation_window_ends_at = timezone.now() - timedelta(seconds=1)
+            h.save(update_fields=['evaluation_window_ends_at'])
+
+        return service, handshakes
+
+    def _run_batch(self):
+        from django.core.management import call_command
+        call_command('process_feedback_windows', verbosity=0)
+
+    # ------------------------------------------------------------------
+    # 1. Re-run does not alter EventEvaluationSummary aggregates
+    # ------------------------------------------------------------------
+
+    def test_event_summary_aggregates_unchanged_on_second_run(self):
+        """
+        After first batch close, unique_evaluator_count and positive_score_total
+        must be identical after a second run — re-running must not double-count.
+        """
+        organizer = UserFactory()
+        participants = [UserFactory() for _ in range(3)]
+
+        service, _ = self._make_expired_event(organizer, participants)
+
+        self._run_batch()
+
+        summary = EventEvaluationSummary.objects.get(service=service)
+        count_after_first = summary.unique_evaluator_count
+        pos_after_first = summary.positive_score_total
+
+        # Second run: all windows already closed — batch must be a no-op.
+        self._run_batch()
+
+        summary.refresh_from_db()
+        assert summary.unique_evaluator_count == count_after_first
+        assert summary.positive_score_total == pos_after_first
+
+    def test_event_summary_negative_score_unchanged_on_second_run(self):
+        """
+        negative_score_total must also be stable across re-runs.
+        """
+        organizer = UserFactory()
+        participants = [UserFactory() for _ in range(2)]
+
+        service, _ = self._make_expired_event(
+            organizer, participants,
+            pos_traits={},
+            neg_traits={'disorganized': True, 'boring': True},
+        )
+
+        self._run_batch()
+
+        summary = EventEvaluationSummary.objects.get(service=service)
+        neg_after_first = summary.negative_score_total
+
+        self._run_batch()
+
+        summary.refresh_from_db()
+        assert summary.negative_score_total == neg_after_first
+
+    # ------------------------------------------------------------------
+    # 2. Re-run does not alter user.event_hot_score
+    # ------------------------------------------------------------------
+
+    def test_event_hot_score_unchanged_on_second_run(self):
+        """
+        user.event_hot_score set by first batch close must not shift on
+        subsequent runs — exactly-once for score computation.
+        """
+        organizer = UserFactory()
+        participants = [UserFactory() for _ in range(2)]
+
+        self._make_expired_event(organizer, participants)
+
+        self._run_batch()
+
+        organizer.refresh_from_db()
+        score_after_first = organizer.event_hot_score
+
+        self._run_batch()
+
+        organizer.refresh_from_db()
+        assert organizer.event_hot_score == score_after_first
+
+    def test_event_hot_score_zero_when_no_evaluations_second_run_unchanged(self):
+        """
+        Even when no evaluations were submitted, event_hot_score stays 0.0
+        across multiple batch runs — no phantom increment from re-processing.
+        """
+        organizer = UserFactory()
+        participant = UserFactory()
+
+        # No evaluation submitted — only window is expired.
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now() - timedelta(hours=50),
+        )
+        HandshakeFactory(
+            service=service,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=50),
+            evaluation_window_ends_at=timezone.now() - timedelta(seconds=1),
+            evaluation_window_closed_at=None,
+        )
+
+        self._run_batch()
+        organizer.refresh_from_db()
+        assert organizer.event_hot_score == 0.0
+
+        self._run_batch()
+        organizer.refresh_from_db()
+        assert organizer.event_hot_score == 0.0
+
+    # ------------------------------------------------------------------
+    # 3. Simulated concurrent execution: two calls before either writes closed_at
+    # ------------------------------------------------------------------
+
+    def test_concurrent_batch_runs_do_not_double_apply_scores(self):
+        """
+        Simulate a race between two concurrent batch invocations by manually
+        collecting the expired window IDs that both would see and running close
+        logic twice on the same set.  Final scores must be identical to a
+        single-run result.
+
+        The batch command uses a SELECT … WHERE closed_at IS NULL / UPDATE
+        pattern inside a transaction — the second concurrent update() call
+        on the same IDs finds closed_at already set and updates 0 rows,
+        then skips refresh_summary for those events.  This test confirms
+        that the guard works and the aggregate is not applied twice.
+        """
+        from django.db import transaction as db_transaction
+        from api.models import Handshake
+        from api.services import EventEvaluationService
+
+        organizer = UserFactory()
+        participants = [UserFactory() for _ in range(3)]
+        service, handshakes = self._make_expired_event(organizer, participants)
+
+        now = timezone.now()
+        expired_ids = list(
+            Handshake.objects.filter(
+                evaluation_window_closed_at__isnull=True,
+                evaluation_window_ends_at__lte=now,
+            ).values_list('id', flat=True)
+        )
+        assert len(expired_ids) == len(handshakes), "Setup: all handshakes must be expired"
+
+        # Simulate first batch job: close the windows.
+        with db_transaction.atomic():
+            Handshake.objects.filter(
+                id__in=expired_ids,
+                evaluation_window_closed_at__isnull=True,
+            ).update(evaluation_window_closed_at=now)
+
+        EventEvaluationService.refresh_summary(service)
+        organizer.refresh_from_db()
+        score_after_first = organizer.event_hot_score
+        summary = EventEvaluationSummary.objects.get(service=service)
+        count_after_first = summary.unique_evaluator_count
+
+        # Simulate second (concurrent/retry) batch job attempting the same IDs.
+        with db_transaction.atomic():
+            updated = Handshake.objects.filter(
+                id__in=expired_ids,
+                evaluation_window_closed_at__isnull=True,  # guard — all already closed
+            ).update(evaluation_window_closed_at=now)
+
+        # Guard must have blocked the update — no rows changed.
+        assert updated == 0, "Second concurrent run must not close already-closed windows"
+
+        # Because updated == 0, the real command would skip refresh_summary.
+        # We still call it here to prove idempotency of the aggregate function itself.
+        EventEvaluationService.refresh_summary(service)
+
+        organizer.refresh_from_db()
+        assert organizer.event_hot_score == score_after_first
+
+        summary.refresh_from_db()
+        assert summary.unique_evaluator_count == count_after_first
+
+    # ------------------------------------------------------------------
+    # 4. Multiple expired events: each processed exactly once
+    # ------------------------------------------------------------------
+
+    def test_multiple_events_each_processed_exactly_once(self):
+        """
+        When several expired events are processed in the same batch run,
+        each event's summary must be correct after the run, and a second run
+        must not alter any of them.
+        """
+        results = []
+        for _ in range(3):
+            organizer = UserFactory()
+            participants = [UserFactory(), UserFactory()]
+            service, _ = self._make_expired_event(organizer, participants)
+            results.append((organizer, service))
+
+        self._run_batch()
+
+        scores_after_first = []
+        for organizer, service in results:
+            organizer.refresh_from_db()
+            summary = EventEvaluationSummary.objects.get(service=service)
+            scores_after_first.append((
+                organizer.event_hot_score,
+                summary.unique_evaluator_count,
+                summary.positive_score_total,
+            ))
+
+        self._run_batch()
+
+        for i, (organizer, service) in enumerate(results):
+            organizer.refresh_from_db()
+            summary = EventEvaluationSummary.objects.get(service=service)
+            assert organizer.event_hot_score == scores_after_first[i][0]
+            assert summary.unique_evaluator_count == scores_after_first[i][1]
+            assert summary.positive_score_total == scores_after_first[i][2]
