@@ -1112,3 +1112,191 @@ class TestAdminReportResolutionStatusMapping:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert 'organizer cannot be removed' in (response.data.get('detail', '') or '').lower()
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestEventEvaluationCommentHistory:
+    """
+    Integration tests for event evaluation comment payload in organizer profile.
+
+    Scope: POST /api/reputation/ with optional 'comment' field, then GET /api/users/me/
+    validates the event_comments_history list returned in the organizer profile payload.
+    """
+
+    def _completed_event_handshake(self, organizer, participant):
+        """
+        Helper: returns (event, handshake) with evaluation window open.
+
+        The window must be open so POST /api/reputation/ accepts the submission.
+        After calling this helper the test is responsible for expiring the window
+        (via _expire_window) before fetching the organizer profile so that
+        _apply_blind_review_visibility does not hide the comment.
+        """
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now() - timedelta(hours=2),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=2),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=46),
+            evaluation_window_closed_at=None,
+        )
+        return event, handshake
+
+    def _expire_window(self, handshake):
+        """Move evaluation_window_ends_at into the past so blind-review filter passes."""
+        handshake.evaluation_window_ends_at = timezone.now() - timedelta(seconds=1)
+        handshake.evaluation_window_closed_at = timezone.now() - timedelta(seconds=1)
+        handshake.save(update_fields=['evaluation_window_ends_at', 'evaluation_window_closed_at'])
+
+    def test_event_comment_appears_in_organizer_event_comments_history(self):
+        """Commented evaluation is present in the organizer profile payload with expected metadata."""
+        organizer = UserFactory()
+        participant = UserFactory()
+        review_text = f'Excellent event, very well run – {timezone.now().timestamp()}'
+
+        event, handshake = self._completed_event_handshake(organizer, participant)
+
+        # Participant submits positive evaluation with a comment (window is open).
+        participant_client = AuthenticatedAPIClient()
+        participant_client.authenticate_user(participant)
+        rep_response = participant_client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': False,
+            'comment': review_text,
+        })
+        assert rep_response.status_code == status.HTTP_201_CREATED
+
+        # Comment created in the DB.
+        assert Comment.objects.filter(
+            related_handshake=handshake,
+            user=participant,
+            is_verified_review=True,
+            is_deleted=False,
+        ).exists()
+
+        # Expire the window so blind-review filter no longer hides the comment.
+        self._expire_window(handshake)
+
+        # Fetch organizer profile as the organizer.
+        organizer_client = AuthenticatedAPIClient()
+        organizer_client.authenticate_user(organizer)
+        profile_response = organizer_client.get('/api/users/me/')
+        assert profile_response.status_code == status.HTTP_200_OK
+
+        history = profile_response.data.get('event_comments_history', [])
+        assert isinstance(history, list), 'event_comments_history must be a list'
+
+        # At least one entry for this event.
+        event_entry = next(
+            (e for e in history if e['event_id'] == str(event.id)),
+            None,
+        )
+        assert event_entry is not None, 'Event not found in event_comments_history'
+
+        # Entry has expected metadata keys.
+        assert event_entry['event_title'] == event.title
+        assert event_entry['event_status'] == 'Completed'
+        assert 'comments' in event_entry
+        assert isinstance(event_entry['comments'], list)
+
+        # The review text is present in the comments list.
+        comment_bodies = [c['body'] for c in event_entry['comments']]
+        assert review_text in comment_bodies, (
+            f'Review text not found in comments. Got: {comment_bodies}'
+        )
+
+    def test_event_evaluation_without_comment_does_not_create_history_entry(self):
+        """Omitting the comment field creates no Comment row and leaves history clean."""
+        organizer = UserFactory()
+        participant = UserFactory()
+
+        event, handshake = self._completed_event_handshake(organizer, participant)
+
+        participant_client = AuthenticatedAPIClient()
+        participant_client.authenticate_user(participant)
+        rep_response = participant_client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': False,
+            'welcoming': False,
+            # No 'comment' key supplied.
+        })
+        assert rep_response.status_code == status.HTTP_201_CREATED
+
+        # No verified review comment should exist for this handshake.
+        assert not Comment.objects.filter(
+            related_handshake=handshake,
+            is_verified_review=True,
+            is_deleted=False,
+        ).exists()
+
+        # Expire the window and fetch profile — entry absent or comments list is empty.
+        self._expire_window(handshake)
+
+        organizer_client = AuthenticatedAPIClient()
+        organizer_client.authenticate_user(organizer)
+        profile_response = organizer_client.get('/api/users/me/')
+        assert profile_response.status_code == status.HTTP_200_OK
+
+        history = profile_response.data.get('event_comments_history', [])
+        event_entry = next(
+            (e for e in history if e['event_id'] == str(event.id)),
+            None,
+        )
+        if event_entry is not None:
+            assert event_entry['comments'] == [], (
+                'No comments should be present when participant submitted no review text'
+            )
+
+    def test_event_comment_history_entry_references_correct_event_metadata(self):
+        """History entry fields match the actual event model values."""
+        organizer = UserFactory()
+        participant = UserFactory()
+        review_text = f'Solid organisation – {timezone.now().timestamp()}'
+
+        event, handshake = self._completed_event_handshake(organizer, participant)
+
+        participant_client = AuthenticatedAPIClient()
+        participant_client.authenticate_user(participant)
+        rep_response = participant_client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+            'comment': review_text,
+        })
+        assert rep_response.status_code == status.HTTP_201_CREATED
+
+        # Expire the window before fetching profile.
+        self._expire_window(handshake)
+
+        organizer_client = AuthenticatedAPIClient()
+        organizer_client.authenticate_user(organizer)
+        profile_response = organizer_client.get('/api/users/me/')
+        assert profile_response.status_code == status.HTTP_200_OK
+
+        history = profile_response.data.get('event_comments_history', [])
+        event_entry = next(
+            (e for e in history if e['event_id'] == str(event.id)),
+            None,
+        )
+        assert event_entry is not None
+
+        assert event_entry['event_id'] == str(event.id)
+        assert event_entry['event_title'] == event.title
+        assert event_entry['event_status'] == event.status
+        # Scheduled time and completed_at must be serialisable ISO strings or None.
+        assert 'event_scheduled_time' in event_entry
+        assert 'event_completed_at' in event_entry
+        if event.event_completed_at:
+            assert event_entry['event_completed_at'] is not None
