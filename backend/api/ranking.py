@@ -85,10 +85,14 @@ def calculate_hot_score(service: Service) -> float:
     
     score = numerator / denominator
 
-    # "Filling the Gap" multiplier for Events (FR-EV-RANK):
-    # Events between 75% and 99% full get a 1.5× boost to surface them
-    # to potential joiners before they sell out.
-    if service.type == 'Event' and service.max_participants > 0:
+    # "Filling the Gap" multiplier (FR-RANK-03):
+    # Events and Group Offers (Offers with max_participants > 1) between 75% and
+    # 99% full get a 1.5× boost to surface them before they sell out.
+    is_group_listing = (
+        service.type == 'Event'
+        or (service.type == 'Offer' and service.max_participants > 1)
+    )
+    if is_group_listing and service.max_participants > 0:
         from .models import Handshake as _Handshake
         accepted_count = _Handshake.objects.filter(
             service=service,
@@ -155,16 +159,20 @@ def calculate_hot_scores_batch(services) -> dict:
     for stat in comment_stats:
         comment_counts[stat['service_id']] = stat['count']
     
-    # Batch query for Event capacity ratios ("Filling the Gap" multiplier)
-    event_service_ids = [s.id for s in services if s.type == 'Event' and s.max_participants > 0]
-    event_accepted_counts: dict = {}
-    if event_service_ids:
+    # Batch query for capacity ratios — Events and Group Offers (FR-RANK-03)
+    group_service_ids = [
+        s.id for s in services
+        if s.max_participants > 0
+        and (s.type == 'Event' or (s.type == 'Offer' and s.max_participants > 1))
+    ]
+    group_accepted_counts: dict = {}
+    if group_service_ids:
         from .models import Handshake as _Handshake
         accepted_stats = _Handshake.objects.filter(
-            service_id__in=event_service_ids,
+            service_id__in=group_service_ids,
             status__in=['accepted', 'checked_in'],
         ).values('service_id').annotate(count=Count('id'))
-        event_accepted_counts = {row['service_id']: row['count'] for row in accepted_stats}
+        group_accepted_counts = {row['service_id']: row['count'] for row in accepted_stats}
 
     # Calculate scores
     now = timezone.now()
@@ -188,9 +196,13 @@ def calculate_hot_scores_batch(services) -> dict:
         else:
             score = numerator / denominator
 
-        # "Filling the Gap" multiplier for Events
-        if service.type == 'Event' and service.max_participants > 0:
-            accepted_count = event_accepted_counts.get(service.id, 0)
+        # "Filling the Gap" multiplier — Events and Group Offers (FR-RANK-03)
+        is_group_listing = (
+            service.type == 'Event'
+            or (service.type == 'Offer' and service.max_participants > 1)
+        )
+        if is_group_listing and service.max_participants > 0:
+            accepted_count = group_accepted_counts.get(service.id, 0)
             capacity_ratio = accepted_count / service.max_participants
             if 0.75 <= capacity_ratio < 1.0:
                 score *= 1.5

@@ -1003,13 +1003,13 @@ export default function ServiceDetailPage() {
 
                 {/* Slot progress bar */}
                 {service.max_participants > 1 && (
-                  <Box mb={6} border={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? `1px solid ${AMBER}60` : 'none'}
-                    borderRadius={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? '12px' : 'none'}
-                    p={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? 3 : 0}
-                    bg={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? AMBER_LT : 'transparent'}
+                  <Box mb={6} border={(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? `1px solid ${RED}60` : 'none'}
+                    borderRadius={(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? '12px' : 'none'}
+                    p={(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? 3 : 0}
+                    bg={(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? RED_LT : 'transparent'}
                   >
-                    {isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) && (
-                      <Text fontSize="11px" fontWeight={700} color={AMBER} mb={2}>⚡ Last spots — hurry!</Text>
+                    {(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) && (
+                      <Text fontSize="11px" fontWeight={700} color={RED} mb={2}>Nearly Full</Text>
                     )}
                     <Flex justify="space-between" mb={2}>
                       <Text fontSize="12px" color={GRAY500} fontWeight={500}>
