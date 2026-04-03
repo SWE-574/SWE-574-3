@@ -1700,3 +1700,304 @@ class TestFR16cEvaluationScoping:
         assert response.status_code == status.HTTP_201_CREATED
         rep = ReputationRep.objects.get(handshake=handshake, giver=participant)
         assert rep.receiver == organizer
+
+
+# ===========================================================================
+# FR-16e: Service hot-score contract at evaluation-window close
+# ===========================================================================
+
+@pytest.mark.django_db
+class TestFR16eWindowCloseHotScoreContract:
+    """
+    Contract under test
+    -------------------
+    Service hot_score (Offer/Request):
+      - Updated at *write time* by Django signals (post_save on ReputationRep /
+        NegativeRep) — but ONLY when service.status == 'Active'.
+      - The batch command ``process_feedback_windows`` does NOT recalculate it.
+        The batch command is authoritative only for Event evaluation summaries
+        and user.event_hot_score.
+      - Completed Offer services retain the hot_score computed while the service
+        was still Active; no further signal update happens after completion.
+
+    User.event_hot_score:
+      - Updated synchronously by the ReputationViewSet at write time via
+        EventEvaluationService.refresh_summary() — NOT deferred to batch.
+      - The batch command also calls refresh_summary() at window close
+        (deterministic, idempotent re-computation).
+      - Both paths produce identical values; running batch a second time is safe.
+
+    Evaluation window validation:
+      - Primary path: checked via evaluation_window_starts_at / ends_at /
+        closed_at fields on the Handshake.
+      - Once evaluation_window_closed_at is set (either by _expire_window helper
+        or the batch command), further submissions return 410 Gone.
+
+    Corollary:
+      - For Offer services the final score at window-close equals the score set
+        by the last signal write; running the batch changes nothing.
+      - Evaluations submitted after window close return 410 regardless of path.
+    """
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    def _open_offer_handshake(self, provider, requester):
+        """Return (service, handshake) with an open 48-hour evaluation window.
+
+        Service status is 'Active' so that reputation signals update hot_score.
+        A completed handshake on an Active offer is the normal production state.
+        """
+        service = ServiceFactory(user=provider, type='Offer', status='Active')
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='completed',
+            provisioned_hours=1,
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=2),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=46),
+            evaluation_window_closed_at=None,
+        )
+        return service, handshake
+
+    def _open_event_handshake(self, organizer, participant):
+        """Return (service, handshake) for an Event with an open evaluation window."""
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+            evaluation_window_starts_at=timezone.now() - timedelta(hours=2),
+            evaluation_window_ends_at=timezone.now() + timedelta(hours=46),
+            evaluation_window_closed_at=None,
+        )
+        return service, handshake
+
+    def _expire_window(self, *handshakes):
+        """Mark windows as expired and closed (simulates batch or natural expiry)."""
+        for h in handshakes:
+            h.evaluation_window_ends_at = timezone.now() - timedelta(seconds=1)
+            h.evaluation_window_closed_at = timezone.now() - timedelta(seconds=1)
+            h.save(update_fields=['evaluation_window_ends_at', 'evaluation_window_closed_at'])
+
+    def _run_close_command(self):
+        from django.core.management import call_command
+        call_command('process_feedback_windows', verbosity=0)
+
+    # ------------------------------------------------------------------
+    # 1. Offer hot_score: signal updates at write time, batch does not change it
+    # ------------------------------------------------------------------
+
+    @pytest.mark.django_db(transaction=True)
+    def test_offer_hot_score_updated_at_write_time_by_signal(self):
+        """
+        Submitting a positive reputation for an Active offer updates service.hot_score
+        via Django signal after the transaction commits (transaction.on_commit path).
+        transaction=True is required so that on_commit hooks actually fire.
+        """
+        provider = UserFactory()
+        requester = UserFactory()
+        service, handshake = self._open_offer_handshake(provider, requester)
+
+        score_before = service.hot_score
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+            'helpful': True,
+            'kindness': True,
+        })
+
+        service.refresh_from_db()
+        # Signal fires on transaction commit for Active services; score must change.
+        assert service.hot_score != score_before
+
+    def test_offer_hot_score_unchanged_after_window_close_batch(self):
+        """
+        Running process_feedback_windows on an expired Offer window must not
+        alter service.hot_score — the batch command owns Event scores only.
+        """
+        provider = UserFactory()
+        requester = UserFactory()
+        service, handshake = self._open_offer_handshake(provider, requester)
+
+        # Write reputation so signal sets a non-zero score.
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+        })
+        service.refresh_from_db()
+        score_after_write = service.hot_score
+
+        # Expire window, then run batch.
+        self._expire_window(handshake)
+        self._run_close_command()
+
+        service.refresh_from_db()
+        # Batch must not touch Offer hot_score.
+        assert service.hot_score == score_after_write
+
+    def test_offer_hot_score_unchanged_when_no_writes_before_close(self):
+        """
+        Window closes with zero evaluations — batch must not alter hot_score,
+        leaving it at the default 0.  Validates closure-only semantics for Offer.
+        """
+        provider = UserFactory()
+        requester = UserFactory()
+        service, handshake = self._open_offer_handshake(provider, requester)
+
+        baseline = service.hot_score  # 0 — no evaluations written
+
+        self._expire_window(handshake)
+        self._run_close_command()
+
+        service.refresh_from_db()
+        assert service.hot_score == baseline
+
+    # ------------------------------------------------------------------
+    # 2. Event: view updates event_hot_score synchronously; batch is idempotent
+    # ------------------------------------------------------------------
+
+    def test_event_hot_score_updated_synchronously_by_view(self):
+        """
+        user.event_hot_score is updated at write time by the ReputationViewSet
+        (via EventEvaluationService.refresh_summary) — not deferred to batch.
+        This is the primary update path for Event scores.
+        """
+        organizer = UserFactory()
+        participant = UserFactory()
+        _, handshake = self._open_event_handshake(organizer, participant)
+
+        organizer.refresh_from_db()
+        score_before = organizer.event_hot_score
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+        })
+
+        # View calls refresh_summary synchronously — score updated immediately.
+        organizer.refresh_from_db()
+        assert organizer.event_hot_score != score_before
+
+    def test_event_hot_score_with_no_writes_before_close_stays_zero(self):
+        """
+        Window closes without any evaluations.  Batch must set/keep
+        user.event_hot_score at 0.0 — closure-only semantics.
+        """
+        organizer = UserFactory()
+        participant = UserFactory()
+        _, handshake = self._open_event_handshake(organizer, participant)
+
+        self._expire_window(handshake)
+        self._run_close_command()
+
+        organizer.refresh_from_db()
+        assert organizer.event_hot_score == 0.0
+
+    def test_event_service_hot_score_not_modified_by_batch(self):
+        """
+        service.hot_score for Event-type services must remain unchanged after
+        batch close — only EventEvaluationSummary and user.event_hot_score are
+        refreshed; the listing-level score is irrelevant for events.
+        """
+        organizer = UserFactory()
+        participant = UserFactory()
+        service, handshake = self._open_event_handshake(organizer, participant)
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+        })
+
+        service.refresh_from_db()
+        listing_score_before = service.hot_score
+
+        self._expire_window(handshake)
+        self._run_close_command()
+
+        service.refresh_from_db()
+        assert service.hot_score == listing_score_before
+
+    # ------------------------------------------------------------------
+    # 3. Post-close evaluations rejected regardless of context
+    # ------------------------------------------------------------------
+
+    def test_offer_evaluation_rejected_after_window_close(self):
+        """
+        Submitting a reputation for an Offer handshake whose window has already
+        been closed must return 410 Gone.
+        """
+        provider = UserFactory()
+        requester = UserFactory()
+        _, handshake = self._open_offer_handshake(provider, requester)
+
+        self._expire_window(handshake)
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'punctual': True,
+        })
+        assert response.status_code == status.HTTP_410_GONE
+
+    def test_event_evaluation_rejected_after_window_close(self):
+        """
+        Submitting an event evaluation for a handshake whose window has already
+        been closed must return 410 Gone.
+        """
+        organizer = UserFactory()
+        participant = UserFactory()
+        _, handshake = self._open_event_handshake(organizer, participant)
+
+        self._expire_window(handshake)
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+        })
+        assert response.status_code == status.HTTP_410_GONE
+
+    def test_batch_close_is_idempotent_for_event_scores(self):
+        """
+        Running process_feedback_windows twice on the same event must produce
+        the identical user.event_hot_score — the command is idempotent.
+        The second run finds no open windows (already closed) and is a no-op.
+        """
+        organizer = UserFactory()
+        participant = UserFactory()
+        _, handshake = self._open_event_handshake(organizer, participant)
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+        })
+
+        self._expire_window(handshake)
+        self._run_close_command()
+
+        organizer.refresh_from_db()
+        score_first = organizer.event_hot_score
+
+        # Second run: window already closed, batch skips it.
+        self._run_close_command()
+
+        organizer.refresh_from_db()
+        assert organizer.event_hot_score == score_first
