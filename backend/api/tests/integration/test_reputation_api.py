@@ -824,6 +824,96 @@ class TestNegativeRepViewSet:
 
 @pytest.mark.django_db
 @pytest.mark.integration
+class TestEventEvaluationHotScoreIsolation:
+    """
+    Regression tests: event trait submissions must affect event_hot_score only.
+    Service hot_score (the listing-level ranking field) must remain unchanged.
+    Covers both positive and negative event trait submission paths.
+    """
+
+    def _make_attended_event_handshake(self, organizer, participant):
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+            hot_score=0.0,
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=0,
+        )
+        return event, handshake
+
+    def test_positive_event_evaluation_updates_event_hot_score_not_service_hot_score(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event, handshake = self._make_attended_event_handshake(organizer, participant)
+
+        hot_score_before = event.hot_score
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+        })
+        assert response.status_code == status.HTTP_201_CREATED
+
+        organizer.refresh_from_db()
+        event.refresh_from_db()
+
+        assert organizer.event_hot_score > 0, (
+            'Positive event evaluation must increase organizer event_hot_score'
+        )
+        assert event.hot_score == hot_score_before, (
+            'Service hot_score must not change after an event evaluation submission'
+        )
+
+    def test_negative_event_evaluation_updates_event_hot_score_not_service_hot_score(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event, handshake = self._make_attended_event_handshake(organizer, participant)
+
+        # Submit a positive eval first so there is a baseline event_hot_score to compare against.
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+        client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+        })
+        organizer.refresh_from_db()
+        event.refresh_from_db()
+        hot_score_after_positive = event.hot_score
+        event_hot_score_after_positive = organizer.event_hot_score
+
+        negative_response = client.post('/api/reputation/negative/', {
+            'handshake_id': str(handshake.id),
+            'disorganized': True,
+            'boring': True,
+            'unwelcoming': False,
+        })
+        assert negative_response.status_code == status.HTTP_201_CREATED
+
+        organizer.refresh_from_db()
+        event.refresh_from_db()
+
+        assert organizer.event_hot_score != event_hot_score_after_positive, (
+            'Negative event evaluation must recalculate organizer event_hot_score'
+        )
+        assert event.hot_score == hot_score_after_positive, (
+            'Service hot_score must not change after a negative event evaluation submission'
+        )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
 class TestEventNoShowAppeals:
     """Integration tests for FR-F02e no-show appeal workflow."""
 
