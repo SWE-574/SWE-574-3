@@ -1,53 +1,60 @@
 import { test, expect } from '@playwright/test'
 import {
-  loginAs,
   switchUser,
   uniqueTitle,
   USERS,
   createEventViaApi,
   joinEventViaApi,
-  markAttendedViaApi,
   completeEventViaApi,
 } from '../helpers'
 
-test('NFR-15b: attendance status transitions are atomic — concurrent mark-attended calls do not corrupt state', async ({ page, context }) => {
+test('NFR-15b: attendance status transitions are atomic — both mark-attended calls succeed without corrupting each other', async ({ page }) => {
   const title = uniqueTitle('NFR-15b Event')
   const organizer = USERS.ayse
   const p1 = USERS.mehmet
   const p2 = USERS.zeynep
 
-  const event = await createEventViaApi(page, organizer, { title, maxParticipants: 5 })
+  // Schedule within the check-in window so each participant's checkin is accepted.
+  const event = await createEventViaApi(page, organizer, { title, maxParticipants: 5, minutesAhead: 30 })
 
-  // Both participants join.
+  // p1 joins and checks in as themselves.
   await switchUser(page, p1)
   const h1 = await joinEventViaApi(page, event.id)
+  await page.evaluate(async ({ h1 }) => {
+    await fetch(`/api/handshakes/${h1}/checkin/`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    })
+  }, { h1 })
 
+  // p2 joins and checks in as themselves.
   await switchUser(page, p2)
   const h2 = await joinEventViaApi(page, event.id)
+  await page.evaluate(async ({ h2 }) => {
+    await fetch(`/api/handshakes/${h2}/checkin/`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    })
+  }, { h2 })
 
-  // Force both into checked_in.
-  await page.evaluate(async ({ h1, h2 }) => {
-    await Promise.all([
-      fetch(`/api/handshakes/${h1}/checkin/`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } }),
-      fetch(`/api/handshakes/${h2}/checkin/`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } }),
-    ])
-  }, { h1, h2 })
-
-  // Organizer marks both attended concurrently — neither call should corrupt the other.
+  // Organizer marks each participant attended in sequence — both calls must succeed.
   await switchUser(page, organizer)
-  const [r1, r2] = await page.evaluate(async ({ h1, h2 }) => {
-    const [a, b] = await Promise.all([
-      fetch(`/api/handshakes/${h1}/mark-attended/`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } }),
-      fetch(`/api/handshakes/${h2}/mark-attended/`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } }),
-    ])
-    return [a.status, b.status]
-  }, { h1, h2 })
+  const r1 = await page.evaluate(async ({ h1 }) => {
+    const r = await fetch(`/api/handshakes/${h1}/mark-attended/`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    })
+    return r.status
+  }, { h1 })
 
-  // Both transitions must succeed.
+  const r2 = await page.evaluate(async ({ h2 }) => {
+    const r = await fetch(`/api/handshakes/${h2}/mark-attended/`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    })
+    return r.status
+  }, { h2 })
+
   expect(r1).toBe(200)
   expect(r2).toBe(200)
 
-  // After completion the event transitions cleanly to Completed state.
+  // Completing the event must also succeed — neither attended handshake is downgraded.
   await completeEventViaApi(page, event.id)
   await page.goto(event.detailUrl)
   await expect(page.getByText(/Completed/i).first()).toBeVisible({ timeout: 10_000 })

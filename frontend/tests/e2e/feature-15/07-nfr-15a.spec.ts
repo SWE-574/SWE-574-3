@@ -1,11 +1,8 @@
 import { test, expect } from '@playwright/test'
 import {
-  loginAs,
   switchUser,
   uniqueTitle,
   USERS,
-  createEventViaApi,
-  joinEventViaApi,
   setupAttendedEventHandshake,
 } from '../helpers'
 
@@ -16,7 +13,7 @@ test('NFR-15a: event evaluations are accepted only from verified eligible partic
   const notJoined = USERS.burak
 
   // One participant reaches attended state; another is not even joined.
-  const { event, handshakeId: attendedHandshakeId } = await setupAttendedEventHandshake(page, {
+  const { handshakeId: attendedHandshakeId } = await setupAttendedEventHandshake(page, {
     organizer,
     participant: attended,
     title,

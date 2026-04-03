@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test'
 import {
-  loginAs,
   switchUser,
   uniqueTitle,
   USERS,
@@ -30,10 +29,12 @@ test('FR-15b: users with JOINED status are blocked from submitting event evaluat
     return { status: r.status }
   }, { handshakeId })
 
-  // Backend must refuse with 404 (ineligible status — handshake not found for evaluation).
   expect(evalResult.status).toBe(404)
 
-  // UI should not show the evaluation CTA for a joined-only participant.
+  // UI must not show the Leave Evaluation button for a joined-only participant.
   await page.goto(event.detailUrl)
-  await expect(page.getByText(/leave.*evaluation/i)).not.toBeVisible({ timeout: 8_000 })
+  await expect(page.getByRole('button', { name: /Leave Evaluation/i })).not.toBeVisible({ timeout: 8_000 })
+
+  // Joined participants see their registration state instead.
+  await expect(page.getByText(/You're registered|Check-in opens/i).first()).toBeVisible({ timeout: 8_000 })
 })

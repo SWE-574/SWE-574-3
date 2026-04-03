@@ -17,11 +17,13 @@ export interface Feature15Event {
 export async function createEventViaApi(
   page: Page,
   organizer: DemoUser,
-  overrides: { title?: string; maxParticipants?: number } = {},
+  overrides: { title?: string; maxParticipants?: number; minutesAhead?: number } = {},
 ): Promise<Feature15Event> {
   const title = overrides.title ?? uniqueTitle('FR-15 Event')
-  const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1_000)
-  future.setHours(14, 0, 0, 0)
+  // Default: 3 days out (check-in window closed — suitable for joined/no-show tests).
+  // Pass minutesAhead ≤ 1440 to place the event inside the 24-hour check-in window.
+  const msAhead = (overrides.minutesAhead ?? 3 * 24 * 60) * 60 * 1_000
+  const future = new Date(Date.now() + msAhead)
   const scheduledTime = future.toISOString().slice(0, 16) // "YYYY-MM-DDTHH:MM"
 
   await loginAs(page, organizer)
@@ -93,7 +95,7 @@ export async function checkinViaApi(page: Page, handshakeId: string): Promise<vo
 
   // 400 is acceptable here if the check-in window is not yet open; tests that need
   // the checked_in state should use the admin override path instead.
-  const _ = result
+  void result
 }
 
 /**
@@ -173,7 +175,9 @@ export async function setupAttendedEventHandshake(
     title?: string
   },
 ): Promise<{ event: Feature15Event; handshakeId: string }> {
-  const event = await createEventViaApi(page, options.organizer, { title: options.title })
+  // Schedule 30 minutes ahead so the 24-hour check-in window is already open,
+  // which allows checkin → mark-attended to succeed.
+  const event = await createEventViaApi(page, options.organizer, { title: options.title, minutesAhead: 30 })
 
   await switchUser(page, options.participant)
   const handshakeId = await joinEventViaApi(page, event.id)
@@ -187,6 +191,10 @@ export async function setupAttendedEventHandshake(
 
   await switchUser(page, options.organizer)
   await markAttendedViaApi(page, handshakeId)
+
+  // Complete the event so event_completed_at is set and the evaluation window opens.
+  // Attended handshakes are not downgraded during completion.
+  await completeEventViaApi(page, event.id)
 
   // Leave page session as participant, ready for evaluation assertions.
   await switchUser(page, options.participant)

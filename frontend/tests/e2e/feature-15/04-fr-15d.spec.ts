@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test'
 import {
-  loginAs,
   switchUser,
   uniqueTitle,
   USERS,

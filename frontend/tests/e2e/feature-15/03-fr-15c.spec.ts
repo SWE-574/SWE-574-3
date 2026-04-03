@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test'
 import {
-  loginAs,
   switchUser,
   uniqueTitle,
   USERS,
   createEventViaApi,
   joinEventViaApi,
   markAttendedViaApi,
+  completeEventViaApi,
 } from '../helpers'
 
 test('FR-15c: organizer can manually override CHECK-IN to ATTENDED as fallback when QR fails', async ({ page }) => {
@@ -14,8 +14,8 @@ test('FR-15c: organizer can manually override CHECK-IN to ATTENDED as fallback w
   const organizer = USERS.zeynep
   const participant = USERS.can
 
-  // Participant joins the event.
-  const event = await createEventViaApi(page, organizer, { title })
+  // Schedule 30 minutes ahead so the 24-hour check-in window is already open.
+  const event = await createEventViaApi(page, organizer, { title, minutesAhead: 30 })
 
   await switchUser(page, participant)
   const handshakeId = await joinEventViaApi(page, event.id)
@@ -33,6 +33,9 @@ test('FR-15c: organizer can manually override CHECK-IN to ATTENDED as fallback w
   // Organizer overrides via mark-attended endpoint (fallback path).
   await switchUser(page, organizer)
   await markAttendedViaApi(page, handshakeId)
+
+  // Complete the event so event_completed_at is set and the evaluation window opens.
+  await completeEventViaApi(page, event.id)
 
   // Participant can now submit a positive evaluation — status is attended.
   await switchUser(page, participant)

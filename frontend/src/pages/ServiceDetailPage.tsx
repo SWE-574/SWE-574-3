@@ -1340,32 +1340,48 @@ export default function ServiceDetailPage() {
                       <FiMessageSquare size={14} /> Event Chat
                     </Box>
 
-                    <Box as="button" w="full" py="11px" borderRadius="10px"
-                      bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
-                      display="flex" alignItems="center" justifyContent="center" gap="7px"
-                      onClick={() => openEventDetailModal('roster')}
-                      style={{ border: 'none', cursor: 'pointer' }}
-                    >
-                      <FiCheckCircle size={14} /> Complete Event
-                    </Box>
-
-                    {isWithinLockdownWindow(service.scheduled_time) && (
-                      <Box bg={AMBER_LT} border={`1px solid ${AMBER}40`} borderRadius="10px" p={3}>
-                        <Text fontSize="12px" color="#92400E" fontWeight={600}>⚠ Lockdown window active</Text>
-                        <Text fontSize="11px" color="#92400E" mt="2px">
-                          Cancelling now will apply a 30-day event creation ban.
-                        </Text>
+                    {service.status === 'Completed' ? (
+                      <Box bg={GREEN_LT} borderRadius="12px" p={4} border={`1px solid ${GREEN}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiCheckCircle size={20} color={GREEN} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={GREEN}>Event completed</Text>
+                          <Text fontSize="12px" color="#166534" mt="2px">
+                            This event has been marked as completed.
+                          </Text>
+                        </Box>
                       </Box>
-                    )}
+                    ) : (
+                      <>
+                        <Box as="button" w="full" py="11px" borderRadius="10px"
+                          bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="7px"
+                          onClick={() => openEventDetailModal('roster')}
+                          style={{ border: 'none', cursor: 'pointer' }}
+                        >
+                          <FiCheckCircle size={14} /> Complete Event
+                        </Box>
 
-                    <Box as="button" w="full" py="10px" borderRadius="10px"
-                      bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
-                      display="flex" alignItems="center" justifyContent="center" gap="6px"
-                      onClick={handleCancelEvent}
-                      style={{ border: `1px solid ${RED}30`, cursor: cancelLoading ? 'not-allowed' : 'pointer', opacity: cancelLoading ? 0.65 : 1 }}
-                    >
-                      {cancelLoading ? 'Cancelling…' : 'Cancel Event'}
-                    </Box>
+                        {isWithinLockdownWindow(service.scheduled_time) && (
+                          <Box bg={AMBER_LT} border={`1px solid ${AMBER}40`} borderRadius="10px" p={3}>
+                            <Text fontSize="12px" color="#92400E" fontWeight={600}>⚠ Lockdown window active</Text>
+                            <Text fontSize="11px" color="#92400E" mt="2px">
+                              Cancelling now will apply a 30-day event creation ban.
+                            </Text>
+                          </Box>
+                        )}
+
+                        <Box as="button" w="full" py="10px" borderRadius="10px"
+                          bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="6px"
+                          onClick={handleCancelEvent}
+                          style={{ border: `1px solid ${RED}30`, cursor: cancelLoading ? 'not-allowed' : 'pointer', opacity: cancelLoading ? 0.65 : 1 }}
+                        >
+                          {cancelLoading ? 'Cancelling…' : 'Cancel Event'}
+                        </Box>
+                      </>
+                    )}
                   </Stack>
                 ) : isAuthenticated ? (
                   <>
@@ -1448,6 +1464,16 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
+                      {!myEventHandshake.user_has_reviewed && (
+                        <Box as="button" w="full" py="11px" borderRadius="10px"
+                          bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="7px"
+                          onClick={() => setShowEvaluationModal(true)}
+                          style={{ border: 'none', cursor: 'pointer' }}
+                        >
+                          <FiStar size={14} /> Leave Evaluation
+                        </Box>
+                      )}
                       <Box as="button" w="full" py="11px" borderRadius="10px"
                         bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
                         display="flex" alignItems="center" justifyContent="center" gap="7px"
@@ -2060,6 +2086,17 @@ export default function ServiceDetailPage() {
           onClose={() => setShowEvaluationModal(false)}
           handshakeId={evaluationHandshake.id}
           counterpartName={evaluationCounterpartName}
+          onSubmitted={handleEvaluationSubmitted}
+        />
+      )}
+
+      {isEvent && myEventHandshake?.status === 'attended' && !myEventHandshake.user_has_reviewed && (
+        <ServiceEvaluationModal
+          isOpen={showEvaluationModal}
+          onClose={() => setShowEvaluationModal(false)}
+          handshakeId={myEventHandshake.id}
+          counterpartName={service?.title ?? 'this event'}
+          isEventEvaluation
           onSubmitted={handleEvaluationSubmitted}
         />
       )}
