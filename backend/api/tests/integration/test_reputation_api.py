@@ -577,6 +577,110 @@ class TestNegativeRepViewSet:
         })
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
+    def test_create_positive_event_reputation_requires_attended_not_accepted(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='accepted',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+        })
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_create_negative_event_reputation_requires_attended_not_accepted(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='accepted',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.post('/api/reputation/negative/', {
+            'handshake_id': str(handshake.id),
+            'disorganized': True,
+        })
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_create_positive_event_reputation_requires_attended_not_no_show(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='no_show',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.post('/api/reputation/', {
+            'handshake_id': str(handshake.id),
+            'well_organized': True,
+            'engaging': True,
+            'welcoming': True,
+        })
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_create_negative_event_reputation_requires_attended_not_no_show(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now(),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='no_show',
+            provisioned_hours=0,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+
+        response = client.post('/api/reputation/negative/', {
+            'handshake_id': str(handshake.id),
+            'disorganized': True,
+        })
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
     def test_event_evaluation_summary_created_and_exposed_on_service(self):
         organizer = UserFactory()
         participant = UserFactory()
