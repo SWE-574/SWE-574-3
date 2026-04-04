@@ -96,7 +96,7 @@ def calculate_hot_score(service: Service) -> float:
         from .models import Handshake as _Handshake
         accepted_count = _Handshake.objects.filter(
             service=service,
-            status__in=['accepted', 'checked_in'],
+            status__in=['accepted', 'checked_in', 'attended', 'no_show'],
         ).count()
         capacity_ratio = accepted_count / service.max_participants
         if 0.75 <= capacity_ratio < 1.0:
@@ -170,7 +170,7 @@ def calculate_hot_scores_batch(services) -> dict:
         from .models import Handshake as _Handshake
         accepted_stats = _Handshake.objects.filter(
             service_id__in=group_service_ids,
-            status__in=['accepted', 'checked_in'],
+            status__in=['accepted', 'checked_in', 'attended', 'no_show'],
         ).values('service_id').annotate(count=Count('id'))
         group_accepted_counts = {row['service_id']: row['count'] for row in accepted_stats}
 

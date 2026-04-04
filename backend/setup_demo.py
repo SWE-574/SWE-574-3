@@ -1185,6 +1185,24 @@ levent_music_event = create_demo_service(
     created_days_ago=16,
 )
 
+elif_photo_event = create_demo_service(
+    user=elif_user,
+    title='Golden Horn Photography Walk',
+    description='A guided walk along the Golden Horn for photography enthusiasts. We will scout light, composition, and local life together. Suitable for all camera types.',
+    service_type='Event',
+    duration='3.00',
+    location_type='In-Person',
+    location_area='Eyüpsultan',
+    location_lat=Decimal('41.0498'),
+    location_lng=Decimal('28.9350'),
+    max_participants=4,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=4, hours=7),
+    schedule_details='Saturday morning, meets at Eyüp Ferry Dock at 08:00',
+    tags=[photography_tag, art_tag],
+    created_days_ago=5,
+)
+
 print(f"\n  Created {len(services)} services")
 
 for service in services:
@@ -1711,6 +1729,13 @@ yasemin_event_2 = event_rsvp(yasemin_story_event, selin, joined_days_ago=4)
 yasemin_event_3 = event_rsvp(yasemin_story_event, mehmet, joined_days_ago=2)
 event_handshakes.extend([yasemin_event_1, yasemin_event_2, yasemin_event_3])
 upcoming_event_handshakes.extend([yasemin_event_1, yasemin_event_2, yasemin_event_3])
+
+# Nearly-full event (75% capacity — 3 of 4 slots taken) — used to verify "Nearly Full" badge
+elif_photo_event_1 = event_rsvp(elif_photo_event, cem, joined_days_ago=3)
+elif_photo_event_2 = event_rsvp(elif_photo_event, ayse, joined_days_ago=2)
+elif_photo_event_3 = event_rsvp(elif_photo_event, mehmet, joined_days_ago=1)
+event_handshakes.extend([elif_photo_event_1, elif_photo_event_2, elif_photo_event_3])
+upcoming_event_handshakes.extend([elif_photo_event_1, elif_photo_event_2, elif_photo_event_3])
 
 Service.objects.filter(pk=levent_music_event.pk).update(scheduled_time=timezone.now() + timedelta(hours=10))
 levent_music_event.refresh_from_db(fields=['scheduled_time'])
