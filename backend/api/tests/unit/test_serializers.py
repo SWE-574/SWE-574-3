@@ -313,11 +313,20 @@ class TestUserProfileSerializer:
     
     def test_user_profile_serialization(self):
         """Test user profile serialization"""
-        user = UserFactory()
+        user = UserFactory(
+            first_name='Elif',
+            last_name='Yilmaz',
+            bio='Community-focused learner',
+            avatar_url='https://example.com/avatars/elif.jpg',
+        )
         serializer = UserProfileSerializer(user)
         data = serializer.data
         assert data['email'] == user.email
         assert data['first_name'] == user.first_name
+        assert data['last_name'] == user.last_name
+        assert data['bio'] == user.bio
+        assert data['avatar_url'] == user.avatar_url
+        assert data['date_joined'].startswith(user.date_joined.date().isoformat())
         assert float(data['timebank_balance']) == float(user.timebank_balance)
     
     def test_user_profile_bio_validation(self):
@@ -350,6 +359,73 @@ class TestUserProfileSerializer:
         data = serializer.data
         assert 'achievements' in data
         assert 'test-achievement' in data['achievements']
+
+    def test_user_profile_partial_update_fields_and_read_only_email(self):
+        """Editable fields update; email remains read-only."""
+        user = UserFactory(
+            first_name='Before',
+            last_name='User',
+            bio='Before bio',
+            avatar_url='https://example.com/avatars/before.jpg',
+            show_history=True,
+        )
+        serializer = UserProfileSerializer(user, data={
+            'first_name': 'After',
+            'last_name': 'Profile',
+            'bio': 'After bio',
+            'avatar_url': 'https://example.com/avatars/after.jpg',
+            'show_history': False,
+            'email': 'should-not-change@example.com',
+        }, partial=True)
+        assert serializer.is_valid(), serializer.errors
+        serializer.save()
+
+        user.refresh_from_db()
+        assert user.first_name == 'After'
+        assert user.last_name == 'Profile'
+        assert user.bio == 'After bio'
+        assert user.avatar_url == 'https://example.com/avatars/after.jpg'
+        assert user.show_history is False
+        assert user.email != 'should-not-change@example.com'
+
+    @pytest.mark.parametrize(
+        'payload,expected_field',
+        [
+            ({'first_name': 'x' * 151}, 'first_name'),
+            ({'last_name': 'x' * 151}, 'last_name'),
+            ({'avatar_url': 'javascript:alert(1)'}, 'avatar_url'),
+        ],
+    )
+    def test_user_profile_rejects_invalid_profile_inputs(self, payload, expected_field):
+        """Invalid profile inputs should fail validation before update/save."""
+        user = UserFactory(
+            first_name='Elif',
+            last_name='Yilmaz',
+            avatar_url='https://example.com/avatars/original.jpg',
+        )
+        serializer = UserProfileSerializer(user, data=payload, partial=True)
+
+        assert serializer.is_valid() is False
+        assert expected_field in serializer.errors
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestPublicUserProfileSerializer:
+    """Test PublicUserProfileSerializer"""
+
+    def test_public_profile_serializer_hides_sensitive_fields(self):
+        """Public serializer should not expose email, role internals, or security metadata."""
+        user = UserFactory()
+        serializer = PublicUserProfileSerializer(user)
+        data = serializer.data
+
+        assert data['id'] == str(user.id)
+        assert 'email' not in data
+        assert 'role' not in data
+        assert 'timebank_balance' not in data
+        assert 'is_verified' not in data
+        assert 'is_onboarded' not in data
 
 
 @pytest.mark.django_db

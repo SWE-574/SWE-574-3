@@ -290,6 +290,79 @@ class TestServiceViewSet:
         assert joined_notification is True
         assert checked_in_notification is True
         assert attended_notification is False
+
+    def test_update_event_notification_includes_changed_fields_summary(self):
+        """Event edit notification message should include changed field names."""
+        owner = UserFactory(first_name='Owner')
+        participant = UserFactory()
+        service = ServiceFactory(
+            user=owner,
+            type='Event',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(days=2),
+            title='Original Event Title',
+            description='Original event description',
+        )
+        HandshakeFactory(service=service, requester=participant, status='accepted')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.patch(
+            f'/api/services/{service.id}/',
+            {
+                'title': 'Updated Event Title',
+                'description': 'Updated event description',
+            },
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        notification = Notification.objects.filter(
+            user=participant,
+            type='service_updated',
+            related_service=service,
+        ).order_by('-created_at').first()
+        assert notification is not None
+        assert 'Changed fields:' in notification.message
+        assert 'title' in notification.message
+        assert 'description' in notification.message
+
+    def test_update_event_blocked_within_lockdown_window(self):
+        """Organizer cannot edit event details inside the 24-hour lock window."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner,
+            type='Event',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=12),
+            title='Event In Lockdown',
+        )
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Should Be Blocked'})
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        service.refresh_from_db()
+        assert service.title == 'Event In Lockdown'
+
+    def test_update_event_blocked_after_start_time(self):
+        """Organizer remains locked from editing once event start time has passed."""
+        owner = UserFactory()
+        service = ServiceFactory(
+            user=owner,
+            type='Event',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() - timedelta(hours=1),
+            status='Active',
+            title='Past Event',
+        )
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Should Also Be Blocked'})
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        service.refresh_from_db()
+        assert service.title == 'Past Event'
     
     def test_update_service_unauthorized(self):
         """Test updating service as non-owner fails"""

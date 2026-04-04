@@ -141,6 +141,13 @@ class TestCheckin:
         with pytest.raises(PermissionError, match='Only the participant'):
             EventHandshakeService.checkin(hs, UserFactory())
 
+    def test_checkin_after_event_start_raises(self):
+        service = _event_service(hours_until_start=-1)
+        user = UserFactory()
+        hs = HandshakeFactory(service=service, requester=user, status='accepted')
+        with pytest.raises(ValueError, match='no longer available'):
+            EventHandshakeService.checkin(hs, user)
+
 
 # ─── mark_attended ────────────────────────────────────────────────────────────
 

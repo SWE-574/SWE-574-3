@@ -1,4 +1,4 @@
-import { Box, Flex, Text } from '@chakra-ui/react'
+import { Box, Flex, Text, Spinner } from '@chakra-ui/react'
 import { FiX } from 'react-icons/fi'
 import {
   GRAY100, GRAY200, GRAY400, GRAY500, GRAY700, GRAY800, GRAY900, GREEN, GREEN_LT, WHITE,
@@ -29,12 +29,19 @@ export default function MultiUseDetailsModal({
   subtitle,
   items,
   onClose,
+  loading = false,
+  emptyMessage,
+  /** When set, caps the scrollable list height (e.g. ~5 rows) so long lists scroll inside the modal */
+  listMaxHeight,
 }: {
   isOpen: boolean
   title: string
   subtitle?: string
   items: MultiUseDetailItem[]
   onClose: () => void
+  loading?: boolean
+  emptyMessage?: string
+  listMaxHeight?: string
 }) {
   if (!isOpen) return null
 
@@ -74,65 +81,82 @@ export default function MultiUseDetailsModal({
             </Box>
           </Flex>
 
-          <Box px={5} py={3} overflowY="auto" maxH="calc(min(80vh, 720px) - 88px)">
-            {items.map((item, index) => (
-              <Flex
-                key={item.id}
-                align="center"
-                gap={3}
-                py={3}
-                borderTop={index === 0 ? 'none' : `1px solid ${GRAY100}`}
-                onClick={item.onClick}
-                style={{ cursor: item.onClick ? 'pointer' : 'default' }}
-              >
-                {item.avatarUrl ? (
-                  <Box
-                    w="38px"
-                    h="38px"
-                    borderRadius="full"
-                    flexShrink={0}
-                    style={{ backgroundImage: `url(${item.avatarUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
-                  />
-                ) : (
-                  <Flex
-                    w="38px"
-                    h="38px"
-                    borderRadius="full"
-                    flexShrink={0}
-                    align="center"
-                    justify="center"
-                    bg={GREEN_LT}
-                    color={GREEN}
-                    fontSize="12px"
-                    fontWeight={800}
-                  >
-                    {initials(item.title)}
-                  </Flex>
-                )}
-
-                <Box flex={1} minW={0}>
-                  <Text fontSize="13px" fontWeight={700} color={GRAY800} whiteSpace="nowrap" overflow="hidden" textOverflow="ellipsis">
-                    {item.title}
-                  </Text>
-                  {item.subtitle && (
-                    <Text fontSize="12px" color={GRAY500} mt="2px">
-                      {item.subtitle}
-                    </Text>
-                  )}
-                  {item.meta && (
-                    <Text fontSize="11px" color={GRAY400} mt="2px">
-                      {item.meta}
-                    </Text>
-                  )}
-                </Box>
-
-                {item.value && (
-                  <Text fontSize="12px" fontWeight={800} color={GRAY700} flexShrink={0}>
-                    {item.value}
-                  </Text>
-                )}
+          <Box
+            px={5}
+            py={3}
+            overflowY="auto"
+            maxH={listMaxHeight ?? 'calc(min(80vh, 720px) - 88px)'}
+            minH={0}
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
+            {loading ? (
+              <Flex justify="center" py={12}>
+                <Spinner color={GREEN} size="lg" />
               </Flex>
-            ))}
+            ) : items.length === 0 ? (
+              <Text fontSize="13px" color={GRAY500} py={8} textAlign="center">
+                {emptyMessage ?? 'Nothing to show.'}
+              </Text>
+            ) : (
+              items.map((item, index) => (
+                <Flex
+                  key={item.id}
+                  align="center"
+                  gap={3}
+                  py={3}
+                  borderTop={index === 0 ? 'none' : `1px solid ${GRAY100}`}
+                  onClick={item.onClick}
+                  style={{ cursor: item.onClick ? 'pointer' : 'default' }}
+                >
+                  {item.avatarUrl ? (
+                    <Box
+                      w="38px"
+                      h="38px"
+                      borderRadius="full"
+                      flexShrink={0}
+                      style={{ backgroundImage: `url(${item.avatarUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                    />
+                  ) : (
+                    <Flex
+                      w="38px"
+                      h="38px"
+                      borderRadius="full"
+                      flexShrink={0}
+                      align="center"
+                      justify="center"
+                      bg={GREEN_LT}
+                      color={GREEN}
+                      fontSize="12px"
+                      fontWeight={800}
+                    >
+                      {initials(item.title)}
+                    </Flex>
+                  )}
+
+                  <Box flex={1} minW={0}>
+                    <Text fontSize="13px" fontWeight={700} color={GRAY800} whiteSpace="nowrap" overflow="hidden" textOverflow="ellipsis">
+                      {item.title}
+                    </Text>
+                    {item.subtitle && (
+                      <Text fontSize="12px" color={GRAY500} mt="2px">
+                        {item.subtitle}
+                      </Text>
+                    )}
+                    {item.meta && (
+                      <Text fontSize="11px" color={GRAY400} mt="2px">
+                        {item.meta}
+                      </Text>
+                    )}
+                  </Box>
+
+                  {item.value && (
+                    <Text fontSize="12px" fontWeight={800} color={GRAY700} flexShrink={0}>
+                      {item.value}
+                    </Text>
+                  )}
+                </Flex>
+              ))
+            )}
           </Box>
         </Box>
       </Flex>
