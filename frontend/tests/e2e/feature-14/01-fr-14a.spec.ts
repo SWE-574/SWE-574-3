@@ -12,7 +12,7 @@ import {
 test('FR-14a: evaluation CTA is absent before COMPLETED and visible once exchange reaches COMPLETED state', async ({ page }) => {
   const title = uniqueTitle('FR-14a Offer')
   const provider = USERS.elif
-  const requester = USERS.cem
+  const requester = USERS.ayse
 
   // Build exchange up to the pending state then accept it so it is in progress but NOT yet completed.
   const { serviceId } = await createPendingOfferExchange(page, {

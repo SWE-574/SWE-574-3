@@ -97,6 +97,11 @@ export async function submitEvaluationViaApi(
   const hasPositive = options.punctual || options.helpful || options.kindness
   const hasNegative = options.is_late || options.is_unhelpful || options.is_rude
 
+  expect(
+    hasPositive || hasNegative,
+    'submitEvaluationViaApi requires at least one positive or negative trait.',
+  ).toBeTruthy()
+
   if (hasPositive) {
     const result = await page.evaluate(async (data) => {
       const res = await fetch('/api/reputation/', {

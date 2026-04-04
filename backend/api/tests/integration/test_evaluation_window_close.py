@@ -21,7 +21,7 @@ from django.utils import timezone
 
 from rest_framework import status
 
-from api.models import Handshake, ReputationRep, NegativeRep, EventEvaluationSummary, Service
+from api.models import Handshake, EventEvaluationSummary, Service
 from api.tests.helpers.factories import HandshakeFactory, ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 

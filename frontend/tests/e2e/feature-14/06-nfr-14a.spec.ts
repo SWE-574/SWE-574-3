@@ -13,7 +13,7 @@ test('NFR-14a: only users party to a completed exchange can access the evaluatio
   const thirdParty = USERS.burak
 
   // Reach completed state; page ends logged in as provider.
-  const { serviceDetailUrl } = await setupCompletedExchange(page, {
+  const { serviceDetailUrl, handshakeId } = await setupCompletedExchange(page, {
     provider,
     requester,
     title,
@@ -25,4 +25,39 @@ test('NFR-14a: only users party to a completed exchange can access the evaluatio
 
   // "Leave Evaluation" must NOT be visible for a non-party user.
   await expect(page.getByText(/Leave Evaluation/i)).not.toBeVisible({ timeout: 10_000 })
+
+  // Backend must also reject direct non-party API submissions.
+  const positiveAttempt = await page.evaluate(async (data) => {
+    const res = await fetch('/api/reputation/', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return { status: res.status, body: await res.text() }
+  }, {
+    handshake_id: handshakeId,
+    punctual: true,
+    helpful: false,
+    kindness: false,
+  })
+  expect(positiveAttempt.status).toBe(403)
+  expect(positiveAttempt.body).toMatch(/not authorized|not a participant|permission denied/i)
+
+  const negativeAttempt = await page.evaluate(async (data) => {
+    const res = await fetch('/api/reputation/negative/', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return { status: res.status, body: await res.text() }
+  }, {
+    handshake_id: handshakeId,
+    is_late: true,
+    is_unhelpful: false,
+    is_rude: false,
+  })
+  expect(negativeAttempt.status).toBe(403)
+  expect(negativeAttempt.body).toMatch(/not authorized|not a participant|permission denied/i)
 })

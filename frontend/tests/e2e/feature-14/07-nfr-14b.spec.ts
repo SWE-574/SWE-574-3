@@ -10,7 +10,7 @@ import {
 test('NFR-14b: evaluation submissions are idempotent — second submission attempt shows already-reviewed state', async ({ page }) => {
   const title = uniqueTitle('NFR-14b Offer')
   const provider = USERS.yasemin
-  const requester = USERS.cem
+  const requester = USERS.mehmet
 
   // Reach completed state; page ends logged in as provider.
   const { serviceDetailUrl } = await setupCompletedExchange(page, {

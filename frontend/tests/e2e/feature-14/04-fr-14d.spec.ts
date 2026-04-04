@@ -12,7 +12,7 @@ test('FR-14d: service receiver and provider can submit optional text review comm
   const title = uniqueTitle('FR-14d Offer')
   const reviewText = `Great experience - FR-14d review ${Date.now()}`
   const provider = USERS.elif
-  const requester = USERS.cem
+  const requester = USERS.ayse
 
   // Reach completed state; page ends logged in as provider.
   const { serviceId, handshakeId, serviceDetailUrl } = await setupCompletedExchange(page, {
