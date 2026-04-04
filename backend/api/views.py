@@ -5425,13 +5425,38 @@ class AdminUserViewSet(viewsets.ViewSet):
             )
         return None
 
+    def _check_target_tier(self, request, target_user, allow_same_tier=False):
+        """Return an error response based on role-tier comparison.
+
+        By default requires actor tier to be strictly above target tier.
+        Pass allow_same_tier=True for actions (e.g. warn) that peers may perform
+        on each other, but that still cannot be performed upward.
+        """
+        actor_tier = self._ROLE_HIERARCHY.get(request.user.role, 0)
+        target_tier = self._ROLE_HIERARCHY.get(target_user.role, 0)
+        blocked = actor_tier < target_tier if allow_same_tier else actor_tier <= target_tier
+        if blocked:
+            return create_error_response(
+                'You cannot perform this action on a user at your tier or above.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _visible_users_queryset(self, request):
+        """Return a User queryset filtered to roles the actor is permitted to see."""
+        qs = User.objects.all()
+        if request.user.role != 'super_admin':
+            qs = qs.exclude(role='super_admin')
+        return qs
+
     def list(self, request):
         """List all users with search and filter support (admin only)"""
         admin_check = self.check_admin(request)
         if admin_check:
             return admin_check
 
-        queryset = User.objects.all().order_by('-date_joined')
+        queryset = self._visible_users_queryset(request).order_by('-date_joined')
         
         # Search by email, first_name, or last_name
         search = request.query_params.get('search', '').strip()
@@ -5466,7 +5491,7 @@ class AdminUserViewSet(viewsets.ViewSet):
             return admin_check
 
         try:
-            user = User.objects.get(id=pk)
+            user = self._visible_users_queryset(request).get(id=pk)
         except User.DoesNotExist:
             return create_error_response(
                 'User not found',
@@ -5499,6 +5524,11 @@ class AdminUserViewSet(viewsets.ViewSet):
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
+
+        # Peers at the same tier may warn each other; acting upward is still blocked.
+        tier_check = self._check_target_tier(request, user, allow_same_tier=True)
+        if tier_check:
+            return tier_check
 
         create_notification(
             user=user,
@@ -5540,6 +5570,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_403_FORBIDDEN
             )
 
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
+
         user.is_active = False
         user.save()
 
@@ -5563,6 +5597,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_404_NOT_FOUND
             )
 
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
+
         user.is_active = True
         user.save()
 
@@ -5585,6 +5623,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
 
         adjustment = request.data.get('adjustment', 0)
         user.karma_score += adjustment
@@ -5719,6 +5761,14 @@ class AdminUserViewSet(viewsets.ViewSet):
         if new_role_tier >= actor_tier:
             return create_error_response(
                 'You cannot assign a role equal to or above your own tier.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Only super_admin may grant the moderator role.
+        if new_role == 'moderator' and request.user.role != 'super_admin':
+            return create_error_response(
+                'Only a super_admin can assign the moderator role.',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN,
             )

@@ -198,6 +198,112 @@ class TestAdminManagementApi:
         target.refresh_from_db()
         assert target.is_active is False
 
+    # ── Tier-enforcement: moderator cannot act on higher-tier users ───────────
+
+    def test_moderator_cannot_ban_admin(self):
+        """A moderator must not be able to suspend an admin account."""
+        moderator = UserFactory(role='moderator')
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(f'/api/admin/users/{admin.id}/ban/', {}, format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        admin.refresh_from_db()
+        assert admin.is_active is True
+
+    def test_moderator_cannot_warn_admin(self):
+        """A moderator must not be able to issue a warning to an admin (higher tier)."""
+        moderator = UserFactory(role='moderator')
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(
+            f'/api/admin/users/{admin.id}/warn/',
+            {'message': 'Attempt'},
+            format='json',
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_moderator_can_warn_another_moderator(self):
+        """Moderators may warn peers at the same tier."""
+        moderator = UserFactory(role='moderator')
+        peer = UserFactory(role='moderator')
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(
+            f'/api/admin/users/{peer.id}/warn/',
+            {'message': 'Please follow guidelines.'},
+            format='json',
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_moderator_cannot_ban_another_moderator(self):
+        """Moderators must not be able to ban peers at the same tier."""
+        moderator = UserFactory(role='moderator')
+        peer = UserFactory(role='moderator', is_active=True)
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(f'/api/admin/users/{peer.id}/ban/', {}, format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        peer.refresh_from_db()
+        assert peer.is_active is True
+
+    def test_moderator_cannot_adjust_karma_of_admin(self):
+        """A moderator must not be able to adjust karma of an admin."""
+        moderator = UserFactory(role='moderator')
+        admin = AdminUserFactory()
+        original_karma = admin.karma_score
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(
+            f'/api/admin/users/{admin.id}/adjust-karma/',
+            {'adjustment': -5},
+            format='json',
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        admin.refresh_from_db()
+        assert admin.karma_score == original_karma
+
+    # ── super_admin visibility ────────────────────────────────────────────────
+
+    def test_super_admin_not_visible_in_user_list_for_admin(self):
+        """An admin must not see super_admin accounts in the user list."""
+        admin = AdminUserFactory()
+        super_admin = UserFactory(role='super_admin')
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.get('/api/admin/users/')
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = {item['id'] for item in _payload_items(response.data)}
+        assert str(super_admin.id) not in ids
+
+    def test_super_admin_detail_returns_404_for_admin(self):
+        """An admin must receive 404 when requesting a super_admin's detail."""
+        admin = AdminUserFactory()
+        super_admin = UserFactory(role='super_admin')
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.get(f'/api/admin/users/{super_admin.id}/')
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_super_admin_can_see_other_super_admins(self):
+        """A super_admin should be able to view another super_admin's detail."""
+        actor = UserFactory(role='super_admin')
+        peer = UserFactory(role='super_admin')
+        client = AuthenticatedAPIClient().authenticate_user(actor)
+
+        response = client.get(f'/api/admin/users/{peer.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['id'] == str(peer.id)
+
     def test_resolved_report_is_retrievable_via_detail_endpoint(self):
         """Resolved reports must return 200 on the detail endpoint (not 404)."""
         admin = AdminUserFactory()
@@ -597,11 +703,11 @@ class TestAdminRoleAssignment:
 
     # ── successful assignments ────────────────────────────────────────────────
 
-    def test_admin_can_promote_member_to_moderator(self):
-        """Happy path: admin promotes a member to moderator."""
-        admin = AdminUserFactory()
+    def test_super_admin_can_promote_member_to_moderator(self):
+        """Happy path: super_admin promotes a member to moderator."""
+        super_admin = UserFactory(role='super_admin')
         target = UserFactory()  # member
-        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        client = AuthenticatedAPIClient().authenticate_user(super_admin)
 
         response = self._post(client, target.id, 'moderator')
 
@@ -622,6 +728,18 @@ class TestAdminRoleAssignment:
         response = self._post(client, target.id, 'member')
 
         assert response.status_code == status.HTTP_200_OK
+        target.refresh_from_db()
+        assert target.role == 'member'
+
+    def test_admin_cannot_promote_member_to_moderator(self):
+        """An admin (not super_admin) must not be able to assign the moderator role."""
+        admin = AdminUserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, target.id, 'moderator')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
         target.refresh_from_db()
         assert target.role == 'member'
 
@@ -655,9 +773,9 @@ class TestAdminRoleAssignment:
 
     def test_audit_log_is_created_on_successful_assignment(self):
         """An immutable audit record must be written for every role change."""
-        admin = AdminUserFactory()
+        super_admin = UserFactory(role='super_admin')
         target = UserFactory()
-        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        client = AuthenticatedAPIClient().authenticate_user(super_admin)
 
         initial_log_count = AdminAuditLog.objects.filter(action_type='assign_role').count()
         response = self._post(client, target.id, 'moderator')
@@ -667,7 +785,7 @@ class TestAdminRoleAssignment:
         assert logs.count() == initial_log_count + 1
 
         log = logs.latest('created_at')
-        assert log.admin == admin
+        assert log.admin == super_admin
         assert str(log.target_id) == str(target.id)
         assert log.previous_role == 'member'
         assert log.new_role == 'moderator'
