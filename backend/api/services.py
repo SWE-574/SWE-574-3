@@ -1,17 +1,50 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 from django.conf import settings
 from django.db import transaction
 from django.db import models as django_models
-from django.db.models import Q
+from django.db.models import F, Q
 from django.db.utils import OperationalError
 from django.utils import timezone
 
-from .models import Handshake, Service, User, ChatMessage, ReputationRep, NegativeRep, EventEvaluationSummary, Report
-from .utils import create_notification
-from .cache_utils import invalidate_conversations
+from .models import (
+    Handshake, Service, User, ChatMessage, ReputationRep, NegativeRep,
+    EventEvaluationSummary, Report, TransactionHistory, Notification,
+    Comment, Badge,
+)
+from .utils import (
+    create_notification,
+    provision_timebank,
+    complete_timebank_transfer,
+    cancel_timebank_transfer,
+    get_provider_and_receiver,
+)
+from .cache_utils import invalidate_conversations, invalidate_transactions
+
+
+def _to_bool(value):
+    """Coerce a request-data value (possibly string) to a Python bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ('true', '1', 'yes')
+    return bool(value)
+
+
+class HandshakeServiceError(Exception):
+    """Raised by HandshakeService methods to signal a business rule violation.
+
+    Attributes:
+        code: An ``ErrorCodes`` string for the API response.
+        status_code: The HTTP status code the view should return.
+    """
+
+    def __init__(self, message: str, code: str = "INVALID_INPUT", status_code: int = 400) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
 
 
 class HandshakeService:
@@ -292,6 +325,957 @@ class HandshakeService:
         """Invalidates conversation caches for both users."""
         invalidate_conversations(str(requester.id))
         invalidate_conversations(str(service_owner.id))
+
+    # ------------------------------------------------------------------
+    # Handshake lifecycle methods (initiate → approve → confirm/cancel)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_maps_url(exact_location: str, lat, lng) -> str:
+        from urllib.parse import quote
+        if lat is not None and lng is not None:
+            try:
+                return f"https://www.google.com/maps?q={float(lat)},{float(lng)}"
+            except (TypeError, ValueError):
+                pass
+        return f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
+
+    @staticmethod
+    def initiate(handshake: Handshake, user: User, data: dict) -> tuple[Handshake, ChatMessage | None]:
+        """
+        Service-owner initiates the handshake by providing session details.
+
+        Returns (handshake, session_chat_message). The caller is responsible
+        for broadcasting ``session_chat_message`` over the WebSocket layer.
+
+        Raises:
+            HandshakeServiceError: On permission or business rule violations.
+        """
+        from .exceptions import ErrorCodes
+
+        if handshake.service.user != user:
+            raise HandshakeServiceError(
+                'Only the service owner can initiate the handshake',
+                code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+            )
+        if handshake.status != 'pending':
+            raise HandshakeServiceError('Handshake is not pending', code=ErrorCodes.INVALID_STATE)
+        if handshake.provider_initiated:
+            raise HandshakeServiceError(
+                'You have already initiated this handshake', code=ErrorCodes.ALREADY_EXISTS,
+            )
+
+        service = handshake.service
+        is_fixed_group_offer = (
+            service.type == 'Offer'
+            and service.schedule_type == 'One-Time'
+            and service.max_participants > 1
+        )
+
+        if is_fixed_group_offer:
+            if not service.location_area or not service.scheduled_time:
+                raise HandshakeServiceError(
+                    'This group offer is missing its fixed meeting details.',
+                    code=ErrorCodes.INVALID_STATE,
+                )
+
+            handshake.provider_initiated = True
+            handshake.exact_duration = service.duration
+            handshake.scheduled_time = service.scheduled_time
+            if service.location_type == 'Online':
+                handshake.exact_location = ''
+                handshake.exact_location_guide = ''
+                handshake.exact_location_maps_url = None
+            else:
+                handshake.exact_location = service.session_exact_location or service.location_area
+                handshake.exact_location_guide = service.session_location_guide
+                if service.session_exact_location_lat is not None and service.session_exact_location_lng is not None:
+                    handshake.exact_location_maps_url = HandshakeService._build_maps_url(
+                        handshake.exact_location,
+                        service.session_exact_location_lat,
+                        service.session_exact_location_lng,
+                    )
+                elif service.location_lat is not None and service.location_lng is not None:
+                    handshake.exact_location_maps_url = HandshakeService._build_maps_url(
+                        handshake.exact_location, service.location_lat, service.location_lng,
+                    )
+                else:
+                    from urllib.parse import quote
+                    handshake.exact_location_maps_url = (
+                        f"https://www.google.com/maps/search/?api=1&query="
+                        f"{quote(service.session_exact_location or service.location_area or '')}"
+                    )
+            handshake.save()
+
+            invalidate_conversations(str(service.user.id))
+            invalidate_conversations(str(handshake.requester.id))
+
+            create_notification(
+                user=handshake.requester,
+                notification_type='handshake_request',
+                title='Group Offer Details Shared',
+                message=(
+                    f"{user.first_name} shared the fixed session details for "
+                    f"'{handshake.service.title}'. Please review and approve."
+                ),
+                handshake=handshake,
+                service=handshake.service,
+            )
+
+            from django.utils import timezone as tz
+            loc = handshake.exact_location or ''
+            guide = (handshake.exact_location_guide or '').strip()
+            summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
+            parts = [f"\U0001F4C5 {summary_time}"]
+            if loc:
+                parts.append(f"\U0001F4CD {loc}")
+            if guide:
+                parts.append(f"\U0001F9ED {guide}")
+            if handshake.exact_location_maps_url:
+                parts.append(f"\U0001F517 {handshake.exact_location_maps_url}")
+            session_msg = ChatMessage.objects.create(
+                handshake=handshake, sender=user, body=" | ".join(parts),
+            )
+            return handshake, session_msg
+
+        # --- standard (non-fixed-group) initiation ---
+        from .timezone_utils import validate_and_normalize_datetime, validate_future_datetime
+        from .exceptions import ErrorCodes
+
+        exact_location = (data.get('exact_location') or '').strip()
+        exact_duration = data.get('exact_duration')
+        scheduled_time = data.get('scheduled_time')
+        exact_location_lat = data.get('exact_location_lat')
+        exact_location_lng = data.get('exact_location_lng')
+
+        requires_exact_location = handshake.service.location_type != 'Online'
+        if requires_exact_location and not exact_location:
+            raise HandshakeServiceError('Exact location is required', code=ErrorCodes.VALIDATION_ERROR)
+        if not exact_duration:
+            raise HandshakeServiceError('Exact duration is required', code=ErrorCodes.VALIDATION_ERROR)
+        if not scheduled_time:
+            raise HandshakeServiceError('Scheduled time is required', code=ErrorCodes.VALIDATION_ERROR)
+
+        parsed_time, parse_error = validate_and_normalize_datetime(scheduled_time)
+        if parse_error:
+            raise HandshakeServiceError(parse_error, code=ErrorCodes.VALIDATION_ERROR)
+
+        future_error = validate_future_datetime(parsed_time)
+        if future_error:
+            raise HandshakeServiceError(future_error, code=ErrorCodes.VALIDATION_ERROR)
+
+        try:
+            exact_duration_decimal = Decimal(str(exact_duration))
+            if exact_duration_decimal <= 0:
+                raise HandshakeServiceError(
+                    'Duration must be greater than 0', code=ErrorCodes.VALIDATION_ERROR,
+                )
+            if (
+                handshake.service.type in ('Offer', 'Need')
+                and exact_duration_decimal != exact_duration_decimal.to_integral_value()
+            ):
+                raise HandshakeServiceError(
+                    'Duration must be a whole number of hours', code=ErrorCodes.VALIDATION_ERROR,
+                )
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            if isinstance(exc, HandshakeServiceError):
+                raise
+            raise HandshakeServiceError('Invalid duration format', code=ErrorCodes.VALIDATION_ERROR) from exc
+
+        from .schedule_utils import check_schedule_conflict
+        conflicts = check_schedule_conflict(
+            user, parsed_time, float(exact_duration_decimal), exclude_handshake=handshake,
+        )
+        if conflicts:
+            info = conflicts[0]
+            other_user_name = f"{info['other_user'].first_name} {info['other_user'].last_name}".strip()
+            conflict_time = info['scheduled_time'].strftime('%Y-%m-%d %H:%M')
+            err = HandshakeServiceError('Schedule conflict detected', code=ErrorCodes.CONFLICT)
+            err.extra = {
+                'conflict': True,
+                'conflict_details': {
+                    'service_title': info['service_title'],
+                    'scheduled_time': conflict_time,
+                    'other_user': other_user_name,
+                },
+            }
+            raise err
+
+        if exact_location:
+            handshake.exact_location_maps_url = HandshakeService._build_maps_url(
+                exact_location, exact_location_lat, exact_location_lng,
+            )
+        else:
+            handshake.exact_location_maps_url = None
+
+        handshake.provider_initiated = True
+        handshake.exact_location = exact_location
+        handshake.exact_duration = exact_duration_decimal
+        handshake.scheduled_time = parsed_time
+        handshake.save()
+
+        invalidate_conversations(str(service.user.id))
+        invalidate_conversations(str(handshake.requester.id))
+
+        create_notification(
+            user=handshake.requester,
+            notification_type='handshake_request',
+            title='Service Details Provided',
+            message=(
+                f"{user.first_name} has provided session details for "
+                f"'{handshake.service.title}'. Please review and approve."
+            ),
+            handshake=handshake,
+            service=handshake.service,
+        )
+
+        from django.utils import timezone as tz
+        summary_time = tz.localtime(parsed_time).strftime('%b %d, %Y %I:%M %p')
+        parts = [f"\U0001F4C5 {summary_time}"]
+        if exact_location:
+            parts.append(f"\U0001F4CD {exact_location}")
+        if handshake.exact_location_maps_url:
+            parts.append(f"\U0001F517 {handshake.exact_location_maps_url}")
+        session_msg = ChatMessage.objects.create(
+            handshake=handshake, sender=user, body=" | ".join(parts),
+        )
+        return handshake, session_msg
+
+    @staticmethod
+    def approve(handshake: Handshake, user: User) -> tuple[Handshake, ChatMessage]:
+        """
+        Requester approves session details, triggering TimeBank provisioning.
+
+        Returns (handshake, approve_chat_message). Caller broadcasts the message.
+
+        Raises:
+            HandshakeServiceError: On permission or business rule violations.
+        """
+        from .exceptions import ErrorCodes
+
+        if handshake.requester != user:
+            raise HandshakeServiceError(
+                'Only the requester can approve the handshake',
+                code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+            )
+        if handshake.status != 'pending':
+            raise HandshakeServiceError('Handshake is not pending', code=ErrorCodes.INVALID_STATE)
+        if not handshake.provider_initiated:
+            raise HandshakeServiceError(
+                'Provider must initiate the handshake first', code=ErrorCodes.INVALID_STATE,
+            )
+        if not handshake.exact_location or not handshake.exact_duration or not handshake.scheduled_time:
+            err = HandshakeServiceError(
+                'Provider must provide exact location, duration, and scheduled time before approval',
+                code=ErrorCodes.INVALID_STATE,
+            )
+            err.extra = {'requires_details': True}
+            raise err
+
+        if handshake.service.type in ('Offer', 'Need') and handshake.exact_duration is not None:
+            handshake.provisioned_hours = handshake.exact_duration
+            handshake.save(update_fields=['provisioned_hours'])
+
+        try:
+            provision_timebank(handshake)
+        except ValueError as exc:
+            raise HandshakeServiceError(
+                str(exc), code=ErrorCodes.INSUFFICIENT_BALANCE,
+            ) from exc
+
+        handshake.status = 'accepted'
+        handshake.requester_initiated = True
+        handshake.save()
+
+        from django.utils import timezone as tz
+        from datetime import timedelta as _timedelta
+
+        summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
+        loc = handshake.exact_location or ''
+        approve_msg = ChatMessage.objects.create(
+            handshake=handshake,
+            sender=user,
+            body=f"Session approved! See you on {summary_time} at {loc}.",
+        )
+
+        create_notification(
+            user=handshake.service.user,
+            notification_type='handshake_accepted',
+            title='Handshake Approved',
+            message=(
+                f"{user.first_name} has approved the handshake for "
+                f"'{handshake.service.title}'. The handshake is now accepted."
+            ),
+            handshake=handshake,
+            service=handshake.service,
+        )
+
+        service_time = handshake.scheduled_time
+        duration_hours = float(handshake.exact_duration)
+        completion_time = service_time + _timedelta(hours=duration_hours)
+
+        if service_time > timezone.now():
+            for party in (handshake.service.user, handshake.requester):
+                create_notification(
+                    user=party,
+                    notification_type='service_reminder',
+                    title='Service Reminder',
+                    message=(
+                        f"Your service '{handshake.service.title}' is scheduled for "
+                        f"{service_time.strftime('%Y-%m-%d %H:%M')}"
+                    ),
+                    handshake=handshake,
+                    service=handshake.service,
+                )
+
+        if completion_time > timezone.now():
+            for party in (handshake.service.user, handshake.requester):
+                create_notification(
+                    user=party,
+                    notification_type='service_confirmation',
+                    title='Service Completion Reminder',
+                    message=(
+                        f"Please confirm completion of '{handshake.service.title}' "
+                        f"after {completion_time.strftime('%Y-%m-%d %H:%M')}"
+                    ),
+                    handshake=handshake,
+                    service=handshake.service,
+                )
+
+        return handshake, approve_msg
+
+    @staticmethod
+    def accept(handshake: Handshake, user: User) -> Handshake:
+        """
+        Service provider accepts a pending handshake (Need/Offer without the
+        initiate→approve flow, or when provider is the one accepting interest).
+
+        Raises:
+            HandshakeServiceError: On permission or business rule violations.
+        """
+        from .exceptions import ErrorCodes
+
+        if handshake.service.user != user:
+            raise HandshakeServiceError(
+                'Only the service provider can accept',
+                code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+            )
+        if handshake.status != 'pending':
+            raise HandshakeServiceError('Handshake is not pending', code=ErrorCodes.INVALID_STATE)
+
+        try:
+            provision_timebank(handshake)
+        except ValueError as exc:
+            raise HandshakeServiceError(
+                str(exc), code=ErrorCodes.INSUFFICIENT_BALANCE,
+            ) from exc
+
+        service = handshake.service
+        with transaction.atomic():
+            handshake.status = 'accepted'
+            handshake.save()
+
+            if service.schedule_type == 'One-Time':
+                accepted_count = Handshake.objects.filter(
+                    service=service,
+                    status__in=['accepted', 'completed', 'reported', 'paused'],
+                ).count()
+
+                if accepted_count >= service.max_participants:
+                    other_pending = Handshake.objects.filter(
+                        service=service, status='pending',
+                    ).exclude(pk=handshake.pk)
+
+                    denied_requesters = list(other_pending.values_list('requester_id', flat=True))
+                    other_pending.update(status='denied')
+
+                    users_by_id = User.objects.in_bulk(denied_requesters)
+                    for requester_id in denied_requesters:
+                        u = users_by_id.get(requester_id)
+                        if u is None:
+                            continue
+                        create_notification(
+                            user=u,
+                            notification_type='handshake_denied',
+                            title='Request Not Accepted',
+                            message=f"All slots for '{service.title}' are now filled.",
+                            service=service,
+                        )
+                        invalidate_conversations(str(requester_id))
+
+                    if service.status == 'Active':
+                        Service.objects.filter(pk=service.pk).update(status='Agreed')
+
+        invalidate_conversations(str(handshake.requester.id))
+        invalidate_conversations(str(service.user.id))
+
+        create_notification(
+            user=handshake.requester,
+            notification_type='handshake_accepted',
+            title='Handshake Accepted',
+            message=f"Your interest in '{service.title}' has been accepted!",
+            handshake=handshake,
+            service=service,
+        )
+        return handshake
+
+    @staticmethod
+    def confirm_completion(handshake: Handshake, user: User, hours=None) -> Handshake:
+        """
+        Record one party's confirmation of service completion.
+
+        When both parties confirm, triggers the TimeBank transfer and opens
+        the evaluation window.
+
+        Raises:
+            HandshakeServiceError: On permission or business rule violations.
+        """
+        from .exceptions import ErrorCodes
+
+        provider, receiver = get_provider_and_receiver(handshake)
+        is_provider = provider == user
+        is_receiver = receiver == user
+
+        if not (is_provider or is_receiver):
+            raise HandshakeServiceError('Not authorized', code=ErrorCodes.PERMISSION_DENIED, status_code=403)
+        if handshake.status != 'accepted':
+            raise HandshakeServiceError('Handshake must be accepted', code=ErrorCodes.INVALID_STATE)
+
+        if hours is not None:
+            try:
+                hours_decimal = Decimal(str(hours))
+                if hours_decimal <= 0:
+                    raise HandshakeServiceError(
+                        'Hours must be greater than 0', code=ErrorCodes.VALIDATION_ERROR,
+                    )
+                if hours_decimal > 24:
+                    raise HandshakeServiceError(
+                        'Hours cannot exceed 24', code=ErrorCodes.VALIDATION_ERROR,
+                    )
+                if (
+                    handshake.service.type in ('Offer', 'Need')
+                    and hours_decimal != hours_decimal.to_integral_value()
+                ):
+                    raise HandshakeServiceError(
+                        'Hours must be a whole number', code=ErrorCodes.VALIDATION_ERROR,
+                    )
+
+                old_hours = handshake.provisioned_hours
+                if handshake.status == 'accepted' and hours_decimal != old_hours:
+                    difference = hours_decimal - old_hours
+                    # receiver is the one who pays hours
+                    payer = handshake.requester
+                    with transaction.atomic():
+                        payer_locked = User.objects.select_for_update().get(id=payer.id)
+                        if difference > 0:
+                            if payer_locked.timebank_balance < difference:
+                                raise HandshakeServiceError(
+                                    f'Insufficient balance. Need {difference} more hours',
+                                    code=ErrorCodes.INSUFFICIENT_BALANCE,
+                                )
+                            payer_locked.timebank_balance = F("timebank_balance") - difference
+                            payer_locked.save(update_fields=["timebank_balance"])
+                            payer_locked.refresh_from_db(fields=["timebank_balance"])
+                            TransactionHistory.objects.create(
+                                user=payer_locked,
+                                transaction_type='provision',
+                                amount=-difference,
+                                balance_after=payer_locked.timebank_balance,
+                                handshake=handshake,
+                                description=(
+                                    f"Additional hours escrowed for '{handshake.service.title}' "
+                                    f"(adjusted from {old_hours} to {hours_decimal} hours)"
+                                ),
+                            )
+                            invalidate_transactions(str(payer_locked.id))
+                        else:
+                            payer_locked.timebank_balance = F("timebank_balance") + abs(difference)
+                            payer_locked.save(update_fields=["timebank_balance"])
+                            payer_locked.refresh_from_db(fields=["timebank_balance"])
+                            TransactionHistory.objects.create(
+                                user=payer_locked,
+                                transaction_type='refund',
+                                amount=abs(difference),
+                                balance_after=payer_locked.timebank_balance,
+                                handshake=handshake,
+                                description=(
+                                    f"Hours adjusted for '{handshake.service.title}' "
+                                    f"(refunded {abs(difference)} hours, changed from {old_hours} to {hours_decimal} hours)"
+                                ),
+                            )
+                            invalidate_transactions(str(payer_locked.id))
+
+                handshake.provisioned_hours = hours_decimal
+            except (InvalidOperation, ValueError, TypeError) as exc:
+                if isinstance(exc, HandshakeServiceError):
+                    raise
+                raise HandshakeServiceError('Invalid hours value', code=ErrorCodes.VALIDATION_ERROR) from exc
+
+        if is_provider:
+            handshake.provider_confirmed_complete = True
+        else:
+            handshake.receiver_confirmed_complete = True
+
+        handshake.save()
+
+        invalidate_conversations(str(handshake.service.user.id))
+        invalidate_conversations(str(handshake.requester.id))
+
+        if handshake.provider_confirmed_complete and handshake.receiver_confirmed_complete:
+            with transaction.atomic():
+                complete_timebank_transfer(handshake)
+                window_start = timezone.now()
+                Handshake.objects.filter(id=handshake.id).update(
+                    evaluation_window_starts_at=window_start,
+                    evaluation_window_ends_at=window_start + timedelta(hours=settings.FEEDBACK_WINDOW_HOURS),
+                    evaluation_window_closed_at=None,
+                )
+                handshake.refresh_from_db(
+                    fields=['status', 'evaluation_window_starts_at', 'evaluation_window_ends_at',
+                            'evaluation_window_closed_at'],
+                )
+                create_notification(
+                    user=handshake.service.user,
+                    notification_type='positive_rep',
+                    title='Leave Feedback',
+                    message=(
+                        f"Service completed! Would you like to leave positive feedback "
+                        f"for {handshake.requester.first_name}?"
+                    ),
+                    handshake=handshake,
+                )
+                create_notification(
+                    user=handshake.requester,
+                    notification_type='positive_rep',
+                    title='Leave Feedback',
+                    message=(
+                        f"Service completed! Would you like to leave positive feedback "
+                        f"for {handshake.service.user.first_name}?"
+                    ),
+                    handshake=handshake,
+                )
+
+        return handshake
+
+    @staticmethod
+    def cancel(handshake: Handshake, user: User) -> Handshake:
+        """
+        Directly cancel a pending handshake.
+
+        Raises:
+            HandshakeServiceError: On permission or state violations.
+        """
+        from .exceptions import ErrorCodes
+
+        if handshake.service.user != user and handshake.requester != user:
+            raise HandshakeServiceError(
+                'Only the service owner or the requester can cancel this handshake',
+                code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+            )
+
+        with transaction.atomic():
+            locked = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester', 'service__user')
+                .get(pk=handshake.pk)
+            )
+
+            if locked.status == 'accepted' and locked.service.type != 'Event':
+                raise HandshakeServiceError(
+                    'Accepted handshakes require a cancellation request and approval',
+                    code=ErrorCodes.INVALID_STATE,
+                )
+            if locked.status != 'pending':
+                raise HandshakeServiceError(
+                    'Can only directly cancel pending handshakes', code=ErrorCodes.INVALID_STATE,
+                )
+
+            locked.status = 'cancelled'
+            locked.save(update_fields=['status', 'updated_at'])
+
+            if user == locked.requester:
+                create_notification(
+                    user=locked.service.user,
+                    notification_type='handshake_cancelled',
+                    title='Handshake Cancelled',
+                    message=(
+                        f"{user.first_name} {user.last_name} cancelled their request "
+                        f"for '{locked.service.title}'."
+                    ),
+                    handshake=locked,
+                    service=locked.service,
+                )
+
+        return locked
+
+    @staticmethod
+    def request_cancellation(handshake: Handshake, user: User, reason: str = '') -> Handshake:
+        """
+        Request cancellation of an accepted handshake (requires counterpart approval).
+
+        Raises:
+            HandshakeServiceError: On permission or state violations.
+        """
+        from .exceptions import ErrorCodes
+
+        if handshake.service.user != user and handshake.requester != user:
+            raise HandshakeServiceError(
+                'Only the service owner or the requester can request cancellation',
+                code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+            )
+
+        with transaction.atomic():
+            locked = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester', 'service__user')
+                .get(pk=handshake.pk)
+            )
+
+            if locked.service.type == 'Event':
+                raise HandshakeServiceError(
+                    'Cancellation requests are only available for Offer and Need handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                )
+            if locked.status != 'accepted':
+                raise HandshakeServiceError(
+                    'Can only request cancellation for accepted handshakes', code=ErrorCodes.INVALID_STATE,
+                )
+            if locked.cancellation_requested_by_id is not None:
+                raise HandshakeServiceError(
+                    'A cancellation request is already pending for this handshake',
+                    code=ErrorCodes.ALREADY_EXISTS,
+                )
+
+            locked.cancellation_requested_by = user
+            locked.cancellation_requested_at = timezone.now()
+            locked.cancellation_reason = reason
+            locked.save(update_fields=[
+                'cancellation_requested_by', 'cancellation_requested_at',
+                'cancellation_reason', 'updated_at',
+            ])
+
+            other_user = (
+                locked.requester if locked.service.user == user else locked.service.user
+            )
+            display_name = f"{user.first_name} {user.last_name}".strip() or user.email
+            msg = f"{display_name} requested to cancel '{locked.service.title}'."
+            if reason:
+                msg = f"{msg} Reason: {reason}"
+
+            create_notification(
+                user=other_user,
+                notification_type='handshake_cancellation_requested',
+                title='Cancellation Requested',
+                message=msg,
+                handshake=locked,
+                service=locked.service,
+            )
+            invalidate_conversations(str(locked.requester_id))
+            invalidate_conversations(str(locked.service.user_id))
+
+        return locked
+
+    @staticmethod
+    def approve_cancellation(handshake: Handshake, user: User) -> Handshake:
+        """
+        Approve a pending cancellation request, refunding escrowed hours.
+
+        Raises:
+            HandshakeServiceError: On permission or state violations.
+        """
+        from .exceptions import ErrorCodes
+
+        if handshake.service.user != user and handshake.requester != user:
+            raise HandshakeServiceError(
+                'Only the service owner or the requester can approve cancellation',
+                code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+            )
+
+        with transaction.atomic():
+            locked = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester', 'service__user')
+                .get(pk=handshake.pk)
+            )
+
+            if locked.service.type == 'Event':
+                raise HandshakeServiceError(
+                    'Cancellation requests are only available for Offer and Need handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                )
+            if locked.status != 'accepted':
+                raise HandshakeServiceError(
+                    'Can only approve cancellation for accepted handshakes', code=ErrorCodes.INVALID_STATE,
+                )
+            if locked.cancellation_requested_by_id is None:
+                raise HandshakeServiceError(
+                    'There is no pending cancellation request for this handshake',
+                    code=ErrorCodes.INVALID_STATE,
+                )
+            if locked.cancellation_requested_by_id == user.id:
+                raise HandshakeServiceError(
+                    'The user who requested cancellation cannot approve it',
+                    code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+                )
+
+            svc = locked.service
+            # Access nullable FK separately to avoid outer-join locking issue
+            cancel_requester = User.objects.get(pk=locked.cancellation_requested_by_id)
+            requester_name = (
+                f"{cancel_requester.first_name} "
+                f"{cancel_requester.last_name}"
+            ).strip() or cancel_requester.email
+
+            cancel_timebank_transfer(locked)
+
+            if svc.status == 'Agreed':
+                Service.objects.filter(pk=svc.pk).update(status='Active')
+
+            create_notification(
+                user=svc.user,
+                notification_type='handshake_cancelled',
+                title='Cancellation Approved',
+                message=(
+                    f"The cancellation request for '{svc.title}' was approved by mutual agreement. "
+                    f"Requested by {requester_name}."
+                ),
+                handshake=locked,
+                service=svc,
+            )
+
+        return locked
+
+    @staticmethod
+    def reject_cancellation(handshake: Handshake, user: User) -> Handshake:
+        """
+        Reject a pending cancellation request.
+
+        Raises:
+            HandshakeServiceError: On permission or state violations.
+        """
+        from .exceptions import ErrorCodes
+
+        if handshake.service.user != user and handshake.requester != user:
+            raise HandshakeServiceError(
+                'Only the service owner or the requester can reject cancellation',
+                code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+            )
+
+        with transaction.atomic():
+            locked = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester', 'service__user')
+                .get(pk=handshake.pk)
+            )
+
+            if locked.service.type == 'Event':
+                raise HandshakeServiceError(
+                    'Cancellation requests are only available for Offer and Need handshakes',
+                    code=ErrorCodes.INVALID_STATE,
+                )
+            if locked.status != 'accepted':
+                raise HandshakeServiceError(
+                    'Can only reject cancellation for accepted handshakes', code=ErrorCodes.INVALID_STATE,
+                )
+            if locked.cancellation_requested_by_id is None:
+                raise HandshakeServiceError(
+                    'There is no pending cancellation request for this handshake',
+                    code=ErrorCodes.INVALID_STATE,
+                )
+            if locked.cancellation_requested_by_id == user.id:
+                raise HandshakeServiceError(
+                    'The user who requested cancellation cannot reject it',
+                    code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+                )
+
+            # Access nullable FK separately to avoid outer-join locking issue
+            request_user = User.objects.get(pk=locked.cancellation_requested_by_id)
+            locked.cancellation_requested_by = None
+            locked.cancellation_requested_at = None
+            locked.cancellation_reason = ''
+            locked.save(update_fields=[
+                'cancellation_requested_by', 'cancellation_requested_at',
+                'cancellation_reason', 'updated_at',
+            ])
+
+            responder_name = f"{user.first_name} {user.last_name}".strip() or user.email
+            create_notification(
+                user=request_user,
+                notification_type='handshake_cancellation_rejected',
+                title='Cancellation Request Declined',
+                message=(
+                    f"{responder_name} declined your cancellation request for "
+                    f"'{locked.service.title}'."
+                ),
+                handshake=locked,
+                service=locked.service,
+            )
+            invalidate_conversations(str(locked.requester_id))
+            invalidate_conversations(str(locked.service.user_id))
+
+        return locked
+
+    # ------------------------------------------------------------------
+    # Report issue
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def report_issue(handshake, user, data):
+        """File an issue report against another party in a handshake.
+
+        Returns:
+            Report instance on success.
+
+        Raises:
+            HandshakeServiceError on any business-rule violation.
+        """
+        from .exceptions import ErrorCodes
+
+        issue_type = (data.get('issue_type') or 'no_show').strip().lower()
+        description = (data.get('description') or '').strip()
+        is_event_handshake = handshake.service.type == 'Event'
+
+        allowed_types = {'no_show', 'service_issue', 'harassment', 'spam', 'scam', 'other'}
+        if issue_type not in allowed_types:
+            raise HandshakeServiceError(
+                'Invalid issue_type.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=400,
+            )
+
+        provider, receiver = get_provider_and_receiver(handshake)
+        is_provider = provider == user
+        is_receiver = receiver == user
+
+        if not (is_provider or is_receiver):
+            raise HandshakeServiceError(
+                'Not authorized',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=403,
+            )
+
+        # Event no-show time window enforcement
+        if is_event_handshake and issue_type == 'no_show':
+            event_start = handshake.service.scheduled_time or handshake.scheduled_time
+            if not event_start:
+                raise HandshakeServiceError(
+                    'Event start time is required to submit reports.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=400,
+                )
+            now = timezone.now()
+            report_window_ends_at = event_start + timedelta(hours=24)
+            if now < event_start or now > report_window_ends_at:
+                raise HandshakeServiceError(
+                    'Event no-show reports are allowed from event start time up to 24 hours after start.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=400,
+                )
+
+        # Determine reported user (with optional override for events)
+        reported_user = receiver if is_provider else provider
+        reported_user_id = data.get('reported_user_id')
+        if reported_user_id is not None:
+            if not is_event_handshake:
+                raise HandshakeServiceError(
+                    'reported_user_id can only be used for event reports.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=400,
+                )
+
+            event_member_ids = set(
+                handshake.service.handshakes.filter(
+                    status__in=['accepted', 'reported', 'paused', 'checked_in', 'attended', 'no_show', 'completed']
+                ).values_list('requester_id', flat=True)
+            )
+            event_member_ids.add(handshake.service.user_id)
+
+            try:
+                target_user = User.objects.get(id=reported_user_id)
+            except (ValueError, TypeError, User.DoesNotExist):
+                raise HandshakeServiceError(
+                    'Invalid reported_user_id.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=400,
+                )
+
+            if target_user.id not in event_member_ids:
+                raise HandshakeServiceError(
+                    'reported_user_id must belong to the event organizer or an active participant.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=400,
+                )
+
+            if str(target_user.id) == str(user.id):
+                raise HandshakeServiceError(
+                    'You cannot report yourself.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=400,
+                )
+
+            reported_user = target_user
+
+        # Duplicate detection
+        has_open_duplicate = Report.objects.filter(
+            reporter=user,
+            reported_user=reported_user,
+            related_handshake=handshake,
+            type=issue_type,
+            status='pending',
+        ).exists()
+        if has_open_duplicate:
+            raise HandshakeServiceError(
+                'You already have an open report for this issue and user in this event.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=400,
+            )
+
+        # Default descriptions
+        if not description:
+            default_descriptions = {
+                'no_show': 'No-show dispute reported',
+                'service_issue': 'Service issue reported',
+                'harassment': 'Harassment or abusive behavior reported',
+                'spam': 'Spam or disruptive behavior reported',
+                'scam': 'Scam or fraud concern reported',
+                'other': 'Other issue reported',
+            }
+            description = default_descriptions.get(issue_type, 'Issue reported')
+
+        report = Report.objects.create(
+            reporter=user,
+            reported_user=reported_user,
+            related_handshake=handshake,
+            reported_service=handshake.service,
+            type=issue_type,
+            description=description,
+        )
+
+        # Only mark handshake as 'reported' when reporting the event organizer
+        reported_is_organizer = (
+            reported_user is not None
+            and str(reported_user.id) == str(handshake.service.user_id)
+        )
+        if is_event_handshake and reported_is_organizer and handshake.status != 'reported':
+            handshake.status = 'reported'
+            handshake.save(update_fields=['status', 'updated_at'])
+
+        # Notify admins
+        admins = User.objects.filter(role='admin')
+        for admin in admins:
+            create_notification(
+                user=admin,
+                notification_type='admin_warning',
+                title='New Report Requires Review',
+                message=f"New {report.get_type_display()} report for service '{handshake.service.title}'",
+                handshake=handshake,
+            )
+
+        return report
 
 
 # ---------------------------------------------------------------------------
@@ -968,3 +1952,198 @@ class EventEvaluationService:
             event_hot_score=round(float(organizer_event_hot_score), 6)
         )
         return summary
+
+
+# ---------------------------------------------------------------------------
+# Reputation service layer
+# ---------------------------------------------------------------------------
+
+class ReputationServiceError(Exception):
+    """Raised by ReputationService to signal a business rule violation."""
+
+    def __init__(self, message: str, code: str = "INVALID_INPUT", status_code: int = 400) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+
+
+class ReputationService:
+    """Business logic for submitting positive reputation (ReputationRep)."""
+
+    @staticmethod
+    def _validate_feedback_window(handshake: Handshake) -> tuple[bool, str | None]:
+        """Return (is_open, error_message). Inline copy so service is self-contained."""
+        starts_at = getattr(handshake, 'evaluation_window_starts_at', None)
+        ends_at = getattr(handshake, 'evaluation_window_ends_at', None)
+        closed_at = getattr(handshake, 'evaluation_window_closed_at', None)
+
+        if starts_at and ends_at:
+            if closed_at is not None or timezone.now() > ends_at:
+                return False, 'The 48-hour evaluation window has closed.'
+            return True, None
+
+        if handshake.service.type == 'Event':
+            svc = handshake.service
+            if svc.status != 'Completed':
+                return False, 'Event evaluations are available only after the organizer marks the event as completed.'
+            completed_at = svc.event_completed_at or svc.updated_at
+            if completed_at is None:
+                return False, 'Event completion time is unavailable; evaluations are currently closed.'
+            deadline = completed_at + timedelta(hours=settings.EVENT_FEEDBACK_WINDOW_HOURS)
+            if timezone.now() > deadline:
+                return False, 'The event evaluation window has closed.'
+            return True, None
+
+        fallback_start = handshake.updated_at
+        if fallback_start is None:
+            return False, 'Evaluation window is unavailable for this handshake.'
+        window_hours = getattr(settings, 'FEEDBACK_WINDOW_HOURS', settings.EVENT_FEEDBACK_WINDOW_HOURS)
+        if timezone.now() > fallback_start + timedelta(hours=window_hours):
+            return False, 'The 48-hour evaluation window has closed.'
+        return True, None
+
+    @staticmethod
+    def submit(
+        handshake: Handshake,
+        giver: User,
+        data: dict,
+        raw_comment: str = '',
+    ) -> ReputationRep:
+        """
+        Submit a positive reputation for a completed/attended handshake.
+
+        Args:
+            handshake: The completed/attended Handshake instance.
+            giver:     The authenticated user submitting the rep.
+            data:      The request payload (punctual, helpful, kindness etc.).
+            raw_comment: Unsanitized optional review text.
+
+        Returns:
+            The newly created ReputationRep.
+
+        Raises:
+            ReputationServiceError: On permission or business rule violations.
+        """
+        import bleach
+        from .badge_utils import check_and_assign_badges
+        from .exceptions import ErrorCodes
+        from .utils import get_provider_and_receiver
+        from django.db import IntegrityError
+
+        required_status = 'attended' if handshake.service.type == 'Event' else 'completed'
+        if handshake.status != required_status:
+            raise ReputationServiceError(
+                'Handshake not found or not eligible for evaluation',
+                code=ErrorCodes.NOT_FOUND, status_code=404,
+            )
+
+        in_window, window_error = ReputationService._validate_feedback_window(handshake)
+        if not in_window:
+            raise ReputationServiceError(window_error, code=ErrorCodes.INVALID_STATE, status_code=410)
+
+        provider, receiver = get_provider_and_receiver(handshake)
+
+        if giver not in (provider, receiver):
+            raise ReputationServiceError(
+                'Not authorized - you are not a participant in this handshake',
+                code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+            )
+
+        is_event_evaluation = handshake.service.type == 'Event'
+        if is_event_evaluation:
+            if handshake.requester_id != giver.id:
+                raise ReputationServiceError(
+                    'Only verified attendees can evaluate the organizer for events',
+                    code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+                )
+            target_user = handshake.service.user
+            is_punctual = _to_bool(data.get('well_organized', data.get('punctual', False)))
+            is_helpful = _to_bool(data.get('engaging', data.get('helpful', False)))
+            is_kind = _to_bool(data.get('welcoming', data.get('kindness', False)))
+        else:
+            target_user = receiver if giver == provider else provider
+            is_punctual = _to_bool(data.get('punctual', False))
+            is_helpful = _to_bool(data.get('helpful', False))
+            is_kind = _to_bool(data.get('kindness', False))
+
+        if ReputationRep.objects.filter(handshake=handshake, giver=giver).exists():
+            raise ReputationServiceError(
+                'Reputation already submitted', code=ErrorCodes.ALREADY_EXISTS,
+            )
+
+        cleaned_comment = None
+        if raw_comment:
+            cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000] or None
+
+        try:
+            rep = ReputationRep.objects.create(
+                handshake=handshake,
+                giver=giver,
+                receiver=target_user,
+                is_punctual=is_punctual,
+                is_helpful=is_helpful,
+                is_kind=is_kind,
+                comment=cleaned_comment,
+            )
+        except IntegrityError:
+            raise ReputationServiceError(
+                'Reputation already submitted', code=ErrorCodes.ALREADY_EXISTS,
+            )
+
+        # Create a verified review Comment from the reputation comment.
+        if rep.comment:
+            review_exists = Comment.objects.filter(
+                related_handshake=handshake,
+                user=giver,
+                is_verified_review=True,
+                is_deleted=False,
+            ).exists()
+            if not review_exists:
+                Comment.objects.create(
+                    service=handshake.service,
+                    user=giver,
+                    body=rep.comment,
+                    is_verified_review=True,
+                    related_handshake=handshake,
+                )
+
+        # Assign badges to the reviewed user
+        new_badge_ids = check_and_assign_badges(target_user)
+        if new_badge_ids:
+            badges_dict = {b.id: b.name for b in Badge.objects.filter(id__in=new_badge_ids)}
+            badge_names = [badges_dict.get(bid, f"Badge {bid}") for bid in new_badge_ids]
+            create_notification(
+                user=target_user,
+                notification_type='positive_rep',
+                title='New Badge Earned!',
+                message=f"Congratulations! You earned: {', '.join(badge_names)}",
+                handshake=handshake,
+                service=handshake.service,
+            )
+
+        # Notify on positive feedback (Offer/Need only)
+        if not is_event_evaluation and (
+            rep.is_punctual or rep.is_helpful or rep.is_kind or bool(rep.comment)
+        ):
+            create_notification(
+                user=target_user,
+                notification_type='positive_rep',
+                title='Feedback Received',
+                message=f"{giver.first_name} left feedback for '{handshake.service.title}'.",
+                handshake=handshake,
+                service=handshake.service,
+            )
+
+        # Update karma (REQ-REP-006)
+        karma_gain = sum([rep.is_punctual, rep.is_helpful, rep.is_kind])
+        if karma_gain:
+            target_user.karma_score += karma_gain
+            target_user.save()
+
+        invalidate_conversations(str(provider.id))
+        invalidate_conversations(str(receiver.id))
+
+        if is_event_evaluation:
+            EventEvaluationService.refresh_summary(handshake.service)
+
+        return rep
