@@ -155,9 +155,29 @@ class PasswordResetToken(models.Model):
         return f"PasswordResetToken({self.user.email})"
 
 
+ENTITY_TYPE_CHOICES = [
+    ('technology', 'Technology'),
+    ('arts', 'Arts'),
+    ('sports', 'Sports'),
+    ('education', 'Education'),
+    ('health', 'Health'),
+    ('food', 'Food'),
+    ('science', 'Science'),
+    ('language', 'Language'),
+    ('craft', 'Craft'),
+    ('activity', 'Activity'),
+    ('other', 'Other'),
+]
+
+
 class Tag(models.Model):
     id = models.CharField(primary_key=True, max_length=200)
     name = models.CharField(max_length=100, unique=True)
+    parent_qid = models.CharField(max_length=200, null=True, blank=True)
+    entity_type = models.CharField(
+        max_length=50, choices=ENTITY_TYPE_CHOICES, null=True, blank=True
+    )
+    depth = models.IntegerField(default=0)
 
     def __str__(self):
         return self.name
@@ -165,6 +185,8 @@ class Tag(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=['name']),
+            models.Index(fields=['entity_type']),
+            models.Index(fields=['parent_qid']),
         ]
 
 class Badge(models.Model):

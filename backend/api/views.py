@@ -1807,6 +1807,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'tag': self.request.query_params.get('tag'),
             'tags': self.request.query_params.getlist('tags'),
             'search': self.request.query_params.get('search'),
+            'entity_type': self.request.query_params.get('entity_type'),
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
             'distance': self.request.query_params.get('distance', 10),
@@ -5855,9 +5856,12 @@ class WikidataSearchView(APIView):
             limit = 10
         
         # Use existing wikidata utility
-        from .wikidata import search_wikidata_items
+        from .wikidata import search_wikidata_items, classify_and_filter_results
         results = search_wikidata_items(query, limit=limit)
-        
+
+        # Filter by entity type and add entity_type to each result
+        results = classify_and_filter_results(results)
+
         return Response(results)
 
 

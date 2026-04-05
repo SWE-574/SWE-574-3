@@ -5,6 +5,7 @@ interface WikidataItem {
   id: string
   label: string
   description?: string
+  entity_type?: string | null
 }
 
 export const tagAPI = {
@@ -22,6 +23,8 @@ export const tagAPI = {
       .map((item) => ({
         id: item.id,
         name: item.label,
+        description: item.description ?? undefined,
+        entity_type: item.entity_type ?? undefined,
       }))
   },
 
