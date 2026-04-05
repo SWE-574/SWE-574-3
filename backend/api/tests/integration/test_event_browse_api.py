@@ -245,7 +245,7 @@ class TestEventJoinAuthGuard:
         event = make_event(title='Auth Guard Event')
         client = APIClient()
 
-        response = client.post(f'/api/services/{event.id}/join-event/')
+        response = client.post(f'/api/handshakes/services/{event.id}/join-event/')
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
