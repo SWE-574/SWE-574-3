@@ -326,107 +326,6 @@ function ActionBtn({
   )
 }
 
-// ─── Warn modal ───────────────────────────────────────────────────────────────
-
-function WarnModal({ userId, onClose, onDone }: { userId: string; onClose: () => void; onDone: () => void }) {
-  const [msg, setMsg] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const submit = async () => {
-    if (!msg.trim()) return
-    setLoading(true)
-    try {
-      await adminAPI.warnUser(userId, msg.trim())
-      toast.success('Warning issued')
-      onDone()
-    } catch (e) {
-      toast.error(getErrorMessage(e) ?? 'Failed to warn user')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Flex position="fixed" inset={0} zIndex={200} align="center" justify="center"
-      bg="rgba(0,0,0,0.45)" onClick={onClose}>
-      <Box bg={WHITE} borderRadius="16px" p={6} w="420px" maxW="90vw"
-        boxShadow="0 8px 40px rgba(0,0,0,0.18)"
-        onClick={(e) => e.stopPropagation()}>
-        <Text fontSize="15px" fontWeight={700} color={GRAY800} mb={3}>Issue Warning</Text>
-        <textarea
-          value={msg}
-          onChange={(e) => setMsg(e.target.value)}
-          placeholder="Describe the reason for this warning…"
-          rows={4}
-          style={{
-            width: '100%', padding: '10px 12px', borderRadius: '8px',
-            border: `1px solid ${GRAY200}`, fontSize: '13px', color: GRAY800,
-            resize: 'vertical', outline: 'none', fontFamily: 'inherit',
-          }}
-        />
-        <Flex gap={2} justify="flex-end" mt={3}>
-          <ActionBtn label="Cancel" icon={FiCheck} bg={GRAY100} hoverBg={GRAY200} color={GRAY600} onClick={onClose} />
-          <ActionBtn label={loading ? 'Sending…' : 'Send Warning'} icon={FiAlertCircle}
-            bg={BLUE_LT} hoverBg={BLUE + '40'} color={BLUE}
-            onClick={submit} disabled={loading || !msg.trim()} />
-        </Flex>
-      </Box>
-    </Flex>
-  )
-}
-
-// ─── Karma modal ──────────────────────────────────────────────────────────────
-
-function KarmaModal({ userId, currentKarma, onClose, onDone }: { userId: string; currentKarma: number; onClose: () => void; onDone: () => void }) {
-  const [adj, setAdj] = useState('')
-  const [loading, setLoading] = useState(false)
-  const parsed = parseInt(adj, 10)
-  const valid = !Number.isNaN(parsed) && parsed !== 0
-
-  const submit = async () => {
-    if (!valid) return
-    setLoading(true)
-    try {
-      await adminAPI.adjustKarma(userId, parsed)
-      toast.success(`Karma adjusted by ${parsed > 0 ? '+' : ''}${parsed}`)
-      onDone()
-    } catch (e) {
-      toast.error(getErrorMessage(e) ?? 'Failed to adjust karma')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Flex position="fixed" inset={0} zIndex={200} align="center" justify="center"
-      bg="rgba(0,0,0,0.45)" onClick={onClose}>
-      <Box bg={WHITE} borderRadius="16px" p={6} w="360px" maxW="90vw"
-        boxShadow="0 8px 40px rgba(0,0,0,0.18)"
-        onClick={(e) => e.stopPropagation()}>
-        <Text fontSize="15px" fontWeight={700} color={GRAY800} mb={1}>Adjust Karma</Text>
-        <Text fontSize="12px" color={GRAY500} mb={3}>Current: {currentKarma}</Text>
-        <input
-          type="number"
-          value={adj}
-          onChange={(e) => setAdj(e.target.value)}
-          placeholder="e.g. +10 or -5"
-          style={{
-            width: '100%', padding: '10px 12px', borderRadius: '8px',
-            border: `1px solid ${GRAY200}`, fontSize: '13px', color: GRAY800,
-            outline: 'none', fontFamily: 'inherit',
-          }}
-        />
-        <Flex gap={2} justify="flex-end" mt={3}>
-          <ActionBtn label="Cancel" icon={FiCheck} bg={GRAY100} hoverBg={GRAY200} color={GRAY600} onClick={onClose} />
-          <ActionBtn label={loading ? 'Saving…' : 'Apply'} icon={FiBarChart2}
-            bg={PURPLE_LT} hoverBg={PURPLE + '40'} color={PURPLE}
-            onClick={submit} disabled={loading || !valid} />
-        </Flex>
-      </Box>
-    </Flex>
-  )
-}
-
 // ─── Role assign modal ────────────────────────────────────────────────────────
 
 // Roles an actor with the given role may assign.  The backend enforces the same
@@ -577,7 +476,9 @@ export default function AdminUserDetailPage() {
   const [user, setUser] = useState<AdminUserDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState<'warn' | 'karma' | 'role' | null>(null)
-  const [actionLoading, setActionLoading] = useState(false)
+  const [warnLoading, setWarnLoading] = useState(false)
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false)
+  const [confirmModalLoading, setConfirmModalLoading] = useState(false)
 
   const [transactions, setTransactions] = useState<AdminTransaction[]>([])
   const [txLoading, setTxLoading] = useState(false)
@@ -619,26 +520,6 @@ export default function AdminUserDetailPage() {
   useEffect(() => { load() }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadTransactions(1) }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleToggleSuspend = async () => {
-    if (!user || isSelf) return
-    setActionLoading(true)
-    try {
-      if (user.is_active) {
-        await adminAPI.banUser(user.id)
-        toast.success('User suspended')
-      } else {
-        await adminAPI.unbanUser(user.id)
-        toast.success('User reactivated')
-      }
-      setSuspendConfirm(false)
-      await load()
-    } catch (e) {
-      toast.error(getErrorMessage(e) ?? 'Action failed')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
   if (loading) {
     return (
       <AdminLayout activeTab="users" onTabChange={(tab) => navigate(`/admin?tab=${tab}`)}>
@@ -651,11 +532,55 @@ export default function AdminUserDetailPage() {
 
   if (!user) return null
 
+  const actorTier = ROLE_TIER[adminUser?.role ?? ''] ?? 0
+  const targetTier = ROLE_TIER[user.role] ?? 0
+  const canActOnTarget = !isSelf && actorTier > targetTier
+  const canWarnTarget = !isSelf && actorTier >= targetTier
+
   const statusColor = user.is_active ? GREEN : RED
   const statusBg = user.is_active ? GREEN_LT : RED_LT
   const statusLabel = user.is_active ? 'Active' : 'Suspended'
   const hasActiveBan = user.is_event_banned_until && new Date(user.is_event_banned_until) > new Date()
   const hasOrganizerBan = user.is_organizer_banned_until && new Date(user.is_organizer_banned_until) > new Date()
+
+  const submitWarn = async (message: string) => {
+    setWarnLoading(true)
+    try {
+      await adminAPI.warnUser(user.id, message)
+      toast.success('Warning issued')
+      setModal(null)
+      await load()
+    } catch (e) {
+      toast.error(getErrorMessage(e) ?? 'Failed to warn user')
+    } finally {
+      setWarnLoading(false)
+    }
+  }
+
+  const handleSuspendToggle = () => {
+    if (!canActOnTarget) return
+    setConfirmModalOpen(true)
+  }
+
+  const submitSuspendToggle = async () => {
+    if (!canActOnTarget) return
+    setConfirmModalLoading(true)
+    try {
+      if (user.is_active) {
+        await adminAPI.banUser(user.id)
+        toast.success('User suspended')
+      } else {
+        await adminAPI.unbanUser(user.id)
+        toast.success('User reactivated')
+      }
+      setConfirmModalOpen(false)
+      await load()
+    } catch (e) {
+      toast.error(getErrorMessage(e) ?? 'Action failed')
+    } finally {
+      setConfirmModalLoading(false)
+    }
+  }
 
   return (
     <AdminLayout activeTab={fromTab === 'reports' ? 'reports' : 'users'} onTabChange={(tab) => navigate(`/admin?tab=${tab}`)}>
@@ -736,8 +661,8 @@ export default function AdminUserDetailPage() {
                   bg={user.is_active ? RED_LT : GREEN_LT}
                   hoverBg={(user.is_active ? RED : GREEN) + '40'}
                   color={user.is_active ? RED : GREEN}
-                  onClick={handleToggleSuspend}
-                  disabled={!canActOnTarget || actionLoading}
+                  onClick={handleSuspendToggle}
+                  disabled={!canActOnTarget}
                 />
                 <ActionBtn
                   label="Karma"
@@ -1002,13 +927,36 @@ export default function AdminUserDetailPage() {
         </Box>
       </Box>
 
-      {modal === 'warn' && (
-        <WarnModal userId={user.id} onClose={() => setModal(null)} onDone={() => { setModal(null); load() }} />
-      )}
-      {modal === 'karma' && (
-        <KarmaModal userId={user.id} currentKarma={user.karma_score}
-          onClose={() => setModal(null)} onDone={() => { setModal(null); load() }} />
-      )}
+      <AdminConfirmModal
+        isOpen={confirmModalOpen}
+        title={user.is_active ? 'Suspend User' : 'Reactivate User'}
+        description={
+          user.is_active
+            ? `Are you sure you want to suspend ${user.first_name || user.email}? They will lose access to the platform.`
+            : `Are you sure you want to reactivate ${user.first_name || user.email}? They will regain full access.`
+        }
+        confirmLabel={user.is_active ? 'Suspend' : 'Reactivate'}
+        accent={user.is_active ? RED : GREEN}
+        accentLt={user.is_active ? RED_LT : GREEN_LT}
+        onConfirm={submitSuspendToggle}
+        onClose={() => setConfirmModalOpen(false)}
+        loading={confirmModalLoading}
+      />
+      <AdminWarnModal
+        isOpen={modal === 'warn'}
+        userName={`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email}
+        onConfirm={submitWarn}
+        onClose={() => setModal(null)}
+        loading={warnLoading}
+      />
+      <AdminKarmaModal
+        isOpen={modal === 'karma'}
+        userName={`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email}
+        currentKarma={user.karma_score}
+        userId={user.id}
+        onDone={() => { setModal(null); load() }}
+        onClose={() => setModal(null)}
+      />
       {modal === 'role' && (
         <RoleAssignModal
           userId={user.id}
