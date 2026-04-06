@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { loginAs, USERS } from '../helpers'
 
-const GROUP_SERVICE_TITLE = 'Traditional Manti Cooking Workshop'
+const GROUP_SERVICE_TITLE = 'Neighborhood Manti Cooking Circle'
 
 test('FR-10d: accepted participant can access offer-level group chat thread', async ({ page }) => {
   // Zeynep is seeded as an accepted participant in this group offer.
@@ -13,7 +13,7 @@ test('FR-10d: accepted participant can access offer-level group chat thread', as
   await expect(header.getByText('GROUP')).toBeVisible({ timeout: 10_000 })
 
   await header.click()
-  const groupRow = page.locator('button').filter({ hasText: /participant/i }).first()
+  const groupRow = page.locator('button').filter({ hasText: /members/i }).first()
   await expect(groupRow).toBeVisible({ timeout: 10_000 })
   await groupRow.click()
 

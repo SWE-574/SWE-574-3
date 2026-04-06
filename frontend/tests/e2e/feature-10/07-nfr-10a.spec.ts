@@ -7,25 +7,28 @@ test('NFR-10a: private chat delivery should complete within one second', async (
   const senderPage = await senderContext.newPage()
   const receiverPage = await receiverContext.newPage()
 
+  // Open the sender first so the private thread is created before the receiver joins.
   await loginAs(senderPage, USERS.cem)
-  await loginAs(receiverPage, USERS.burak)
   await senderPage.goto('/messages')
-  await receiverPage.goto('/messages')
 
-  const senderRow = senderPage.locator('button').filter({ hasText: /Burak|Chess/i }).first()
-  const receiverRow = receiverPage.locator('button').filter({ hasText: /Cem|Chess/i }).first()
+  const senderRow = senderPage.getByRole('button', { name: /Burak Kurt/i }).first()
   await expect(senderRow).toBeVisible({ timeout: 20_000 })
-  await expect(receiverRow).toBeVisible({ timeout: 20_000 })
   await senderRow.click()
-  await receiverRow.click()
+  await expect(senderPage).toHaveURL(/\/messages\/[^/]+/, { timeout: 10_000 })
+  const handshakeId = senderPage.url().split('/messages/')[1]
 
   const senderInput = senderPage.getByPlaceholder(/Write a message/i)
-  const receiverThread = receiverPage.locator('[data-testid="chat-messages"], [role="log"], main')
 
   // Warm-up send to avoid counting initial socket/bootstrap overhead.
   const warmupMessage = uniqueText('NFR-10a warmup')
   await senderInput.fill(warmupMessage)
   await senderInput.press('Enter')
+
+  await loginAs(receiverPage, USERS.burak)
+  await receiverPage.goto(`/messages/${handshakeId}`)
+
+  const receiverThread = receiverPage.locator('[data-testid="chat-messages"], [role="log"], main')
+
   await expect(receiverPage.getByText(warmupMessage).first()).toBeVisible({ timeout: 10_000 })
 
   const uniqueMessage = uniqueText('NFR-10a latency check')
