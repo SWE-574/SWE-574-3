@@ -210,6 +210,9 @@ export interface Tag {
   id: string
   name: string
   wikidata_id?: string
+  parent_qid?: string
+  entity_type?: string
+  description?: string
 }
 
 // ─── Handshake Types ──────────────────────────────────────────────────────────

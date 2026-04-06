@@ -166,7 +166,8 @@ class TagSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Tag
-        fields = ['id', 'name', 'wikidata_info']
+        fields = ['id', 'name', 'parent_qid', 'entity_type', 'depth', 'wikidata_info']
+        read_only_fields = ['parent_qid', 'entity_type', 'depth']
     
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_wikidata_info(self, obj):
@@ -802,7 +803,7 @@ class ServiceSerializer(serializers.ModelSerializer):
                     if tid not in existing_tags and wikidata_qid_pattern.match(tid)
                 ]
                 if missing_qids:
-                    from .wikidata import fetch_wikidata_item
+                    from .wikidata import fetch_wikidata_item, fetch_wikidata_claims, resolve_entity_type
                     for qid in missing_qids:
                         normalized_qid = qid.upper()
                         if normalized_qid in existing_tags:
@@ -824,6 +825,18 @@ class ServiceSerializer(serializers.ModelSerializer):
                             tags_to_add.append(tag)
                         if created:
                             logger.info(f"Auto-created Wikidata tag: {normalized_qid} ({tag_name})")
+                            # Enrich with hierarchy data
+                            try:
+                                claims = fetch_wikidata_claims(normalized_qid)
+                                if claims:
+                                    parents = claims.get('instance_of', []) + claims.get('subclass_of', [])
+                                    if parents:
+                                        tag.parent_qid = parents[0]
+                                        tag.depth = 1
+                                    tag.entity_type = resolve_entity_type(normalized_qid)
+                                    tag.save(update_fields=['parent_qid', 'entity_type', 'depth'])
+                            except Exception:
+                                logger.warning(f"Could not enrich tag {normalized_qid} with hierarchy data")
 
             if tag_names:
                 for tag_name in tag_names:
