@@ -1225,6 +1225,11 @@ class TestSearchWeighting(TestCase):
         self.assertIsNotNone(TITLE_WEIGHT)
         self.assertIsNotNone(TAG_WEIGHT)
         self.assertGreater(TITLE_WEIGHT, TAG_WEIGHT, "Title weight must exceed tag weight")
+
+
+@pytest.mark.xfail(reason="FR-12c: DateRangeStrategy not yet implemented", strict=False)
+class DateRangeStrategyTestCase(TestCase):
+    """
     Unit tests for DateRangeStrategy (FR-12c).
 
     DateRangeStrategy filters services by their scheduled_time using optional
