@@ -78,12 +78,12 @@ from .utils import (
     can_user_post_offer, provision_timebank, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
 )
-from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService
+from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService, get_social_proximity_boosts
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -1740,8 +1740,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'is_admin': str(is_admin),  # Different cache for admin vs non-admin
         }
         
-        # Don't cache location-based queries (results vary by user location)
-        use_cache = not (request.query_params.get('lat') and request.query_params.get('lng'))
+        sort_param = request.query_params.get('sort', 'latest')
+        # Don't cache location-based queries (results vary by user location).
+        # Also skip cache for hot-sort by authenticated users — social boost is per-user.
+        use_cache = not (
+            (request.query_params.get('lat') and request.query_params.get('lng'))
+            or (sort_param == 'hot' and request.user.is_authenticated)
+        )
         
         if use_cache:
             cached_result = get_cached_service_list(cache_key_params)
@@ -1807,6 +1812,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'tag': self.request.query_params.get('tag'),
             'tags': self.request.query_params.getlist('tags'),
             'search': self.request.query_params.get('search'),
+            'entity_type': self.request.query_params.get('entity_type'),
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
             'distance': self.request.query_params.get('distance', 10),
@@ -1846,12 +1852,33 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
             queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         elif sort_param == 'hot':
-            # Sort by hot score (descending - highest score first)
-            queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
+            if self.request.user.is_authenticated:
+                # Apply social proximity boost (weight 0.5) for authenticated users.
+                # composite_score = hot_score + 0.5 * social_boost
+                # social_boost: 1.0 (1st-degree) or 0.5 (2nd-degree), 0 otherwise.
+                # Single SQL CTE call — no pre-evaluation of the service queryset.
+                boosts = get_social_proximity_boosts(self.request.user.id)
+                if boosts:
+                    # boosts keys are UUID objects; user_id on Service is also UUID — no coercion needed.
+                    whens = [
+                        When(user_id=uid, then=Value(boost, output_field=FloatField()))
+                        for uid, boost in boosts.items()
+                    ]
+                    queryset = queryset.annotate(
+                        social_boost=Case(*whens, default=Value(0.0, output_field=FloatField()), output_field=FloatField()),
+                        composite_score=ExpressionWrapper(
+                            F('hot_score') + Value(0.5, output_field=FloatField()) * F('social_boost'),
+                            output_field=FloatField(),
+                        ),
+                    ).order_by('-is_pinned', '-composite_score', '-created_at')
+                else:
+                    queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
+            else:
+                queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
         else:
             # Default: sort by latest (created_at descending)
             queryset = queryset.order_by('-is_pinned', '-created_at')
-        
+
         return queryset
 
     def get_serializer_context(self):
@@ -5855,9 +5882,12 @@ class WikidataSearchView(APIView):
             limit = 10
         
         # Use existing wikidata utility
-        from .wikidata import search_wikidata_items
+        from .wikidata import search_wikidata_items, classify_and_filter_results
         results = search_wikidata_items(query, limit=limit)
-        
+
+        # Filter by entity type and add entity_type to each result
+        results = classify_and_filter_results(results)
+
         return Response(results)
 
 

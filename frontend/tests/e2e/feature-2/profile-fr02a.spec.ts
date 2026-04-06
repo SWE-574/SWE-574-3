@@ -6,7 +6,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { loginAs, USERS } from './helpers/auth'
+import { loginAs, USERS } from '../helpers/auth'
 
 test.describe('Self-profile (FR-02a)', () => {
   test('shows display name, avatar, join year, and bio for seeded demo user', async ({

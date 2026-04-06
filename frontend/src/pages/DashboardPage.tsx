@@ -395,7 +395,7 @@ const DashboardPage = () => {
       const onlineOnly = online.filter((s) => s.location_type === 'Online')
       raw = [...nearby, ...onlineOnly]
     } else {
-      raw = await serviceAPI.list(undefined, signal)
+      raw = await serviceAPI.list({ search: debouncedSearch || undefined }, signal)
     }
     const active = raw.filter((s) => s.status === 'Active' && s.is_visible)
     const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
@@ -405,14 +405,6 @@ const DashboardPage = () => {
     if (activeFilter === 'recurrent') filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
     if (activeFilter === 'newest')    filtered = [...filtered].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     if (activeFilter === 'weekend')   filtered = filtered.filter((s) => /saturday|sunday|weekend/i.test(s.schedule_details ?? ''))
-    if (debouncedSearch.trim()) {
-      const q = debouncedSearch.toLowerCase()
-      filtered = filtered.filter((s) =>
-        s.title.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q) ||
-        s.tags?.some((t) => t.name.toLowerCase().includes(q)),
-      )
-    }
     // Float pinned services to the top
     filtered.sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
     setServices(filtered)

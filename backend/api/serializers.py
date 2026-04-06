@@ -2,10 +2,10 @@
 
 from rest_framework import serializers
 from .models import (
-    User, Service, Tag, Handshake, ChatMessage, 
+    User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, UserBadge, Report, TransactionHistory,
     ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
-    ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow,
+    ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow
 )
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
@@ -166,7 +166,8 @@ class TagSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Tag
-        fields = ['id', 'name', 'wikidata_info']
+        fields = ['id', 'name', 'parent_qid', 'entity_type', 'depth', 'wikidata_info']
+        read_only_fields = ['parent_qid', 'entity_type', 'depth']
     
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_wikidata_info(self, obj):
@@ -802,7 +803,7 @@ class ServiceSerializer(serializers.ModelSerializer):
                     if tid not in existing_tags and wikidata_qid_pattern.match(tid)
                 ]
                 if missing_qids:
-                    from .wikidata import fetch_wikidata_item
+                    from .wikidata import fetch_wikidata_item, fetch_wikidata_claims, resolve_entity_type
                     for qid in missing_qids:
                         normalized_qid = qid.upper()
                         if normalized_qid in existing_tags:
@@ -824,6 +825,18 @@ class ServiceSerializer(serializers.ModelSerializer):
                             tags_to_add.append(tag)
                         if created:
                             logger.info(f"Auto-created Wikidata tag: {normalized_qid} ({tag_name})")
+                            # Enrich with hierarchy data
+                            try:
+                                claims = fetch_wikidata_claims(normalized_qid)
+                                if claims:
+                                    parents = claims.get('instance_of', []) + claims.get('subclass_of', [])
+                                    if parents:
+                                        tag.parent_qid = parents[0]
+                                        tag.depth = 1
+                                    tag.entity_type = resolve_entity_type(normalized_qid)
+                                    tag.save(update_fields=['parent_qid', 'entity_type', 'depth'])
+                            except Exception:
+                                logger.warning(f"Could not enrich tag {normalized_qid} with hierarchy data")
 
             if tag_names:
                 for tag_name in tag_names:
@@ -2808,6 +2821,24 @@ class ForumRecentPostSerializer(ForumPostSerializer):
 
     class Meta(ForumPostSerializer.Meta):
         fields = ForumPostSerializer.Meta.fields + ['topic_title', 'category_slug', 'category_name']
+
+
+class UserFollowSerializer(serializers.ModelSerializer):
+    follower_id = serializers.UUIDField(source='follower.id', read_only=True)
+    following_id = serializers.UUIDField(source='following.id', read_only=True)
+    follower_name = serializers.SerializerMethodField()
+    following_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserFollow
+        fields = ['id', 'follower_id', 'follower_name', 'following_id', 'following_name', 'created_at']
+        read_only_fields = fields
+
+    def get_follower_name(self, obj):
+        return f"{obj.follower.first_name} {obj.follower.last_name}".strip()
+
+    def get_following_name(self, obj):
+        return f"{obj.following.first_name} {obj.following.last_name}".strip()
 
 
 class ForumTopicDetailSerializer(ForumTopicSerializer):
