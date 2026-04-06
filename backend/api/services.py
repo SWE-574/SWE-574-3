@@ -8,10 +8,13 @@ from django.db import models as django_models
 from django.db.models import Q
 from django.db.utils import OperationalError
 from django.utils import timezone
+import logging
 
 from .models import Handshake, Service, User, ChatMessage, ReputationRep, NegativeRep, EventEvaluationSummary, Report
 from .utils import create_notification
 from .cache_utils import invalidate_conversations
+
+logger = logging.getLogger(__name__)
 
 
 class HandshakeService:
@@ -196,8 +199,18 @@ class HandshakeService:
             # Send notifications (use locked service_owner)
             HandshakeService._send_notifications(service, handshake, requester, service_owner)
             
-            # Create initial chat message
-            HandshakeService._create_initial_message(handshake, requester, service)
+            # Create initial chat message.
+            initial_message = HandshakeService._create_initial_message(handshake, requester, service)
+
+            # Broadcast only after the transaction is committed, so websocket consumers
+            # can read the message row and we avoid rolling back handshake creation if
+            # websocket transport is temporarily unavailable.
+            transaction.on_commit(
+                lambda: HandshakeService._broadcast_private_message(
+                    handshake_id=handshake.id,
+                    message_id=initial_message.id,
+                )
+            )
         
         # Invalidate caches AFTER transaction commits to prevent race condition:
         # If we invalidate before commit, another request could see cache miss,
@@ -286,6 +299,36 @@ class HandshakeService:
             sender=requester,
             body=f"Hi! I'm interested in your service: {service.title}"
         )
+
+    @staticmethod
+    def _broadcast_private_message(handshake_id, message_id) -> None:
+        """Push a private chat message over websocket group transport."""
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            from .serializers import ChatMessageSerializer
+
+            channel_layer = get_channel_layer()
+            if not channel_layer:
+                return
+
+            message = ChatMessage.objects.select_related('sender', 'handshake').get(id=message_id)
+            serializer = ChatMessageSerializer(message)
+
+            async_to_sync(channel_layer.group_send)(
+                f'chat_{handshake_id}',
+                {
+                    'type': 'chat_message',
+                    'message': serializer.data,
+                },
+            )
+        except Exception:
+            # Realtime delivery should not block core interest/handshake creation.
+            logger.warning(
+                "Failed to broadcast private chat message",
+                extra={"handshake_id": str(handshake_id), "message_id": str(message_id)},
+                exc_info=True,
+            )
     
     @staticmethod
     def _invalidate_caches(requester: User, service_owner: User) -> None:
