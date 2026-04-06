@@ -2306,7 +2306,7 @@ else:
         is_onboarded=True,
     )
 super_admin_user.skills.set([technology_tag, education_tag])
-print(f"  Created: {super_admin_email} (Super Admin account)")
+print(f"  Prepared: {super_admin_email} (Super Admin account)")
 
 print("\n[11/11] Creating admin-testable data (reports + audit logs)...")
 
