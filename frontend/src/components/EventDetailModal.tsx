@@ -7,10 +7,11 @@ import type { Service } from '@/types'
 import type { Handshake } from '@/services/handshakeAPI'
 import { EventChatPanel } from '@/components/EventChatModal'
 import { EventRosterPanel } from '@/components/EventRosterModal'
-import { formatEventDateTime, isFutureEvent, spotsLeft, timeUntilEvent } from '@/utils/eventUtils'
+import { formatEventDateTime, isFutureEvent, isNearlyFull, spotsLeft, timeUntilEvent } from '@/utils/eventUtils'
 import {
   AMBER, AMBER_LT,
   GREEN, GREEN_LT,
+  RED, RED_LT,
   GRAY50, GRAY100, GRAY200, GRAY400, GRAY500, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
@@ -127,7 +128,14 @@ export default function EventDetailModal({
               <FiCalendar size={18} />
             </Flex>
             <Box minW={0}>
-              <Text fontSize="17px" fontWeight={800} color={GRAY800}>Event Details</Text>
+              <Flex align="center" gap="8px">
+                <Text fontSize="17px" fontWeight={800} color={GRAY800}>Event Details</Text>
+                {isNearlyFull(service.max_participants, service.participant_count ?? 0) && (
+                  <Box px="7px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700} bg={RED_LT} color={RED} flexShrink={0}>
+                    Nearly Full
+                  </Box>
+                )}
+              </Flex>
               <Text fontSize="12px" color={GRAY500} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {service.title}
               </Text>

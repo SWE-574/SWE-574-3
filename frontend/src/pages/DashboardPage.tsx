@@ -38,9 +38,11 @@ import {
   GREEN, GREEN_LT,
   AMBER, AMBER_LT,
   BLUE, BLUE_LT,
+  RED, RED_LT,
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
+import { isNearlyFull } from '@/utils/eventUtils'
 
 const TRANSPARENT = 'transparent'
 
@@ -274,6 +276,10 @@ function ServiceCard({
             />
             {isOwn && <Pill label="Yours" bg={AMBER_LT} color={AMBER} />}
             {!isOwn && hsCfg && <Pill label={hsCfg.label} bg={hsCfg.bg} color={hsCfg.color} />}
+            {(service.type === 'Event' || (service.type === 'Offer' && service.max_participants > 1)) &&
+              isNearlyFull(service.max_participants, service.participant_count ?? 0) && (
+              <Pill label="Nearly Full" bg={RED_LT} color={RED} />
+            )}
             {isOwn && incomingCount > 0 && (
               <Box
                 px="5px" py="2px" borderRadius="full" fontSize="10px" fontWeight={800}
