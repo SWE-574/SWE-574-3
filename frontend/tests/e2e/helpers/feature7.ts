@@ -288,30 +288,37 @@ export async function findHandshakeId(page: Page, options: {
   requesterName: string
   status?: string
 }): Promise<string> {
-  const handshakeId = await page.evaluate(async ({ serviceTitle, requesterName, status }) => {
-    const response = await fetch('/api/handshakes/', {
-      credentials: 'include',
-    })
+  const maxAttempts = 20
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const handshakeId = await page.evaluate(async ({ serviceTitle, requesterName, status }) => {
+      const response = await fetch('/api/handshakes/', {
+        credentials: 'include',
+      })
 
-    if (!response.ok) {
-      throw new Error(`Could not read handshakes: ${response.status}`)
+      if (!response.ok) {
+        throw new Error(`Could not read handshakes: ${response.status}`)
+      }
+
+      const handshakes = await response.json() as Array<Record<string, unknown>>
+      const target = handshakes.find((handshake) => (
+        handshake.service_title === serviceTitle
+        && handshake.requester_name === requesterName
+        && (status ? handshake.status === status : true)
+      ))
+
+      return typeof target?.id === 'string' ? target.id : null
+    }, options)
+
+    if (handshakeId) {
+      return handshakeId
     }
 
-    const handshakes = await response.json() as Array<Record<string, unknown>>
-    const target = handshakes.find((handshake) => (
-      handshake.service_title === serviceTitle
-      && handshake.requester_name === requesterName
-      && (status ? handshake.status === status : true)
-    ))
-
-    return typeof target?.id === 'string' ? target.id : null
-  }, options)
-
-  if (!handshakeId) {
-    throw new Error(`Could not find handshake for ${options.serviceTitle} / ${options.requesterName}.`)
+    if (attempt < maxAttempts - 1) {
+      await page.waitForTimeout(500)
+    }
   }
 
-  return handshakeId
+  throw new Error(`Could not find handshake for ${options.serviceTitle} / ${options.requesterName}.`)
 }
 
 export async function confirmHandshakeViaApi(page: Page, handshakeId: string): Promise<void> {
