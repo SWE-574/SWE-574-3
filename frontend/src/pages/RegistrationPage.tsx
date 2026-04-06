@@ -37,6 +37,12 @@ const schema = z
 
 type FormData = z.infer<typeof schema>
 
+/** First character uppercase for display while typing (registration name fields). */
+function capitalizeFirstLetter(value: string): string {
+  if (!value) return value
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
 // ─── Shared field components ──────────────────────────────────────────────────
 
 function FieldLabel({ children, htmlFor }: { children: React.ReactNode; htmlFor: string }) {
@@ -187,15 +193,22 @@ const RegistrationPage = () => {
                 <Box flex={1}>
                   <FieldLabel htmlFor="first_name">First name</FieldLabel>
                   <InputRow icon={<FiUser size={14} />} hasError={!!errors.first_name}>
-                    <Input
-                      id="first_name"
-                      placeholder="John"
-                      {...register('first_name')}
-                      disabled={isLoading}
-                      autoComplete="given-name"
-                      border="none" bg="transparent"
-                      _focus={{ boxShadow: 'none' }}
-                      fontSize="sm" flex={1}
+                    <Controller
+                      name="first_name"
+                      control={control}
+                      render={({ field }) => (
+                        <Input
+                          id="first_name"
+                          placeholder="John"
+                          {...field}
+                          onChange={(e) => field.onChange(capitalizeFirstLetter(e.target.value))}
+                          disabled={isLoading}
+                          autoComplete="given-name"
+                          border="none" bg="transparent"
+                          _focus={{ boxShadow: 'none' }}
+                          fontSize="sm" flex={1}
+                        />
+                      )}
                     />
                   </InputRow>
                   <FieldError msg={errors.first_name?.message} />
@@ -203,15 +216,22 @@ const RegistrationPage = () => {
                 <Box flex={1}>
                   <FieldLabel htmlFor="last_name">Last name</FieldLabel>
                   <InputRow icon={<FiUser size={14} />} hasError={!!errors.last_name}>
-                    <Input
-                      id="last_name"
-                      placeholder="Doe"
-                      {...register('last_name')}
-                      disabled={isLoading}
-                      autoComplete="family-name"
-                      border="none" bg="transparent"
-                      _focus={{ boxShadow: 'none' }}
-                      fontSize="sm" flex={1}
+                    <Controller
+                      name="last_name"
+                      control={control}
+                      render={({ field }) => (
+                        <Input
+                          id="last_name"
+                          placeholder="Doe"
+                          {...field}
+                          onChange={(e) => field.onChange(capitalizeFirstLetter(e.target.value))}
+                          disabled={isLoading}
+                          autoComplete="family-name"
+                          border="none" bg="transparent"
+                          _focus={{ boxShadow: 'none' }}
+                          fontSize="sm" flex={1}
+                        />
+                      )}
                     />
                   </InputRow>
                   <FieldError msg={errors.last_name?.message} />

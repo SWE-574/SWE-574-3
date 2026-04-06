@@ -210,6 +210,9 @@ export interface Tag {
   id: string
   name: string
   wikidata_id?: string
+  parent_qid?: string
+  entity_type?: string
+  description?: string
 }
 
 // ─── Handshake Types ──────────────────────────────────────────────────────────
@@ -352,6 +355,10 @@ export interface ReputationData {
   punctual?: boolean
   helpful?: boolean
   kindness?: boolean
+  // Event-specific positive traits
+  well_organized?: boolean
+  engaging?: boolean
+  welcoming?: boolean
   handshake_id: string
   comment?: string
 }
@@ -361,6 +368,10 @@ export interface NegativeReputationData {
   is_late?: boolean
   is_unhelpful?: boolean
   is_rude?: boolean
+  // Event-specific negative traits
+  disorganized?: boolean
+  boring?: boolean
+  unwelcoming?: boolean
   comment?: string
 }
 

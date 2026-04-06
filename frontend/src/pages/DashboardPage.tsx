@@ -38,9 +38,11 @@ import {
   GREEN, GREEN_LT,
   AMBER, AMBER_LT,
   BLUE, BLUE_LT,
+  RED, RED_LT,
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
+import { isNearlyFull } from '@/utils/eventUtils'
 
 const TRANSPARENT = 'transparent'
 
@@ -274,6 +276,10 @@ function ServiceCard({
             />
             {isOwn && <Pill label="Yours" bg={AMBER_LT} color={AMBER} />}
             {!isOwn && hsCfg && <Pill label={hsCfg.label} bg={hsCfg.bg} color={hsCfg.color} />}
+            {(service.type === 'Event' || (service.type === 'Offer' && service.max_participants > 1)) &&
+              isNearlyFull(service.max_participants, service.participant_count ?? 0) && (
+              <Pill label="Nearly Full" bg={RED_LT} color={RED} />
+            )}
             {isOwn && incomingCount > 0 && (
               <Box
                 px="5px" py="2px" borderRadius="full" fontSize="10px" fontWeight={800}
@@ -395,7 +401,7 @@ const DashboardPage = () => {
       const onlineOnly = online.filter((s) => s.location_type === 'Online')
       raw = [...nearby, ...onlineOnly]
     } else {
-      raw = await serviceAPI.list(undefined, signal)
+      raw = await serviceAPI.list({ search: debouncedSearch || undefined }, signal)
     }
     const active = raw.filter((s) => s.status === 'Active' && s.is_visible)
     const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
@@ -405,14 +411,6 @@ const DashboardPage = () => {
     if (activeFilter === 'recurrent') filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
     if (activeFilter === 'newest')    filtered = [...filtered].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     if (activeFilter === 'weekend')   filtered = filtered.filter((s) => /saturday|sunday|weekend/i.test(s.schedule_details ?? ''))
-    if (debouncedSearch.trim()) {
-      const q = debouncedSearch.toLowerCase()
-      filtered = filtered.filter((s) =>
-        s.title.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q) ||
-        s.tags?.some((t) => t.name.toLowerCase().includes(q)),
-      )
-    }
     // Float pinned services to the top
     filtered.sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
     setServices(filtered)

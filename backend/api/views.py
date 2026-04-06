@@ -79,12 +79,12 @@ from .utils import (
     can_user_post_offer, provision_timebank, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
 )
-from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService
+from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService, get_social_proximity_boosts
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -1746,8 +1746,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'is_admin': str(is_admin),  # Different cache for admin vs non-admin
         }
         
-        # Don't cache location-based queries (results vary by user location)
-        use_cache = not (request.query_params.get('lat') and request.query_params.get('lng'))
+        sort_param = request.query_params.get('sort', 'latest')
+        # Don't cache location-based queries (results vary by user location).
+        # Also skip cache for hot-sort by authenticated users — social boost is per-user.
+        use_cache = not (
+            (request.query_params.get('lat') and request.query_params.get('lng'))
+            or (sort_param == 'hot' and request.user.is_authenticated)
+        )
         
         if use_cache:
             cached_result = get_cached_service_list(cache_key_params)
@@ -1813,6 +1818,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'tag': self.request.query_params.get('tag'),
             'tags': self.request.query_params.getlist('tags'),
             'search': self.request.query_params.get('search'),
+            'entity_type': self.request.query_params.get('entity_type'),
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
             'distance': self.request.query_params.get('distance', 10),
@@ -1852,12 +1858,33 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
             queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         elif sort_param == 'hot':
-            # Sort by hot score (descending - highest score first)
-            queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
+            if self.request.user.is_authenticated:
+                # Apply social proximity boost (weight 0.5) for authenticated users.
+                # composite_score = hot_score + 0.5 * social_boost
+                # social_boost: 1.0 (1st-degree) or 0.5 (2nd-degree), 0 otherwise.
+                # Single SQL CTE call — no pre-evaluation of the service queryset.
+                boosts = get_social_proximity_boosts(self.request.user.id)
+                if boosts:
+                    # boosts keys are UUID objects; user_id on Service is also UUID — no coercion needed.
+                    whens = [
+                        When(user_id=uid, then=Value(boost, output_field=FloatField()))
+                        for uid, boost in boosts.items()
+                    ]
+                    queryset = queryset.annotate(
+                        social_boost=Case(*whens, default=Value(0.0, output_field=FloatField()), output_field=FloatField()),
+                        composite_score=ExpressionWrapper(
+                            F('hot_score') + Value(0.5, output_field=FloatField()) * F('social_boost'),
+                            output_field=FloatField(),
+                        ),
+                    ).order_by('-is_pinned', '-composite_score', '-created_at')
+                else:
+                    queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
+            else:
+                queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
         else:
             # Default: sort by latest (created_at descending)
             queryset = queryset.order_by('-is_pinned', '-created_at')
-        
+
         return queryset
 
     def get_serializer_context(self):
@@ -5425,13 +5452,38 @@ class AdminUserViewSet(viewsets.ViewSet):
             )
         return None
 
+    def _check_target_tier(self, request, target_user, allow_same_tier=False):
+        """Return an error response based on role-tier comparison.
+
+        By default requires actor tier to be strictly above target tier.
+        Pass allow_same_tier=True for actions (e.g. warn) that peers may perform
+        on each other, but that still cannot be performed upward.
+        """
+        actor_tier = self._ROLE_HIERARCHY.get(request.user.role, 0)
+        target_tier = self._ROLE_HIERARCHY.get(target_user.role, 0)
+        blocked = actor_tier < target_tier if allow_same_tier else actor_tier <= target_tier
+        if blocked:
+            return create_error_response(
+                'You cannot perform this action on a user at your tier or above.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _visible_users_queryset(self, request):
+        """Return a User queryset filtered to roles the actor is permitted to see."""
+        qs = User.objects.all()
+        if request.user.role != 'super_admin':
+            qs = qs.exclude(role='super_admin')
+        return qs
+
     def list(self, request):
         """List all users with search and filter support (admin only)"""
         admin_check = self.check_admin(request)
         if admin_check:
             return admin_check
 
-        queryset = User.objects.all().order_by('-date_joined')
+        queryset = self._visible_users_queryset(request).order_by('-date_joined')
         
         # Search by email, first_name, or last_name
         search = request.query_params.get('search', '').strip()
@@ -5466,7 +5518,7 @@ class AdminUserViewSet(viewsets.ViewSet):
             return admin_check
 
         try:
-            user = User.objects.get(id=pk)
+            user = self._visible_users_queryset(request).get(id=pk)
         except User.DoesNotExist:
             return create_error_response(
                 'User not found',
@@ -5499,6 +5551,11 @@ class AdminUserViewSet(viewsets.ViewSet):
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
+
+        # Peers at the same tier may warn each other; acting upward is still blocked.
+        tier_check = self._check_target_tier(request, user, allow_same_tier=True)
+        if tier_check:
+            return tier_check
 
         create_notification(
             user=user,
@@ -5540,6 +5597,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_403_FORBIDDEN
             )
 
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
+
         user.is_active = False
         user.save()
 
@@ -5563,6 +5624,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_404_NOT_FOUND
             )
 
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
+
         user.is_active = True
         user.save()
 
@@ -5585,6 +5650,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
 
         adjustment = request.data.get('adjustment', 0)
         user.karma_score += adjustment
@@ -5719,6 +5788,14 @@ class AdminUserViewSet(viewsets.ViewSet):
         if new_role_tier >= actor_tier:
             return create_error_response(
                 'You cannot assign a role equal to or above your own tier.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Only super_admin may grant the moderator role.
+        if new_role == 'moderator' and request.user.role != 'super_admin':
+            return create_error_response(
+                'Only a super_admin can assign the moderator role.',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN,
             )
@@ -6042,9 +6119,12 @@ class WikidataSearchView(APIView):
             limit = 10
         
         # Use existing wikidata utility
-        from .wikidata import search_wikidata_items
+        from .wikidata import search_wikidata_items, classify_and_filter_results
         results = search_wikidata_items(query, limit=limit)
-        
+
+        # Filter by entity type and add entity_type to each result
+        results = classify_and_filter_results(results)
+
         return Response(results)
 
 

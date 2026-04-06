@@ -31,6 +31,13 @@ type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
 
+const ROLE_TIER: Record<string, number> = {
+  super_admin: 3,
+  admin: 2,
+  moderator: 1,
+  member: 0,
+}
+
 function asStatusCode(error: unknown): number | undefined {
   return (error as { response?: { status?: number } })?.response?.status
 }
@@ -92,134 +99,7 @@ function canRemoveReportedUserFromEvent(report: AdminReport): boolean {
   return ['accepted', 'checked_in', 'reported', 'paused'].includes(report.handshake_status ?? '')
 }
 
-// ── Shared modal primitives ────────────────────────────────────────────────────
-const ModalBackdrop = ({ onClick, children }: { onClick: () => void; children: React.ReactNode }) => (
-  <Box position="fixed" inset={0} zIndex={3000} display="flex" alignItems="center" justifyContent="center" p={4}
-    style={{ background: 'rgba(15,23,42,0.48)', backdropFilter: 'blur(2px)' }} onClick={onClick}>
-    {children}
-  </Box>
-)
-const ModalCard = ({ maxW = '420px', children, onClick }: { maxW?: string; children: React.ReactNode; onClick: (e: React.MouseEvent) => void }) => (
-  <Box bg={WHITE} borderRadius="16px" w="100%" maxW={maxW} border={`1px solid ${GRAY200}`}
-    style={{ boxShadow: '0 20px 48px rgba(0,0,0,0.18)' }} onClick={onClick}>
-    {children}
-  </Box>
-)
-const ModalHeader = ({ icon, iconBg, iconColor, title, subtitle }: { icon: React.ReactNode; iconBg: string; iconColor: string; title: string; subtitle?: string }) => (
-  <Flex align="center" gap="12px" px={5} pt={5} pb={4} borderBottom={`1px solid ${GRAY100}`}>
-    <Box w="34px" h="34px" borderRadius="10px" display="flex" alignItems="center" justifyContent="center" flexShrink={0}
-      style={{ background: iconBg, color: iconColor }}>
-      {icon}
-    </Box>
-    <Box>
-      <Text fontSize="15px" fontWeight={700} color={GRAY800} lineHeight={1.2}>{title}</Text>
-      {subtitle && <Text fontSize="12px" color={GRAY400} mt="2px">{subtitle}</Text>}
-    </Box>
-  </Flex>
-)
-const ModalFooter = ({ onClose, confirmLabel, accent, accentLt, onConfirm, loading, disabled }: { onClose: () => void; confirmLabel: string; accent: string; accentLt: string; onConfirm: () => void; loading: boolean; disabled?: boolean }) => (
-  <Flex px={5} py={4} gap={3} justify="flex-end" borderTop={`1px solid ${GRAY100}`}>
-    <Box as="button" px="16px" py="8px" borderRadius="9px" fontSize="13px" fontWeight={500}
-      style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = GRAY200 }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = GRAY100 }}
-      onClick={onClose}>Cancel</Box>
-    <Box as="button" px="18px" py="8px" borderRadius="9px" fontSize="13px" fontWeight={600}
-      style={{ background: accentLt, color: accent, border: `1px solid ${accent}40`, cursor: (loading || disabled) ? 'not-allowed' : 'pointer', opacity: (loading || disabled) ? 0.6 : 1, transition: 'filter 0.12s' }}
-      onMouseEnter={(e) => { if (!loading && !disabled) (e.currentTarget as HTMLElement).style.filter = 'brightness(0.9)' }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = 'none' }}
-      onClick={() => { if (!loading && !disabled) onConfirm() }}>
-      {loading ? 'Working…' : confirmLabel}
-    </Box>
-  </Flex>
-)
-const ModalFieldLabel = ({ children }: { children: React.ReactNode }) => (
-  <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb="6px">{children}</Text>
-)
-
-// ── AdminConfirmModal ─────────────────────────────────────────────────────────
-interface ConfirmModalProps {
-  isOpen: boolean; title: string; description: string; confirmLabel: string
-  accent: string; accentLt: string; onConfirm: () => void; onClose: () => void; loading: boolean
-}
-function AdminConfirmModal({ isOpen, title, description, confirmLabel, accent, accentLt, onConfirm, onClose, loading }: ConfirmModalProps) {
-  if (!isOpen) return null
-  const isDestructive = accent === RED
-  return (
-    <ModalBackdrop onClick={onClose}>
-      <ModalCard onClick={(e) => e.stopPropagation()}>
-        <ModalHeader
-          icon={isDestructive ? <FiAlertTriangle size={15} /> : <FiAlertCircle size={15} />}
-          iconBg={accentLt} iconColor={accent}
-          title={title} />
-        <Box px={5} py={4}>
-          <Text fontSize="13px" color={GRAY500} lineHeight={1.6}>{description}</Text>
-        </Box>
-        <ModalFooter onClose={onClose} confirmLabel={confirmLabel} accent={accent} accentLt={accentLt} onConfirm={onConfirm} loading={loading} />
-      </ModalCard>
-    </ModalBackdrop>
-  )
-}
-
-// ── AdminWarnModal ────────────────────────────────────────────────────────────
-interface WarnModalProps { isOpen: boolean; userName: string; onConfirm: (msg: string) => void; onClose: () => void; loading: boolean }
-function AdminWarnModal({ isOpen, userName, onConfirm, onClose, loading }: WarnModalProps) {
-  const [message, setMessage] = useState('Please follow community guidelines.')
-  if (!isOpen) return null
-  const canSubmit = !loading && message.trim().length > 0
-  return (
-    <ModalBackdrop onClick={onClose}>
-      <ModalCard maxW="460px" onClick={(e) => e.stopPropagation()}>
-        <ModalHeader
-          icon={<FiAlertCircle size={15} />} iconBg={BLUE_LT} iconColor={BLUE}
-          title={`Warn ${userName}`} subtitle="Message will be sent as a warning notification" />
-        <Box px={5} py={4}>
-          <ModalFieldLabel>Warning message</ModalFieldLabel>
-          <Textarea value={message} onChange={(e) => setMessage(e.target.value)}
-            rows={4} bg={GRAY50} borderColor={GRAY200} borderRadius="10px" fontSize="13px"
-            placeholder="Describe the violation and expected behaviour…" />
-          <Text fontSize="11px" color={GRAY400} mt={2}>{message.trim().length} chars</Text>
-        </Box>
-        <ModalFooter onClose={onClose} confirmLabel="Send Warning" accent={BLUE} accentLt={BLUE_LT}
-          onConfirm={() => { if (canSubmit) onConfirm(message.trim()) }} loading={loading} disabled={!canSubmit} />
-      </ModalCard>
-    </ModalBackdrop>
-  )
-}
-
-// ── AdminKarmaModal ───────────────────────────────────────────────────────────
-interface KarmaModalProps { isOpen: boolean; userName: string; onConfirm: (n: number) => void; onClose: () => void; loading: boolean }
-function AdminKarmaModal({ isOpen, userName, onConfirm, onClose, loading }: KarmaModalProps) {
-  const [value, setValue] = useState('0')
-  if (!isOpen) return null
-  const num = Number.parseInt(value, 10)
-  const isValid = !Number.isNaN(num) && value.trim() !== '' && num !== 0
-  return (
-    <ModalBackdrop onClick={onClose}>
-      <ModalCard maxW="380px" onClick={(e) => e.stopPropagation()}>
-        <ModalHeader
-          icon={<FiBarChart2 size={15} />} iconBg={AMBER_LT} iconColor={AMBER}
-          title="Adjust Karma" subtitle={userName} />
-        <Box px={5} py={4}>
-          <ModalFieldLabel>Amount (use negative to subtract)</ModalFieldLabel>
-          <Input value={value} onChange={(e) => setValue(e.target.value)} type="number"
-            bg={GRAY50} borderColor={GRAY200} borderRadius="10px" fontSize="14px" />
-          {isValid && (
-            <Flex align="center" gap="6px" mt={3} px={3} py="8px" borderRadius="8px"
-              style={{ background: num > 0 ? GREEN_LT : RED_LT, border: `1px solid ${(num > 0 ? GREEN : RED)}30` }}>
-              <Box w="6px" h="6px" borderRadius="full" style={{ background: num > 0 ? GREEN : RED, flexShrink: 0 }} />
-              <Text fontSize="12px" fontWeight={600} color={num > 0 ? GREEN : RED}>
-                {num > 0 ? `+${num}` : num} karma will be applied to {userName}
-              </Text>
-            </Flex>
-          )}
-        </Box>
-        <ModalFooter onClose={onClose} confirmLabel="Apply" accent={AMBER} accentLt={AMBER_LT}
-          onConfirm={() => { if (!loading && isValid) onConfirm(num) }} loading={loading} disabled={!isValid} />
-      </ModalCard>
-    </ModalBackdrop>
-  )
-}
+import { AdminConfirmModal, AdminKarmaModal, AdminWarnModal } from '@/components/AdminModals'
 
 
 // ── AdminDashboard ────────────────────────────────────────────────────────────
@@ -279,7 +159,7 @@ const AdminDashboard = () => {
 
   // ── Modal state ──────────────────────────────────────────────────────────
   const [warnModal,    setWarnModal]    = useState<{ open: boolean; user: AdminUserSummary | null; loading: boolean }>({ open: false, user: null, loading: false })
-  const [karmaModal,   setKarmaModal]   = useState<{ open: boolean; user: AdminUserSummary | null; loading: boolean }>({ open: false, user: null, loading: false })
+  const [karmaModal,   setKarmaModal]   = useState<{ open: boolean; user: AdminUserSummary | null }>({ open: false, user: null })
   const [confirmModal, setConfirmModal] = useState<{
     open: boolean; title: string; description: string; confirmLabel: string
     accent: string; accentLt: string; onConfirm: () => Promise<void>
@@ -502,21 +382,7 @@ const AdminDashboard = () => {
   }
 
   const handleAdjustKarma = (user: AdminUserSummary) => {
-    setKarmaModal({ open: true, user, loading: false })
-  }
-
-  const submitKarma = async (adjustment: number) => {
-    if (!karmaModal.user) return
-    setKarmaModal((prev) => ({ ...prev, loading: true }))
-    try {
-      await adminAPI.adjustKarma(karmaModal.user.id, adjustment)
-      toast.success('Karma updated')
-      await loadUsers()
-      setKarmaModal({ open: false, user: null, loading: false })
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to update karma'))
-      setKarmaModal((prev) => ({ ...prev, loading: false }))
-    }
+    setKarmaModal({ open: true, user })
   }
 
   const handleResolveReport = (report: AdminReport, action: ReportResolveAction) => {
@@ -861,7 +727,11 @@ const AdminDashboard = () => {
   useEffect(() => {
     const tabParam = searchParams.get('tab')
     const reportIdParam = searchParams.get('reportId')
+
     const validTabs: AdminTab[] = ['dashboard', 'users', 'reports', 'comments', 'moderation', 'audit']
+    if (tabParam && validTabs.includes(tabParam as AdminTab) && activeTab !== tabParam) {
+      setActiveTab(tabParam as AdminTab)
+    }
 
     if (reportIdParam) {
       if (activeTab !== 'reports') {
@@ -1226,6 +1096,10 @@ const AdminDashboard = () => {
                   const initials = [user.first_name?.[0], user.last_name?.[0]].filter(Boolean).join('').toUpperCase() || user.email[0].toUpperCase()
                   const avatarColor = AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
                   const isSelf = currentUser?.id === user.id
+                  const actorTier = ROLE_TIER[currentUser?.role ?? ''] ?? 0
+                  const targetTier = ROLE_TIER[user.role] ?? 0
+                  const canActOn = !isSelf && actorTier > targetTier
+                  const canWarn = !isSelf && actorTier >= targetTier
                   const isLast = idx === (users?.results || []).length - 1
                   const mkUserBtn = (title: string, icon: React.ReactNode, bg: string, border: string, color: string, onClick: () => void, disabled?: boolean) => (
                     <Box as="button" title={title}
@@ -1291,14 +1165,14 @@ const AdminDashboard = () => {
                       {/* Actions */}
                       <Flex w="108px" flexShrink={0} justify="flex-end" gap="4px">
                         {mkUserBtn('View profile', <FiArrowUpRight size={11}/>, GRAY100, GRAY200, GRAY600, () => navigate(`/admin/users/${user.id}`, { state: { from: 'users' } }))}
-                        {mkUserBtn('Warn user', <FiAlertCircle size={11}/>, BLUE_LT, BLUE+'40', BLUE, () => handleWarnUser(user), isSelf)}
+                        {mkUserBtn('Warn user', <FiAlertCircle size={11}/>, BLUE_LT, BLUE+'40', BLUE, () => handleWarnUser(user), !canWarn)}
                         {mkUserBtn(user.is_active?'Suspend user':'Activate user',
                           user.is_active ? <FiSlash size={11}/> : <FiCheck size={11}/>,
                           user.is_active ? RED_LT : GREEN_LT,
                           (user.is_active ? RED : GREEN)+'40',
                           user.is_active ? RED : GREEN,
-                          () => handleBanToggle(user), isSelf)}
-                        {mkUserBtn('Adjust karma', <FiBarChart2 size={11}/>, AMBER_LT, AMBER+'40', AMBER, () => handleAdjustKarma(user))}
+                          () => handleBanToggle(user), !canActOn)}
+                        {mkUserBtn('Adjust karma', <FiBarChart2 size={11}/>, AMBER_LT, AMBER+'40', AMBER, () => handleAdjustKarma(user), !canActOn)}
                       </Flex>
                     </Flex>
                   )
@@ -2306,9 +2180,10 @@ const AdminDashboard = () => {
     <AdminKarmaModal
       isOpen={karmaModal.open}
       userName={karmaModal.user ? userDisplayName(karmaModal.user) : ''}
-      onConfirm={submitKarma}
-      onClose={() => setKarmaModal({ open: false, user: null, loading: false })}
-      loading={karmaModal.loading}
+      currentKarma={karmaModal.user?.karma_score ?? 0}
+      userId={karmaModal.user?.id ?? ''}
+      onDone={() => { setKarmaModal({ open: false, user: null }); loadUsers() }}
+      onClose={() => setKarmaModal({ open: false, user: null })}
     />
   </>
   )

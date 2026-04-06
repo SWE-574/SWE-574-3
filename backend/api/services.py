@@ -968,3 +968,85 @@ class EventEvaluationService:
             event_hot_score=round(float(organizer_event_hot_score), 6)
         )
         return summary
+
+
+def get_social_proximity_boosts(viewer_id) -> dict:
+    """
+    Return a dict mapping user_id (UUID) -> social_boost for every user reachable
+    within 2 hops of the viewer.
+
+    Boost values:
+      1.0  — viewer directly follows the user OR has a completed handshake with them
+      0.5  — reachable in exactly 2 hops through a 1st-degree connection
+
+    Implemented as a single raw SQL CTE query. No Python-side graph traversal.
+
+    Index requirements (already created in migration 0051):
+      api_userfollow(follower_id), api_userfollow(following_id)
+      api_handshake(status), api_service(user_id)
+    """
+    if viewer_id is None:
+        return {}
+
+    from django.db import connection
+    import uuid as _uuid
+
+    sql = """
+        WITH first_degree AS (
+            SELECT following_id AS uid
+            FROM   api_userfollow
+            WHERE  follower_id = %s
+            UNION
+            SELECT h.requester_id AS uid
+            FROM   api_handshake h
+            JOIN   api_service   s ON h.service_id = s.id
+            WHERE  s.user_id = %s AND h.status = 'completed'
+            UNION
+            SELECT s.user_id AS uid
+            FROM   api_handshake h
+            JOIN   api_service   s ON h.service_id = s.id
+            WHERE  h.requester_id = %s AND h.status = 'completed'
+        ),
+        first_excl AS (
+            SELECT uid FROM first_degree WHERE uid != %s
+        ),
+        second_degree AS (
+            SELECT uf.following_id AS uid
+            FROM   api_userfollow uf
+            JOIN   first_excl fd ON uf.follower_id = fd.uid
+            WHERE  uf.following_id != %s
+            UNION
+            SELECT h.requester_id AS uid
+            FROM   api_handshake h
+            JOIN   api_service   s ON h.service_id = s.id
+            JOIN   first_excl    fd ON s.user_id   = fd.uid
+            WHERE  h.status = 'completed' AND h.requester_id != %s
+            UNION
+            SELECT s.user_id AS uid
+            FROM   api_handshake h
+            JOIN   api_service   s ON h.service_id = s.id
+            JOIN   first_excl    fd ON h.requester_id = fd.uid
+            WHERE  h.status = 'completed' AND s.user_id != %s
+        )
+        SELECT uid, 1.0 AS boost FROM first_excl
+        UNION ALL
+        SELECT uid, 0.5 AS boost
+        FROM   second_degree
+        WHERE  uid NOT IN (SELECT uid FROM first_excl) AND uid != %s
+    """
+
+    viewer_id_str = str(viewer_id)
+    params = [viewer_id_str] * 8
+
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+
+    # Use max boost when a user appears in both result sets (shouldn't happen
+    # due to the WHERE clause, but guards against edge cases).
+    boosts: dict = {}
+    for uid, boost in rows:
+        uid_key = _uuid.UUID(str(uid)) if not isinstance(uid, _uuid.UUID) else uid
+        if uid_key not in boosts or boost > boosts[uid_key]:
+            boosts[uid_key] = boost
+    return boosts

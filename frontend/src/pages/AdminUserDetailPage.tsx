@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { adminAPI } from '@/services/adminAPI'
 import { getErrorMessage } from '@/services/api'
 import AdminLayout from '@/components/AdminLayout'
+import { AdminConfirmModal, AdminKarmaModal, AdminWarnModal } from '@/components/AdminModals'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { AdminTransaction, AdminUserDetail } from '@/types'
 import {
@@ -436,10 +437,6 @@ const ASSIGNABLE_ROLES_BY_ACTOR: Record<string, { value: string; label: string }
     { value: 'moderator', label: 'Moderator' },
     { value: 'member', label: 'Member' },
   ],
-  admin: [
-    { value: 'moderator', label: 'Moderator' },
-    { value: 'member', label: 'Member' },
-  ],
 }
 
 const ROLE_TIER: Record<string, number> = {
@@ -633,6 +630,7 @@ export default function AdminUserDetailPage() {
         await adminAPI.unbanUser(user.id)
         toast.success('User reactivated')
       }
+      setSuspendConfirm(false)
       await load()
     } catch (e) {
       toast.error(getErrorMessage(e) ?? 'Action failed')
@@ -730,7 +728,7 @@ export default function AdminUserDetailPage() {
                   icon={FiAlertCircle}
                   bg={BLUE_LT} hoverBg={BLUE + '40'} color={BLUE}
                   onClick={() => setModal('warn')}
-                  disabled={isSelf}
+                  disabled={!canWarnTarget}
                 />
                 <ActionBtn
                   label={user.is_active ? 'Suspend' : 'Reactivate'}
@@ -739,17 +737,17 @@ export default function AdminUserDetailPage() {
                   hoverBg={(user.is_active ? RED : GREEN) + '40'}
                   color={user.is_active ? RED : GREEN}
                   onClick={handleToggleSuspend}
-                  disabled={isSelf || actionLoading}
+                  disabled={!canActOnTarget || actionLoading}
                 />
                 <ActionBtn
                   label="Karma"
                   icon={FiBarChart2}
                   bg={PURPLE_LT} hoverBg={PURPLE + '40'} color={PURPLE}
                   onClick={() => setModal('karma')}
+                  disabled={!canActOnTarget}
                 />
-                {/* Role button: hidden when the logged-in admin cannot possibly
-                    change the target's role (self or insufficient tier). */}
-                {!isSelf && (ROLE_TIER[adminUser?.role ?? ''] ?? 0) > (ROLE_TIER[user.role] ?? 0) && (
+                {/* Role button: only super_admin can assign roles. */}
+                {!isSelf && adminUser?.role === 'super_admin' && (ROLE_TIER[user.role] ?? 0) < 3 && (
                   <ActionBtn
                     label="Role"
                     icon={FiShield}
