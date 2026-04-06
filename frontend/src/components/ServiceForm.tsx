@@ -9,6 +9,7 @@ import {
 import { FiX, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCircle, FiNavigation, FiStar } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
+import { useAuthStore } from '@/store/useAuthStore'
 import WikidataTagAutocomplete from './WikidataTagAutocomplete'
 import { LocationPickerMap } from './LocationPickerMap'
 import type { Service, ServiceMedia, Tag } from '@/types'
@@ -433,6 +434,7 @@ export default function ServiceForm({
   initialService,
 }: ServiceFormProps) {
   const navigate = useNavigate()
+  const refreshUser = useAuthStore((state) => state.refreshUser)
   const accent   = type === 'Event' ? AMBER : type === 'Offer' ? GREEN : BLUE
   const accentLt = type === 'Event' ? AMBER_LT : type === 'Offer' ? GREEN_LT : BLUE_LT
   const isEditMode = mode === 'edit' && !!serviceId
@@ -845,6 +847,7 @@ export default function ServiceForm({
           unmanagedMediaIds.forEach((mediaId) => fd.append('media_order', `existing:${mediaId}`))
         }
         const updated = await serviceAPI.update(serviceId, fd)
+        if (type === 'Need') await refreshUser()
         toast.success(`${type} updated successfully!`)
         navigate(`/service-detail/${updated.id}`)
       } else {
@@ -905,6 +908,7 @@ export default function ServiceForm({
             ]
         orderedFiles.forEach((f) => fd.append('media', f))
         const created = await serviceAPI.create(fd)
+        if (type === 'Need') await refreshUser()
         toast.success(`${type} posted successfully!`)
         navigate(`/service-detail/${created.id}`)
       }
