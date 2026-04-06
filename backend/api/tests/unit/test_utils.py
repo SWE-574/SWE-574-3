@@ -8,7 +8,9 @@ from django.db import transaction
 from api.models import User, Service, Handshake, TransactionHistory
 from api.utils import (
     can_user_post_offer, provision_timebank, complete_timebank_transfer,
-    cancel_timebank_transfer, get_provider_and_receiver, create_notification
+    cancel_timebank_transfer, get_provider_and_receiver, create_notification,
+    reserve_timebank_for_need_service, release_timebank_for_need_service,
+    ensure_accepted_handshake_reservation,
 )
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
@@ -92,6 +94,53 @@ class TestProvisionTimebank:
         
         assert handshake.provisioned_hours == Decimal('2.00')
         assert receiver.timebank_balance == Decimal('1.00')  # 3.00 - 2.00
+
+    def test_reserve_timebank_for_need_service(self):
+        owner = UserFactory(timebank_balance=Decimal('3.00'))
+        service = ServiceFactory(user=owner, type='Need', duration=Decimal('2.00'))
+
+        reserve_timebank_for_need_service(service)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+
+        assert owner.timebank_balance == Decimal('1.00')
+        assert service.reserved_timebank_hours == Decimal('2.00')
+        assert TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=None,
+            transaction_type='provision',
+        ).exists()
+
+    def test_accepted_need_reuses_existing_service_reservation(self):
+        owner = UserFactory(timebank_balance=Decimal('2.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('1.00'),
+            reserved_timebank_hours=Decimal('1.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='pending',
+            provisioned_hours=Decimal('1.00'),
+        )
+
+        ensure_accepted_handshake_reservation(handshake)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+        assert owner.timebank_balance == Decimal('2.00')
+        assert service.reserved_timebank_hours == Decimal('1.00')
+        assert TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=handshake,
+            transaction_type='provision',
+        ).count() == 0
 
 
 @pytest.mark.django_db
@@ -191,6 +240,53 @@ class TestCancelTimebankTransfer:
         
         receiver.refresh_from_db()
         assert receiver.timebank_balance == Decimal('3.00')  # 1.00 + 2.00 (refunded)
+
+    def test_release_timebank_for_need_service(self):
+        owner = UserFactory(timebank_balance=Decimal('1.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('2.00'),
+            reserved_timebank_hours=Decimal('2.00'),
+        )
+
+        release_timebank_for_need_service(service)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+
+        assert owner.timebank_balance == Decimal('3.00')
+        assert service.reserved_timebank_hours == Decimal('0.00')
+        assert TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=None,
+            transaction_type='refund',
+        ).exists()
+
+    def test_cancel_timebank_transfer_refunds_need_service_reservation(self):
+        owner = UserFactory(timebank_balance=Decimal('1.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('2.00'),
+            reserved_timebank_hours=Decimal('2.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='accepted',
+            provisioned_hours=Decimal('2.00'),
+        )
+
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+        assert owner.timebank_balance == Decimal('3.00')
+        assert service.reserved_timebank_hours == Decimal('0.00')
 
 
 @pytest.mark.django_db

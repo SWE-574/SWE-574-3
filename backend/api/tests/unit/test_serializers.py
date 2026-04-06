@@ -620,6 +620,27 @@ class TestTransactionHistorySerializer:
         assert data['counterpart'] is None
         assert data['is_current_user_provider'] is False
 
+    def test_need_service_level_reservation_uses_service_fallback(self):
+        owner = UserFactory(first_name='Ayşe', last_name='Demir')
+        service = ServiceFactory(user=owner, type='Need', title='Need Reservation')
+        transaction = TransactionHistoryFactory(
+            user=owner,
+            service=service,
+            handshake=None,
+            transaction_type='provision',
+            description='Hours reserved for request',
+        )
+
+        serializer = TransactionHistorySerializer(transaction)
+        data = serializer.data
+
+        assert data['handshake_id'] is None
+        assert data['service_id'] == str(service.id)
+        assert data['service_title'] == 'Need Reservation'
+        assert data['service_type'] == 'Need'
+        assert data['counterpart'] is None
+        assert data['is_current_user_provider'] is False
+
 
 @pytest.mark.django_db
 @pytest.mark.unit

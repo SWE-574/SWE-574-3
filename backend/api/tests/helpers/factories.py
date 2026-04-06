@@ -164,6 +164,7 @@ class TransactionHistoryFactory(factory.django.DjangoModelFactory):
     amount = Decimal('2.00')
     balance_after = Decimal('5.00')
     handshake = factory.SubFactory(HandshakeFactory)
+    service = None
     description = factory.Faker('sentence')
 
 

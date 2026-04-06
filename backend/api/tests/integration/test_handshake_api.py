@@ -570,6 +570,35 @@ class TestInitiateApproveServiceOwnerModel:
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
 
+    def test_need_approve_reuses_existing_request_reservation(self):
+        service_owner = UserFactory(timebank_balance=Decimal('2.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=service_owner,
+            type='Need',
+            duration=Decimal('1.00'),
+            reserved_timebank_hours=Decimal('1.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='pending',
+            provider_initiated=True,
+            exact_location='Need Location',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_200_OK
+
+        service_owner.refresh_from_db()
+        service.refresh_from_db()
+        assert service_owner.timebank_balance == Decimal('2.00')
+        assert service.reserved_timebank_hours == Decimal('1.00')
+
     def test_confirm_rejects_fractional_hours_adjustment(self):
         """Completion confirmation must reject fractional hour adjustments."""
         provider = UserFactory(timebank_balance=Decimal('5.00'))
