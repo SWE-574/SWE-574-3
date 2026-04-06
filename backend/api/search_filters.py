@@ -10,21 +10,24 @@ from typing import Any
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
-from django.db.models import Q, QuerySet
+from django.db.models import (
+    Q, QuerySet, Case, When, Value, FloatField, Sum, Exists, OuterRef,
+    Subquery,
+)
 
 
 class SearchStrategy(ABC):
     """Abstract base class for search filter strategies"""
-    
+
     @abstractmethod
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         """
         Apply the search filter to the queryset.
-        
+
         Args:
             queryset: The Django QuerySet to filter
             params: Dictionary of search parameters
-            
+
         Returns:
             Filtered QuerySet
         """
@@ -34,32 +37,32 @@ class SearchStrategy(ABC):
 class LocationStrategy(SearchStrategy):
     """
     Filter services by distance from user location using PostGIS.
-    
+
     Parameters:
         - lat: User's latitude
-        - lng: User's longitude  
+        - lng: User's longitude
         - distance: Maximum distance in kilometers (default: 10)
     """
-    
+
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         lat = params.get('lat')
         lng = params.get('lng')
         distance_km = params.get('distance', 10)
-        
+
         # Only apply if both lat and lng are provided
         if lat is None or lng is None:
             return queryset
-        
+
         try:
             lat = float(lat)
             lng = float(lng)
             distance_km = float(distance_km)
         except (ValueError, TypeError):
             return queryset
-        
+
         # Create user location point (lng, lat order for PostGIS)
         user_location = Point(lng, lat, srid=4326)
-        
+
         # Filter by distance and annotate with calculated distance
         # Only filter services that have a location set
         queryset = queryset.filter(
@@ -68,89 +71,108 @@ class LocationStrategy(SearchStrategy):
         ).annotate(
             distance=Distance('location', user_location)
         ).order_by('distance')
-        
+
         return queryset
 
 
 class TagStrategy(SearchStrategy):
     """
     Filter services by semantic tags (Wikidata IDs).
-    
+
+    Supports hierarchical matching: a search for a parent tag QID will also
+    find services tagged with child tags (via parent_qid).
+
     Parameters:
         - tags: List of tag IDs to filter by
         - tag: Single tag ID (alternative to tags list)
+        - entity_type: Filter by broad entity type (e.g. 'technology', 'food')
     """
-    
+
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         # Support both 'tags' (list) and 'tag' (single) parameters
         tag_ids = params.get('tags', [])
         single_tag = params.get('tag')
-        
+
         if single_tag and single_tag not in tag_ids:
             tag_ids = list(tag_ids) + [single_tag]
-        
-        if not tag_ids:
-            return queryset
-        
-        # Filter services that have any of the specified tags
-        queryset = queryset.filter(tags__id__in=tag_ids).distinct()
-        
+
+        if tag_ids:
+            # Direct match OR parent_qid match (hierarchical traversal)
+            queryset = queryset.filter(
+                Q(tags__id__in=tag_ids) | Q(tags__parent_qid__in=tag_ids)
+            ).distinct()
+
+        # Entity type filtering
+        entity_type = params.get('entity_type')
+        if entity_type:
+            queryset = queryset.filter(
+                tags__entity_type=entity_type
+            ).distinct()
+
         return queryset
 
 
 class TextStrategy(SearchStrategy):
     """
     Full-text search on service title, description, and tag names.
-    
+
     Parameters:
         - search: Search query string
     """
-    
+
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         search = params.get('search', '')
-        
+
         if not search or not isinstance(search, str):
             return queryset
-        
+
         search = search.strip()
         if not search:
             return queryset
-        
+
         # Search in title, description, and tag names
         queryset = queryset.filter(
             Q(title__icontains=search) |
             Q(description__icontains=search) |
             Q(tags__name__icontains=search)
         ).distinct()
-        
+
         return queryset
 
 
 class TypeStrategy(SearchStrategy):
     """
     Filter services by type (Offer or Need).
-    
+
     Parameters:
         - type: 'Offer' or 'Need'
     """
-    
+
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         service_type = params.get('type')
-        
+
         if service_type and service_type in ['Offer', 'Need']:
             queryset = queryset.filter(type=service_type)
-        
+
         return queryset
 
 
 class SearchEngine:
     """
     Composite search engine that applies multiple filter strategies.
-    
+
     Uses the Strategy Pattern to combine location-based, tag-based,
     text-based, and type-based filtering into a unified search interface.
+
+    After filtering, applies weighted scoring annotations when search
+    or tag parameters are present (FR-SEA-01):
+        - Title match: 1.0
+        - Direct tag match: 0.8
+        - Description match: 0.6
+        - Parent tag match: 0.5
+        - Tag name match: 0.3
     """
-    
+
     def __init__(self):
         """Initialize with default strategy order"""
         self.strategies: list[SearchStrategy] = [
@@ -159,11 +181,12 @@ class SearchEngine:
             TextStrategy(),      # Then by text search
             LocationStrategy(),  # Location last (adds ordering by distance)
         ]
-    
+
     def search(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         """
-        Apply all search strategies to the queryset.
-        
+        Apply all search strategies to the queryset, then annotate
+        with relevance scores when search/tag parameters are present.
+
         Args:
             queryset: Base QuerySet to filter
             params: Dictionary containing all search parameters:
@@ -171,15 +194,86 @@ class SearchEngine:
                 - tags: List of tag IDs
                 - tag: Single tag ID
                 - search: Text search query
+                - entity_type: Broad entity type filter
                 - lat: User latitude
                 - lng: User longitude
                 - distance: Max distance in km
-                
+
         Returns:
-            Filtered and potentially ordered QuerySet
+            Filtered and potentially scored/ordered QuerySet
         """
+        has_location = params.get('lat') is not None and params.get('lng') is not None
+
         for strategy in self.strategies:
             queryset = strategy.apply(queryset, params)
-        
-        return queryset
 
+        # Apply scoring when search or tag params are present
+        search_term = (params.get('search') or '').strip()
+        tag_ids = list(params.get('tags', []))
+        single_tag = params.get('tag')
+        if single_tag and single_tag not in tag_ids:
+            tag_ids.append(single_tag)
+
+        if not search_term and not tag_ids:
+            return queryset
+
+        score_parts = []
+
+        if search_term:
+            # Title match -> 1.0
+            score_parts.append(
+                Case(
+                    When(title__icontains=search_term, then=Value(1.0)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+            )
+            # Description match -> 0.6
+            score_parts.append(
+                Case(
+                    When(description__icontains=search_term, then=Value(0.6)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+            )
+            # Tag name match -> 0.3
+            score_parts.append(
+                Case(
+                    When(tags__name__icontains=search_term, then=Value(0.3)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+            )
+
+        if tag_ids:
+            # Direct tag match -> 0.8
+            score_parts.append(
+                Case(
+                    When(tags__id__in=tag_ids, then=Value(0.8)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+            )
+            # Parent tag match -> 0.5
+            score_parts.append(
+                Case(
+                    When(tags__parent_qid__in=tag_ids, then=Value(0.5)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+            )
+
+        if score_parts:
+            total_score = score_parts[0]
+            for part in score_parts[1:]:
+                total_score = total_score + part
+
+            queryset = queryset.annotate(
+                search_score=total_score
+            ).distinct()
+
+            # Location ordering takes precedence
+            if not has_location:
+                queryset = queryset.order_by('-search_score')
+
+        return queryset
