@@ -17,6 +17,9 @@ from .views import (
     UserHistoryView,
     UserBadgeProgressView,
     UserVerifiedReviewsView,
+    UserFollowView,
+    UserFollowersListView,
+    UserFollowingListView,
     ServiceViewSet,
     TagViewSet,
     HandshakeViewSet,
@@ -146,10 +149,7 @@ def metrics_endpoint(request):
     from api.models import User, Service, Handshake, TransactionHistory
     from django.db.models import Count, Q
     
-    is_admin = (
-        getattr(request.user, 'role', None) == 'admin'
-        or bool(getattr(request.user, 'is_staff', False))
-    )
+    is_admin = getattr(request.user, 'role', None) in ('admin', 'super_admin', 'moderator')
 
     if not request.user.is_authenticated or not is_admin:
         return JsonResponse(
@@ -286,10 +286,15 @@ urlpatterns = [
     path('auth/send-verification/', SendVerificationEmailView.as_view(), name='send-verification'),
     path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
-    path('users/<uuid:id>/', UserProfileView.as_view(), name='user-detail'),
+    # Nested /users/<id>/… routes must be registered before the generic user-detail path
+    # so paths like …/follow/ are never mistaken for detail (defensive ordering).
+    path('users/<uuid:id>/follow/', UserFollowView.as_view(), name='user-follow'),
+    path('users/<uuid:id>/followers/', UserFollowersListView.as_view(), name='user-followers'),
+    path('users/<uuid:id>/following/', UserFollowingListView.as_view(), name='user-following'),
     path('users/<uuid:id>/history/', UserHistoryView.as_view(), name='user-history'),
     path('users/<uuid:id>/badge-progress/', UserBadgeProgressView.as_view(), name='user-badge-progress'),
     path('users/<uuid:id>/verified-reviews/', UserVerifiedReviewsView.as_view(), name='user-verified-reviews'),
+    path('users/<uuid:id>/', UserProfileView.as_view(), name='user-detail'),
     path('services/<uuid:service_id>/interest/', 
          ExpressInterestView.as_view(),
          name='express-interest'),

@@ -146,7 +146,79 @@ class TestCalculateHotScore:
         assert score == pytest.approx(base_score, rel=1e-5)
 
     def test_non_event_service_no_boost(self):
-        """Non-Event services should never receive the event multiplier."""
+        """Single-participant Offer (Need-like) should never receive the multiplier."""
+        service = ServiceFactory(
+            type='Offer', status='Active', max_participants=1,
+        )
+        base_score = calculate_hot_score(service)
+
+        HandshakeFactory(service=service, status='accepted')
+
+        score = calculate_hot_score(service)
+        assert score == pytest.approx(base_score, rel=1e-5)
+
+    # ── Boundary tests (FR-RANK-03 acceptance criteria) ──────────────────────
+
+    def test_event_at_74pct_no_boost(self):
+        """74% capacity (just below threshold) should NOT trigger the 1.5× boost."""
+        service = ServiceFactory(
+            type='Event', status='Active', max_participants=100,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        base_score = calculate_hot_score(service)
+
+        for _ in range(74):
+            HandshakeFactory(service=service, status='accepted')
+
+        score = calculate_hot_score(service)
+        assert score == pytest.approx(base_score, rel=1e-5)
+
+    def test_event_at_75pct_gets_boost(self):
+        """Exactly 75% capacity should trigger the 1.5× boost."""
+        service = ServiceFactory(
+            type='Event', status='Active', max_participants=100,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        base_score = calculate_hot_score(service)
+
+        for _ in range(75):
+            HandshakeFactory(service=service, status='accepted')
+
+        boosted_score = calculate_hot_score(service)
+        if base_score != 0:
+            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+
+    def test_event_at_99pct_gets_boost(self):
+        """99% capacity (last slot open) should still trigger the 1.5× boost."""
+        service = ServiceFactory(
+            type='Event', status='Active', max_participants=100,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        base_score = calculate_hot_score(service)
+
+        for _ in range(99):
+            HandshakeFactory(service=service, status='accepted')
+
+        boosted_score = calculate_hot_score(service)
+        if base_score != 0:
+            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+
+    def test_event_at_100pct_no_boost(self):
+        """Exactly 100% capacity (full) should NOT trigger the boost."""
+        service = ServiceFactory(
+            type='Event', status='Active', max_participants=100,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        base_score = calculate_hot_score(service)
+
+        for _ in range(100):
+            HandshakeFactory(service=service, status='accepted')
+
+        score = calculate_hot_score(service)
+        assert score == pytest.approx(base_score, rel=1e-5)
+
+    def test_group_offer_at_75pct_gets_boost(self):
+        """Group Offer (max_participants > 1) at 75% capacity should get the 1.5× boost."""
         service = ServiceFactory(
             type='Offer', status='Active', max_participants=4,
         )
@@ -154,6 +226,19 @@ class TestCalculateHotScore:
 
         for _ in range(3):
             HandshakeFactory(service=service, status='accepted')
+
+        boosted_score = calculate_hot_score(service)
+        if base_score != 0:
+            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+
+    def test_single_participant_offer_no_boost(self):
+        """Offer with max_participants=1 should never receive the group multiplier."""
+        service = ServiceFactory(
+            type='Offer', status='Active', max_participants=1,
+        )
+        base_score = calculate_hot_score(service)
+
+        HandshakeFactory(service=service, status='accepted')
 
         score = calculate_hot_score(service)
         assert score == pytest.approx(base_score, rel=1e-5)
@@ -616,3 +701,15 @@ class TestWilsonScoreConfidenceInterval:
     def test_deterministic_for_same_inputs(self):
         """Same inputs always produce the same result (NFR-17b applies here too)."""
         assert _wilson_score_lower_bound(50, 100) == _wilson_score_lower_bound(50, 100)
+    def test_batch_group_offer_multiplier_matches_single(self):
+        """Batch scoring must match single-service scoring for Group Offers."""
+        service = ServiceFactory(
+            type='Offer', status='Active', max_participants=4,
+        )
+        for _ in range(3):
+            HandshakeFactory(service=service, status='accepted')
+
+        single_score = calculate_hot_score(service)
+        batch_scores = calculate_hot_scores_batch([service])
+
+        assert batch_scores[service.id] == pytest.approx(single_score, rel=1e-5)

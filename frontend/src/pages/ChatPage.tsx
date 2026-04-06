@@ -1827,7 +1827,10 @@ export default function ChatPage() {
     if (!msg?.id) return
     if ((msg.handshake_id ?? msg.handshake) !== selectedId) return
     setMessages((prev) => mergeMessages(prev, [msg]))
-  }, [selectedId])
+    // State changes like "details proposed" arrive as chat messages, so refresh
+    // the conversation metadata too or the action panel can lag behind the thread.
+    refreshConversations()
+  }, [refreshConversations, selectedId])
 
   const { isConnected: wsConnected, sendMessage: wsSend } = useWebSocket({
     url: wsUrl,
@@ -2165,11 +2168,24 @@ export default function ChatPage() {
                     <FiArrowLeft />
                   </Box>
 
-                  <Avatar name={selectedConv.other_user.name} url={selectedConv.other_user.avatar_url} size={38} />
+                  <Box
+                    as="button"
+                    onClick={() => navigate(`/public-profile/${selectedConv.other_user.id}`)}
+                    style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}
+                    aria-label={`View ${selectedConv.other_user.name}'s profile`}
+                  >
+                    <Avatar name={selectedConv.other_user.name} url={selectedConv.other_user.avatar_url} size={38} />
+                  </Box>
 
                   <Box flex={1} minW={0}>
                     <Flex align="center" gap={2} flexWrap="wrap">
-                      <Text fontSize="14px" fontWeight={700} color={GRAY800}>
+                      <Text
+                        as="button"
+                        fontSize="14px" fontWeight={700} color={GRAY800}
+                        onClick={() => navigate(`/public-profile/${selectedConv.other_user.id}`)}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}
+                        _hover={{ textDecoration: 'underline' }}
+                      >
                         {selectedConv.other_user.name}
                       </Text>
                       {/* Service type pill */}

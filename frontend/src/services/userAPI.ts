@@ -1,5 +1,5 @@
 import apiClient from './api'
-import type { User, BadgeProgress, AchievementProgressItem, ProfileReviewsResponse } from '@/types'
+import type { User, UserSummary, BadgeProgress, AchievementProgressItem, ProfileReviewsResponse } from '@/types'
 
 export interface UserHistoryItem {
   service_id: string
@@ -137,6 +137,26 @@ export const userAPI = {
   getUser: async (id: string, signal?: AbortSignal): Promise<User> => {
     const res = await apiClient.get<User>(`/users/${id}/`, { signal })
     return res.data
+  },
+
+  /** Create active follow + follow event (authenticated). */
+  followUser: async (userId: string): Promise<void> => {
+    await apiClient.post(`/users/${userId}/follow/`)
+  },
+
+  /** Remove follow + append unfollow event (authenticated). */
+  unfollowUser: async (userId: string): Promise<void> => {
+    await apiClient.delete(`/users/${userId}/follow/`)
+  },
+
+  getFollowers: async (userId: string, signal?: AbortSignal): Promise<UserSummary[]> => {
+    const res = await apiClient.get<{ results: UserSummary[] }>(`/users/${userId}/followers/`, { signal })
+    return res.data.results
+  },
+
+  getFollowing: async (userId: string, signal?: AbortSignal): Promise<UserSummary[]> => {
+    const res = await apiClient.get<{ results: UserSummary[] }>(`/users/${userId}/following/`, { signal })
+    return res.data.results
   },
 
   getHistory: async (userId: string, signal?: AbortSignal): Promise<UserHistoryItem[]> => {

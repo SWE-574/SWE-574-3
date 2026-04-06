@@ -22,6 +22,8 @@ from api.search_filters import (
     SearchEngine,
 )
 
+# DateRangeStrategy is not yet implemented. Imported lazily so that an
+# ImportError here does not break the rest of this module.
 try:
     from api.search_filters import DateRangeStrategy as _DateRangeStrategy
 except ImportError:
@@ -1014,7 +1016,8 @@ class ServiceViewSetOrderingTestCase(TestCase):
 
 
 # ---------------------------------------------------------------------------
-# FR-12c — DateRangeStrategy (TDD / xfail until implemented)
+# FR-12c: DateRangeStrategy — TDD tests (will fail until DateRangeStrategy
+# is added to search_filters.py and wired into SearchEngine)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.xfail(reason="FR-12c: DateRangeStrategy not yet implemented", strict=False)
@@ -1222,3 +1225,175 @@ class TestSearchWeighting(TestCase):
         self.assertIsNotNone(TITLE_WEIGHT)
         self.assertIsNotNone(TAG_WEIGHT)
         self.assertGreater(TITLE_WEIGHT, TAG_WEIGHT, "Title weight must exceed tag weight")
+    Unit tests for DateRangeStrategy (FR-12c).
+
+    DateRangeStrategy filters services by their scheduled_time using optional
+    date_from and date_to ISO-8601 date parameters. It is intended to be used
+    together with TypeStrategy so that only Event services are date-filtered,
+    but the strategy itself is type-agnostic.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email='daterange@test.com',
+            password='testpass123',
+            first_name='Test',
+            last_name='User',
+            timebank_balance=Decimal('10.00'),
+        )
+        now = timezone.now()
+
+        # Event happening yesterday
+        self.event_past = Service.objects.create(
+            user=self.user,
+            title='Past Event',
+            description='An event that already happened',
+            type='Event',
+            duration=Decimal('2.00'),
+            location_type='Online',
+            max_participants=10,
+            schedule_type='One-Time',
+            scheduled_time=now - timedelta(days=1),
+        )
+
+        # Event happening today
+        self.event_today = Service.objects.create(
+            user=self.user,
+            title='Today Event',
+            description='An event happening today',
+            type='Event',
+            duration=Decimal('1.00'),
+            location_type='Online',
+            max_participants=10,
+            schedule_type='One-Time',
+            scheduled_time=now,
+        )
+
+        # Event happening in 3 days
+        self.event_near_future = Service.objects.create(
+            user=self.user,
+            title='Near Future Event',
+            description='An event coming up in a few days',
+            type='Event',
+            duration=Decimal('2.00'),
+            location_type='Online',
+            max_participants=10,
+            schedule_type='One-Time',
+            scheduled_time=now + timedelta(days=3),
+        )
+
+        # Event happening in 10 days
+        self.event_far_future = Service.objects.create(
+            user=self.user,
+            title='Far Future Event',
+            description='An event further out',
+            type='Event',
+            duration=Decimal('2.00'),
+            location_type='Online',
+            max_participants=10,
+            schedule_type='One-Time',
+            scheduled_time=now + timedelta(days=10),
+        )
+
+        # Regular offer service (no scheduled_time) — must never be excluded by date filter
+        self.offer_no_date = Service.objects.create(
+            user=self.user,
+            title='Regular Offer',
+            description='A non-event offer with no scheduled time',
+            type='Offer',
+            duration=Decimal('1.00'),
+            location_type='Online',
+            max_participants=1,
+            schedule_type='Recurrent',
+        )
+
+        if _DateRangeStrategy is None:
+            pytest.xfail("DateRangeStrategy not yet implemented — FR-12c")
+        self.strategy = _DateRangeStrategy()
+
+    def _event_titles(self, queryset):
+        return {s.title for s in queryset}
+
+    def test_date_from_excludes_events_before_that_date(self):
+        """FR-12c: date_from filters out events scheduled before the given date."""
+        future_date = (timezone.now() + timedelta(days=2)).date().isoformat()
+        qs = Service.objects.filter(status='Active')
+
+        result = self.strategy.apply(qs, {'date_from': future_date})
+        titles = self._event_titles(result)
+
+        self.assertIn('Near Future Event', titles)
+        self.assertIn('Far Future Event', titles)
+        self.assertNotIn('Past Event', titles)
+        self.assertNotIn('Today Event', titles)
+
+    def test_date_to_excludes_events_after_that_date(self):
+        """FR-12c: date_to filters out events scheduled after the given date."""
+        cutoff_date = (timezone.now() + timedelta(days=5)).date().isoformat()
+        qs = Service.objects.filter(status='Active')
+
+        result = self.strategy.apply(qs, {'date_to': cutoff_date})
+        titles = self._event_titles(result)
+
+        self.assertIn('Past Event', titles)
+        self.assertIn('Today Event', titles)
+        self.assertIn('Near Future Event', titles)
+        self.assertNotIn('Far Future Event', titles)
+
+    def test_date_from_and_date_to_together_form_window(self):
+        """FR-12c: date_from + date_to combined returns only events in the window."""
+        date_from = (timezone.now() + timedelta(days=2)).date().isoformat()
+        date_to = (timezone.now() + timedelta(days=5)).date().isoformat()
+        qs = Service.objects.filter(status='Active')
+
+        result = self.strategy.apply(qs, {'date_from': date_from, 'date_to': date_to})
+        titles = self._event_titles(result)
+
+        self.assertIn('Near Future Event', titles)
+        self.assertNotIn('Past Event', titles)
+        self.assertNotIn('Today Event', titles)
+        self.assertNotIn('Far Future Event', titles)
+
+    def test_services_without_scheduled_time_excluded_when_date_filter_active(self):
+        """FR-12c: services with no scheduled_time are excluded when date filter is set."""
+        date_from = (timezone.now() - timedelta(days=2)).date().isoformat()
+        qs = Service.objects.filter(status='Active')
+
+        result = self.strategy.apply(qs, {'date_from': date_from})
+
+        self.assertNotIn(self.offer_no_date, list(result))
+
+    def test_no_params_returns_queryset_unchanged(self):
+        """FR-12c: empty params — DateRangeStrategy is a no-op."""
+        qs = Service.objects.filter(status='Active')
+        original_count = qs.count()
+
+        result = self.strategy.apply(qs, {})
+
+        self.assertEqual(result.count(), original_count)
+
+    def test_invalid_date_from_raises_400_compatible_error(self):
+        """FR-12c: invalid date string should raise ValueError (caller converts to 400)."""
+        qs = Service.objects.filter(status='Active')
+
+        with self.assertRaises(ValueError):
+            self.strategy.apply(qs, {'date_from': 'not-a-date'})
+
+    def test_invalid_date_to_raises_400_compatible_error(self):
+        """FR-12c: invalid date_to should raise ValueError (caller converts to 400)."""
+        qs = Service.objects.filter(status='Active')
+
+        with self.assertRaises(ValueError):
+            self.strategy.apply(qs, {'date_to': 'not-a-date'})
+
+    def test_date_from_equal_to_date_to_returns_single_day_window(self):
+        """FR-12c: date_from == date_to should return events on that exact day."""
+        today = timezone.now().date().isoformat()
+        qs = Service.objects.filter(status='Active')
+
+        result = self.strategy.apply(qs, {'date_from': today, 'date_to': today})
+        titles = self._event_titles(result)
+
+        self.assertIn('Today Event', titles)
+        self.assertNotIn('Near Future Event', titles)
+        self.assertNotIn('Far Future Event', titles)

@@ -7,7 +7,8 @@ import type { NavigatorScreenParams } from "@react-navigation/native";
 import HomeStack from "./HomeStack";
 import type { HomeStackParamList } from "./HomeStack";
 import ForumScreen from "../presentation/screens/ForumScreen";
-import PostServiceScreen from "../presentation/screens/PostServiceScreen";
+import PostStack from "./PostStack";
+import type { PostStackParamList } from "./PostStack";
 import MessagesStack from "./MessagesStack";
 import type { MessagesStackParamList } from "./MessagesStack";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -21,7 +22,7 @@ export type BottomTabParamList = {
   Home: NavigatorScreenParams<HomeStackParamList>;
   Forum: undefined;
   Profile: NavigatorScreenParams<ProfileStackParamList>;
-  PostService: undefined;
+  PostService: NavigatorScreenParams<PostStackParamList>;
   Messages: NavigatorScreenParams<MessagesStackParamList>;
 };
 
@@ -77,7 +78,7 @@ export default function BottomTabNavigator() {
 
       <Tab.Screen
         name="PostService"
-        component={PostServiceScreen}
+        component={PostStack}
         options={{
           title: "Post Service",
           tabBarButton: (props) => <PostServiceTabButton {...props} />,

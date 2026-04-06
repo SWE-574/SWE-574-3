@@ -29,7 +29,8 @@
       "favicon": "./src/assets/icon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-asset"
     ],
     "extra": {
       "eas": {
