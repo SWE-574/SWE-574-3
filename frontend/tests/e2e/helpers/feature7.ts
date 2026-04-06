@@ -119,6 +119,7 @@ export async function fetchCurrentUser(page: Page): Promise<CurrentUserPayload> 
   const user = await page.evaluate(async () => {
     const response = await fetch('/api/users/me/', {
       credentials: 'include',
+      cache: 'no-store',
     })
 
     if (!response.ok) {
@@ -142,6 +143,7 @@ export async function listTransactions(
   const data = await page.evaluate(async ({ direction }) => {
     const response = await fetch(`/api/transactions/?page=1&direction=${direction}`, {
       credentials: 'include',
+      cache: 'no-store',
     })
 
     if (!response.ok) {
