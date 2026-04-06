@@ -75,8 +75,10 @@ from .serializers import (
 )
 from .achievement_utils import get_achievement_progress
 from .utils import (
-    can_user_post_offer, provision_timebank, complete_timebank_transfer,
+    can_user_post_offer, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
+    reserve_timebank_for_need_service, release_timebank_for_need_service,
+    ensure_accepted_handshake_reservation,
 )
 from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService, get_social_proximity_boosts
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
@@ -1127,28 +1129,28 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         user_id = self.kwargs.get('id')
         if user_id:
             return self.get_queryset().get(id=user_id)
-        
+
         cached_user = get_cached_user_profile(str(self.request.user.id))
         if cached_user:
             user = User.objects.get(id=self.request.user.id)
             user._cached_data = cached_user
             return user
-            
+
         return self.get_queryset().get(id=self.request.user.id)
     
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
-        
+
         if hasattr(instance, '_cached_data'):
             return Response(instance._cached_data)
-            
+
         response_data = serializer.data
         response_data['event_comments_history'] = _build_event_comments_history(instance, request)
         
         if not kwargs.get('id'):
             cache_user_profile(str(request.user.id), response_data)
-        
+
         return Response(response_data)
     
     def update(self, request, *args, **kwargs):
@@ -2049,7 +2051,19 @@ class ServiceViewSet(viewsets.ModelViewSet):
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
 
-        response = super().create(request, *args, **kwargs)
+        try:
+            with transaction.atomic():
+                response = super().create(request, *args, **kwargs)
+                if service_type == 'Need':
+                    created_service = Service.objects.get(id=response.data['id'])
+                    reserve_timebank_for_need_service(created_service)
+        except ValueError as e:
+            return create_error_response(
+                str(e),
+                code=ErrorCodes.INSUFFICIENT_BALANCE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
         invalidate_service_lists()
         
         # Award karma for posting a service (+2)
@@ -2114,8 +2128,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
 
         # Soft-delete: mark as Cancelled instead of removing the row.
-        instance.status = 'Cancelled'
-        instance.save(update_fields=['status', 'updated_at'])
+        with transaction.atomic():
+            if instance.type == 'Need':
+                release_timebank_for_need_service(instance)
+            instance.status = 'Cancelled'
+            instance.save(update_fields=['status', 'updated_at'])
         invalidate_service_lists()
         invalidate_user_services(str(instance.user.id))
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -3075,7 +3092,7 @@ class HandshakeViewSet(viewsets.ModelViewSet):
 
         # Provision TimeBank and accept handshake
         try:
-            provision_timebank(handshake)
+            ensure_accepted_handshake_reservation(handshake)
         except ValueError as e:
             return create_error_response(
                 str(e),
@@ -3291,7 +3308,7 @@ class HandshakeViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            provision_timebank(handshake)
+            ensure_accepted_handshake_reservation(handshake)
         except ValueError as e:
             return create_error_response(
                 str(e),
@@ -5796,6 +5813,7 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         queryset = TransactionHistory.objects.filter(user=self.request.user).select_related(
+            'service__user',
             'handshake__service__user',
             'handshake__requester',
         )
