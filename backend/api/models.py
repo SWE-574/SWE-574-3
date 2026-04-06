@@ -37,7 +37,13 @@ class User(AbstractUser):
     banner_url = models.TextField(blank=True, null=True)  # Support data URLs and regular URLs
     timebank_balance = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('3.00'))
     karma_score = models.IntegerField(default=0)
-    role = models.CharField(max_length=20, choices=[('member', 'Member'), ('admin', 'Admin')], default='member')
+    ROLE_CHOICES = [
+        ('member', 'Member'),
+        ('moderator', 'Moderator'),
+        ('admin', 'Admin'),
+        ('super_admin', 'Super Admin'),
+    ]
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='member')
     featured_achievement_id = models.CharField(max_length=200, null=True, blank=True, help_text='Featured achievement badge ID to display on profile')
     date_joined = models.DateTimeField(auto_now_add=True)
     failed_login_attempts = models.IntegerField(default=0, help_text='Number of consecutive failed login attempts')
@@ -722,6 +728,7 @@ class AdminAuditLog(models.Model):
         ('restore_comment', 'Restore Comment'),
         ('lock_topic', 'Lock Topic'),
         ('pin_topic', 'Pin Topic'),
+        ('assign_role', 'Assign Role'),
     )
 
     TARGET_CHOICES = (
@@ -738,6 +745,10 @@ class AdminAuditLog(models.Model):
     target_entity = models.CharField(max_length=32, choices=TARGET_CHOICES)
     target_id = models.UUIDField()
     reason = models.TextField(blank=True, null=True)
+    # Role-assignment specific audit fields (null for non-role-change actions)
+    previous_role = models.CharField(max_length=20, blank=True, null=True)
+    new_role = models.CharField(max_length=20, blank=True, null=True)
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

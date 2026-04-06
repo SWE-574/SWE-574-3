@@ -2220,7 +2220,7 @@ for user in all_users:
 
 print("  Done")
 
-print("\n[9/9] Creating admin account...")
+print("\n[9/10] Creating admin account...")
 admin_email = 'moderator@demo.com'
 admin_password = 'demo123'
 
@@ -2249,7 +2249,36 @@ admin_user = User.objects.create_superuser(
 admin_user.skills.set([technology_tag, education_tag])
 print(f"  Created: {admin_email} (Admin account)")
 
-print("\n[10/10] Creating admin-testable data (reports + audit logs)...")
+print("\n[10/11] Creating super admin account...")
+super_admin_email = 'superadmin@demo.com'
+super_admin_password = 'demo123'
+
+existing_super_admin = User.objects.filter(email=super_admin_email).first()
+if existing_super_admin:
+    existing_super_admin.delete()
+    print(f"  Removed existing super admin account")
+
+super_admin_user = User.objects.create_superuser(
+    email=super_admin_email,
+    password=super_admin_password,
+    first_name='Super',
+    last_name='Admin',
+    bio='Platform super administrator with full access to all roles and settings.',
+    avatar_url=dicebear_avatar('superadmin'),
+    banner_url=picsum_image('superadmin-banner', 1200, 400),
+    location='Beşiktaş, Istanbul',
+    timebank_balance=Decimal('10.00'),
+    karma_score=200,
+    role='super_admin',
+    is_staff=True,
+    is_superuser=True,
+    is_verified=True,
+    is_onboarded=True,
+)
+super_admin_user.skills.set([technology_tag, education_tag])
+print(f"  Created: {super_admin_email} (Super Admin account)")
+
+print("\n[11/11] Creating admin-testable data (reports + audit logs)...")
 
 # ── Reports ──────────────────────────────────────────────────────────────────
 
