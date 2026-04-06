@@ -824,7 +824,7 @@ class EventNoShowAppealService:
         admin_notes: str | None = None,
     ) -> Report:
         """Resolve a pending no-show appeal with uphold or overturn outcome."""
-        if admin_user.role != 'admin':
+        if admin_user.role not in ('admin', 'super_admin', 'moderator'):
             raise PermissionError('Admin access required')
 
         with transaction.atomic():
