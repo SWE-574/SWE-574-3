@@ -2,10 +2,10 @@
 
 from rest_framework import serializers
 from .models import (
-    User, Service, Tag, Handshake, ChatMessage, 
+    User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, UserBadge, Report, TransactionHistory,
     ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
-    ForumCategory, ForumTopic, ForumPost, ServiceMedia
+    ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow
 )
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
@@ -98,6 +98,18 @@ class AdminUserListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class UserFollowRelationshipSerializer(serializers.ModelSerializer):
+    """Serialized UserFollow row for follow/unfollow API responses."""
+
+    follower_id = serializers.UUIDField(read_only=True)
+    following_id = serializers.UUIDField(read_only=True)
+
+    class Meta:
+        model = UserFollow
+        fields = ['id', 'follower_id', 'following_id', 'created_at']
+        read_only_fields = fields
+
+
 class AdminCommentSerializer(serializers.ModelSerializer):
     """Serializer used by admin comment moderation endpoints."""
     user_id = serializers.UUIDField(source='user.id', read_only=True)
@@ -154,7 +166,8 @@ class TagSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Tag
-        fields = ['id', 'name', 'wikidata_info']
+        fields = ['id', 'name', 'parent_qid', 'entity_type', 'depth', 'wikidata_info']
+        read_only_fields = ['parent_qid', 'entity_type', 'depth']
     
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_wikidata_info(self, obj):
@@ -790,7 +803,7 @@ class ServiceSerializer(serializers.ModelSerializer):
                     if tid not in existing_tags and wikidata_qid_pattern.match(tid)
                 ]
                 if missing_qids:
-                    from .wikidata import fetch_wikidata_item
+                    from .wikidata import fetch_wikidata_item, fetch_wikidata_claims, resolve_entity_type
                     for qid in missing_qids:
                         normalized_qid = qid.upper()
                         if normalized_qid in existing_tags:
@@ -812,6 +825,18 @@ class ServiceSerializer(serializers.ModelSerializer):
                             tags_to_add.append(tag)
                         if created:
                             logger.info(f"Auto-created Wikidata tag: {normalized_qid} ({tag_name})")
+                            # Enrich with hierarchy data
+                            try:
+                                claims = fetch_wikidata_claims(normalized_qid)
+                                if claims:
+                                    parents = claims.get('instance_of', []) + claims.get('subclass_of', [])
+                                    if parents:
+                                        tag.parent_qid = parents[0]
+                                        tag.depth = 1
+                                    tag.entity_type = resolve_entity_type(normalized_qid)
+                                    tag.save(update_fields=['parent_qid', 'entity_type', 'depth'])
+                            except Exception:
+                                logger.warning(f"Could not enrich tag {normalized_qid} with hierarchy data")
 
             if tag_names:
                 for tag_name in tag_names:
@@ -1117,7 +1142,49 @@ class ProfileEventFieldsMixin:
         return self._serialize_handshakes(invited)
 
 
-class UserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer):
+class ProfileFollowStatsMixin(serializers.Serializer):
+    """Read-only follow counts and viewer-specific is_following for profile serializers.
+
+    Must subclass Serializer so DRF's metaclass registers SerializerMethodField
+    declarations; a plain mixin class would leave them out of _declared_fields.
+    """
+
+    followers_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_followers_count(self, obj):
+        v = getattr(obj, 'followers_count', None)
+        if v is not None:
+            return v
+        return UserFollow.objects.filter(
+            following_id=obj.pk, follower__is_active=True
+        ).count()
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_following_count(self, obj):
+        v = getattr(obj, 'following_count', None)
+        if v is not None:
+            return v
+        return UserFollow.objects.filter(
+            follower_id=obj.pk, following__is_active=True
+        ).count()
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_is_following(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        if request.user.pk == obj.pk:
+            return False
+        return UserFollow.objects.filter(
+            follower_id=request.user.pk,
+            following_id=obj.pk,
+        ).exists()
+
+
+class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     created_events = serializers.SerializerMethodField()
     joined_events = serializers.SerializerMethodField()
@@ -1156,6 +1223,7 @@ class UserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer
             'portfolio_images', 'show_history', 'featured_achievement_id',
             'is_onboarded', 'is_verified',
             'skills', 'skill_ids',
+            'followers_count', 'following_count', 'is_following',
         ]
         read_only_fields = [
             'id', 'email', 'timebank_balance', 'karma_score', 'role', 'services',
@@ -1163,6 +1231,7 @@ class UserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_file_url', 'featured_achievement_id', 'is_verified',
             'skills',
+            'followers_count', 'following_count', 'is_following',
         ]
         extra_kwargs = {
             'video_intro_file': {'write_only': True, 'required': False}
@@ -1322,7 +1391,7 @@ class UserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer
             instance.skills.set(tags_to_set)
         return instance
 
-class PublicUserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSerializer):
+class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     created_events = serializers.SerializerMethodField()
     joined_events = serializers.SerializerMethodField()
@@ -1342,6 +1411,7 @@ class PublicUserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSeri
             'created_events', 'joined_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
+            'followers_count', 'following_count', 'is_following',
         ]
         read_only_fields = [
             'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
@@ -1349,6 +1419,7 @@ class PublicUserProfileSerializer(ProfileEventFieldsMixin, serializers.ModelSeri
             'created_events', 'joined_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
+            'followers_count', 'following_count', 'is_following',
         ]
 
     def get_skills(self, obj):
@@ -2750,6 +2821,24 @@ class ForumRecentPostSerializer(ForumPostSerializer):
 
     class Meta(ForumPostSerializer.Meta):
         fields = ForumPostSerializer.Meta.fields + ['topic_title', 'category_slug', 'category_name']
+
+
+class UserFollowSerializer(serializers.ModelSerializer):
+    follower_id = serializers.UUIDField(source='follower.id', read_only=True)
+    following_id = serializers.UUIDField(source='following.id', read_only=True)
+    follower_name = serializers.SerializerMethodField()
+    following_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserFollow
+        fields = ['id', 'follower_id', 'follower_name', 'following_id', 'following_name', 'created_at']
+        read_only_fields = fields
+
+    def get_follower_name(self, obj):
+        return f"{obj.follower.first_name} {obj.follower.last_name}".strip()
+
+    def get_following_name(self, obj):
+        return f"{obj.following.first_name} {obj.following.last_name}".strip()
 
 
 class ForumTopicDetailSerializer(ForumTopicSerializer):

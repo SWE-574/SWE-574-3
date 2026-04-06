@@ -36,6 +36,13 @@ export default function ServiceCard({
         ? colors.BLUE
         : colors.AMBER;
   const isOffer = service.type === "Offer";
+  const isGroupListing =
+    service.type === "Event" ||
+    (service.type === "Offer" && service.max_participants > 1);
+  const participantCount = service.participant_count ?? 0;
+  const maxParticipants = service.max_participants ?? 0;
+  const capacityRatio = maxParticipants > 0 ? participantCount / maxParticipants : 0;
+  const isNearlyFull = isGroupListing && capacityRatio >= 0.75 && capacityRatio < 1.0;
   const initials = getInitials(service.user.first_name, service.user.last_name);
   const displayName =
     [service.user.first_name, service.user.last_name]
@@ -108,6 +115,11 @@ export default function ServiceCard({
                 : "Event"}
           </Text>
         </View>
+        {isNearlyFull && (
+          <View style={styles.nearlyFullBadge}>
+            <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
+          </View>
+        )}
 
         <View style={styles.userRow}>
           <View style={styles.avatar}>
@@ -258,6 +270,20 @@ const styles = StyleSheet.create({
   },
   typeEvent: {
     backgroundColor: "rgb(255, 245, 238)",
+  },
+  nearlyFullBadge: {
+    position: "absolute",
+    right: 12,
+    top: 44,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: colors.RED_LT,
+  },
+  nearlyFullBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.RED,
   },
   typeOfferBadgeText: {
     fontSize: 14,

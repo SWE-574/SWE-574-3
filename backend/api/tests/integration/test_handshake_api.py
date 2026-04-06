@@ -3,6 +3,7 @@ Integration tests for handshake API endpoints
 """
 import pytest
 from rest_framework import status
+from rest_framework.test import APIClient
 from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
@@ -951,4 +952,374 @@ class TestAgreedStatusIntegration:
         svc.refresh_from_db()
         assert svc.status == 'Active', (
             f"Recurrent service must stay Active after accept, got {svc.status}"
+        )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestEventHandshakeEndpoints:
+    """Coverage for event-specific handshake endpoints and auth guards."""
+
+    def test_join_event_requires_authentication(self):
+        organizer = UserFactory()
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(days=2),
+        )
+
+        client = APIClient()
+        response = client.post(f'/api/handshakes/services/{service.id}/join-event/')
+        assert response.status_code in (
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_join_event_success_creates_credit_free_handshake(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(days=2),
+            max_participants=3,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+        response = client.post(f'/api/handshakes/services/{service.id}/join-event/')
+        assert response.status_code == status.HTTP_201_CREATED
+
+        handshake = Handshake.objects.get(id=response.data['id'])
+        assert handshake.status == 'accepted'
+        assert handshake.provisioned_hours == Decimal('0.00')
+
+    def test_checkin_after_start_returns_invalid_state(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() - timedelta(minutes=30),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=participant,
+            status='accepted',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+        response = client.post(f'/api/handshakes/{handshake.id}/checkin/')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'no longer available' in str(response.data).lower()
+
+    def test_mark_attended_requires_authentication(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=2),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=participant,
+            status='checked_in',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = APIClient()
+        response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
+        assert response.status_code in (
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestMarkAttendedAndCompleteEvent:
+    """
+    Integration tests for:
+      POST /api/handshakes/{id}/mark-attended/
+      POST /api/services/{id}/complete-event/
+
+    Covers Feature 15 lifecycle invariants:
+    role-based permissions, allowed/blocked source states, and DB persistence.
+    """
+
+    # ------------------------------------------------------------------ #
+    # mark-attended
+    # ------------------------------------------------------------------ #
+
+    def test_organizer_can_mark_checked_in_participant_as_attended(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=2),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='checked_in',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(organizer)
+        response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
+
+        assert response.status_code == status.HTTP_200_OK
+        handshake.refresh_from_db()
+        assert handshake.status == 'attended'
+
+    def test_non_organizer_cannot_mark_attended(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        other = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=2),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='checked_in',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(other)
+        response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
+
+        assert response.status_code in (
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_404_NOT_FOUND,  # view hides handshakes from non-parties
+        )
+        handshake.refresh_from_db()
+        assert handshake.status == 'checked_in'
+
+    def test_participant_cannot_mark_themselves_attended(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=2),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='checked_in',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+        response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
+
+        assert response.status_code in (
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        handshake.refresh_from_db()
+        assert handshake.status == 'checked_in'
+
+    def test_mark_attended_rejected_when_status_is_accepted(self):
+        """Handshake must be checked_in, not merely accepted."""
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=2),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='accepted',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(organizer)
+        response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        handshake.refresh_from_db()
+        assert handshake.status == 'accepted'
+
+    def test_mark_attended_is_idempotent_on_already_attended(self):
+        """Calling mark-attended on an already-attended handshake is rejected cleanly."""
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(hours=2),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(organizer)
+        response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        handshake.refresh_from_db()
+        assert handshake.status == 'attended'
+
+    # ------------------------------------------------------------------ #
+    # complete-event
+    # ------------------------------------------------------------------ #
+
+    def test_complete_event_moves_accepted_and_checked_in_to_no_show(self):
+        organizer = UserFactory()
+        p_accepted = UserFactory()
+        p_checked_in = UserFactory()
+        p_attended = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() - timedelta(hours=1),
+        )
+        h_accepted = HandshakeFactory(
+            service=event,
+            requester=p_accepted,
+            status='accepted',
+            provisioned_hours=Decimal('0.00'),
+        )
+        h_checked_in = HandshakeFactory(
+            service=event,
+            requester=p_checked_in,
+            status='checked_in',
+            provisioned_hours=Decimal('0.00'),
+        )
+        h_attended = HandshakeFactory(
+            service=event,
+            requester=p_attended,
+            status='attended',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(organizer)
+        response = client.post(f'/api/services/{event.id}/complete-event/')
+
+        assert response.status_code == status.HTTP_200_OK
+
+        h_accepted.refresh_from_db()
+        h_checked_in.refresh_from_db()
+        h_attended.refresh_from_db()
+
+        assert h_accepted.status == 'no_show'
+        assert h_checked_in.status == 'no_show'
+        assert h_attended.status == 'attended', 'attended participants must not be downgraded'
+
+    def test_attended_participants_not_downgraded_during_completion(self):
+        """Explicit isolation: attended status is preserved regardless of other participants."""
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() - timedelta(hours=1),
+        )
+        handshake = HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(organizer)
+        response = client.post(f'/api/services/{event.id}/complete-event/')
+
+        assert response.status_code == status.HTTP_200_OK
+        handshake.refresh_from_db()
+        assert handshake.status == 'attended'
+
+    def test_non_organizer_cannot_complete_event(self):
+        organizer = UserFactory()
+        other = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() - timedelta(hours=1),
+        )
+        HandshakeFactory(
+            service=event,
+            requester=UserFactory(),
+            status='accepted',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(other)
+        response = client.post(f'/api/services/{event.id}/complete-event/')
+
+        assert response.status_code in (
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        event.refresh_from_db()
+        assert event.status != 'Completed'
+
+    def test_complete_event_repeated_call_is_safely_rejected(self):
+        """Second call on an already-Completed event must not raise 500."""
+        organizer = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() - timedelta(hours=1),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(organizer)
+
+        first = client.post(f'/api/services/{event.id}/complete-event/')
+        assert first.status_code == status.HTTP_200_OK
+
+        second = client.post(f'/api/services/{event.id}/complete-event/')
+        assert second.status_code in (
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_409_CONFLICT,
+            status.HTTP_404_NOT_FOUND,  # completed events may be filtered from active queryset
         )

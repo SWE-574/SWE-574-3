@@ -87,6 +87,10 @@ export interface User {
   punctual_count?: number
   helpful_count?: number
   kind_count?: number
+  // ─── Follow system (profile detail) ───────────────────────────────────────
+  followers_count?: number
+  following_count?: number
+  is_following?: boolean
   location?: string
   skills?: Tag[]
   // ─── Event System ───────────────────────────────────────────────────────────
@@ -96,6 +100,15 @@ export interface User {
   created_events?: Service[]
   joined_events?: ProfileEventHandshake[]
   invited_events?: ProfileEventHandshake[]
+}
+
+/** Minimal user row from GET /users/:id/followers/ and .../following/ */
+export interface UserSummary {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  avatar_url?: string | null
 }
 
 export interface ProfileEventHandshake {
@@ -197,6 +210,9 @@ export interface Tag {
   id: string
   name: string
   wikidata_id?: string
+  parent_qid?: string
+  entity_type?: string
+  description?: string
 }
 
 // ─── Handshake Types ──────────────────────────────────────────────────────────
@@ -339,6 +355,10 @@ export interface ReputationData {
   punctual?: boolean
   helpful?: boolean
   kindness?: boolean
+  // Event-specific positive traits
+  well_organized?: boolean
+  engaging?: boolean
+  welcoming?: boolean
   handshake_id: string
   comment?: string
 }
@@ -348,6 +368,10 @@ export interface NegativeReputationData {
   is_late?: boolean
   is_unhelpful?: boolean
   is_rude?: boolean
+  // Event-specific negative traits
+  disorganized?: boolean
+  boring?: boolean
+  unwelcoming?: boolean
   comment?: string
 }
 
