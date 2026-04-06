@@ -3059,10 +3059,22 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
-        # Require all details to be set
-        if not handshake.exact_location or not handshake.exact_duration or not handshake.scheduled_time:
+        # Online sessions do not share an exact location, but in-person sessions still require it.
+        requires_exact_location = handshake.service.location_type != 'Online'
+        if requires_exact_location:
+            missing_required_details = (
+                not handshake.exact_location
+                or not handshake.exact_duration
+                or not handshake.scheduled_time
+            )
+            missing_details_message = 'Provider must provide exact location, duration, and scheduled time before approval'
+        else:
+            missing_required_details = not handshake.exact_duration or not handshake.scheduled_time
+            missing_details_message = 'Provider must provide duration and scheduled time before approval'
+
+        if missing_required_details:
             return create_error_response(
-                'Provider must provide exact location, duration, and scheduled time before approval',
+                missing_details_message,
                 code=ErrorCodes.INVALID_STATE,
                 status_code=status.HTTP_400_BAD_REQUEST,
                 requires_details=True
@@ -3091,10 +3103,13 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         from django.utils import timezone as tz
         summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
         loc = handshake.exact_location or ''
+        approve_body = f"Session approved! See you on {summary_time}."
+        if loc:
+            approve_body = f"Session approved! See you on {summary_time} at {loc}."
         approve_msg = ChatMessage.objects.create(
             handshake=handshake,
             sender=user,
-            body=f"Session approved! See you on {summary_time} at {loc}."
+            body=approve_body
         )
         from channels.layers import get_channel_layer
         from asgiref.sync import async_to_sync

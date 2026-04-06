@@ -494,6 +494,69 @@ class TestInitiateApproveServiceOwnerModel:
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
 
+    def test_online_group_offer_requester_can_approve_without_exact_location(self):
+        """Online fixed group offers should approve without requiring an exact location."""
+        service_owner = UserFactory()
+        requester = UserFactory(timebank_balance=Decimal('5.00'))
+        scheduled_time = timezone.now() + timedelta(days=3)
+        service = ServiceFactory(
+            user=service_owner,
+            type='Offer',
+            duration=Decimal('1.00'),
+            location_type='Online',
+            location_area='Zoom',
+            schedule_type='One-Time',
+            max_participants=3,
+            scheduled_time=scheduled_time,
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=requester,
+            status='pending',
+            provider_initiated=True,
+            exact_location='',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=scheduled_time,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_200_OK
+
+        handshake.refresh_from_db()
+        assert handshake.status == 'accepted'
+
+        approve_msgs = ChatMessage.objects.filter(handshake=handshake, sender=requester, body__contains='Session approved!')
+        assert approve_msgs.count() == 1
+        assert ' at .' not in approve_msgs.first().body
+
+    def test_in_person_approve_still_requires_exact_location(self):
+        """In-person approvals must still reject missing exact location details."""
+        service_owner = UserFactory()
+        requester = UserFactory(timebank_balance=Decimal('5.00'))
+        handshake = HandshakeFactory(
+            service=ServiceFactory(
+                user=service_owner,
+                type='Offer',
+                duration=Decimal('1.00'),
+                location_type='In-Person',
+            ),
+            requester=requester,
+            status='pending',
+            provider_initiated=True,
+            exact_location='',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(requester)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert resp.data['detail'] == 'Provider must provide exact location, duration, and scheduled time before approval'
+        assert resp.data['requires_details'] is True
+
     def test_offer_service_owner_cannot_approve_own_handshake(self):
         """Service owner cannot approve their own handshake."""
         service_owner = UserFactory()
