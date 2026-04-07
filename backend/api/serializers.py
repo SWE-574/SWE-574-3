@@ -14,6 +14,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from decimal import Decimal
 import bleach
+import html
 import re
 import logging
 import math
@@ -2923,14 +2924,14 @@ class ForumTopicSerializer(serializers.ModelSerializer):
 
     def validate_title(self, value):
         """Sanitize and validate title"""
-        cleaned = bleach.clean(value, tags=[], strip=True).strip()
+        cleaned = html.unescape(bleach.clean(value, tags=[], strip=True)).strip()
         if len(cleaned) < 5:
             raise serializers.ValidationError('Title must be at least 5 characters long')
         return cleaned
 
     def validate_body(self, value):
         """Sanitize body text"""
-        return bleach.clean(value, tags=[], strip=True)
+        return html.unescape(bleach.clean(value, tags=[], strip=True))
 
 
 @extend_schema_serializer(

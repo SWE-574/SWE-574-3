@@ -57,6 +57,56 @@ const COLOR_MAP: Record<string, { bg: string; text: string; light: string }> = {
   teal:   { bg: '#0D9488',   text: WHITE, light: '#F0FDFA' },
 }
 
+function TopicInlineEdit({ topic, onSave, onCancel }: { topic: ForumTopic; onSave: (title: string, body: string) => Promise<void>; onCancel: () => void }) {
+  const [title, setTitle] = useState(topic.title)
+  const [body, setBody]   = useState(topic.body)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    const t = title.trim(); const b = body.trim()
+    if (!t || !b) return
+    setSaving(true)
+    await onSave(t, b)
+    setSaving(false)
+  }
+
+  return (
+    <Box bg={WHITE} p={3} borderRadius="10px" border={`1px solid ${GRAY200}`}>
+      <Text fontSize="11px" fontWeight={600} color={GRAY600} mb={1}>Title</Text>
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        style={{
+          width: '100%', height: '36px', fontSize: '13px',
+          padding: '0 10px', marginBottom: '10px',
+          border: `1px solid ${GRAY300}`, borderRadius: '8px',
+          background: WHITE, outline: 'none', boxSizing: 'border-box',
+        }}
+      />
+      <Text fontSize="11px" fontWeight={600} color={GRAY600} mb={1}>Body</Text>
+      <Textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={5}
+        fontSize="13px"
+        resize="vertical"
+        border={`1px solid ${GRAY300}`}
+        borderRadius="8px"
+        bg={WHITE}
+        _focus={{ borderColor: GREEN, outline: 'none' }}
+        mb={3}
+      />
+      <Flex gap={2} justify="flex-end">
+        <Button size="sm" variant="ghost" borderRadius="8px" onClick={onCancel} disabled={saving}>Cancel</Button>
+        <Button size="sm" bg={GREEN} color={WHITE} borderRadius="8px" _hover={{ bg: '#214D41' }}
+          onClick={save} disabled={saving || !title.trim() || !body.trim()}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </Flex>
+    </Box>
+  )
+}
+
 function timeAgo(iso: string | null | undefined) {
   if (!iso) return '—'
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000)
@@ -577,6 +627,7 @@ function TopicDetailView({
   const [replying, setReplying] = useState(false)
   const [editingPost, setEditingPost] = useState<ForumPost | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [editingTopic, setEditingTopic] = useState(false)
   const totalPages = Math.max(1, Math.ceil(total / POSTS_PAGE_SIZE))
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -622,6 +673,16 @@ function TopicDetailView({
       setEditingPost(null)
       toast.success('Updated!')
     } catch { toast.error('Failed to update') }
+  }
+
+  const saveTopic = async (title: string, body: string) => {
+    if (!topic) return
+    try {
+      const updated = await forumAPI.updateTopic(topic.id, { title, body })
+      setTopic(updated)
+      setEditingTopic(false)
+      toast.success('Topic updated!')
+    } catch { toast.error('Failed to update topic') }
   }
 
   const deletePost = async (postId: string) => {
@@ -728,16 +789,18 @@ function TopicDetailView({
             <Flex align="center" gap={1} fontSize="12px" color={GRAY400}><FiMessageSquare size={11} /><Text>{topic.reply_count} replies</Text></Flex>
             <Flex align="center" gap={1} fontSize="12px" color={GRAY400}><FiEye size={11} /><Text>{topic.view_count} views</Text></Flex>
             </Flex>
-            {isAuthenticated && (!user?.id || topic.author_id !== user.id) && (
-              <Button
-                size="xs"
-                variant="outline"
-                borderRadius="8px"
-                onClick={reportTopic}
-              >
-                <Flex align="center" gap={1}><FiFlag size={11} /></Flex>
-              </Button>
-            )}
+            <Flex align="center" gap={2}>
+              {isAuthenticated && (!user?.id || topic.author_id !== user.id) && (
+                <Button size="xs" variant="outline" borderRadius="8px" onClick={reportTopic}>
+                  <Flex align="center" gap={1}><FiFlag size={11} /></Flex>
+                </Button>
+              )}
+              {isAuthenticated && user?.id === topic.author_id && !topic.is_locked && !editingTopic && (
+                <Button size="xs" variant="outline" borderRadius="8px" onClick={() => setEditingTopic(true)}>
+                  <Flex align="center" gap={1}><FiEdit2 size={11} /> Edit</Flex>
+                </Button>
+              )}
+            </Flex>
           </Flex>
         </Box>
 
@@ -751,9 +814,13 @@ function TopicDetailView({
                 <Box bg={GREEN} color={WHITE} borderRadius="5px" px={2} py="1px" fontSize="10px" fontWeight={700}>Author</Box>
                 <Text fontSize="11px" color={GRAY500}>{timeAgo(topic.created_at)}</Text>
               </Flex>
-              <Text fontSize="14px" color={GRAY700} lineHeight={1.75} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {topic.body}
-              </Text>
+              {editingTopic ? (
+                <TopicInlineEdit topic={topic} onSave={saveTopic} onCancel={() => setEditingTopic(false)} />
+              ) : (
+                <Text fontSize="14px" color={GRAY700} lineHeight={1.75} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {topic.body}
+                </Text>
+              )}
             </Box>
           </Flex>
         </Box>

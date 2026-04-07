@@ -205,6 +205,161 @@ class TestForumPostViewSet:
 
 @pytest.mark.django_db
 @pytest.mark.integration
+class TestForumTopicEdit:
+    """Tests for PATCH /api/forum/topics/{id}/ — title and body editing"""
+
+    def test_author_can_update_title(self):
+        """Author can patch only the title; body remains unchanged"""
+        author = UserFactory()
+        topic = ForumTopicFactory(author=author, title='Original Title', body='Original body text here.')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.patch(f'/api/forum/topics/{topic.id}/', {'title': 'Updated Title'})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['title'] == 'Updated Title'
+        assert response.data['body'] == 'Original body text here.'
+        topic.refresh_from_db()
+        assert topic.title == 'Updated Title'
+
+    def test_author_can_update_body(self):
+        """Author can patch only the body; title remains unchanged"""
+        author = UserFactory()
+        topic = ForumTopicFactory(author=author, title='Original Title', body='Old body.')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.patch(f'/api/forum/topics/{topic.id}/', {'body': 'Brand new body content here.'})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['title'] == 'Original Title'
+        assert response.data['body'] == 'Brand new body content here.'
+        topic.refresh_from_db()
+        assert topic.body == 'Brand new body content here.'
+
+    def test_author_can_update_title_and_body_together(self):
+        """Author can patch title and body in a single request"""
+        author = UserFactory()
+        topic = ForumTopicFactory(author=author, title='Old Title', body='Old body.')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.patch(f'/api/forum/topics/{topic.id}/', {
+            'title': 'New Title',
+            'body': 'New body content.',
+        })
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['title'] == 'New Title'
+        assert response.data['body'] == 'New body content.'
+
+    def test_other_user_cannot_edit_topic(self):
+        """A user who did not create the topic receives 403"""
+        author = UserFactory()
+        other = UserFactory()
+        topic = ForumTopicFactory(author=author, title='Original Title')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(other)
+
+        response = client.patch(f'/api/forum/topics/{topic.id}/', {'title': 'Stolen Title'})
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        topic.refresh_from_db()
+        assert topic.title == 'Original Title'
+
+    def test_unauthenticated_user_cannot_edit_topic(self):
+        """Unauthenticated requests receive 401"""
+        topic = ForumTopicFactory(title='Original Title')
+
+        response = APIClient().patch(f'/api/forum/topics/{topic.id}/', {'title': 'No Auth Title'})
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        topic.refresh_from_db()
+        assert topic.title == 'Original Title'
+
+    def test_admin_can_edit_any_topic(self):
+        """Admin staff can edit a topic they did not author"""
+        author = UserFactory()
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(author=author, title='User Title', body='User body.')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+
+        response = client.patch(f'/api/forum/topics/{topic.id}/', {
+            'title': 'Admin Edited Title',
+            'body': 'Admin edited body.',
+        })
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['title'] == 'Admin Edited Title'
+
+    def test_edit_ignores_non_editable_fields(self):
+        """Patching category or is_pinned has no effect — only title/body are allowed"""
+        author = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        other_category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category, is_pinned=False)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.patch(f'/api/forum/topics/{topic.id}/', {
+            'title': 'Fine Title',
+            'category': str(other_category.id),
+            'is_pinned': True,
+        })
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.category_id == category.id  # unchanged
+        assert topic.is_pinned is False           # unchanged
+
+    def test_title_too_short_returns_400(self):
+        """Title shorter than 5 characters fails validation"""
+        author = UserFactory()
+        topic = ForumTopicFactory(author=author, title='Valid Title')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.patch(f'/api/forum/topics/{topic.id}/', {'title': 'Hi'})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_title_preserves_special_characters(self):
+        """Special characters like & are stored and returned as-is (not HTML-encoded)"""
+        author = UserFactory()
+        topic = ForumTopicFactory(author=author, title='Original')
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.patch(f'/api/forum/topics/{topic.id}/', {'title': 'Cats & Dogs'})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['title'] == 'Cats & Dogs'
+        topic.refresh_from_db()
+        assert topic.title == 'Cats & Dogs'
+
+    def test_edit_nonexistent_topic_returns_404(self):
+        """Patching a topic that does not exist returns 404"""
+        user = UserFactory()
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.patch('/api/forum/topics/00000000-0000-0000-0000-000000000000/', {'title': 'Ghost'})
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
 class TestForumTopicSorting:
     """Test sort query parameter on GET /api/forum/topics/"""
 
