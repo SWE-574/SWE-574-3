@@ -2148,11 +2148,11 @@ for spec in topics:
         author=spec['author'],
         title=spec['title'],
         body=spec['body'],
-        created_at=spec['created_at'],
         is_pinned=spec.get('is_pinned', False),
         is_locked=spec.get('is_locked', False),
         view_count=spec.get('view_count', 0),
     )
+    ForumTopic.objects.filter(pk=topic.pk).update(created_at=spec['created_at'])
     forum_topics.append(topic)
     print(f"  Created forum topic: {spec['title']}")
 
@@ -2178,12 +2178,12 @@ posts_data = [
 ]
 
 for topic, author, body, created_at in posts_data:
-    ForumPost.objects.create(
+    post = ForumPost.objects.create(
         topic=topic,
         author=author,
         body=body,
-        created_at=created_at
     )
+    ForumPost.objects.filter(pk=post.pk).update(created_at=created_at)
     print(f"  Added forum post to: {topic.title[:30]}...")
 
 flagged_forum_post = ForumPost.objects.create(
@@ -2191,8 +2191,8 @@ flagged_forum_post = ForumPost.objects.create(
     author=burak,
     body='Posting a duplicate route list here because the earlier reply got buried.',
     is_deleted=True,
-    created_at=timezone.now() - timedelta(days=3, hours=8),
 )
+ForumPost.objects.filter(pk=flagged_forum_post.pk).update(created_at=timezone.now() - timedelta(days=3, hours=8))
 
 print("\n[8/8] Assigning achievements and finalizing...")
 

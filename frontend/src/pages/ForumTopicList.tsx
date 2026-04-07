@@ -133,13 +133,14 @@ export default function ForumTopicList() {
   const [page, setPage]         = useState(1)
   const [sort, setSort]         = useState<TopicSortOption>('newest')
   const [loading, setLoading]   = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError]       = useState<string | null>(null)
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const load = useCallback(async (p: number, signal: AbortSignal) => {
     if (!slug) return
-    setLoading(true)
+    setTopics(prev => { if (prev.length > 0) { setRefreshing(true); return prev } setLoading(true); return prev })
     setError(null)
     try {
       const [cat, res] = await Promise.all([
@@ -152,7 +153,7 @@ export default function ForumTopicList() {
     } catch (e: unknown) {
       if (!signal.aborted) setError((e as Error).message ?? 'Failed to load')
     } finally {
-      if (!signal.aborted) setLoading(false)
+      if (!signal.aborted) { setLoading(false); setRefreshing(false) }
     }
   }, [slug, sort])
 
@@ -278,9 +279,11 @@ export default function ForumTopicList() {
                     ))}
                   </Flex>
                 </Flex>
-                {topics.map((t) => (
-                  <TopicRow key={t.id} topic={t} onClick={() => navigate(`/forum/topic/${t.id}`)} />
-                ))}
+                <Box opacity={refreshing ? 0.45 : 1} transition="opacity 0.15s">
+                  {topics.map((t) => (
+                    <TopicRow key={t.id} topic={t} onClick={() => navigate(`/forum/topic/${t.id}`)} />
+                  ))}
+                </Box>
               </>
             )}
           </Box>

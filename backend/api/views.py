@@ -84,7 +84,8 @@ from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
+from django.db.models.functions import Coalesce
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -7022,7 +7023,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
 
         sort = self.request.query_params.get('sort', 'newest')
         if sort == 'most_active':
-            return queryset.order_by('-is_pinned', '-last_activity_annotated', '-reply_count_annotated')
+            return queryset.order_by('-is_pinned', '-reply_count_annotated', '-last_activity_annotated')
         return queryset.order_by('-is_pinned', '-created_at')
     
     def get_serializer_class(self):

@@ -365,11 +365,13 @@ function TopicListView({
   const [page, setPage] = useState(1)
   const [sort, setSort] = useState<TopicSortOption>('newest')
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const totalPages = Math.max(1, Math.ceil(total / TOPICS_PAGE_SIZE))
 
   const load = useCallback(async (p: number, signal: AbortSignal) => {
-    setLoading(true); setError(null)
+    setTopics(prev => { if (prev.length > 0) { setRefreshing(true); return prev } setLoading(true); return prev })
+    setError(null)
     try {
       const res = await forumAPI.listTopics({ category: category.slug, page: p, page_size: TOPICS_PAGE_SIZE, sort }, signal)
       setTopics(res.results); setTotal(res.count)
@@ -378,7 +380,7 @@ function TopicListView({
       const isAbort = e instanceof Error && (e.name?.includes('Abort') || e.message === 'canceled' || e.message === 'CanceledError')
       if (!isAbort) setError(msg || 'Failed to load')
     } finally {
-      setLoading(false)
+      setLoading(false); setRefreshing(false)
     }
   }, [category.slug, sort])
 
@@ -480,6 +482,7 @@ function TopicListView({
                 ))}
               </Flex>
             </Flex>
+            <Box opacity={refreshing ? 0.45 : 1} transition="opacity 0.15s">
             {topics.map((t) => (
               <Flex
                 key={t.id} as="div" w="full" align="flex-start" gap={3}
@@ -528,6 +531,7 @@ function TopicListView({
                 </Flex>
               </Flex>
             ))}
+            </Box>
           </>
         )}
       </Box>
