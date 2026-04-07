@@ -7,7 +7,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { loginAs, USERS } from './helpers/auth'
+import { loginAs, USERS } from '../helpers/auth'
 
 test.describe('Public profile privacy (FR-02d)', () => {
   test('viewer cannot see sensitive fields on another user profile', async ({ page, request }) => {

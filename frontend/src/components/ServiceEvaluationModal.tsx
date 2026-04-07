@@ -22,6 +22,7 @@ interface Props {
   onClose: () => void
   handshakeId: string
   counterpartName: string
+  isEventEvaluation?: boolean
   alreadyReviewed?: boolean
   onSubmitted?: () => Promise<void> | void
 }
@@ -33,13 +34,22 @@ interface TraitOption {
   icon: 'clock' | 'users' | 'star' | 'flag' | 'alert' | 'slash'
 }
 
-const TRAITS: TraitOption[] = [
+const SERVICE_TRAITS: TraitOption[] = [
   { key: 'punctual', label: 'Punctual', tone: 'positive', icon: 'clock' },
   { key: 'helpful', label: 'Helpful', tone: 'positive', icon: 'users' },
   { key: 'kindness', label: 'Kind', tone: 'positive', icon: 'star' },
   { key: 'is_late', label: 'Late', tone: 'negative', icon: 'slash' },
   { key: 'is_unhelpful', label: 'Unhelpful', tone: 'negative', icon: 'flag' },
   { key: 'is_rude', label: 'Rude', tone: 'negative', icon: 'alert' },
+]
+
+const EVENT_TRAITS: TraitOption[] = [
+  { key: 'well_organized', label: 'Well Organized', tone: 'positive', icon: 'star' },
+  { key: 'engaging', label: 'Engaging', tone: 'positive', icon: 'users' },
+  { key: 'welcoming', label: 'Welcoming', tone: 'positive', icon: 'clock' },
+  { key: 'disorganized', label: 'Disorganized', tone: 'negative', icon: 'slash' },
+  { key: 'boring', label: 'Boring', tone: 'negative', icon: 'flag' },
+  { key: 'unwelcoming', label: 'Unwelcoming', tone: 'negative', icon: 'alert' },
 ]
 
 function TraitIcon({ icon, color }: { icon: TraitOption['icon']; color: string }) {
@@ -56,6 +66,7 @@ export default function ServiceEvaluationModal({
   onClose,
   handshakeId,
   counterpartName,
+  isEventEvaluation = false,
   alreadyReviewed = false,
   onSubmitted,
 }: Props) {
@@ -63,12 +74,14 @@ export default function ServiceEvaluationModal({
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  const traitSet = isEventEvaluation ? EVENT_TRAITS : SERVICE_TRAITS
+
   const selectedCount = useMemo(
     () => Object.values(selected).filter(Boolean).length,
     [selected],
   )
-  const positiveTraits = useMemo(() => TRAITS.filter((t) => t.tone === 'positive'), [])
-  const negativeTraits = useMemo(() => TRAITS.filter((t) => t.tone === 'negative'), [])
+  const positiveTraits = useMemo(() => traitSet.filter((t) => t.tone === 'positive'), [traitSet])
+  const negativeTraits = useMemo(() => traitSet.filter((t) => t.tone === 'negative'), [traitSet])
 
   if (!isOpen) return null
 
@@ -97,20 +110,37 @@ export default function ServiceEvaluationModal({
 
     setSubmitting(true)
     try {
-      await reputationAPI.submitCombined({
-        handshake_id: handshakeId,
-        positive: {
-          punctual: Boolean(selected.punctual),
-          helpful: Boolean(selected.helpful),
-          kindness: Boolean(selected.kindness),
-        },
-        negative: {
-          is_late: Boolean(selected.is_late),
-          is_unhelpful: Boolean(selected.is_unhelpful),
-          is_rude: Boolean(selected.is_rude),
-        },
-        comment,
-      })
+      if (isEventEvaluation) {
+        await reputationAPI.submitCombinedEvent({
+          handshake_id: handshakeId,
+          positive: {
+            well_organized: Boolean(selected.well_organized),
+            engaging: Boolean(selected.engaging),
+            welcoming: Boolean(selected.welcoming),
+          },
+          negative: {
+            disorganized: Boolean(selected.disorganized),
+            boring: Boolean(selected.boring),
+            unwelcoming: Boolean(selected.unwelcoming),
+          },
+          comment,
+        })
+      } else {
+        await reputationAPI.submitCombined({
+          handshake_id: handshakeId,
+          positive: {
+            punctual: Boolean(selected.punctual),
+            helpful: Boolean(selected.helpful),
+            kindness: Boolean(selected.kindness),
+          },
+          negative: {
+            is_late: Boolean(selected.is_late),
+            is_unhelpful: Boolean(selected.is_unhelpful),
+            is_rude: Boolean(selected.is_rude),
+          },
+          comment,
+        })
+      }
 
       toast.success('Evaluation submitted. Thank you for your feedback!')
       await onSubmitted?.()
@@ -148,7 +178,7 @@ export default function ServiceEvaluationModal({
       >
         <Flex align="center" justify="space-between" px={{ base: 4, md: 6 }} py={{ base: 4, md: 5 }} borderBottom={`1px solid ${GRAY100}`}>
           <Box>
-            <Text fontSize="18px" fontWeight={800} color={GRAY800}>Evaluate Exchange</Text>
+            <Text fontSize="18px" fontWeight={800} color={GRAY800}>{isEventEvaluation ? 'Evaluate Organizer' : 'Evaluate Exchange'}</Text>
             <Text fontSize="12px" color={GRAY400} mt="2px">
               Share feedback for {counterpartName}.
             </Text>

@@ -14,7 +14,7 @@ from api.models import (
     ChatMessage, Handshake, Notification, ReputationRep, Comment,
     Service, Tag, User, UserBadge, ForumCategory, ForumTopic, ForumPost,
     Report, AdminAuditLog, ServiceMedia, PublicChatMessage,
-    ServiceGroupChatMessage, NegativeRep,
+    ServiceGroupChatMessage, NegativeRep, UserFollow,
 )
 from api.achievement_utils import check_and_assign_badges
 from api.services import HandshakeService, EventHandshakeService, EventEvaluationService
@@ -60,6 +60,7 @@ if demo_users.exists():
     ForumPost.objects.filter(author_id__in=user_ids).delete()
     ChatMessage.objects.filter(sender_id__in=user_ids).delete()
     Report.objects.filter(Q(reporter_id__in=user_ids) | Q(reported_user_id__in=user_ids)).delete()
+    UserFollow.objects.filter(Q(follower_id__in=user_ids) | Q(following_id__in=user_ids)).delete()
     demo_users.delete()
 
 orphaned_handshakes = Handshake.objects.filter(service__isnull=True)
@@ -472,6 +473,68 @@ levent = create_or_update_user(
 )
 
 all_users = [elif_user, cem, ayse, mehmet, zeynep, can, deniz, burak, selin, emre, yasemin, murat, levent]
+
+print("\n[3b/8] Creating social follow graph...")
+
+def follow(follower, following):
+    UserFollow.objects.get_or_create(follower=follower, following=following)
+
+# Elif (main demo user) — community hub, followed by many, follows her close circle
+follow(elif_user, ayse);     follow(elif_user, zeynep);   follow(elif_user, selin)
+follow(elif_user, levent);   follow(elif_user, yasemin)
+
+# Ayse — follows wellness/women's circle
+follow(ayse, elif_user);     follow(ayse, zeynep);        follow(ayse, selin)
+follow(ayse, yasemin);       follow(ayse, deniz)
+
+# Zeynep — follows community organizers
+follow(zeynep, elif_user);   follow(zeynep, ayse);        follow(zeynep, selin)
+follow(zeynep, cem);         follow(zeynep, deniz)
+
+# Cem — tech/youth cluster
+follow(cem, can);            follow(cem, burak);          follow(cem, emre)
+follow(cem, mehmet);         follow(cem, zeynep)
+
+# Mehmet — cross-generation bridge
+follow(mehmet, cem);         follow(mehmet, levent);      follow(mehmet, murat)
+follow(mehmet, can);         follow(mehmet, elif_user)
+
+# Can — young tech crowd
+follow(can, cem);            follow(can, burak);          follow(can, emre)
+follow(can, mehmet)
+
+# Deniz — photography & outdoor community
+follow(deniz, selin);        follow(deniz, zeynep);       follow(deniz, ayse)
+follow(deniz, can);          follow(deniz, elif_user)
+
+# Burak — startup / tech
+follow(burak, can);          follow(burak, cem);          follow(burak, emre)
+follow(burak, mehmet)
+
+# Selin — wellness & arts
+follow(selin, elif_user);    follow(selin, ayse);         follow(selin, zeynep)
+follow(selin, yasemin);      follow(selin, deniz)
+
+# Emre — tech newcomer
+follow(emre, can);           follow(emre, burak);         follow(emre, cem)
+follow(emre, mehmet)
+
+# Yasemin — cultural & women's community
+follow(yasemin, elif_user);  follow(yasemin, ayse);       follow(yasemin, selin)
+follow(yasemin, zeynep);     follow(yasemin, levent)
+
+# Murat — older gen, board games & culture
+follow(murat, levent);       follow(murat, mehmet);       follow(murat, cem)
+follow(murat, elif_user)
+
+# Levent — retired musician, intergenerational
+follow(levent, murat);       follow(levent, mehmet);      follow(levent, elif_user)
+follow(levent, yasemin);     follow(levent, ayse)
+
+total_follows = UserFollow.objects.filter(
+    follower__email__in=[u.email for u in all_users]
+).count()
+print(f"  Created {total_follows} follow relationships across {len(all_users)} users")
 
 print("\n[4/8] Creating realistic services...")
 
@@ -1185,6 +1248,24 @@ levent_music_event = create_demo_service(
     created_days_ago=16,
 )
 
+elif_photo_event = create_demo_service(
+    user=elif_user,
+    title='Golden Horn Photography Walk',
+    description='A guided walk along the Golden Horn for photography enthusiasts. We will scout light, composition, and local life together. Suitable for all camera types.',
+    service_type='Event',
+    duration='3.00',
+    location_type='In-Person',
+    location_area='Eyüpsultan',
+    location_lat=Decimal('41.0498'),
+    location_lng=Decimal('28.9350'),
+    max_participants=4,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=4, hours=7),
+    schedule_details='Saturday morning, meets at Eyüp Ferry Dock at 08:00',
+    tags=[photography_tag, art_tag],
+    created_days_ago=5,
+)
+
 print(f"\n  Created {len(services)} services")
 
 for service in services:
@@ -1712,6 +1793,13 @@ yasemin_event_3 = event_rsvp(yasemin_story_event, mehmet, joined_days_ago=2)
 event_handshakes.extend([yasemin_event_1, yasemin_event_2, yasemin_event_3])
 upcoming_event_handshakes.extend([yasemin_event_1, yasemin_event_2, yasemin_event_3])
 
+# Nearly-full event (75% capacity — 3 of 4 slots taken) — used to verify "Nearly Full" badge
+elif_photo_event_1 = event_rsvp(elif_photo_event, cem, joined_days_ago=3)
+elif_photo_event_2 = event_rsvp(elif_photo_event, ayse, joined_days_ago=2)
+elif_photo_event_3 = event_rsvp(elif_photo_event, mehmet, joined_days_ago=1)
+event_handshakes.extend([elif_photo_event_1, elif_photo_event_2, elif_photo_event_3])
+upcoming_event_handshakes.extend([elif_photo_event_1, elif_photo_event_2, elif_photo_event_3])
+
 Service.objects.filter(pk=levent_music_event.pk).update(scheduled_time=timezone.now() + timedelta(hours=10))
 levent_music_event.refresh_from_db(fields=['scheduled_time'])
 levent_event_1 = event_rsvp(levent_music_event, elif_user, joined_days_ago=7)
@@ -2132,36 +2220,95 @@ for user in all_users:
 
 print("  Done")
 
-print("\n[9/9] Creating admin account...")
+print("\n[9/10] Creating admin account...")
 admin_email = 'moderator@demo.com'
 admin_password = 'demo123'
 
 existing_admin = User.objects.filter(email=admin_email).first()
 if existing_admin:
-    existing_admin.delete()
-    print(f"  Removed existing admin account")
-
-admin_user = User.objects.create_superuser(
-    email=admin_email,
-    password=admin_password,
-    first_name='Moderator',
-    last_name='Admin',
-    bio='Platform moderator and administrator',
-    avatar_url=dicebear_avatar('moderator'),
-    banner_url=picsum_image('moderator-banner', 1200, 400),
-    location='Beyoğlu, Istanbul',
-    timebank_balance=Decimal('10.00'),
-    karma_score=100,
-    role='admin',
-    is_staff=True,
-    is_superuser=True,
-    is_verified=True,
-    is_onboarded=True,
-)
+    admin_user = existing_admin
+    admin_user.first_name = 'Moderator'
+    admin_user.last_name = 'Admin'
+    admin_user.bio = 'Platform moderator and administrator'
+    admin_user.avatar_url = dicebear_avatar('moderator')
+    admin_user.banner_url = picsum_image('moderator-banner', 1200, 400)
+    admin_user.location = 'Beyoğlu, Istanbul'
+    admin_user.timebank_balance = Decimal('10.00')
+    admin_user.karma_score = 100
+    admin_user.role = 'admin'
+    admin_user.is_staff = True
+    admin_user.is_superuser = True
+    admin_user.is_verified = True
+    admin_user.is_onboarded = True
+    admin_user.set_password(admin_password)
+    admin_user.save()
+    print(f"  Updated existing admin account")
+else:
+    admin_user = User.objects.create_superuser(
+        email=admin_email,
+        password=admin_password,
+        first_name='Moderator',
+        last_name='Admin',
+        bio='Platform moderator and administrator',
+        avatar_url=dicebear_avatar('moderator'),
+        banner_url=picsum_image('moderator-banner', 1200, 400),
+        location='Beyoğlu, Istanbul',
+        timebank_balance=Decimal('10.00'),
+        karma_score=100,
+        role='admin',
+        is_staff=True,
+        is_superuser=True,
+        is_verified=True,
+        is_onboarded=True,
+    )
 admin_user.skills.set([technology_tag, education_tag])
-print(f"  Created: {admin_email} (Admin account)")
+print(f"  Prepared: {admin_email} (Admin account)")
 
-print("\n[10/10] Creating admin-testable data (reports + audit logs)...")
+print("\n[10/11] Creating super admin account...")
+super_admin_email = 'superadmin@demo.com'
+super_admin_password = 'demo123'
+
+existing_super_admin = User.objects.filter(email=super_admin_email).first()
+if existing_super_admin:
+    super_admin_user = existing_super_admin
+    super_admin_user.first_name = 'Super'
+    super_admin_user.last_name = 'Admin'
+    super_admin_user.bio = 'Platform super administrator with full access to all roles and settings.'
+    super_admin_user.avatar_url = dicebear_avatar('superadmin')
+    super_admin_user.banner_url = picsum_image('superadmin-banner', 1200, 400)
+    super_admin_user.location = 'Beşiktaş, Istanbul'
+    super_admin_user.timebank_balance = Decimal('10.00')
+    super_admin_user.karma_score = 200
+    super_admin_user.role = 'super_admin'
+    super_admin_user.is_staff = True
+    super_admin_user.is_superuser = True
+    super_admin_user.is_verified = True
+    super_admin_user.is_onboarded = True
+    super_admin_user.set_password(super_admin_password)
+    super_admin_user.save()
+    print(f"  Updated existing super admin account")
+else:
+    super_admin_user = User.objects.create_superuser(
+        email=super_admin_email,
+        password=super_admin_password,
+        first_name='Super',
+        last_name='Admin',
+        bio='Platform super administrator with full access to all roles and settings.',
+        avatar_url=dicebear_avatar('superadmin'),
+        banner_url=picsum_image('superadmin-banner', 1200, 400),
+        location='Beşiktaş, Istanbul',
+        timebank_balance=Decimal('10.00'),
+        karma_score=200,
+        role='super_admin',
+        is_staff=True,
+        is_superuser=True,
+        is_verified=True,
+        is_onboarded=True,
+    )
+super_admin_user.skills.set([technology_tag, education_tag])
+print(f"  Prepared: {super_admin_email} (Super Admin account)")
+
+print("\n[11/11] Creating admin-testable data (reports + audit logs)...")
 
 # ── Reports ──────────────────────────────────────────────────────────────────
 
@@ -2254,7 +2401,6 @@ audit1 = AdminAuditLog.objects.create(
     target_id=burak.id,
     reason='Multiple community members reported aggressive follow-up messages. Issued formal warning and reminded of platform code of conduct.',
 )
-AdminAuditLog.objects.filter(pk=audit1.pk).update(created_at=timezone.now() - timedelta(days=8))
 
 audit2 = AdminAuditLog.objects.create(
     admin=admin_user,
@@ -2263,7 +2409,6 @@ audit2 = AdminAuditLog.objects.create(
     target_id=can.id,
     reason='Manually corrected karma score (+10) after a system error failed to record three completed exchanges from last month.',
 )
-AdminAuditLog.objects.filter(pk=audit2.pk).update(created_at=timezone.now() - timedelta(days=5))
 
 audit3 = AdminAuditLog.objects.create(
     admin=admin_user,
@@ -2272,7 +2417,6 @@ audit3 = AdminAuditLog.objects.create(
     target_id=report4.id,
     reason='Reviewed evidence and closed service_issue report. Both parties confirmed mutual agreement. No policy violation.',
 )
-AdminAuditLog.objects.filter(pk=audit3.pk).update(created_at=timezone.now() - timedelta(days=2))
 
 audit4 = AdminAuditLog.objects.create(
     admin=admin_user,
@@ -2281,7 +2425,6 @@ audit4 = AdminAuditLog.objects.create(
     target_id=forum_topics[1].id,
     reason='Thread derailed into off-topic arguments. Locked after moderator warning was ignored by participants.',
 )
-AdminAuditLog.objects.filter(pk=audit4.pk).update(created_at=timezone.now() - timedelta(days=14))
 
 audit5 = AdminAuditLog.objects.create(
     admin=admin_user,
@@ -2290,7 +2433,6 @@ audit5 = AdminAuditLog.objects.create(
     target_id=forum_topics[0].id,
     reason='Pinned welcome thread to top of General Discussion for better visibility for new members.',
 )
-AdminAuditLog.objects.filter(pk=audit5.pk).update(created_at=timezone.now() - timedelta(days=20))
 
 audit6 = AdminAuditLog.objects.create(
     admin=admin_user,
@@ -2299,7 +2441,6 @@ audit6 = AdminAuditLog.objects.create(
     target_id=report6.id,
     reason='Resolved forum spam report and documented removal of duplicate post in event planning thread.',
 )
-AdminAuditLog.objects.filter(pk=audit6.pk).update(created_at=timezone.now() - timedelta(days=1))
 
 audit7 = AdminAuditLog.objects.create(
     admin=admin_user,
@@ -2308,7 +2449,6 @@ audit7 = AdminAuditLog.objects.create(
     target_id=deniz.id,
     reason='Issued gentle warning after repeated last-minute cancellations and one unresolved no-show appeal required moderation follow-up.',
 )
-AdminAuditLog.objects.filter(pk=audit7.pk).update(created_at=timezone.now() - timedelta(hours=12))
 
 print(f"  Created 7 audit log entries")
 

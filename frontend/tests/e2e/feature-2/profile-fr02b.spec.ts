@@ -11,7 +11,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { loginAs, USERS } from './helpers/auth'
+import { loginAs, USERS } from '../helpers/auth'
 
 function tinyPngFile() {
   // 1x1 transparent PNG

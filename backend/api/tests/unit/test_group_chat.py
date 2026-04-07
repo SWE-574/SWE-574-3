@@ -365,3 +365,22 @@ class TestGroupChatConsumerAccess:
         session_b, _ = GroupChatSession.objects.get_or_create(service=service, scheduled_time=st_b, defaults={})
 
         assert self._sync_session_check(participant, str(service.id), str(session_b.id)) is False
+
+    def test_recurrent_session_access_denied_when_handshake_has_no_scheduled_time(self):
+        """Accepted recurrent handshake without scheduled_time never grants session access."""
+        from django.utils import timezone
+        from datetime import timedelta
+        from api.models import GroupChatSession
+
+        service = ServiceFactory(schedule_type='Recurrent', max_participants=5)
+        participant = UserFactory()
+        st = timezone.now() + timedelta(days=1)
+        session, _ = GroupChatSession.objects.get_or_create(service=service, scheduled_time=st, defaults={})
+        HandshakeFactory(
+            service=service,
+            requester=participant,
+            status='accepted',
+            scheduled_time=None,
+        )
+
+        assert self._sync_session_check(participant, str(service.id), str(session.id)) is False

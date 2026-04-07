@@ -149,10 +149,7 @@ def metrics_endpoint(request):
     from api.models import User, Service, Handshake, TransactionHistory
     from django.db.models import Count, Q
     
-    is_admin = (
-        getattr(request.user, 'role', None) == 'admin'
-        or bool(getattr(request.user, 'is_staff', False))
-    )
+    is_admin = getattr(request.user, 'role', None) in ('admin', 'super_admin', 'moderator')
 
     if not request.user.is_authenticated or not is_admin:
         return JsonResponse(

@@ -155,7 +155,7 @@ const Navbar = () => {
 
   const balance = Number(user?.timebank_balance ?? 0)
   const p       = location.pathname
-  const isAdmin = user?.role === 'admin' || user?.is_admin === true
+  const isAdmin = ['admin', 'super_admin', 'moderator'].includes(user?.role ?? '') || user?.is_admin === true
   // On dashboard the sidebar already shows balance & post service — hide them from navbar
   const isDashboard = p === '/dashboard'
 
