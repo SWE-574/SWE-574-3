@@ -142,6 +142,20 @@ class ReputationRepFactory(factory.django.DjangoModelFactory):
     comment = factory.Faker('sentence')
 
 
+class NegativeRepFactory(factory.django.DjangoModelFactory):
+    """Factory for creating NegativeRep instances"""
+    class Meta:
+        model = NegativeRep
+
+    handshake = factory.SubFactory(HandshakeFactory)
+    giver = factory.SubFactory(UserFactory)
+    receiver = factory.SubFactory(UserFactory)
+    is_late = True
+    is_unhelpful = False
+    is_rude = False
+    comment = factory.Faker('sentence')
+
+
 class CommentFactory(factory.django.DjangoModelFactory):
     """Factory for creating Comment instances"""
     class Meta:

@@ -1,9 +1,19 @@
+import io
+from unittest.mock import patch
+
 import pytest
+from django.conf import settings
+from django.core.management import call_command
+from django.db import connection
+from django.db.utils import DatabaseError, InternalError
+from django.utils import timezone
+from datetime import timedelta
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from api.exceptions import AuditLogImmutabilityError
 from api.models import AdminAuditLog, Report
-from api.tests.helpers.factories import AdminUserFactory, HandshakeFactory, ServiceFactory, UserFactory
+from api.tests.helpers.factories import AdminUserFactory, ForumTopicFactory, HandshakeFactory, ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 
 
@@ -198,6 +208,112 @@ class TestAdminManagementApi:
         target.refresh_from_db()
         assert target.is_active is False
 
+    # ── Tier-enforcement: moderator cannot act on higher-tier users ───────────
+
+    def test_moderator_cannot_ban_admin(self):
+        """A moderator must not be able to suspend an admin account."""
+        moderator = UserFactory(role='moderator')
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(f'/api/admin/users/{admin.id}/ban/', {}, format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        admin.refresh_from_db()
+        assert admin.is_active is True
+
+    def test_moderator_cannot_warn_admin(self):
+        """A moderator must not be able to issue a warning to an admin (higher tier)."""
+        moderator = UserFactory(role='moderator')
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(
+            f'/api/admin/users/{admin.id}/warn/',
+            {'message': 'Attempt'},
+            format='json',
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_moderator_can_warn_another_moderator(self):
+        """Moderators may warn peers at the same tier."""
+        moderator = UserFactory(role='moderator')
+        peer = UserFactory(role='moderator')
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(
+            f'/api/admin/users/{peer.id}/warn/',
+            {'message': 'Please follow guidelines.'},
+            format='json',
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_moderator_cannot_ban_another_moderator(self):
+        """Moderators must not be able to ban peers at the same tier."""
+        moderator = UserFactory(role='moderator')
+        peer = UserFactory(role='moderator', is_active=True)
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(f'/api/admin/users/{peer.id}/ban/', {}, format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        peer.refresh_from_db()
+        assert peer.is_active is True
+
+    def test_moderator_cannot_adjust_karma_of_admin(self):
+        """A moderator must not be able to adjust karma of an admin."""
+        moderator = UserFactory(role='moderator')
+        admin = AdminUserFactory()
+        original_karma = admin.karma_score
+        client = AuthenticatedAPIClient().authenticate_user(moderator)
+
+        response = client.post(
+            f'/api/admin/users/{admin.id}/adjust-karma/',
+            {'adjustment': -5},
+            format='json',
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        admin.refresh_from_db()
+        assert admin.karma_score == original_karma
+
+    # ── super_admin visibility ────────────────────────────────────────────────
+
+    def test_super_admin_not_visible_in_user_list_for_admin(self):
+        """An admin must not see super_admin accounts in the user list."""
+        admin = AdminUserFactory()
+        super_admin = UserFactory(role='super_admin')
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.get('/api/admin/users/')
+
+        assert response.status_code == status.HTTP_200_OK
+        ids = {item['id'] for item in _payload_items(response.data)}
+        assert str(super_admin.id) not in ids
+
+    def test_super_admin_detail_returns_404_for_admin(self):
+        """An admin must receive 404 when requesting a super_admin's detail."""
+        admin = AdminUserFactory()
+        super_admin = UserFactory(role='super_admin')
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.get(f'/api/admin/users/{super_admin.id}/')
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_super_admin_can_see_other_super_admins(self):
+        """A super_admin should be able to view another super_admin's detail."""
+        actor = UserFactory(role='super_admin')
+        peer = UserFactory(role='super_admin')
+        client = AuthenticatedAPIClient().authenticate_user(actor)
+
+        response = client.get(f'/api/admin/users/{peer.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['id'] == str(peer.id)
+
     def test_resolved_report_is_retrievable_via_detail_endpoint(self):
         """Resolved reports must return 200 on the detail endpoint (not 404)."""
         admin = AdminUserFactory()
@@ -269,3 +385,725 @@ class TestAdminManagementApi:
         assert pause_response.status_code == status.HTTP_200_OK
         handshake.refresh_from_db()
         assert handshake.status == 'paused'
+
+    # ── Admin User Detail ──────────────────────────────────────────────────────
+
+    def test_admin_user_detail_requires_authentication(self):
+        target = UserFactory()
+        response = APIClient().get(f'/api/admin/users/{target.id}/')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_non_admin_cannot_retrieve_user_detail(self):
+        member = UserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(member)
+        response = client.get(f'/api/admin/users/{target.id}/')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_admin_can_retrieve_user_detail(self):
+        admin = AdminUserFactory()
+        target = UserFactory(
+            first_name='Jane', last_name='Doe',
+            karma_score=25, is_active=True, is_verified=True,
+        )
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.get(f'/api/admin/users/{target.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data
+        assert data['id'] == str(target.id)
+        assert data['email'] == target.email
+        assert data['first_name'] == 'Jane'
+        assert data['last_name'] == 'Doe'
+        assert data['karma_score'] == 25
+        assert data['is_active'] is True
+        assert data['is_verified'] is True
+        assert 'date_joined' in data
+        assert 'last_login' in data
+        assert 'timebank_balance' in data
+        assert 'no_show_count' in data
+        assert 'is_event_banned_until' in data
+        assert 'is_organizer_banned_until' in data
+        assert 'offers_count' in data
+        assert 'requests_count' in data
+        assert 'events_count' in data
+        assert 'handshakes_as_requester_count' in data
+        assert 'handshakes_as_provider_count' in data
+        assert 'forum_topics_count' in data
+        assert 'recent_admin_actions' in data
+
+    def test_admin_user_detail_counts_are_accurate(self):
+        admin = AdminUserFactory()
+        target = UserFactory()
+
+        ServiceFactory(user=target, type='Offer')
+        ServiceFactory(user=target, type='Offer')
+        ServiceFactory(user=target, type='Need')
+        ServiceFactory(user=target, type='Event')
+
+        provider_service = ServiceFactory(user=UserFactory(), type='Offer')
+        HandshakeFactory(service=provider_service, requester=target, status='completed')
+
+        ForumTopicFactory(author=target)
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = client.get(f'/api/admin/users/{target.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data
+        assert data['offers_count'] == 2
+        assert data['requests_count'] == 1
+        assert data['events_count'] == 1
+        assert data['handshakes_as_requester_count'] == 1
+        assert data['forum_topics_count'] == 1
+
+    def test_admin_user_detail_includes_recent_admin_actions(self):
+        admin = AdminUserFactory()
+        target = UserFactory()
+        AdminAuditLog.objects.create(
+            admin=admin,
+            action_type='warn_user',
+            target_entity='user',
+            target_id=target.id,
+            reason='Test warning',
+        )
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = client.get(f'/api/admin/users/{target.id}/')
+
+        assert response.status_code == status.HTTP_200_OK
+        actions = response.data['recent_admin_actions']
+        assert len(actions) == 1
+        assert actions[0]['action_type'] == 'warn_user'
+        assert actions[0]['reason'] == 'Test warning'
+
+    def test_admin_user_detail_returns_404_for_unknown_user(self):
+        import uuid
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.get(f'/api/admin/users/{uuid.uuid4()}/')
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    # ── Role-aware handshake counts ───────────────────────────────────────────
+
+    def test_offer_requester_counts_as_requester(self):
+        """When a user requests an Offer, they count as Requester (not Provider)."""
+        admin = AdminUserFactory()
+        user = UserFactory()
+        offer = ServiceFactory(user=UserFactory(), type='Offer')
+        HandshakeFactory(service=offer, requester=user)
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{user.id}/').data
+
+        assert data['handshakes_as_requester_count'] == 1
+        assert data['handshakes_as_provider_count'] == 0
+
+    def test_offer_owner_counts_as_provider(self):
+        """When a user owns an Offer that receives a handshake, they count as Provider."""
+        admin = AdminUserFactory()
+        provider = UserFactory()
+        offer = ServiceFactory(user=provider, type='Offer')
+        HandshakeFactory(service=offer, requester=UserFactory())
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{provider.id}/').data
+
+        assert data['handshakes_as_provider_count'] == 1
+        assert data['handshakes_as_requester_count'] == 0
+
+    def test_want_owner_counts_as_requester(self):
+        """When a user creates a Want (Need), they count as Requester because they seek the service."""
+        admin = AdminUserFactory()
+        seeker = UserFactory()
+        want = ServiceFactory(user=seeker, type='Need')
+        HandshakeFactory(service=want, requester=UserFactory())
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{seeker.id}/').data
+
+        assert data['handshakes_as_requester_count'] == 1
+        assert data['handshakes_as_provider_count'] == 0
+
+    def test_want_responder_counts_as_provider(self):
+        """When a user responds to a Want (their handshake.requester on a Need), they count as Provider."""
+        admin = AdminUserFactory()
+        responder = UserFactory()
+        want = ServiceFactory(user=UserFactory(), type='Need')
+        HandshakeFactory(service=want, requester=responder)
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{responder.id}/').data
+
+        assert data['handshakes_as_provider_count'] == 1
+        assert data['handshakes_as_requester_count'] == 0
+
+    def test_events_excluded_from_handshake_counts(self):
+        """Event handshakes must not appear in provider/requester counts."""
+        admin = AdminUserFactory()
+        organizer = UserFactory()
+        event = ServiceFactory(user=organizer, type='Event')
+        HandshakeFactory(service=event, requester=UserFactory())
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{organizer.id}/').data
+
+        assert data['handshakes_as_provider_count'] == 0
+        assert data['handshakes_as_requester_count'] == 0
+
+    def test_mixed_roles_counted_independently(self):
+        """A user can be both requester and provider across different services."""
+        admin = AdminUserFactory()
+        user = UserFactory()
+
+        # user requests an offer → counts as requester
+        offer = ServiceFactory(user=UserFactory(), type='Offer')
+        HandshakeFactory(service=offer, requester=user)
+
+        # user responds to a want → counts as provider
+        want = ServiceFactory(user=UserFactory(), type='Need')
+        HandshakeFactory(service=want, requester=user)
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        data = client.get(f'/api/admin/users/{user.id}/').data
+
+        assert data['handshakes_as_requester_count'] == 1
+        assert data['handshakes_as_provider_count'] == 1
+
+    # ── Recent service and topic previews ─────────────────────────────────────
+
+    def test_recent_offers_returned_in_detail(self):
+        admin = AdminUserFactory()
+        user = UserFactory()
+        s1 = ServiceFactory(user=user, type='Offer', title='Offer One')
+        s2 = ServiceFactory(user=user, type='Offer', title='Offer Two')
+
+        data = AuthenticatedAPIClient().authenticate_admin(admin).get(f'/api/admin/users/{user.id}/').data
+
+        ids = {str(item['id']) for item in data['recent_offers']}
+        assert str(s1.id) in ids
+        assert str(s2.id) in ids
+
+    def test_recent_forum_topics_returned_in_detail(self):
+        admin = AdminUserFactory()
+        user = UserFactory()
+        topic = ForumTopicFactory(author=user)
+
+        data = AuthenticatedAPIClient().authenticate_admin(admin).get(f'/api/admin/users/{user.id}/').data
+
+        assert any(str(item['id']) == str(topic.id) for item in data['recent_forum_topics'])
+
+    def test_recent_handshakes_as_requester_preview(self):
+        """Preview shows the offer the user requested."""
+        admin = AdminUserFactory()
+        user = UserFactory()
+        offer = ServiceFactory(user=UserFactory(), type='Offer', title='Piano Lessons')
+        HandshakeFactory(service=offer, requester=user)
+
+        data = AuthenticatedAPIClient().authenticate_admin(admin).get(f'/api/admin/users/{user.id}/').data
+
+        assert len(data['recent_handshakes_as_requester']) == 1
+        assert data['recent_handshakes_as_requester'][0]['title'] == 'Piano Lessons'
+        assert len(data['recent_handshakes_as_provider']) == 0
+
+    def test_recent_handshakes_as_provider_preview(self):
+        """Preview shows the want the user responded to."""
+        admin = AdminUserFactory()
+        user = UserFactory()
+        want = ServiceFactory(user=UserFactory(), type='Need', title='Need a Plumber')
+        HandshakeFactory(service=want, requester=user)
+
+        data = AuthenticatedAPIClient().authenticate_admin(admin).get(f'/api/admin/users/{user.id}/').data
+
+        assert len(data['recent_handshakes_as_provider']) == 1
+        assert data['recent_handshakes_as_provider'][0]['title'] == 'Need a Plumber'
+        assert len(data['recent_handshakes_as_requester']) == 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Role Assignment Tests
+# POST /api/admin/users/{id}/assign-role/
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAdminRoleAssignment:
+    """Integration tests for the assign_role admin action.
+
+    Business rules exercised:
+    1. Successful assignment by an authorised admin.
+    2. Self-assignment is rejected (403).
+    3. An admin cannot modify another admin (same or higher tier).
+    4. An admin cannot elevate a user to admin (same tier).
+    5. Unauthenticated requests are rejected (401).
+    6. Member-role users are rejected (403).
+    7. Audit log is written on success, and contains the expected fields.
+    8. A super_admin can promote a member all the way to admin.
+    """
+
+    ASSIGN_ROLE_URL = '/api/admin/users/{id}/assign-role/'
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _url(self, user_id):
+        return self.ASSIGN_ROLE_URL.format(id=user_id)
+
+    def _post(self, client, user_id, role):
+        return client.post(self._url(user_id), {'role': role}, format='json')
+
+    # ── authentication / authorisation guard ─────────────────────────────────
+
+    def test_unauthenticated_request_is_rejected(self):
+        """Endpoint requires a valid session."""
+        target = UserFactory()
+        response = APIClient().post(self._url(target.id), {'role': 'moderator'}, format='json')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_member_cannot_assign_roles(self):
+        """A standard member must not access admin endpoints."""
+        member = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(member)
+        target = UserFactory()
+
+        response = self._post(client, target.id, 'moderator')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        target.refresh_from_db()
+        assert target.role == 'member'
+
+    # ── self-assignment ───────────────────────────────────────────────────────
+
+    def test_admin_cannot_assign_own_role(self):
+        """Self-modification is prohibited regardless of tier (FR-RBAC-3)."""
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, admin.id, 'member')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        admin.refresh_from_db()
+        assert admin.role == 'admin'  # unchanged
+
+    # ── peer / superior modification ──────────────────────────────────────────
+
+    def test_admin_cannot_modify_another_admin(self):
+        """An admin may not change the role of a peer (same tier) (FR-RBAC-2)."""
+        admin = AdminUserFactory()
+        peer_admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, peer_admin.id, 'member')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        peer_admin.refresh_from_db()
+        assert peer_admin.role == 'admin'  # unchanged
+
+    def test_admin_cannot_elevate_user_to_admin_tier(self):
+        """An admin cannot grant a role equal to their own tier (FR-RBAC-2)."""
+        admin = AdminUserFactory()
+        target = UserFactory()  # member by default
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, target.id, 'admin')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        target.refresh_from_db()
+        assert target.role == 'member'  # unchanged
+
+    # ── successful assignments ────────────────────────────────────────────────
+
+    def test_super_admin_can_promote_member_to_moderator(self):
+        """Happy path: super_admin promotes a member to moderator."""
+        super_admin = UserFactory(role='super_admin')
+        target = UserFactory()  # member
+        client = AuthenticatedAPIClient().authenticate_user(super_admin)
+
+        response = self._post(client, target.id, 'moderator')
+
+        assert response.status_code == status.HTTP_200_OK
+        payload = response.json()
+        assert payload['status'] == 'success'
+        assert payload['previous_role'] == 'member'
+        assert payload['new_role'] == 'moderator'
+        target.refresh_from_db()
+        assert target.role == 'moderator'
+
+    def test_admin_can_demote_moderator_to_member(self):
+        """An admin can demote a moderator back to member."""
+        admin = AdminUserFactory()
+        target = UserFactory(role='moderator')
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, target.id, 'member')
+
+        assert response.status_code == status.HTTP_200_OK
+        target.refresh_from_db()
+        assert target.role == 'member'
+
+    def test_admin_cannot_promote_member_to_moderator(self):
+        """An admin (not super_admin) must not be able to assign the moderator role."""
+        admin = AdminUserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, target.id, 'moderator')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        target.refresh_from_db()
+        assert target.role == 'member'
+
+    # ── super_admin privileges ────────────────────────────────────────────────
+
+    def test_super_admin_can_promote_member_to_admin(self):
+        """A super_admin can assign any role, including admin (FR-RBAC-2)."""
+        super_admin = UserFactory(role='super_admin')
+        target = UserFactory()  # member
+        client = AuthenticatedAPIClient().authenticate_user(super_admin)
+
+        response = self._post(client, target.id, 'admin')
+
+        assert response.status_code == status.HTTP_200_OK
+        target.refresh_from_db()
+        assert target.role == 'admin'
+
+    def test_super_admin_cannot_modify_another_super_admin(self):
+        """Even a super_admin may not change a peer super_admin's role."""
+        super_admin = UserFactory(role='super_admin')
+        peer = UserFactory(role='super_admin')
+        client = AuthenticatedAPIClient().authenticate_user(super_admin)
+
+        response = self._post(client, peer.id, 'admin')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        peer.refresh_from_db()
+        assert peer.role == 'super_admin'
+
+    # ── audit log ─────────────────────────────────────────────────────────────
+
+    def test_audit_log_is_created_on_successful_assignment(self):
+        """An immutable audit record must be written for every role change."""
+        super_admin = UserFactory(role='super_admin')
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(super_admin)
+
+        initial_log_count = AdminAuditLog.objects.filter(action_type='assign_role').count()
+        response = self._post(client, target.id, 'moderator')
+        assert response.status_code == status.HTTP_200_OK
+
+        logs = AdminAuditLog.objects.filter(action_type='assign_role')
+        assert logs.count() == initial_log_count + 1
+
+        log = logs.latest('created_at')
+        assert log.admin == super_admin
+        assert str(log.target_id) == str(target.id)
+        assert log.previous_role == 'member'
+        assert log.new_role == 'moderator'
+        assert log.target_entity == 'user'
+
+    def test_audit_log_is_not_created_on_failed_assignment(self):
+        """A rejected request must not create an audit record."""
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='assign_role').count()
+        # Attempt self-assignment — must fail
+        self._post(client, admin.id, 'member')
+
+        assert AdminAuditLog.objects.filter(action_type='assign_role').count() == initial_count
+
+    # ── input validation ──────────────────────────────────────────────────────
+
+    def test_invalid_role_value_returns_400(self):
+        """Unrecognised role strings must be rejected before any DB write."""
+        admin = AdminUserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, target.id, 'superuser')  # not a valid role
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        target.refresh_from_db()
+        assert target.role == 'member'
+
+    def test_missing_role_field_returns_400(self):
+        """A request without a role body field must be rejected."""
+        admin = AdminUserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = client.post(self._url(target.id), {}, format='json')
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_unknown_user_id_returns_404(self):
+        """A non-existent target user must return 404."""
+        import uuid
+        admin = AdminUserFactory()
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        response = self._post(client, uuid.uuid4(), 'member')
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAdminForumTopicLockPin:
+    """Integration tests for admin lock/pin operations on forum topics (FR-03d)."""
+
+    def _lock_url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/lock/'
+
+    def _pin_url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/pin/'
+
+    # ── lock ──────────────────────────────────────────────────────────────────
+
+    def test_admin_can_lock_topic(self):
+        """POST lock/ on an unlocked topic sets is_locked=True and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='lock_topic').count()
+        response = client.post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+
+        logs = AdminAuditLog.objects.filter(action_type='lock_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.admin == admin
+        assert str(log.target_id) == str(topic.id)
+        assert log.target_entity == 'forum_topic'
+        assert log.reason == 'Locked'
+
+    def test_admin_can_unlock_topic(self):
+        """POST lock/ on a locked topic sets is_locked=False and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=True)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='lock_topic').count()
+        response = client.post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_locked is False
+
+        logs = AdminAuditLog.objects.filter(action_type='lock_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.reason == 'Unlocked'
+
+    def test_non_admin_cannot_lock_topic(self):
+        """Regular members must receive 403 on POST lock/."""
+        member = UserFactory()
+        topic = ForumTopicFactory(is_locked=False)
+        client = AuthenticatedAPIClient().authenticate_user(member)
+
+        response = client.post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        topic.refresh_from_db()
+        assert topic.is_locked is False
+
+    def test_unauthenticated_cannot_lock_topic(self):
+        """Unauthenticated requests must receive 401 on POST lock/."""
+        topic = ForumTopicFactory(is_locked=False)
+
+        response = APIClient().post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # ── pin ───────────────────────────────────────────────────────────────────
+
+    def test_admin_can_pin_topic(self):
+        """POST pin/ on an unpinned topic sets is_pinned=True and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='pin_topic').count()
+        response = client.post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_pinned is True
+
+        logs = AdminAuditLog.objects.filter(action_type='pin_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.admin == admin
+        assert str(log.target_id) == str(topic.id)
+        assert log.target_entity == 'forum_topic'
+        assert log.reason == 'Pinned'
+
+    def test_admin_can_unpin_topic(self):
+        """POST pin/ on a pinned topic sets is_pinned=False and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_pinned=True)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='pin_topic').count()
+        response = client.post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_pinned is False
+
+        logs = AdminAuditLog.objects.filter(action_type='pin_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.reason == 'Unpinned'
+
+    def test_non_admin_cannot_pin_topic(self):
+        """Regular members must receive 403 on POST pin/."""
+        member = UserFactory()
+        topic = ForumTopicFactory(is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_user(member)
+
+        response = client.post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        topic.refresh_from_db()
+        assert topic.is_pinned is False
+
+    def test_unauthenticated_cannot_pin_topic(self):
+        """Unauthenticated requests must receive 401 on POST pin/."""
+        topic = ForumTopicFactory(is_pinned=False)
+
+        response = APIClient().post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # ── idempotency / multiple toggles ────────────────────────────────────────
+
+    def test_lock_and_pin_are_idempotent(self):
+        """Toggling lock then lock again returns the topic to its original state."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=False, is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        # Lock → unlocked → locked: three round-trips
+        for expected in [True, False, True]:
+            response = client.post(self._lock_url(topic.id), format='json')
+            assert response.status_code == status.HTTP_200_OK
+            topic.refresh_from_db()
+            assert topic.is_locked is expected
+
+        # Pin → unpinned → pinned: three round-trips
+        for expected in [True, False, True]:
+            response = client.post(self._pin_url(topic.id), format='json')
+            assert response.status_code == status.HTTP_200_OK
+            topic.refresh_from_db()
+            assert topic.is_pinned is expected
+
+    def test_lock_and_pin_are_independent(self):
+        """Locking a topic must not affect its pin state and vice versa."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=False, is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        client.post(self._lock_url(topic.id), format='json')
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+        assert topic.is_pinned is False
+
+        client.post(self._pin_url(topic.id), format='json')
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+        assert topic.is_pinned is True
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAdminAuditLogImmutability:
+    """
+    Verifies that AdminAuditLog records cannot be modified or deleted at the
+    application layer (model overrides) and at the database layer (PostgreSQL
+    trigger).
+    """
+
+    def _make_log(self):
+        admin = AdminUserFactory()
+        target = UserFactory()
+        return AdminAuditLog.objects.create(
+            admin=admin,
+            action_type='warn_user',
+            target_entity='user',
+            target_id=target.id,
+            reason='Test entry',
+        )
+
+    def test_audit_log_cannot_be_deleted(self):
+        """Model.delete() must raise AuditLogImmutabilityError."""
+        log = self._make_log()
+        with pytest.raises(AuditLogImmutabilityError):
+            log.delete()
+        assert AdminAuditLog.objects.filter(pk=log.pk).exists()
+
+    def test_audit_log_cannot_be_modified(self):
+        """Model.save() on an existing record must raise AuditLogImmutabilityError."""
+        log = self._make_log()
+        log.reason = 'Tampered reason'
+        with pytest.raises(AuditLogImmutabilityError):
+            log.save()
+        log.refresh_from_db()
+        assert log.reason == 'Test entry'
+
+    @pytest.mark.django_db(transaction=True)
+    def test_audit_log_db_level_delete_rejected(self):
+        """
+        Raw SQL DELETE against api_adminauditlog must be rejected by the
+        PostgreSQL trigger. Skipped on non-PostgreSQL backends.
+        """
+        if connection.vendor != 'postgresql':
+            pytest.skip('PostgreSQL-only test: immutability trigger not present on this backend.')
+
+        log = self._make_log()
+        log_pk = str(log.pk)
+
+        from django.db import transaction as db_transaction
+
+        with pytest.raises((InternalError, DatabaseError)):
+            with db_transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        'DELETE FROM api_adminauditlog WHERE id = %s::uuid',
+                        [log_pk],
+                    )
+
+        assert AdminAuditLog.objects.filter(pk=log.pk).exists()
+
+    def test_audit_log_retention_policy_enforced(self):
+        """
+        The archive_audit_logs management command reports records older than
+        AUDIT_RETENTION_DAYS with --dry-run without writing any files.
+        """
+        admin = AdminUserFactory()
+        target = UserFactory()
+        past_date = timezone.now() - timedelta(days=settings.AUDIT_RETENTION_DAYS + 10)
+
+        with patch('django.utils.timezone.now', return_value=past_date):
+            AdminAuditLog.objects.create(
+                admin=admin,
+                action_type='ban_user',
+                target_entity='user',
+                target_id=target.id,
+                reason='Old record for retention test',
+            )
+
+        out = io.StringIO()
+        call_command(
+            'archive_audit_logs',
+            '--dry-run',
+            f'--days={settings.AUDIT_RETENTION_DAYS}',
+            stdout=out,
+        )
+        output = out.getvalue()
+        assert 'DRY RUN' in output
+        assert '1' in output

@@ -40,7 +40,7 @@ export default function ForumCreateTopic() {
     register,
     handleSubmit,
     formState: { errors },
-    setValue,
+    reset,
     watch,
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -57,16 +57,13 @@ export default function ForumCreateTopic() {
         const active = data.filter((c) => c.is_active)
         setCategories(active)
         const preselected = active.find((c) => c.slug === preselectedSlug)
-        if (preselected) {
-          setValue('category', preselected.id)
-        } else if (active.length > 0) {
-          setValue('category', active[0].id)
-        }
+        const defaultCategory = preselected?.id ?? active[0]?.id ?? ''
+        reset({ category: defaultCategory, title: '', body: '' })
       })
       .catch(() => {})
       .finally(() => setCatLoading(false))
     return () => ctrl.abort()
-  }, [preselectedSlug, setValue])
+  }, [preselectedSlug, reset])
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true)
