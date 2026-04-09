@@ -46,7 +46,7 @@ export default function PublicChatScreen() {
         const data = await getPublicChat(roomId);
         const list = Array.isArray(data) ? data : (data as { messages: unknown[] }).messages ?? [];
         setMessages(
-          list.map((m: Record<string, unknown>) => normalizeMessage(m))
+          (list as Record<string, unknown>[]).map((m) => normalizeMessage(m))
         );
       } catch {
         // proceed without initial messages
