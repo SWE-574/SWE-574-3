@@ -265,4 +265,6 @@ jobs:
       # ── 21. Tear down ─────────────────────────────────────────────────────
       - name: Tear down stack
         if: always()
-        run: docker compose down -v
+        run: |
+          touch .env  # ensure .env exists so docker compose doesn't fail
+          docker compose down -v

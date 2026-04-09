@@ -165,7 +165,7 @@ for pattern in "${SHARED_PATTERNS[@]}"; do
 done
 
 # ── Map changed files to feature test directories ───────────────────────────
-declare -A SELECTED_TESTS
+declare -A SELECTED_TESTS=()
 
 for mapping in "${MAPPINGS[@]}"; do
   src_pattern="${mapping%%|*}"
