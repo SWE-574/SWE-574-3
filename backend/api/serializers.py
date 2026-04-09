@@ -797,12 +797,18 @@ class ServiceSerializer(serializers.ModelSerializer):
         """Replace exact coordinates with a ~1 km privacy-fuzzed version before sending."""
         data = super().to_representation(instance)
         request = self.context.get('request')
-        if request is None or not getattr(request, 'user', None) or request.user != instance.user:
+        request_user = getattr(request, 'user', None) if request is not None else None
+        is_owner = bool(
+            request_user
+            and getattr(request_user, 'is_authenticated', False)
+            and str(getattr(request_user, 'id', '')) == str(instance.user_id)
+        )
+        if not is_owner:
             data.pop('session_exact_location', None)
             data.pop('session_exact_location_lat', None)
             data.pop('session_exact_location_lng', None)
             data.pop('session_location_guide', None)
-        if instance.location_type == 'In-Person':
+        if instance.location_type == 'In-Person' and not is_owner:
             lat, lng = self._real_coords(instance)
             if lat is not None:
                 fuzzy_lat, fuzzy_lng = _fuzzy_coords(str(instance.id), lat, lng)
