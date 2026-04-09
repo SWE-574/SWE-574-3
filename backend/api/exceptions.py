@@ -26,6 +26,11 @@ class ErrorCodes:
     SERVER_ERROR = 'SERVER_ERROR'
 
 
+class AuditLogImmutabilityError(Exception):
+    """Raised when code attempts to modify or delete an AdminAuditLog record."""
+    pass
+
+
 def custom_exception_handler(exc, context):
     if isinstance(exc, (ObjectDoesNotExist, Http404)):
         return Response(

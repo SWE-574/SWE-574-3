@@ -644,7 +644,7 @@ class AdminAuditLog(models.Model):
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    admin = models.ForeignKey(User, on_delete=models.CASCADE, related_name='admin_audit_logs')
+    admin = models.ForeignKey(User, on_delete=models.PROTECT, related_name='admin_audit_logs')
     action_type = models.CharField(max_length=32, choices=ACTION_CHOICES)
     target_entity = models.CharField(max_length=32, choices=TARGET_CHOICES)
     target_id = models.UUIDField()
@@ -663,6 +663,21 @@ class AdminAuditLog(models.Model):
             models.Index(fields=['target_entity', 'created_at']),
             models.Index(fields=['target_id']),
         ]
+
+    def delete(self, using=None, keep_parents=False):
+        from api.exceptions import AuditLogImmutabilityError
+        raise AuditLogImmutabilityError(
+            f"AdminAuditLog records are immutable. Deletion of record {self.pk} is not permitted."
+        )
+
+    def save(self, *args, **kwargs):
+        from api.exceptions import AuditLogImmutabilityError
+        if self._state.adding:
+            super().save(*args, **kwargs)
+        else:
+            raise AuditLogImmutabilityError(
+                f"AdminAuditLog records are immutable. Update of record {self.pk} is not permitted."
+            )
 
 
 class ChatRoom(models.Model):

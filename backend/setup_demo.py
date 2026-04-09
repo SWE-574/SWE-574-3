@@ -2394,61 +2394,65 @@ print(f"  Created 7 test reports (4 pending, 2 resolved, 1 dismissed)")
 
 # ── Audit Logs ───────────────────────────────────────────────────────────────
 
-audit1 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='warn_user',
-    target_entity='user',
-    target_id=burak.id,
-    reason='Multiple community members reported aggressive follow-up messages. Issued formal warning and reminded of platform code of conduct.',
-)
-
-audit2 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='adjust_karma',
-    target_entity='user',
-    target_id=can.id,
-    reason='Manually corrected karma score (+10) after a system error failed to record three completed exchanges from last month.',
-)
-
-audit3 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='resolve_report',
-    target_entity='report',
-    target_id=report4.id,
-    reason='Reviewed evidence and closed service_issue report. Both parties confirmed mutual agreement. No policy violation.',
-)
-
-audit4 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='lock_topic',
-    target_entity='forum_topic',
-    target_id=forum_topics[1].id,
-    reason='Thread derailed into off-topic arguments. Locked after moderator warning was ignored by participants.',
-)
-
-audit5 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='pin_topic',
-    target_entity='forum_topic',
-    target_id=forum_topics[0].id,
-    reason='Pinned welcome thread to top of General Discussion for better visibility for new members.',
-)
-
-audit6 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='resolve_report',
-    target_entity='report',
-    target_id=report6.id,
-    reason='Resolved forum spam report and documented removal of duplicate post in event planning thread.',
-)
-
-audit7 = AdminAuditLog.objects.create(
-    admin=admin_user,
-    action_type='warn_user',
-    target_entity='user',
-    target_id=deniz.id,
-    reason='Issued gentle warning after repeated last-minute cancellations and one unresolved no-show appeal required moderation follow-up.',
-)
+now = timezone.now()
+AdminAuditLog.objects.bulk_create([
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='warn_user',
+        target_entity='user',
+        target_id=burak.id,
+        reason='Multiple community members reported aggressive follow-up messages. Issued formal warning and reminded of platform code of conduct.',
+        created_at=now - timedelta(days=8),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='adjust_karma',
+        target_entity='user',
+        target_id=can.id,
+        reason='Manually corrected karma score (+10) after a system error failed to record three completed exchanges from last month.',
+        created_at=now - timedelta(days=5),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='resolve_report',
+        target_entity='report',
+        target_id=report4.id,
+        reason='Reviewed evidence and closed service_issue report. Both parties confirmed mutual agreement. No policy violation.',
+        created_at=now - timedelta(days=2),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='lock_topic',
+        target_entity='forum_topic',
+        target_id=forum_topics[1].id,
+        reason='Thread derailed into off-topic arguments. Locked after moderator warning was ignored by participants.',
+        created_at=now - timedelta(days=14),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='pin_topic',
+        target_entity='forum_topic',
+        target_id=forum_topics[0].id,
+        reason='Pinned welcome thread to top of General Discussion for better visibility for new members.',
+        created_at=now - timedelta(days=20),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='resolve_report',
+        target_entity='report',
+        target_id=report6.id,
+        reason='Resolved forum spam report and documented removal of duplicate post in event planning thread.',
+        created_at=now - timedelta(days=1),
+    ),
+    AdminAuditLog(
+        admin=admin_user,
+        action_type='warn_user',
+        target_entity='user',
+        target_id=deniz.id,
+        reason='Issued gentle warning after repeated last-minute cancellations and one unresolved no-show appeal required moderation follow-up.',
+        created_at=now - timedelta(hours=12),
+    ),
+])
 
 print(f"  Created 7 audit log entries")
 

@@ -326,7 +326,6 @@ function ActionBtn({
   )
 }
 
-
 // ─── Role assign modal ────────────────────────────────────────────────────────
 
 // Roles an actor with the given role may assign.  The backend enforces the same
@@ -477,9 +476,9 @@ export default function AdminUserDetailPage() {
   const [user, setUser] = useState<AdminUserDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState<'warn' | 'karma' | 'role' | null>(null)
-  const [actionLoading, setActionLoading] = useState(false)
   const [warnLoading, setWarnLoading] = useState(false)
-  const [suspendConfirm, setSuspendConfirm] = useState(false)
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false)
+  const [confirmModalLoading, setConfirmModalLoading] = useState(false)
 
   const [transactions, setTransactions] = useState<AdminTransaction[]>([])
   const [txLoading, setTxLoading] = useState(false)
@@ -503,12 +502,6 @@ export default function AdminUserDetailPage() {
   }
 
   const isSelf = adminUser?.id === userId
-  const actorTier = ROLE_TIER[adminUser?.role ?? ''] ?? 0
-  const targetTier = ROLE_TIER[user?.role ?? ''] ?? 0
-  // Ban/karma: actor must be strictly above target.
-  const canActOnTarget = !isSelf && !!user && actorTier > targetTier
-  // Warn: peers at the same tier may warn each other; acting upward is still blocked.
-  const canWarnTarget = !isSelf && !!user && actorTier >= targetTier
 
   const load = async () => {
     if (!userId) return
@@ -527,31 +520,6 @@ export default function AdminUserDetailPage() {
   useEffect(() => { load() }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadTransactions(1) }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleToggleSuspend = () => {
-    if (!canActOnTarget) return
-    setSuspendConfirm(true)
-  }
-
-  const executeSuspend = async () => {
-    if (!user) return
-    setActionLoading(true)
-    try {
-      if (user.is_active) {
-        await adminAPI.banUser(user.id)
-        toast.success('User suspended')
-      } else {
-        await adminAPI.unbanUser(user.id)
-        toast.success('User reactivated')
-      }
-      setSuspendConfirm(false)
-      await load()
-    } catch (e) {
-      toast.error(getErrorMessage(e) ?? 'Action failed')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
   if (loading) {
     return (
       <AdminLayout activeTab="users" onTabChange={(tab) => navigate(`/admin?tab=${tab}`)}>
@@ -564,11 +532,55 @@ export default function AdminUserDetailPage() {
 
   if (!user) return null
 
+  const actorTier = ROLE_TIER[adminUser?.role ?? ''] ?? 0
+  const targetTier = ROLE_TIER[user.role] ?? 0
+  const canActOnTarget = !isSelf && actorTier > targetTier
+  const canWarnTarget = !isSelf && actorTier >= targetTier
+
   const statusColor = user.is_active ? GREEN : RED
   const statusBg = user.is_active ? GREEN_LT : RED_LT
   const statusLabel = user.is_active ? 'Active' : 'Suspended'
   const hasActiveBan = user.is_event_banned_until && new Date(user.is_event_banned_until) > new Date()
   const hasOrganizerBan = user.is_organizer_banned_until && new Date(user.is_organizer_banned_until) > new Date()
+
+  const submitWarn = async (message: string) => {
+    setWarnLoading(true)
+    try {
+      await adminAPI.warnUser(user.id, message)
+      toast.success('Warning issued')
+      setModal(null)
+      await load()
+    } catch (e) {
+      toast.error(getErrorMessage(e) ?? 'Failed to warn user')
+    } finally {
+      setWarnLoading(false)
+    }
+  }
+
+  const handleSuspendToggle = () => {
+    if (!canActOnTarget) return
+    setConfirmModalOpen(true)
+  }
+
+  const submitSuspendToggle = async () => {
+    if (!canActOnTarget) return
+    setConfirmModalLoading(true)
+    try {
+      if (user.is_active) {
+        await adminAPI.banUser(user.id)
+        toast.success('User suspended')
+      } else {
+        await adminAPI.unbanUser(user.id)
+        toast.success('User reactivated')
+      }
+      setConfirmModalOpen(false)
+      await load()
+    } catch (e) {
+      toast.error(getErrorMessage(e) ?? 'Action failed')
+    } finally {
+      setConfirmModalLoading(false)
+    }
+  }
 
   return (
     <AdminLayout activeTab={fromTab === 'reports' ? 'reports' : 'users'} onTabChange={(tab) => navigate(`/admin?tab=${tab}`)}>
@@ -649,8 +661,8 @@ export default function AdminUserDetailPage() {
                   bg={user.is_active ? RED_LT : GREEN_LT}
                   hoverBg={(user.is_active ? RED : GREEN) + '40'}
                   color={user.is_active ? RED : GREEN}
-                  onClick={handleToggleSuspend}
-                  disabled={!canActOnTarget || actionLoading}
+                  onClick={handleSuspendToggle}
+                  disabled={!canActOnTarget}
                 />
                 <ActionBtn
                   label="Karma"
@@ -915,48 +927,35 @@ export default function AdminUserDetailPage() {
         </Box>
       </Box>
 
-      <AdminWarnModal
-        isOpen={modal === 'warn'}
-        userName={[user.first_name, user.last_name].filter(Boolean).join(' ') || user.email}
-        onConfirm={async (msg) => {
-          setWarnLoading(true)
-          try {
-            await adminAPI.warnUser(user.id, msg)
-            toast.success('Warning issued')
-            setModal(null); load()
-          } catch (e) {
-            toast.error(getErrorMessage(e) ?? 'Failed to warn user')
-          } finally {
-            setWarnLoading(false)
-          }
-        }}
-        onClose={() => setModal(null)}
-        loading={warnLoading}
-      />
-      {modal === 'karma' && (
-        <AdminKarmaModal
-          isOpen
-          userName={[user.first_name, user.last_name].filter(Boolean).join(' ') || user.email}
-          currentKarma={user.karma_score}
-          userId={user.id}
-          onDone={() => { setModal(null); load() }}
-          onClose={() => setModal(null)}
-        />
-      )}
       <AdminConfirmModal
-        isOpen={suspendConfirm}
+        isOpen={confirmModalOpen}
         title={user.is_active ? 'Suspend User' : 'Reactivate User'}
         description={
           user.is_active
-            ? `Are you sure you want to suspend ${[user.first_name, user.last_name].filter(Boolean).join(' ') || user.email}? They will lose access to the platform.`
-            : `Are you sure you want to reactivate ${[user.first_name, user.last_name].filter(Boolean).join(' ') || user.email}? They will regain full access.`
+            ? `Are you sure you want to suspend ${user.first_name || user.email}? They will lose access to the platform.`
+            : `Are you sure you want to reactivate ${user.first_name || user.email}? They will regain full access.`
         }
         confirmLabel={user.is_active ? 'Suspend' : 'Reactivate'}
         accent={user.is_active ? RED : GREEN}
         accentLt={user.is_active ? RED_LT : GREEN_LT}
-        onConfirm={executeSuspend}
-        onClose={() => setSuspendConfirm(false)}
-        loading={actionLoading}
+        onConfirm={submitSuspendToggle}
+        onClose={() => setConfirmModalOpen(false)}
+        loading={confirmModalLoading}
+      />
+      <AdminWarnModal
+        isOpen={modal === 'warn'}
+        userName={`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email}
+        onConfirm={submitWarn}
+        onClose={() => setModal(null)}
+        loading={warnLoading}
+      />
+      <AdminKarmaModal
+        isOpen={modal === 'karma'}
+        userName={`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email}
+        currentKarma={user.karma_score}
+        userId={user.id}
+        onDone={() => { setModal(null); load() }}
+        onClose={() => setModal(null)}
       />
       {modal === 'role' && (
         <RoleAssignModal

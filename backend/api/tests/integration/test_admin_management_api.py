@@ -1,7 +1,17 @@
+import io
+from unittest.mock import patch
+
 import pytest
+from django.conf import settings
+from django.core.management import call_command
+from django.db import connection
+from django.db.utils import DatabaseError, InternalError
+from django.utils import timezone
+from datetime import timedelta
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from api.exceptions import AuditLogImmutabilityError
 from api.models import AdminAuditLog, Report
 from api.tests.helpers.factories import AdminUserFactory, ForumTopicFactory, HandshakeFactory, ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
@@ -835,3 +845,265 @@ class TestAdminRoleAssignment:
         response = self._post(client, uuid.uuid4(), 'member')
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAdminForumTopicLockPin:
+    """Integration tests for admin lock/pin operations on forum topics (FR-03d)."""
+
+    def _lock_url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/lock/'
+
+    def _pin_url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/pin/'
+
+    # ── lock ──────────────────────────────────────────────────────────────────
+
+    def test_admin_can_lock_topic(self):
+        """POST lock/ on an unlocked topic sets is_locked=True and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='lock_topic').count()
+        response = client.post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+
+        logs = AdminAuditLog.objects.filter(action_type='lock_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.admin == admin
+        assert str(log.target_id) == str(topic.id)
+        assert log.target_entity == 'forum_topic'
+        assert log.reason == 'Locked'
+
+    def test_admin_can_unlock_topic(self):
+        """POST lock/ on a locked topic sets is_locked=False and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=True)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='lock_topic').count()
+        response = client.post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_locked is False
+
+        logs = AdminAuditLog.objects.filter(action_type='lock_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.reason == 'Unlocked'
+
+    def test_non_admin_cannot_lock_topic(self):
+        """Regular members must receive 403 on POST lock/."""
+        member = UserFactory()
+        topic = ForumTopicFactory(is_locked=False)
+        client = AuthenticatedAPIClient().authenticate_user(member)
+
+        response = client.post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        topic.refresh_from_db()
+        assert topic.is_locked is False
+
+    def test_unauthenticated_cannot_lock_topic(self):
+        """Unauthenticated requests must receive 401 on POST lock/."""
+        topic = ForumTopicFactory(is_locked=False)
+
+        response = APIClient().post(self._lock_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # ── pin ───────────────────────────────────────────────────────────────────
+
+    def test_admin_can_pin_topic(self):
+        """POST pin/ on an unpinned topic sets is_pinned=True and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='pin_topic').count()
+        response = client.post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_pinned is True
+
+        logs = AdminAuditLog.objects.filter(action_type='pin_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.admin == admin
+        assert str(log.target_id) == str(topic.id)
+        assert log.target_entity == 'forum_topic'
+        assert log.reason == 'Pinned'
+
+    def test_admin_can_unpin_topic(self):
+        """POST pin/ on a pinned topic sets is_pinned=False and writes an audit log."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_pinned=True)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        initial_count = AdminAuditLog.objects.filter(action_type='pin_topic').count()
+        response = client.post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_200_OK
+        topic.refresh_from_db()
+        assert topic.is_pinned is False
+
+        logs = AdminAuditLog.objects.filter(action_type='pin_topic')
+        assert logs.count() == initial_count + 1
+        log = logs.latest('created_at')
+        assert log.reason == 'Unpinned'
+
+    def test_non_admin_cannot_pin_topic(self):
+        """Regular members must receive 403 on POST pin/."""
+        member = UserFactory()
+        topic = ForumTopicFactory(is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_user(member)
+
+        response = client.post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        topic.refresh_from_db()
+        assert topic.is_pinned is False
+
+    def test_unauthenticated_cannot_pin_topic(self):
+        """Unauthenticated requests must receive 401 on POST pin/."""
+        topic = ForumTopicFactory(is_pinned=False)
+
+        response = APIClient().post(self._pin_url(topic.id), format='json')
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # ── idempotency / multiple toggles ────────────────────────────────────────
+
+    def test_lock_and_pin_are_idempotent(self):
+        """Toggling lock then lock again returns the topic to its original state."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=False, is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        # Lock → unlocked → locked: three round-trips
+        for expected in [True, False, True]:
+            response = client.post(self._lock_url(topic.id), format='json')
+            assert response.status_code == status.HTTP_200_OK
+            topic.refresh_from_db()
+            assert topic.is_locked is expected
+
+        # Pin → unpinned → pinned: three round-trips
+        for expected in [True, False, True]:
+            response = client.post(self._pin_url(topic.id), format='json')
+            assert response.status_code == status.HTTP_200_OK
+            topic.refresh_from_db()
+            assert topic.is_pinned is expected
+
+    def test_lock_and_pin_are_independent(self):
+        """Locking a topic must not affect its pin state and vice versa."""
+        admin = AdminUserFactory()
+        topic = ForumTopicFactory(is_locked=False, is_pinned=False)
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+
+        client.post(self._lock_url(topic.id), format='json')
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+        assert topic.is_pinned is False
+
+        client.post(self._pin_url(topic.id), format='json')
+        topic.refresh_from_db()
+        assert topic.is_locked is True
+        assert topic.is_pinned is True
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestAdminAuditLogImmutability:
+    """
+    Verifies that AdminAuditLog records cannot be modified or deleted at the
+    application layer (model overrides) and at the database layer (PostgreSQL
+    trigger).
+    """
+
+    def _make_log(self):
+        admin = AdminUserFactory()
+        target = UserFactory()
+        return AdminAuditLog.objects.create(
+            admin=admin,
+            action_type='warn_user',
+            target_entity='user',
+            target_id=target.id,
+            reason='Test entry',
+        )
+
+    def test_audit_log_cannot_be_deleted(self):
+        """Model.delete() must raise AuditLogImmutabilityError."""
+        log = self._make_log()
+        with pytest.raises(AuditLogImmutabilityError):
+            log.delete()
+        assert AdminAuditLog.objects.filter(pk=log.pk).exists()
+
+    def test_audit_log_cannot_be_modified(self):
+        """Model.save() on an existing record must raise AuditLogImmutabilityError."""
+        log = self._make_log()
+        log.reason = 'Tampered reason'
+        with pytest.raises(AuditLogImmutabilityError):
+            log.save()
+        log.refresh_from_db()
+        assert log.reason == 'Test entry'
+
+    @pytest.mark.django_db(transaction=True)
+    def test_audit_log_db_level_delete_rejected(self):
+        """
+        Raw SQL DELETE against api_adminauditlog must be rejected by the
+        PostgreSQL trigger. Skipped on non-PostgreSQL backends.
+        """
+        if connection.vendor != 'postgresql':
+            pytest.skip('PostgreSQL-only test: immutability trigger not present on this backend.')
+
+        log = self._make_log()
+        log_pk = str(log.pk)
+
+        from django.db import transaction as db_transaction
+
+        with pytest.raises((InternalError, DatabaseError)):
+            with db_transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        'DELETE FROM api_adminauditlog WHERE id = %s::uuid',
+                        [log_pk],
+                    )
+
+        assert AdminAuditLog.objects.filter(pk=log.pk).exists()
+
+    def test_audit_log_retention_policy_enforced(self):
+        """
+        The archive_audit_logs management command reports records older than
+        AUDIT_RETENTION_DAYS with --dry-run without writing any files.
+        """
+        admin = AdminUserFactory()
+        target = UserFactory()
+        past_date = timezone.now() - timedelta(days=settings.AUDIT_RETENTION_DAYS + 10)
+
+        with patch('django.utils.timezone.now', return_value=past_date):
+            AdminAuditLog.objects.create(
+                admin=admin,
+                action_type='ban_user',
+                target_entity='user',
+                target_id=target.id,
+                reason='Old record for retention test',
+            )
+
+        out = io.StringIO()
+        call_command(
+            'archive_audit_logs',
+            '--dry-run',
+            f'--days={settings.AUDIT_RETENTION_DAYS}',
+            stdout=out,
+        )
+        output = out.getvalue()
+        assert 'DRY RUN' in output
+        assert '1' in output
