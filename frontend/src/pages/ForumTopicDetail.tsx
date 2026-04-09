@@ -176,6 +176,64 @@ function PostCard({ post, isOp, currentUserId, onEdit, onDelete, onReport }: Pos
   )
 }
 
+// ─── Topic Inline Edit ────────────────────────────────────────────────────────
+
+function TopicInlineEdit({ topic, onSave, onCancel }: { topic: ForumTopic; onSave: (title: string, body: string) => Promise<void>; onCancel: () => void }) {
+  const [title, setTitle] = useState(topic.title)
+  const [body, setBody]   = useState(topic.body)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    const t = title.trim(); const b = body.trim()
+    if (!t || !b) return
+    setSaving(true)
+    await onSave(t, b)
+    setSaving(false)
+  }
+
+  return (
+    <Box bg={GRAY50} p={4} borderRadius="12px" border={`1px solid ${GRAY200}`} mb={4}>
+      <Text fontSize="12px" fontWeight={600} color={GRAY600} mb={1}>Title</Text>
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        style={{
+          width: '100%',
+          height: '40px',
+          fontSize: '14px',
+          padding: '0 12px',
+          marginBottom: '12px',
+          border: `1px solid ${GRAY300}`,
+          borderRadius: '10px',
+          background: WHITE,
+          outline: 'none',
+          boxSizing: 'border-box',
+        }}
+      />
+      <Text fontSize="12px" fontWeight={600} color={GRAY600} mb={1}>Body</Text>
+      <Textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={6}
+        fontSize="14px"
+        resize="vertical"
+        border={`1px solid ${GRAY300}`}
+        borderRadius="10px"
+        bg={WHITE}
+        _focus={{ borderColor: GREEN, outline: 'none' }}
+        mb={3}
+      />
+      <Flex gap={2} justify="flex-end">
+        <Button size="sm" variant="ghost" borderRadius="8px" onClick={onCancel} disabled={saving}>Cancel</Button>
+        <Button size="sm" bg={GREEN} color={WHITE} borderRadius="8px" _hover={{ bg: '#214D41' }}
+          onClick={save} disabled={saving || !title.trim() || !body.trim()}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </Flex>
+    </Box>
+  )
+}
+
 // ─── Inline Edit Modal ────────────────────────────────────────────────────────
 
 function InlineEdit({ post, onSave, onCancel }: { post: ForumPost; onSave: (body: string) => Promise<void>; onCancel: () => void }) {
@@ -236,9 +294,10 @@ export default function ForumTopicDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError]   = useState<string | null>(null)
 
-  const [replyBody, setReplyBody]  = useState('')
-  const [replying, setReplying]    = useState(false)
-  const [editingPost, setEditingPost] = useState<ForumPost | null>(null)
+  const [replyBody, setReplyBody]   = useState('')
+  const [replying, setReplying]     = useState(false)
+  const [editingPost, setEditingPost]   = useState<ForumPost | null>(null)
+  const [editingTopic, setEditingTopic] = useState(false)
 
   const replyRef = useRef<HTMLTextAreaElement | null>(null)
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -301,6 +360,18 @@ export default function ForumTopicDetail() {
       toast.success('Post updated')
     } catch {
       toast.error('Failed to update post')
+    }
+  }
+
+  const saveTopic = async (title: string, body: string) => {
+    if (!topic) return
+    try {
+      const updated = await forumAPI.updateTopic(topic.id, { title, body })
+      setTopic(updated)
+      setEditingTopic(false)
+      toast.success('Topic updated')
+    } catch {
+      toast.error('Failed to update topic')
     }
   }
 
@@ -422,6 +493,20 @@ export default function ForumTopicDetail() {
                       <FiFlag size={12} /> Report topic
                     </Box>
                   )}
+                  {isAuthenticated && user?.id === topic.author_id && !topic.is_locked && !editingTopic && (
+                    <Box
+                      as="button"
+                      display="inline-flex"
+                      alignItems="center"
+                      gap={1}
+                      color={GRAY500}
+                      fontSize="12px"
+                      _hover={{ color: GRAY800 }}
+                      onClick={() => setEditingTopic(true)}
+                    >
+                      <FiEdit2 size={12} /> Edit topic
+                    </Box>
+                  )}
                 </Flex>
               </Box>
 
@@ -435,9 +520,17 @@ export default function ForumTopicDetail() {
                       <Box bg={GREEN} color={WHITE} borderRadius="6px" px={2} py="2px" fontSize="10px" fontWeight={700}>Author</Box>
                       <Text fontSize="12px" color={GRAY500}>{timeAgo(topic.created_at)}</Text>
                     </Flex>
-                    <Text fontSize="14px" color={GRAY700} lineHeight={1.75} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {topic.body}
-                    </Text>
+                    {editingTopic ? (
+                      <TopicInlineEdit
+                        topic={topic}
+                        onSave={saveTopic}
+                        onCancel={() => setEditingTopic(false)}
+                      />
+                    ) : (
+                      <Text fontSize="14px" color={GRAY700} lineHeight={1.75} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {topic.body}
+                      </Text>
+                    )}
                   </Box>
                 </Flex>
               </Box>

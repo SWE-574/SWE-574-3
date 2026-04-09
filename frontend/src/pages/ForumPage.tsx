@@ -19,7 +19,7 @@ import {
   FiPlus, FiArrowLeft, FiEdit2, FiTrash2, FiSend, FiCheck, FiX,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
-import { forumAPI, type ForumReportType } from '@/services/forumAPI'
+import { forumAPI, type ForumReportType, type TopicSortOption } from '@/services/forumAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { ForumCategory, ForumTopic, ForumPost, User } from '@/types'
 import {
@@ -55,6 +55,56 @@ const COLOR_MAP: Record<string, { bg: string; text: string; light: string }> = {
   pink:   { bg: '#DB2777',   text: WHITE, light: '#FDF2F8' },
   red:    { bg: RED,         text: WHITE, light: RED_LT    },
   teal:   { bg: '#0D9488',   text: WHITE, light: '#F0FDFA' },
+}
+
+function TopicInlineEdit({ topic, onSave, onCancel }: { topic: ForumTopic; onSave: (title: string, body: string) => Promise<void>; onCancel: () => void }) {
+  const [title, setTitle] = useState(topic.title)
+  const [body, setBody]   = useState(topic.body)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    const t = title.trim(); const b = body.trim()
+    if (!t || !b) return
+    setSaving(true)
+    await onSave(t, b)
+    setSaving(false)
+  }
+
+  return (
+    <Box bg={WHITE} p={3} borderRadius="10px" border={`1px solid ${GRAY200}`}>
+      <Text fontSize="11px" fontWeight={600} color={GRAY600} mb={1}>Title</Text>
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        style={{
+          width: '100%', height: '36px', fontSize: '13px',
+          padding: '0 10px', marginBottom: '10px',
+          border: `1px solid ${GRAY300}`, borderRadius: '8px',
+          background: WHITE, outline: 'none', boxSizing: 'border-box',
+        }}
+      />
+      <Text fontSize="11px" fontWeight={600} color={GRAY600} mb={1}>Body</Text>
+      <Textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        rows={5}
+        fontSize="13px"
+        resize="vertical"
+        border={`1px solid ${GRAY300}`}
+        borderRadius="8px"
+        bg={WHITE}
+        _focus={{ borderColor: GREEN, outline: 'none' }}
+        mb={3}
+      />
+      <Flex gap={2} justify="flex-end">
+        <Button size="sm" variant="ghost" borderRadius="8px" onClick={onCancel} disabled={saving}>Cancel</Button>
+        <Button size="sm" bg={GREEN} color={WHITE} borderRadius="8px" _hover={{ bg: '#214D41' }}
+          onClick={save} disabled={saving || !title.trim() || !body.trim()}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </Flex>
+    </Box>
+  )
 }
 
 function timeAgo(iso: string | null | undefined) {
@@ -363,28 +413,34 @@ function TopicListView({
   const [topics, setTopics] = useState<ForumTopic[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [sort, setSort] = useState<TopicSortOption>('newest')
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const totalPages = Math.max(1, Math.ceil(total / TOPICS_PAGE_SIZE))
 
   const load = useCallback(async (p: number, signal: AbortSignal) => {
-    setLoading(true); setError(null)
+    setTopics(prev => { if (prev.length > 0) { setRefreshing(true); return prev } setLoading(true); return prev })
+    setError(null)
     try {
-      const res = await forumAPI.listTopics({ category: category.slug, page: p, page_size: TOPICS_PAGE_SIZE }, signal)
-      const sorted = [...res.results].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
-      setTopics(sorted); setTotal(res.count)
+      const res = await forumAPI.listTopics({ category: category.slug, page: p, page_size: TOPICS_PAGE_SIZE, sort }, signal)
+      setTopics(res.results); setTotal(res.count)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : ''
       const isAbort = e instanceof Error && (e.name?.includes('Abort') || e.message === 'canceled' || e.message === 'CanceledError')
       if (!isAbort) setError(msg || 'Failed to load')
     } finally {
-      setLoading(false)
+      setLoading(false); setRefreshing(false)
     }
-  }, [category.slug])
+  }, [category.slug, sort])
 
   useEffect(() => {
     setPage(1)
   }, [category.slug])
+
+  useEffect(() => {
+    setPage(1)
+  }, [sort])
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -454,9 +510,29 @@ function TopicListView({
           </Box>
         ) : (
           <>
-            <Box px={4} py={3} borderBottom={`1px solid ${GRAY100}`}>
+            <Flex px={4} py={3} borderBottom={`1px solid ${GRAY100}`} align="center" justify="space-between">
               <Text fontSize="11px" color={GRAY400} fontWeight={500}>{total} topic{total !== 1 ? 's' : ''}</Text>
-            </Box>
+              <Flex gap={1} bg={GRAY100} borderRadius="8px" p="3px">
+                {(['newest', 'most_active'] as TopicSortOption[]).map((opt) => (
+                  <Box
+                    key={opt}
+                    as="button"
+                    px={3} py="3px"
+                    fontSize="10px" fontWeight={600}
+                    borderRadius="6px"
+                    bg={sort === opt ? WHITE : 'transparent'}
+                    color={sort === opt ? GRAY800 : GRAY500}
+                    boxShadow={sort === opt ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'}
+                    cursor="pointer"
+                    transition="all 0.13s"
+                    onClick={() => setSort(opt)}
+                  >
+                    {opt === 'newest' ? 'Newest' : 'Most Active'}
+                  </Box>
+                ))}
+              </Flex>
+            </Flex>
+            <Box opacity={refreshing ? 0.45 : 1} transition="opacity 0.15s">
             {topics.map((t) => (
               <Flex
                 key={t.id} as="div" w="full" align="flex-start" gap={3}
@@ -505,6 +581,7 @@ function TopicListView({
                 </Flex>
               </Flex>
             ))}
+            </Box>
           </>
         )}
       </Box>
@@ -550,6 +627,7 @@ function TopicDetailView({
   const [replying, setReplying] = useState(false)
   const [editingPost, setEditingPost] = useState<ForumPost | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [editingTopic, setEditingTopic] = useState(false)
   const totalPages = Math.max(1, Math.ceil(total / POSTS_PAGE_SIZE))
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -595,6 +673,16 @@ function TopicDetailView({
       setEditingPost(null)
       toast.success('Updated!')
     } catch { toast.error('Failed to update') }
+  }
+
+  const saveTopic = async (title: string, body: string) => {
+    if (!topic) return
+    try {
+      const updated = await forumAPI.updateTopic(topic.id, { title, body })
+      setTopic(updated)
+      setEditingTopic(false)
+      toast.success('Topic updated!')
+    } catch { toast.error('Failed to update topic') }
   }
 
   const deletePost = async (postId: string) => {
@@ -701,16 +789,18 @@ function TopicDetailView({
             <Flex align="center" gap={1} fontSize="12px" color={GRAY400}><FiMessageSquare size={11} /><Text>{topic.reply_count} replies</Text></Flex>
             <Flex align="center" gap={1} fontSize="12px" color={GRAY400}><FiEye size={11} /><Text>{topic.view_count} views</Text></Flex>
             </Flex>
-            {isAuthenticated && (!user?.id || topic.author_id !== user.id) && (
-              <Button
-                size="xs"
-                variant="outline"
-                borderRadius="8px"
-                onClick={reportTopic}
-              >
-                <Flex align="center" gap={1}><FiFlag size={11} /></Flex>
-              </Button>
-            )}
+            <Flex align="center" gap={2}>
+              {isAuthenticated && (!user?.id || topic.author_id !== user.id) && (
+                <Button size="xs" variant="outline" borderRadius="8px" onClick={reportTopic}>
+                  <Flex align="center" gap={1}><FiFlag size={11} /></Flex>
+                </Button>
+              )}
+              {isAuthenticated && user?.id === topic.author_id && !topic.is_locked && !editingTopic && (
+                <Button size="xs" variant="outline" borderRadius="8px" onClick={() => setEditingTopic(true)}>
+                  <Flex align="center" gap={1}><FiEdit2 size={11} /> Edit</Flex>
+                </Button>
+              )}
+            </Flex>
           </Flex>
         </Box>
 
@@ -724,9 +814,13 @@ function TopicDetailView({
                 <Box bg={GREEN} color={WHITE} borderRadius="5px" px={2} py="1px" fontSize="10px" fontWeight={700}>Author</Box>
                 <Text fontSize="11px" color={GRAY500}>{timeAgo(topic.created_at)}</Text>
               </Flex>
-              <Text fontSize="14px" color={GRAY700} lineHeight={1.75} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {topic.body}
-              </Text>
+              {editingTopic ? (
+                <TopicInlineEdit topic={topic} onSave={saveTopic} onCancel={() => setEditingTopic(false)} />
+              ) : (
+                <Text fontSize="14px" color={GRAY700} lineHeight={1.75} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {topic.body}
+                </Text>
+              )}
             </Box>
           </Flex>
         </Box>

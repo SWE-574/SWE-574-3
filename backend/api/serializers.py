@@ -14,6 +14,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from decimal import Decimal
 import bleach
+import html
 import re
 import logging
 import math
@@ -2866,7 +2867,7 @@ class ForumCategorySerializer(serializers.ModelSerializer):
     ]
 )
 class ForumTopicSerializer(serializers.ModelSerializer):
-    author_id = serializers.UUIDField(source='author.id', read_only=True)
+    author_id = serializers.SerializerMethodField()
     author_name = serializers.SerializerMethodField()
     author_avatar_url = serializers.SerializerMethodField()
     category_name = serializers.CharField(source='category.name', read_only=True)
@@ -2888,11 +2889,19 @@ class ForumTopicSerializer(serializers.ModelSerializer):
         ]
 
     @extend_schema_field(OpenApiTypes.STR)
+    def get_author_id(self, obj):
+        return str(obj.author_id) if obj.author_id is not None else None
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_author_name(self, obj):
+        if obj.author_id is None:
+            return '[Deleted User]'
         return f"{obj.author.first_name} {obj.author.last_name}".strip()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_author_avatar_url(self, obj):
+        if obj.author_id is None:
+            return None
         return obj.author.avatar_url
 
     @extend_schema_field(OpenApiTypes.INT)
@@ -2915,14 +2924,14 @@ class ForumTopicSerializer(serializers.ModelSerializer):
 
     def validate_title(self, value):
         """Sanitize and validate title"""
-        cleaned = bleach.clean(value, tags=[], strip=True).strip()
+        cleaned = html.unescape(bleach.clean(value, tags=[], strip=True)).strip()
         if len(cleaned) < 5:
             raise serializers.ValidationError('Title must be at least 5 characters long')
         return cleaned
 
     def validate_body(self, value):
         """Sanitize body text"""
-        return bleach.clean(value, tags=[], strip=True)
+        return html.unescape(bleach.clean(value, tags=[], strip=True))
 
 
 @extend_schema_serializer(
@@ -2952,7 +2961,7 @@ class ForumTopicSerializer(serializers.ModelSerializer):
     ]
 )
 class ForumPostSerializer(serializers.ModelSerializer):
-    author_id = serializers.UUIDField(source='author.id', read_only=True)
+    author_id = serializers.SerializerMethodField()
     author_name = serializers.SerializerMethodField()
     author_avatar_url = serializers.SerializerMethodField()
 
@@ -2965,11 +2974,19 @@ class ForumPostSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'topic', 'author_id', 'is_deleted', 'created_at', 'updated_at']
 
     @extend_schema_field(OpenApiTypes.STR)
+    def get_author_id(self, obj):
+        return str(obj.author_id) if obj.author_id is not None else None
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_author_name(self, obj):
+        if obj.author_id is None:
+            return '[Deleted User]'
         return f"{obj.author.first_name} {obj.author.last_name}".strip()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_author_avatar_url(self, obj):
+        if obj.author_id is None:
+            return None
         return obj.author.avatar_url
 
     def validate_body(self, value):

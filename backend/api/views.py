@@ -84,7 +84,8 @@ from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
+from django.db.models.functions import Coalesce
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -6998,7 +6999,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         queryset = ForumTopic.objects.select_related('author', 'category')
-        
+
         # Filter by category if provided
         category_slug = self.request.query_params.get('category')
         if category_slug:
@@ -7013,9 +7014,16 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         
         # Annotate with reply count
         queryset = queryset.annotate(
-            reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False))
+            reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False)),
+            last_activity_annotated=Coalesce(
+                Max('posts__created_at', filter=Q(posts__is_deleted=False)),
+                'created_at',
+            ),
         )
-        
+
+        sort = self.request.query_params.get('sort', 'newest')
+        if sort == 'most_active':
+            return queryset.order_by('-is_pinned', '-reply_count_annotated', '-last_activity_annotated')
         return queryset.order_by('-is_pinned', '-created_at')
     
     def get_serializer_class(self):
@@ -7375,6 +7383,28 @@ class ForumPostViewSet(viewsets.ViewSet):
         post.is_deleted = True
         post.save(update_fields=['is_deleted'])
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='restore')
+    @track_performance
+    def restore(self, request, pk=None):
+        """Restore a soft-deleted forum post (admin only)."""
+        if not request.user.is_staff:
+            return create_error_response(
+                'Admin access required',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            post = ForumPost.objects.select_related('topic', 'author').get(pk=pk, is_deleted=True)
+        except ForumPost.DoesNotExist:
+            return create_error_response(
+                'Post not found or not deleted',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        post.is_deleted = False
+        post.save(update_fields=['is_deleted'])
+        return Response(ForumPostSerializer(post).data)
 
     @action(detail=True, methods=['post'], url_path='report', throttle_classes=[ConfirmationThrottle])
     @track_performance

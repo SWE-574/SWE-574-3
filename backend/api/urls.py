@@ -267,6 +267,10 @@ forum_post_report = ForumPostViewSet.as_view({
     'post': 'report'
 })
 
+forum_post_restore = ForumPostViewSet.as_view({
+    'post': 'restore'
+})
+
 forum_post_recent = ForumPostViewSet.as_view({
     'get': 'recent'
 })
@@ -324,6 +328,7 @@ urlpatterns = [
     path('forum/topics/<uuid:topic_id>/posts/', forum_post_list_create, name='forum-post-list'),
     path('forum/posts/<uuid:pk>/', forum_post_detail, name='forum-post-detail'),
     path('forum/posts/<uuid:pk>/report/', forum_post_report, name='forum-post-report'),
+    path('forum/posts/<uuid:pk>/restore/', forum_post_restore, name='forum-post-restore'),
     path('forum/posts/recent/', forum_post_recent, name='forum-post-recent'),
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
