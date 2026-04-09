@@ -50,6 +50,7 @@ from .serializers import (
     UserRegistrationSerializer, 
     UserProfileSerializer,
     AdminUserListSerializer,
+    AdminUserDetailSerializer,
     AdminCommentSerializer,
     AdminAuditLogSerializer,
     ServiceSerializer,
@@ -83,7 +84,8 @@ from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
+from django.db.models.functions import Coalesce
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -116,6 +118,11 @@ def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
     """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS."""
     response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=True))
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
+
+
+# Roles that may access admin / moderation endpoints.
+# Keep in sync with User.ROLE_CHOICES and the frontend AdminProtectedRoute.
+ADMIN_ROLES = frozenset(('admin', 'super_admin', 'moderator'))
 
 
 def log_admin_action(admin_user, action_type: str, target_entity: str, target_obj, reason: str = '') -> None:
@@ -1094,7 +1101,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         )
         
         # Filter services by visibility - admins can see all, others only visible
-        is_admin = self.request.user.is_authenticated and self.request.user.role == 'admin'
+        is_admin = self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES
         if is_admin:
             services_prefetch = Prefetch('services', queryset=Service.objects.prefetch_related('tags'))
         else:
@@ -1724,7 +1731,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         # Include all search parameters in cache key
         # Include admin status since admins see hidden services (is_visible=False)
-        is_admin = request.user.is_authenticated and request.user.role == 'admin'
+        is_admin = request.user.is_authenticated and request.user.role in ADMIN_ROLES
         cache_key_params = {
             'type': request.query_params.get('type'),
             'tag': request.query_params.get('tag'),
@@ -1802,7 +1809,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         )
         
         # Filter by visibility - admins can see all, others only visible
-        if not (self.request.user.is_authenticated and self.request.user.role == 'admin'):
+        if not (self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES):
             queryset = queryset.filter(is_visible=True)
         
         # Apply search engine filters (Strategy Pattern)
@@ -2143,7 +2150,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         - 403 Forbidden: Admin role required
         - 404 Not Found: Service does not exist
         """
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             raise PermissionDenied('Admin access required')
         
         service = self.get_object()
@@ -2176,7 +2183,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
         **Endpoint:** POST /api/services/{id}/pin-event/
         """
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             raise PermissionDenied('Admin access required')
 
         service = self.get_object()
@@ -4967,8 +4974,8 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Only admins can access
-        if self.request.user.role != 'admin':
+        # Only admin-role users can access
+        if self.request.user.role not in ADMIN_ROLES:
             return Report.objects.none()
 
         queryset = Report.objects.all()
@@ -4996,7 +5003,7 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         - confirm_no_show: Refund receiver, apply karma penalty, notify both parties
         - dismiss: Complete transfer to provider, notify both parties
         """
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             return create_error_response(
                 'Admin access required',
                 code=ErrorCodes.PERMISSION_DENIED,
@@ -5330,7 +5337,7 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         
         **Endpoint:** POST /api/admin/reports/{id}/pause/
         """
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             return create_error_response(
                 'Admin access required',
                 code=ErrorCodes.PERMISSION_DENIED,
@@ -5442,8 +5449,18 @@ class AdminUserViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = StandardResultsSetPagination
 
+    # Ordered from highest to lowest privilege.  Used by assign_role to enforce
+    # the hierarchy: an actor may only target users below their own tier and
+    # may only grant roles strictly below their own tier.
+    _ROLE_HIERARCHY: dict[str, int] = {
+        'super_admin': 3,
+        'admin': 2,
+        'moderator': 1,
+        'member': 0,
+    }
+
     def check_admin(self, request):
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             return create_error_response(
                 'Admin access required',
                 code=ErrorCodes.PERMISSION_DENIED,
@@ -5451,13 +5468,38 @@ class AdminUserViewSet(viewsets.ViewSet):
             )
         return None
 
+    def _check_target_tier(self, request, target_user, allow_same_tier=False):
+        """Return an error response based on role-tier comparison.
+
+        By default requires actor tier to be strictly above target tier.
+        Pass allow_same_tier=True for actions (e.g. warn) that peers may perform
+        on each other, but that still cannot be performed upward.
+        """
+        actor_tier = self._ROLE_HIERARCHY.get(request.user.role, 0)
+        target_tier = self._ROLE_HIERARCHY.get(target_user.role, 0)
+        blocked = actor_tier < target_tier if allow_same_tier else actor_tier <= target_tier
+        if blocked:
+            return create_error_response(
+                'You cannot perform this action on a user at your tier or above.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _visible_users_queryset(self, request):
+        """Return a User queryset filtered to roles the actor is permitted to see."""
+        qs = User.objects.all()
+        if request.user.role != 'super_admin':
+            qs = qs.exclude(role='super_admin')
+        return qs
+
     def list(self, request):
         """List all users with search and filter support (admin only)"""
         admin_check = self.check_admin(request)
         if admin_check:
             return admin_check
 
-        queryset = User.objects.all().order_by('-date_joined')
+        queryset = self._visible_users_queryset(request).order_by('-date_joined')
         
         # Search by email, first_name, or last_name
         search = request.query_params.get('search', '').strip()
@@ -5485,6 +5527,24 @@ class AdminUserViewSet(viewsets.ViewSet):
         serializer = AdminUserListSerializer(queryset[:100], many=True)
         return Response(serializer.data)
 
+    def retrieve(self, request, pk=None):
+        """Return comprehensive user detail for admin review (admin only)"""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        try:
+            user = self._visible_users_queryset(request).get(id=pk)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = AdminUserDetailSerializer(user)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['post'], url_path='warn', throttle_classes=[ConfirmationThrottle])
     def warn_user(self, request, pk=None):
         """REQ-ADM-003: Issue warning to user"""
@@ -5507,6 +5567,11 @@ class AdminUserViewSet(viewsets.ViewSet):
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
+
+        # Peers at the same tier may warn each other; acting upward is still blocked.
+        tier_check = self._check_target_tier(request, user, allow_same_tier=True)
+        if tier_check:
+            return tier_check
 
         create_notification(
             user=user,
@@ -5548,6 +5613,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_403_FORBIDDEN
             )
 
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
+
         user.is_active = False
         user.save()
 
@@ -5570,6 +5639,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
 
         user.is_active = True
         user.save()
@@ -5594,6 +5667,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_404_NOT_FOUND
             )
 
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
+
         adjustment = request.data.get('adjustment', 0)
         user.karma_score += adjustment
         user.save()
@@ -5612,6 +5689,167 @@ class AdminUserViewSet(viewsets.ViewSet):
             'message': f'Karma adjusted by {adjustment}'
         })
 
+    @action(detail=True, methods=['get'], url_path='transactions')
+    def transactions(self, request, pk=None):
+        """Return paginated transaction history for a user (admin only)."""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        try:
+            user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        qs = TransactionHistory.objects.filter(user=user).select_related(
+            'handshake__service'
+        ).order_by('-created_at')
+
+        page_size = min(int(request.query_params.get('page_size', 20)), 100)
+        page = max(int(request.query_params.get('page', 1)), 1)
+        total = qs.count()
+        start = (page - 1) * page_size
+        items = qs[start:start + page_size]
+
+        data = [
+            {
+                'id': str(t.id),
+                'transaction_type': t.transaction_type,
+                'amount': str(t.amount),
+                'balance_after': str(t.balance_after),
+                'description': t.description,
+                'service_title': t.handshake.service.title if t.handshake and t.handshake.service else None,
+                'service_id': str(t.handshake.service_id) if t.handshake and t.handshake.service_id else None,
+                'created_at': t.created_at.isoformat(),
+            }
+            for t in items
+        ]
+
+        return Response({
+            'count': total,
+            'page': page,
+            'page_size': page_size,
+            'results': data,
+        })
+
+    @action(detail=True, methods=['post'], url_path='assign-role', throttle_classes=[ConfirmationThrottle])
+    def assign_role(self, request, pk=None):
+        """
+        REQ-ADM-010: Assign or change a user's role with strict hierarchy enforcement.
+
+        Role hierarchy (highest → lowest): super_admin → admin → moderator → member.
+
+        Rules enforced:
+        - Actor must be admin or super_admin.
+        - Self-modification is prohibited.
+        - Actor can only target users whose current role is strictly below the actor's tier.
+        - Actor can only grant roles strictly below their own tier.
+
+        Request body:
+        ```json
+        { "role": "moderator" }
+        ```
+
+        Response:
+        ```json
+        { "status": "success", "message": "...", "previous_role": "member", "new_role": "moderator" }
+        ```
+        """
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        try:
+            target_user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Self-modification is never allowed, regardless of tier.
+        if target_user == request.user:
+            return create_error_response(
+                'You cannot modify your own role.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        new_role = (request.data.get('role') or '').strip()
+        if new_role not in self._ROLE_HIERARCHY:
+            return create_error_response(
+                f'Invalid role. Accepted values: {", ".join(self._ROLE_HIERARCHY)}.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        actor_tier = self._ROLE_HIERARCHY.get(request.user.role, 0)
+        target_current_tier = self._ROLE_HIERARCHY.get(target_user.role, 0)
+        new_role_tier = self._ROLE_HIERARCHY[new_role]
+
+        # Actor cannot modify a peer or someone above them.
+        if target_current_tier >= actor_tier:
+            return create_error_response(
+                'You cannot modify the role of a user at your tier or above.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Actor cannot elevate someone to their own tier or higher.
+        if new_role_tier >= actor_tier:
+            return create_error_response(
+                'You cannot assign a role equal to or above your own tier.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Only super_admin may grant the moderator role.
+        if new_role == 'moderator' and request.user.role != 'super_admin':
+            return create_error_response(
+                'Only a super_admin can assign the moderator role.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        previous_role = target_user.role
+
+        # Extract client IP for the audit trail (X-Forwarded-For respected for proxied setups).
+        ip_address = (
+            request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+            or request.META.get('REMOTE_ADDR', '')
+        ) or None
+
+        target_user.role = new_role
+        target_user.save(update_fields=['role'])
+
+        # Write an immutable audit record directly so we can capture the extra
+        # role-change fields that log_admin_action() does not support.
+        try:
+            AdminAuditLog.objects.create(
+                admin=request.user,
+                action_type='assign_role',
+                target_entity='user',
+                target_id=target_user.id,
+                previous_role=previous_role,
+                new_role=new_role,
+                ip_address=ip_address,
+                reason=f'Role changed from {previous_role} to {new_role}',
+            )
+        except Exception as exc:
+            logger.warning('Admin audit log failed for assign_role (user %s): %s', pk, exc)
+
+        return Response({
+            'status': 'success',
+            'message': f"Role updated to '{new_role}'",
+            'previous_role': previous_role,
+            'new_role': new_role,
+        })
+
 
 class AdminCommentViewSet(viewsets.ViewSet):
     """Admin-only moderation endpoints for service comments/reviews."""
@@ -5620,7 +5858,7 @@ class AdminCommentViewSet(viewsets.ViewSet):
     serializer_class = AdminCommentSerializer
 
     def check_admin(self, request):
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             return create_error_response(
                 'Admin access required',
                 code=ErrorCodes.PERMISSION_DENIED,
@@ -5717,7 +5955,7 @@ class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        if self.request.user.role != 'admin':
+        if self.request.user.role not in ADMIN_ROLES:
             return AdminAuditLog.objects.none()
 
         queryset = AdminAuditLog.objects.select_related('admin').all()
@@ -6776,7 +7014,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         queryset = ForumTopic.objects.select_related('author', 'category')
-        
+
         # Filter by category if provided
         category_slug = self.request.query_params.get('category')
         if category_slug:
@@ -6784,12 +7022,23 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         else:
             # Only show topics from active categories
             queryset = queryset.filter(category__is_active=True)
+
+        author_id = self.request.query_params.get('author')
+        if author_id:
+            queryset = queryset.filter(author_id=author_id)
         
         # Annotate with reply count
         queryset = queryset.annotate(
-            reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False))
+            reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False)),
+            last_activity_annotated=Coalesce(
+                Max('posts__created_at', filter=Q(posts__is_deleted=False)),
+                'created_at',
+            ),
         )
-        
+
+        sort = self.request.query_params.get('sort', 'newest')
+        if sort == 'most_active':
+            return queryset.order_by('-is_pinned', '-reply_count_annotated', '-last_activity_annotated')
         return queryset.order_by('-is_pinned', '-created_at')
     
     def get_serializer_class(self):
@@ -6917,7 +7166,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         topic.is_pinned = not topic.is_pinned
         topic.save(update_fields=['is_pinned'])
 
-        if request.user.role == 'admin':
+        if request.user.role in ADMIN_ROLES:
             state = 'Pinned' if topic.is_pinned else 'Unpinned'
             log_admin_action(request.user, 'pin_topic', 'forum_topic', topic, state)
         
@@ -6940,7 +7189,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         topic.is_locked = not topic.is_locked
         topic.save(update_fields=['is_locked'])
 
-        if request.user.role == 'admin':
+        if request.user.role in ADMIN_ROLES:
             state = 'Locked' if topic.is_locked else 'Unlocked'
             log_admin_action(request.user, 'lock_topic', 'forum_topic', topic, state)
         
@@ -7149,6 +7398,28 @@ class ForumPostViewSet(viewsets.ViewSet):
         post.is_deleted = True
         post.save(update_fields=['is_deleted'])
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='restore')
+    @track_performance
+    def restore(self, request, pk=None):
+        """Restore a soft-deleted forum post (admin only)."""
+        if not request.user.is_staff:
+            return create_error_response(
+                'Admin access required',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            post = ForumPost.objects.select_related('topic', 'author').get(pk=pk, is_deleted=True)
+        except ForumPost.DoesNotExist:
+            return create_error_response(
+                'Post not found or not deleted',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        post.is_deleted = False
+        post.save(update_fields=['is_deleted'])
+        return Response(ForumPostSerializer(post).data)
 
     @action(detail=True, methods=['post'], url_path='report', throttle_classes=[ConfirmationThrottle])
     @track_performance

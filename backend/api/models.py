@@ -37,7 +37,13 @@ class User(AbstractUser):
     banner_url = models.TextField(blank=True, null=True)  # Support data URLs and regular URLs
     timebank_balance = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('3.00'))
     karma_score = models.IntegerField(default=0)
-    role = models.CharField(max_length=20, choices=[('member', 'Member'), ('admin', 'Admin')], default='member')
+    ROLE_CHOICES = [
+        ('member', 'Member'),
+        ('moderator', 'Moderator'),
+        ('admin', 'Admin'),
+        ('super_admin', 'Super Admin'),
+    ]
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='member')
     featured_achievement_id = models.CharField(max_length=200, null=True, blank=True, help_text='Featured achievement badge ID to display on profile')
     date_joined = models.DateTimeField(auto_now_add=True)
     failed_login_attempts = models.IntegerField(default=0, help_text='Number of consecutive failed login attempts')
@@ -209,102 +215,6 @@ class UserBadge(models.Model):
         unique_together = ['user', 'badge']
         indexes = [
             models.Index(fields=['user', 'badge']),
-        ]
-
-
-class UserFollow(models.Model):
-    """
-    Active follow relationship: follower follows following (no self-follow).
-    """
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    follower = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='follows',
-        help_text='User who follows',
-    )
-    following = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='followed_by',
-        help_text='User being followed',
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def clean(self):
-        super().clean()
-        if self.follower_id and self.following_id and self.follower_id == self.following_id:
-            raise ValidationError('A user cannot follow themselves.')
-
-    def save(self, *args, **kwargs):
-        self.full_clean()
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f'{self.follower} follows {self.following}'
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=['follower', 'following'],
-                name='api_userfollow_follower_following_uniq',
-            ),
-            models.CheckConstraint(
-                condition=~models.Q(follower=models.F('following')),
-                name='api_userfollow_no_self_follow',
-            ),
-        ]
-
-
-class UserFollowEvent(models.Model):
-    """
-    Append-only history of follow and unfollow actions (multiple rows per pair allowed).
-    """
-
-    ACTION_FOLLOW = 'follow'
-    ACTION_UNFOLLOW = 'unfollow'
-    ACTION_CHOICES = (
-        (ACTION_FOLLOW, 'Follow'),
-        (ACTION_UNFOLLOW, 'Unfollow'),
-    )
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    follower = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='follow_events_as_follower',
-        help_text='User who performed the action',
-    )
-    following = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='follow_events_as_target',
-        help_text='User who was followed or unfollowed',
-    )
-    action = models.CharField(max_length=16, choices=ACTION_CHOICES)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def clean(self):
-        super().clean()
-        if self.follower_id and self.following_id and self.follower_id == self.following_id:
-            raise ValidationError('Follow events cannot target the same user as the actor.')
-
-    def save(self, *args, **kwargs):
-        self.full_clean()
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        action_label = dict(self.ACTION_CHOICES).get(self.action, self.action)
-        return f'{self.follower} {action_label.lower()} {self.following}'
-
-    class Meta:
-        ordering = ['-created_at']
-        constraints = [
-            models.CheckConstraint(
-                condition=~models.Q(follower=models.F('following')),
-                name='api_userfollowevent_no_self_action',
-            ),
         ]
 
 
@@ -722,6 +632,7 @@ class AdminAuditLog(models.Model):
         ('restore_comment', 'Restore Comment'),
         ('lock_topic', 'Lock Topic'),
         ('pin_topic', 'Pin Topic'),
+        ('assign_role', 'Assign Role'),
     )
 
     TARGET_CHOICES = (
@@ -733,11 +644,15 @@ class AdminAuditLog(models.Model):
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    admin = models.ForeignKey(User, on_delete=models.CASCADE, related_name='admin_audit_logs')
+    admin = models.ForeignKey(User, on_delete=models.PROTECT, related_name='admin_audit_logs')
     action_type = models.CharField(max_length=32, choices=ACTION_CHOICES)
     target_entity = models.CharField(max_length=32, choices=TARGET_CHOICES)
     target_id = models.UUIDField()
     reason = models.TextField(blank=True, null=True)
+    # Role-assignment specific audit fields (null for non-role-change actions)
+    previous_role = models.CharField(max_length=20, blank=True, null=True)
+    new_role = models.CharField(max_length=20, blank=True, null=True)
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -748,6 +663,21 @@ class AdminAuditLog(models.Model):
             models.Index(fields=['target_entity', 'created_at']),
             models.Index(fields=['target_id']),
         ]
+
+    def delete(self, using=None, keep_parents=False):
+        from api.exceptions import AuditLogImmutabilityError
+        raise AuditLogImmutabilityError(
+            f"AdminAuditLog records are immutable. Deletion of record {self.pk} is not permitted."
+        )
+
+    def save(self, *args, **kwargs):
+        from api.exceptions import AuditLogImmutabilityError
+        if self._state.adding:
+            super().save(*args, **kwargs)
+        else:
+            raise AuditLogImmutabilityError(
+                f"AdminAuditLog records are immutable. Update of record {self.pk} is not permitted."
+            )
 
 
 class ChatRoom(models.Model):
@@ -1023,8 +953,9 @@ class ForumTopic(models.Model):
         related_name='topics'
     )
     author = models.ForeignKey(
-        User, 
-        on_delete=models.CASCADE, 
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
         related_name='forum_topics'
     )
     title = models.CharField(max_length=200)
@@ -1056,8 +987,9 @@ class ForumPost(models.Model):
         related_name='posts'
     )
     author = models.ForeignKey(
-        User, 
-        on_delete=models.CASCADE, 
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
         related_name='forum_posts'
     )
     body = models.TextField(max_length=5000)
@@ -1066,7 +998,8 @@ class ForumPost(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Post by {self.author.email} in {self.topic.title[:30]}"
+        author_label = self.author.email if self.author_id else '[deleted]'
+        return f"Post by {author_label} in {self.topic.title[:30]}"
 
     class Meta:
         ordering = ['created_at']

@@ -30,6 +30,7 @@ const PublicProfile          = lazy(() => import('@/pages/PublicProfile'))
 const TransactionHistoryPage = lazy(() => import('@/pages/TransactionHistoryPage'))
 const NotificationsPage      = lazy(() => import('@/pages/NotificationsPage'))
 const AdminDashboard         = lazy(() => import('@/pages/AdminDashboard'))
+const AdminUserDetailPage    = lazy(() => import('@/pages/AdminUserDetailPage'))
 const ReportDetail           = lazy(() => import('@/pages/ReportDetail'))
 const ForumPage              = lazy(() => import('@/pages/ForumPage'))
 const ForumCreateTopic       = lazy(() => import('@/pages/ForumCreateTopic'))
@@ -315,6 +316,14 @@ function App() {
             element={
               <AdminProtectedRoute>
                 <AdminDashboard />
+              </AdminProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/users/:userId"
+            element={
+              <AdminProtectedRoute>
+                <AdminUserDetailPage />
               </AdminProtectedRoute>
             }
           />

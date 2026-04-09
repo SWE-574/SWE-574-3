@@ -848,3 +848,6 @@ LOGGING = {
 FEEDBACK_WINDOW_HOURS = int(os.environ.get('FEEDBACK_WINDOW_HOURS', '48'))
 # Backward-compatible alias for existing event-specific reads.
 EVENT_FEEDBACK_WINDOW_HOURS = int(os.environ.get('EVENT_FEEDBACK_WINDOW_HOURS', str(FEEDBACK_WINDOW_HOURS)))
+# Audit log retention (FR-AUDIT): admin audit records must be retained for
+# at least 7 years (2555 days) before archival is permitted.
+AUDIT_RETENTION_DAYS = int(os.environ.get('AUDIT_RETENTION_DAYS', '2555'))

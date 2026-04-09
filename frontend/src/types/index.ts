@@ -445,11 +445,106 @@ export interface AdminUserSummary {
   email: string
   first_name: string
   last_name: string
+  avatar_url: string | null
   timebank_balance: number
   karma_score: number
   role: string
   is_active: boolean
   date_joined: string
+}
+
+export interface AdminTransaction {
+  id: string
+  transaction_type: 'provision' | 'transfer' | 'refund' | 'adjustment'
+  amount: string
+  balance_after: string
+  description: string
+  service_title: string | null
+  service_id: string | null
+  created_at: string
+}
+
+export interface AdminUserDetailAction {
+  action_type: string
+  reason: string | null
+  created_at: string
+}
+
+export interface AdminUserDetail {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  bio: string | null
+  avatar_url: string | null
+  location: string | null
+  role: string
+  is_active: boolean
+  is_verified: boolean
+  is_onboarded: boolean
+  date_joined: string
+  last_login: string | null
+  timebank_balance: number
+  karma_score: number
+  no_show_count: number
+  is_event_banned_until: string | null
+  is_organizer_banned_until: string | null
+  locked_until: string | null
+  offers_count: number
+  requests_count: number
+  events_count: number
+  handshakes_as_requester_count: number
+  handshakes_as_provider_count: number
+  forum_topics_count: number
+  recent_admin_actions: AdminUserDetailAction[]
+  recent_offers?: { id: string; title: string }[]
+  recent_requests?: { id: string; title: string }[]
+  recent_events?: { id: string; title: string }[]
+  recent_forum_topics?: { id: string; title: string }[]
+  recent_handshakes_as_requester?: { id: string; title: string; service_id: string }[]
+  recent_handshakes_as_provider?: { id: string; title: string; service_id: string }[]
+  karma_adjustments?: { delta: number; karma: number; created_at: string; label: string }[]
+}
+
+export interface AdminUserDetailAction {
+  action_type: string
+  reason: string | null
+  created_at: string
+}
+
+export interface AdminUserDetail {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  bio: string | null
+  avatar_url: string | null
+  location: string | null
+  role: string
+  is_active: boolean
+  is_verified: boolean
+  is_onboarded: boolean
+  date_joined: string
+  last_login: string | null
+  timebank_balance: number
+  karma_score: number
+  no_show_count: number
+  is_event_banned_until: string | null
+  is_organizer_banned_until: string | null
+  locked_until: string | null
+  offers_count: number
+  requests_count: number
+  events_count: number
+  handshakes_as_requester_count: number
+  handshakes_as_provider_count: number
+  forum_topics_count: number
+  recent_admin_actions: AdminUserDetailAction[]
+  recent_offers?: { id: string; title: string }[]
+  recent_requests?: { id: string; title: string }[]
+  recent_events?: { id: string; title: string }[]
+  recent_forum_topics?: { id: string; title: string }[]
+  recent_handshakes_as_requester?: { id: string; title: string; service_id: string }[]
+  recent_handshakes_as_provider?: { id: string; title: string; service_id: string }[]
 }
 
 export interface AdminMetrics {
@@ -510,6 +605,10 @@ export interface AdminAuditLog {
     | 'restore_comment'
     | 'lock_topic'
     | 'pin_topic'
+    | 'assign_role'
+  previous_role?: string | null
+  new_role?: string | null
+  ip_address?: string | null
   target_entity: 'user' | 'report' | 'handshake' | 'comment' | 'forum_topic'
   target_id: string
   reason?: string | null

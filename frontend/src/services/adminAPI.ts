@@ -1,5 +1,5 @@
 import { apiClient } from './api'
-import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, PaginatedResponse } from '@/types'
+import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminTransaction, AdminUserDetail, AdminUserSummary, PaginatedResponse } from '@/types'
 
 export type ReportStatusFilter = 'pending' | 'resolved' | 'dismissed'
 export type CommentStatusFilter = 'active' | 'removed' | 'all'
@@ -95,6 +95,24 @@ export const adminAPI = {
     return toPaginated(res.data)
   },
 
+  getUserDetail: async (userId: string, signal?: AbortSignal): Promise<AdminUserDetail> => {
+    const res = await apiClient.get<AdminUserDetail>(`/admin/users/${userId}/`, { signal })
+    return res.data
+  },
+
+  getUserTransactions: async (
+    userId: string,
+    page = 1,
+    pageSize = 20,
+    signal?: AbortSignal,
+  ): Promise<{ count: number; page: number; page_size: number; results: AdminTransaction[] }> => {
+    const res = await apiClient.get(`/admin/users/${userId}/transactions/`, {
+      params: { page, page_size: pageSize },
+      signal,
+    })
+    return res.data
+  },
+
   warnUser: async (
     userId: string,
     message: string,
@@ -142,6 +160,20 @@ export const adminAPI = {
       { adjustment },
       { signal },
     )
+    return res.data
+  },
+
+  assignUserRole: async (
+    userId: string,
+    newRole: string,
+    signal?: AbortSignal,
+  ): Promise<{ status: string; message: string; previous_role: string; new_role: string }> => {
+    const res = await apiClient.post<{
+      status: string
+      message: string
+      previous_role: string
+      new_role: string
+    }>(`/admin/users/${userId}/assign-role/`, { role: newRole }, { signal })
     return res.data
   },
 
