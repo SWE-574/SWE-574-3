@@ -38,7 +38,7 @@ make coverage-frontend
 
 #### E2E Tests
 ```bash
-# Run E2E tests
+# Run E2E tests (full stack must be running)
 make test-e2e
 
 # Run E2E tests with UI
@@ -46,6 +46,17 @@ make test-e2e-ui
 
 # Run E2E tests in debug mode
 make test-e2e-debug
+
+# Run a single feature suite
+cd frontend && PLAYWRIGHT_BASE_URL=http://localhost npm run test:e2e -- tests/e2e/feature-5
+
+# Run a single spec
+cd frontend && PLAYWRIGHT_BASE_URL=http://localhost npm run test:e2e -- tests/e2e/feature-5/01-fr-05a.spec.ts
+```
+
+#### Mobile Tests
+```bash
+cd mobile-client && npm test
 ```
 
 #### All Tests
@@ -88,9 +99,14 @@ make coverage-report
   - Component + API integration
 
 - **E2E Tests**: `frontend/tests/e2e/`
-  - Full user flow tests
-  - Cross-browser tests
-  - Visual regression tests
+  - 164 spec files across 16 feature directories
+  - Requirement-driven (one spec per FR/NFR)
+  - See `frontend/tests/e2e/TEST_GUIDE.md` for authoring conventions
+
+### Mobile Tests
+- **Unit Tests**: `mobile-client/src/api/__tests__/`
+  - API client tests (auth, chats, handshakes, services, etc.)
+  - 15 test files covering all API modules
 
 ## Coverage Targets
 
@@ -98,6 +114,32 @@ make coverage-report
 - **Critical Paths**: 90% minimum
 - **Business Logic**: 85% minimum
 - **UI Components**: 60% minimum
+
+## CI Workflows
+
+| Workflow | Trigger | What it runs |
+|----------|---------|-------------|
+| `ci-backend.yml` | `backend/**` changes | pytest (unit + integration), migrations check, pip-audit |
+| `ci-frontend.yml` | `frontend/**` changes | ESLint, tsc, Vitest unit tests, production build |
+| `ci-mobile.yml` | `mobile-client/**` changes | tsc, Jest unit tests |
+| `ci-e2e.yml` | `frontend/**` or `backend/**` changes | Tiered Playwright E2E (see below) |
+| `ci-docker.yml` | Docker/nginx config changes | Dockerfile lint, compose validation |
+
+### E2E Tiered Testing
+
+The E2E workflow uses path-based test selection to avoid running all 164 tests on every PR:
+
+- **Smoke tier** (always runs, blocks PRs): ~8 critical tests covering auth, dashboard, service detail, and core CRUD. If these fail, the PR cannot merge.
+- **Feature tier** (path-selected, soft-fail): Only tests related to changed source files run. Failures are visible in artifacts but do not block PRs while the suite stabilizes.
+- **Full suite**: Runs on every push to `dev` and via manual `workflow_dispatch`.
+
+When shared infrastructure files change (App.tsx, api.ts, models.py, serializers.py, etc.), the full suite runs automatically.
+
+### E2E Coverage Gaps
+
+The following flows have minimal or no E2E coverage:
+- **Notifications**: No dedicated tests for notification delivery, badge counts, or preferences
+- **Onboarding**: Only route existence and initial balance display tested; full onboarding flow not covered
 
 ## Test Data
 
