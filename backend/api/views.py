@@ -80,6 +80,7 @@ from .utils import (
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
 )
 from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService, get_social_proximity_boosts
+from .ranking_debug import build_service_debug_payload, get_debug_viewer_options
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
@@ -2302,6 +2303,60 @@ class ServiceViewSet(viewsets.ModelViewSet):
         invalidate_service_lists()
         serializer = self.get_serializer(service)
         return Response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='debug-ranking-options',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def debug_ranking_options(self, request):
+        is_admin = request.user.role in ADMIN_ROLES
+        return Response({
+            'viewers': get_debug_viewer_options(request.user, is_admin),
+            'effective_viewer_id': str(request.user.id),
+            'can_override_viewer': is_admin,
+        })
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='debug-ranking',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def debug_ranking(self, request):
+        raw_service_ids = request.data.get('service_ids') or []
+        service_ids = [str(service_id) for service_id in raw_service_ids if service_id]
+
+        if not service_ids:
+            return create_error_response(
+                'service_ids is required.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        def _to_float(value):
+            if value in (None, ''):
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        payload = build_service_debug_payload(
+            service_ids=service_ids,
+            selected_service_id=request.data.get('selected_service_id'),
+            request_user=request.user,
+            viewer_override_id=request.data.get('viewer_id'),
+            is_admin=request.user.role in ADMIN_ROLES,
+            search=(request.data.get('search') or '').strip(),
+            tag_ids=[str(tag_id) for tag_id in (request.data.get('tags') or []) if tag_id],
+            lat=_to_float(request.data.get('lat')),
+            lng=_to_float(request.data.get('lng')),
+            distance=_to_float(request.data.get('distance')),
+            active_filter=(request.data.get('active_filter') or 'all').strip() or 'all',
+        )
+        return Response(payload)
 
     @action(
         detail=True,
