@@ -28,20 +28,26 @@ export interface UserSummary {
 }
 
 /**
- * Fields from GET /users/{id}/ when loading another user's profile
- * (backend `PublicUserProfileSerializer`), limited to what the mobile
- * public profile screen reads. The API returns more keys; callers should
- * only rely on these unless extended intentionally.
+ * Fields from GET /users/{id}/ for another user (`PublicUserProfileSerializer`)
+ * that the mobile public profile screen consumes. The API may return more keys.
  */
 export interface PublicUserProfile {
   id: string;
   first_name?: string;
   last_name?: string;
   bio?: string | null;
+  avatar_url?: string | null;
+  banner_url?: string | null;
+  location?: string | null;
   karma_score?: number;
   date_joined?: string;
-  /** Not exposed on public serializer today; optional for API drift. */
-  role?: string;
+  helpful_count?: number;
+  kind_count?: number;
+  punctual_count?: number;
+  badges?: string[];
+  achievements?: string[];
+  skills?: Array<{ id: string; name: string }>;
+  portfolio_images?: string[];
 }
 
 export interface Tag {
