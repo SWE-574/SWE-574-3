@@ -14,9 +14,11 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/e2e',
 
-  /* No test-level parallelism — shared DB means ordering matters */
+  /* Tests within a file run serially (shared DB), but different files
+     run in parallel across workers.  Safe because tests use uniqueTitle()
+     and distinct demo users for write operations. */
   fullyParallel: false,
-  workers: 1,
+  workers: process.env.CI ? 3 : 1,
 
   /* Fail CI fast if someone left `.only` in a test file */
   forbidOnly: !!process.env.CI,

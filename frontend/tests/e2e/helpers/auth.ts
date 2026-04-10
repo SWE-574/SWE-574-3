@@ -18,17 +18,17 @@ export type DemoUser = (typeof USERS)[keyof typeof USERS]
 /**
  * Authenticate via the REST API, then navigate to /dashboard.
  *
- * This is far more reliable in CI than filling the login form because it
- * skips form rendering, button clicks, React state propagation, and the
- * redirect chain.  The POST sets httponly auth cookies; after that we
- * simply load the dashboard as a fresh page navigation.
+ * After the POST /auth/login/ call sets httponly cookies and returns user
+ * data, we intercept the first /users/me/ request so React's checkAuth()
+ * resolves instantly instead of waiting for the (potentially slow) backend.
+ * This prevents the "Loading…" spinner from blocking the test when
+ * multiple workers are hitting the backend simultaneously.
  */
 export async function loginAs(page: Page, user: DemoUser): Promise<void> {
-  // 1. Ensure we have a page loaded on the app origin so cookies can be set.
-  //    Use the login page — it's lightweight and always available.
+  // 1. Load a page on the app origin so cookies can be set.
   await page.goto('/login', { waitUntil: 'commit' })
 
-  // 2. Authenticate via API — this sets httponly access_token & refresh_token cookies.
+  // 2. Authenticate via API — sets httponly cookies and returns user data.
   const loginResult = await page.evaluate(
     async (creds) => {
       const res = await fetch('/api/auth/login/', {
@@ -43,11 +43,42 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
   )
   expect(loginResult.ok, `API login failed (${loginResult.status}): ${loginResult.body}`).toBeTruthy()
 
-  // 3. Navigate to dashboard — cookies are set, so the app will recognise the session.
-  await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
+  // 3. Extract the user payload returned by the login endpoint and add
+  //    fields that /users/me/ normally includes but the login response omits.
+  const loginData = JSON.parse(loginResult.body)
+  const userData = {
+    ...loginData.user,
+    is_onboarded: true,
+    is_admin: false,
+    is_active: true,
+    is_verified: true,
+  }
 
-  // 4. Wait for the authenticated shell to render (proves auth state is hydrated).
-  await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 30_000 })
+  // 4. Intercept the first /users/me/ call so checkAuth() resolves instantly.
+  //    Without this, the React app shows a "Loading…" spinner while waiting
+  //    for /users/me/ from the (slow-under-load) backend.
+  let intercepted = false
+  await page.route('**/api/users/me/', async (route) => {
+    if (!intercepted && route.request().method() === 'GET') {
+      intercepted = true
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(userData),
+      })
+    } else {
+      await route.continue()
+    }
+  })
+
+  // 5. Navigate to dashboard — auth cookies are set, /users/me/ will resolve
+  //    instantly from the intercepted route, so the navbar renders fast.
+  await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 15_000 })
+
+  // 6. Remove the interception so subsequent /users/me/ calls go to the
+  //    real backend (important for tests that modify user state).
+  await page.unroute('**/api/users/me/')
 }
 
 /**
