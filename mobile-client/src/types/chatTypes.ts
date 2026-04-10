@@ -5,6 +5,7 @@ export type ChatScreenParams = {
   handshakeId: string;
   otherUserName: string;
   serviceTitle?: string;
+  otherUserId?: string;
 };
 
 export type NavProps = NativeStackScreenProps<
