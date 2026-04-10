@@ -41,7 +41,7 @@ from .models import (
     User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
     ChatRoom, PublicChatMessage, ServiceGroupChatMessage, GroupChatSession, Comment, NegativeRep,
-    AdminAuditLog,
+    AdminAuditLog, PlatformSetting,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
     EmailVerificationToken, PasswordResetToken,
     UserFollow, UserFollowEvent,
@@ -52,7 +52,7 @@ from .serializers import (
     AdminUserListSerializer,
     AdminUserDetailSerializer,
     AdminCommentSerializer,
-    AdminAuditLogSerializer,
+    AdminAuditLogSerializer, PlatformSettingSerializer,
     ServiceSerializer,
     TagSerializer,
     HandshakeSerializer,
@@ -2306,11 +2306,29 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
+        methods=['get'],
+        url_path='debug-ranking-availability',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def debug_ranking_availability(self, request):
+        platform_settings = PlatformSetting.get_solo()
+        return Response({'enabled': platform_settings.ranking_debug_enabled})
+
+    @action(
+        detail=False,
         methods=['post'],
         url_path='debug-ranking',
         permission_classes=[permissions.IsAuthenticated],
     )
     def debug_ranking(self, request):
+        platform_settings = PlatformSetting.get_solo()
+        if not platform_settings.ranking_debug_enabled:
+            return create_error_response(
+                'Ranking debug is currently disabled by an administrator.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
         raw_service_ids = request.data.get('service_ids') or []
         service_ids = [str(service_id) for service_id in raw_service_ids if service_id]
 
@@ -6008,6 +6026,38 @@ class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(target_entity=target_entity)
 
         return queryset.order_by('-created_at')
+
+
+class AdminSettingsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _check_admin(self, request):
+        if request.user.role not in ADMIN_ROLES:
+            return create_error_response(
+                'Admin access required',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def get(self, request):
+        admin_check = self._check_admin(request)
+        if admin_check:
+            return admin_check
+
+        serializer = PlatformSettingSerializer(PlatformSetting.get_solo())
+        return Response(serializer.data)
+
+    def patch(self, request):
+        admin_check = self._check_admin(request)
+        if admin_check:
+            return admin_check
+
+        settings_obj = PlatformSetting.get_solo()
+        serializer = PlatformSettingSerializer(settings_obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     """

@@ -4,7 +4,7 @@ from rest_framework import serializers
 from .models import (
     User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, UserBadge, Report, TransactionHistory,
-    ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
+    ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog, PlatformSetting,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow
 )
 from django.db.models import Q
@@ -2316,6 +2316,12 @@ class AdminAuditLogSerializer(serializers.ModelSerializer):
     def get_admin_name(self, obj):
         full = f"{obj.admin.first_name} {obj.admin.last_name}".strip()
         return full or obj.admin.email
+
+
+class PlatformSettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PlatformSetting
+        fields = ['ranking_debug_enabled', 'updated_at']
 
 
 # Public Chat Serializers
