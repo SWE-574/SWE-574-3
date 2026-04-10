@@ -35,6 +35,17 @@ export function getUser(id: string): Promise<PublicUserProfile> {
   return apiRequest<PublicUserProfile>(`/users/${id}/`);
 }
 
+export function followUser(userId: string): Promise<void> {
+  return apiRequest<void>(`/users/${userId}/follow/`, {
+    method: "POST",
+    body: {},
+  });
+}
+
+export function unfollowUser(userId: string): Promise<void> {
+  return apiRequest<void>(`/users/${userId}/follow/`, { method: "DELETE" });
+}
+
 export function updateUser(
   id: string,
   body: Partial<UserProfileRequest>,

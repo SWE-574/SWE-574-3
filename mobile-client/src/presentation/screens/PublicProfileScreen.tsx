@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -18,7 +19,12 @@ import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
-import { getUser, getUserHistory } from "../../api/users";
+import {
+  followUser,
+  getUser,
+  getUserHistory,
+  unfollowUser,
+} from "../../api/users";
 import { listServices } from "../../api/services";
 import type { PublicUserProfile, Service, UserHistoryItem } from "../../api/types";
 import { groupHistoryItems, isOwnHistoryItem } from "../../utils/historyGrouping";
@@ -67,6 +73,7 @@ export default function PublicProfileScreen() {
   const [activeServices, setActiveServices] = useState<Service[]>([]);
   const [activeServicesOpen, setActiveServicesOpen] = useState(false);
   const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
+  const [followActionLoading, setFollowActionLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,6 +199,41 @@ export default function PublicProfileScreen() {
   const canOpenAchievementsList =
     authUser?.id != null && String(authUser.id) === String(user.id);
 
+  const isOwnProfile =
+    authUser?.id != null && String(authUser.id) === String(user.id);
+  const showFollowButton = authUser != null && !isOwnProfile;
+
+  const handleFollowToggle = () => {
+    if (state.status !== "success" || followActionLoading) return;
+    const currentlyFollowing = Boolean(user.is_following);
+    setFollowActionLoading(true);
+    const run = currentlyFollowing ? unfollowUser(userId) : followUser(userId);
+    run
+      .then(() => {
+        setState((prev) => {
+          if (prev.status !== "success") return prev;
+          const u = prev.user;
+          const nextFollowing = !currentlyFollowing;
+          const delta = nextFollowing ? 1 : -1;
+          const prevFollowers = u.followers_count ?? 0;
+          return {
+            status: "success",
+            user: {
+              ...u,
+              is_following: nextFollowing,
+              followers_count: Math.max(0, prevFollowers + delta),
+            },
+          };
+        });
+      })
+      .catch((err: unknown) => {
+        const message =
+          err instanceof Error ? err.message : "Could not update follow status.";
+        Alert.alert("Error", message);
+      })
+      .finally(() => setFollowActionLoading(false));
+  };
+
   const offersCount = activeServices.filter((s) => s.type === "Offer").length;
   const needsCount = activeServices.filter((s) => s.type === "Need").length;
   const exchangesCount = groupHistoryItems(
@@ -214,7 +256,49 @@ export default function PublicProfileScreen() {
           <View style={styles.profileHeaderContent}>
             <View style={styles.nameRow}>
               <Text style={styles.name}>{fullName || "Unnamed User"}</Text>
+              {showFollowButton ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: followActionLoading,
+                    busy: followActionLoading,
+                  }}
+                  disabled={followActionLoading}
+                  onPress={handleFollowToggle}
+                  style={({ pressed }) => [
+                    user.is_following
+                      ? styles.followButtonOutline
+                      : styles.followButtonFilled,
+                    pressed && styles.followButtonPressed,
+                    followActionLoading && styles.followButtonDisabled,
+                  ]}
+                >
+                  {followActionLoading ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={
+                        user.is_following ? colors.GRAY700 : colors.WHITE
+                      }
+                    />
+                  ) : (
+                    <Text
+                      style={
+                        user.is_following
+                          ? styles.followButtonOutlineText
+                          : styles.followButtonFilledText
+                      }
+                    >
+                      {user.is_following ? "Unfollow" : "Follow"}
+                    </Text>
+                  )}
+                </Pressable>
+              ) : null}
             </View>
+
+            <Text style={styles.followMeta}>
+              {user.followers_count ?? 0} followers ·{" "}
+              {user.following_count ?? 0} following
+            </Text>
 
             {locationText ? (
               <Text style={styles.location}>{locationText}</Text>
@@ -469,11 +553,55 @@ const getStyles = (top: number, bottom: number) =>
       flexWrap: "wrap",
       gap: 8,
       marginBottom: 6,
+      justifyContent: "space-between",
     },
     name: {
       fontSize: 24,
       fontWeight: "700",
       color: colors.GRAY900,
+      flex: 1,
+      minWidth: 0,
+    },
+    followButtonFilled: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 12,
+      backgroundColor: colors.GREEN,
+      minWidth: 96,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    followButtonOutline: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY300,
+      backgroundColor: colors.WHITE,
+      minWidth: 96,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    followButtonFilledText: {
+      color: colors.WHITE,
+      fontSize: 14,
+      fontWeight: "700",
+    },
+    followButtonOutlineText: {
+      color: colors.GRAY700,
+      fontSize: 14,
+      fontWeight: "600",
+    },
+    followButtonPressed: {
+      opacity: 0.85,
+    },
+    followButtonDisabled: {
+      opacity: 0.7,
+    },
+    followMeta: {
+      fontSize: 13,
+      color: colors.GRAY500,
+      marginBottom: 8,
     },
     location: {
       fontSize: 14,

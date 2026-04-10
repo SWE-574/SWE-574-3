@@ -12,6 +12,8 @@ import {
   getBadgeProgress,
   getUserHistory,
   getVerifiedReviews,
+  followUser,
+  unfollowUser,
 } from "../users";
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
 
@@ -80,5 +82,21 @@ describe("users", () => {
     mockFetchResolve({ results: [] });
     await getVerifiedReviews("u1", { page: 1 });
     expect(getLastFetchCall().url).toContain("/users/u1/verified-reviews/");
+  });
+
+  it("followUser POSTs /users/:id/follow/", async () => {
+    mockFetchResolve(null);
+    await followUser("u2");
+    const { url, init } = getLastFetchCall();
+    expect(url).toContain("/users/u2/follow/");
+    expect(init?.method).toBe("POST");
+  });
+
+  it("unfollowUser DELETEs /users/:id/follow/", async () => {
+    mockFetchResolve(null);
+    await unfollowUser("u2");
+    const { url, init } = getLastFetchCall();
+    expect(url).toContain("/users/u2/follow/");
+    expect(init?.method).toBe("DELETE");
   });
 });
