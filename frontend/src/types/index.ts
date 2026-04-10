@@ -206,6 +206,78 @@ export interface ServiceMedia {
   order?: number
 }
 
+export interface RecommendationDebugViewerOption {
+  id: string
+  label: string
+  email: string
+}
+
+export interface RecommendationDebugNode {
+  id: string
+  label: string
+  tone: 'positive' | 'negative' | 'neutral'
+}
+
+export interface RecommendationDebugLink {
+  source: string
+  target: string
+  value: number
+  tone: 'positive' | 'negative' | 'neutral'
+}
+
+export interface RecommendationDebugBreakdown {
+  positive_count: number
+  negative_count: number
+  comment_count: number
+  numerator: number
+  age_hours: number
+  denominator: number
+  raw_hot_score: number
+  capacity_ratio: number | null
+  capacity_boost_applied: boolean
+  social_reason: string
+}
+
+export interface RecommendationDebugSelectedService {
+  id: string
+  title: string
+  type: 'Offer' | 'Need' | 'Event'
+  owner_name: string
+  location_type: 'In-Person' | 'Online'
+  location_area?: string
+  current_position?: number
+  is_pinned: boolean
+  stored_hot_score: number
+  recomputed_hot_score: number
+  search_score: number
+  social_boost: number
+  weighted_social_boost: number
+  distance_km: number | null
+  participant_count: number
+  max_participants: number
+  breakdown: RecommendationDebugBreakdown
+  formula_lines: string[]
+  notes: string[]
+  sankey: {
+    nodes: RecommendationDebugNode[]
+    links: RecommendationDebugLink[]
+  }
+}
+
+export interface RecommendationDebugResponse {
+  viewer_options: RecommendationDebugViewerOption[]
+  effective_viewer: RecommendationDebugViewerOption | null
+  active_filter: string
+  total_services: number
+  selected_service: RecommendationDebugSelectedService | null
+}
+
+export interface RecommendationDebugOptionsResponse {
+  viewers: RecommendationDebugViewerOption[]
+  effective_viewer_id: string
+  can_override_viewer: boolean
+}
+
 export interface Tag {
   id: string
   name: string
