@@ -7472,3 +7472,58 @@ class ForumPostViewSet(viewsets.ViewSet):
             )
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
+
+# ── E2E Test Utilities ──────────────────────────────────────────────────────
+# These endpoints are ONLY available when DJANGO_E2E=1 (non-production).
+# They allow Playwright tests to set deterministic user state.
+
+class E2ESetBalanceView(APIView):
+    """
+    Set the authenticated user's timebank balance to an exact value.
+
+    Only available when DJANGO_E2E is enabled (non-production).
+
+    POST /api/e2e/set-balance/
+    Body: { "balance": 5.0 }
+    Response: { "id": "...", "email": "...", "balance": 5.0 }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if not getattr(settings, 'DJANGO_E2E', False):
+            return Response(
+                {'detail': 'This endpoint is only available in E2E mode.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        balance_raw = request.data.get('balance')
+        if balance_raw is None:
+            return Response(
+                {'detail': 'balance field is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            balance = Decimal(str(balance_raw))
+        except (InvalidOperation, ValueError, TypeError):
+            return Response(
+                {'detail': 'balance must be a valid number.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if balance < Decimal('-10.00') or balance > Decimal('99999999.99'):
+            return Response(
+                {'detail': 'balance out of allowed range.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user
+        user.timebank_balance = balance
+        user.save(update_fields=['timebank_balance'])
+
+        return Response({
+            'id': str(user.id),
+            'email': user.email,
+            'balance': float(user.timebank_balance),
+        })
