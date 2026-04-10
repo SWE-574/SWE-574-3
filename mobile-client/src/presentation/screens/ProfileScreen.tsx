@@ -26,8 +26,11 @@ import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
 import { listServices } from "../../api/services";
-import type { Service } from "../../api/types";
+import { getUserHistory } from "../../api/users";
+import type { Service, UserHistoryItem } from "../../api/types";
+import { groupHistoryItems, isOwnHistoryItem } from "../../utils/historyGrouping";
 import AchievementsSection from "../components/AchievementsSection";
+import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
 import ServiceCard from "../components/ServiceCard";
 
 type ProfileHomeNavigation = CompositeNavigationProp<
@@ -57,6 +60,7 @@ export default function ProfileScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [activeServices, setActiveServices] = useState<Service[]>([]);
   const [activeServicesOpen, setActiveServicesOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
 
   const initialForm = useMemo<EditableProfile>(
     () => ({
@@ -89,6 +93,25 @@ export default function ProfileScreen() {
       })
       .catch(() => {
         if (!cancelled) setActiveServices([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setHistoryItems([]);
+      return;
+    }
+    const uid = String(user.id);
+    let cancelled = false;
+    getUserHistory(uid)
+      .then((rows) => {
+        if (!cancelled) setHistoryItems(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setHistoryItems([]);
       });
     return () => {
       cancelled = true;
@@ -181,6 +204,13 @@ export default function ProfileScreen() {
   const joinedDate = typedUser.date_joined
     ? new Date(typedUser.date_joined).toLocaleDateString()
     : null;
+
+  const activeListingServices = activeServices.filter((s) => s.status === "Active");
+  const offersCount = activeListingServices.filter((s) => s.type === "Offer").length;
+  const needsCount = activeListingServices.filter((s) => s.type === "Need").length;
+  const exchangesCount = groupHistoryItems(
+    historyItems.filter(isOwnHistoryItem),
+  ).length;
 
   return (
     <View style={styles.container}>
@@ -300,6 +330,12 @@ export default function ProfileScreen() {
             )}
           </View>
         </View>
+
+        <ProfileListingStatsRow
+          offersCount={offersCount}
+          needsCount={needsCount}
+          exchangesCount={exchangesCount}
+        />
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>

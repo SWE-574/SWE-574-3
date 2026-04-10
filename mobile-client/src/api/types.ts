@@ -25,6 +25,8 @@ export interface UserSummary {
   badges?: string[];
   featured_badge?: string | null;
   featured_achievement_id?: string | null;
+  /** When false, other users should not see exchange history (web parity). */
+  show_history?: boolean;
 }
 
 /**
@@ -48,6 +50,23 @@ export interface PublicUserProfile {
   achievements?: string[];
   skills?: Array<{ id: string; name: string }>;
   portfolio_images?: string[];
+  /** Public exchange history visibility; when false, do not fetch history for viewers. */
+  show_history?: boolean;
+}
+
+/** GET /users/{id}/history/ row shape (web `UserHistoryItem`). */
+export interface UserHistoryItem {
+  service_id: string;
+  service_title: string;
+  service_type: "Offer" | "Need" | "Event";
+  schedule_type: "One-Time" | "Recurrent";
+  max_participants: number;
+  duration: number | string;
+  partner_name: string;
+  partner_id: string;
+  partner_avatar_url?: string | null;
+  completed_date: string;
+  was_provider: boolean;
 }
 
 export interface Tag {

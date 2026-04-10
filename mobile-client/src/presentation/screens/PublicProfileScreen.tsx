@@ -18,14 +18,16 @@ import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
-import { getUser } from "../../api/users";
+import { getUser, getUserHistory } from "../../api/users";
 import { listServices } from "../../api/services";
-import type { PublicUserProfile, Service } from "../../api/types";
+import type { PublicUserProfile, Service, UserHistoryItem } from "../../api/types";
+import { groupHistoryItems, isOwnHistoryItem } from "../../utils/historyGrouping";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import AchievementsSection from "../components/AchievementsSection";
+import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
 import ServiceCard from "../components/ServiceCard";
 
 const DEFAULT_BANNER_URI =
@@ -64,6 +66,7 @@ export default function PublicProfileScreen() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [activeServices, setActiveServices] = useState<Service[]>([]);
   const [activeServicesOpen, setActiveServicesOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +105,29 @@ export default function PublicProfileScreen() {
       cancelled = true;
     };
   }, [userId]);
+
+  useEffect(() => {
+    if (state.status === "loading" || state.status === "error") {
+      setHistoryItems([]);
+      return;
+    }
+    if (state.status !== "success") return;
+    if (!state.user.show_history) {
+      setHistoryItems([]);
+      return;
+    }
+    let cancelled = false;
+    getUserHistory(userId)
+      .then((rows) => {
+        if (!cancelled) setHistoryItems(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setHistoryItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state, userId]);
 
   if (state.status === "loading") {
     return (
@@ -166,6 +192,12 @@ export default function PublicProfileScreen() {
   const canOpenAchievementsList =
     authUser?.id != null && String(authUser.id) === String(user.id);
 
+  const offersCount = activeServices.filter((s) => s.type === "Offer").length;
+  const needsCount = activeServices.filter((s) => s.type === "Need").length;
+  const exchangesCount = groupHistoryItems(
+    historyItems.filter(isOwnHistoryItem),
+  ).length;
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -191,6 +223,12 @@ export default function PublicProfileScreen() {
             {bioText ? <Text style={styles.bio}>{bioText}</Text> : null}
           </View>
         </View>
+
+        <ProfileListingStatsRow
+          offersCount={offersCount}
+          needsCount={needsCount}
+          exchangesCount={exchangesCount}
+        />
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
