@@ -27,6 +27,7 @@ import {
   FiX,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
+import RecommendationDebugBar from '@/components/RecommendationDebugBar'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -109,6 +110,31 @@ function timeAgo(d: string) {
   const dy = Math.floor(h / 24)
   return dy < 7 ? `${dy}d ago`
     : new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function matchesDashboardSearch(service: Service, query: string) {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+
+  const haystacks = [
+    service.title,
+    service.description,
+    service.location_area,
+    service.location_type,
+    ...(service.tags?.map(tag => tag.name) ?? []),
+  ]
+
+  return haystacks.some(value => value?.toLowerCase().includes(q))
+}
+
+function sortServicesByFeedPriority(a: Service, b: Service) {
+  const pinDiff = Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned))
+  if (pinDiff !== 0) return pinDiff
+
+  const hotDiff = Number(b.hot_score ?? 0) - Number(a.hot_score ?? 0)
+  if (hotDiff !== 0) return hotDiff
+
+  return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
 }
 
 // ─── Tiny reusable bits ───────────────────────────────────────────────────────
@@ -213,7 +239,7 @@ function CardHeader({ service, gradient }: { service: Service; gradient: [string
 }
 
 function ServiceCard({
-  service, isOwn, handshake, incomingCount, pendingCount, onClick,
+  service, isOwn, handshake, incomingCount, pendingCount, onClick, onHover,
 }: {
   service: Service
   isOwn: boolean
@@ -221,6 +247,7 @@ function ServiceCard({
   incomingCount: number
   pendingCount: number
   onClick: () => void
+  onHover?: () => void
 }) {
   const owner     = service.user ?? service.provider
   const isOffer   = service.type === 'Offer'
@@ -234,6 +261,8 @@ function ServiceCard({
   return (
     <Box
       as="button" onClick={onClick} w="full" textAlign="left"
+      onMouseEnter={onHover}
+      onFocus={onHover}
       bg={WHITE} borderRadius="16px"
       border="1px solid" borderColor={isOwn ? '#FED7AA' : GRAY200}
       overflow="hidden"
@@ -374,6 +403,7 @@ const DashboardPage = () => {
 
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
+  const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
 
   const searchTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -406,13 +436,14 @@ const DashboardPage = () => {
     const active = raw.filter((s) => s.status === 'Active' && s.is_visible)
     const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
     setAllActiveServices(unique)
-    let filtered = unique
+    let filtered = unique.filter((service) => matchesDashboardSearch(service, debouncedSearch))
     if (activeFilter === 'online')    filtered = filtered.filter((s) => s.location_type === 'Online')
     if (activeFilter === 'recurrent') filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
     if (activeFilter === 'newest')    filtered = [...filtered].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     if (activeFilter === 'weekend')   filtered = filtered.filter((s) => /saturday|sunday|weekend/i.test(s.schedule_details ?? ''))
-    // Float pinned services to the top
-    filtered.sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
+    if (activeFilter !== 'newest') {
+      filtered = [...filtered].sort(sortServicesByFeedPriority)
+    }
     setServices(filtered)
   }, [activeFilter, debouncedSearch, locationEnabled, userLocation, debouncedDistance])
 
@@ -514,6 +545,16 @@ const DashboardPage = () => {
         overflow="hidden"
         position="relative"
       >
+        <RecommendationDebugBar
+          services={displayServices}
+          hoveredServiceId={hoveredServiceId}
+          activeFilter={activeFilter}
+          search={debouncedSearch}
+          lat={locationEnabled ? userLocation?.lat : undefined}
+          lng={locationEnabled ? userLocation?.lng : undefined}
+          distance={locationEnabled ? debouncedDistance : undefined}
+        />
+
         {/* ── Sidebar (desktop always visible; mobile: overlay) ───────────── */}
         <Box
           display={{ base: sidebarOpen ? 'flex' : 'none', lg: 'flex' }}
@@ -723,6 +764,7 @@ const DashboardPage = () => {
                       incomingCount={aCount}
                       pendingCount={pCount}
                       onClick={() => navigate(`/service-detail/${service.id}`)}
+                      onHover={() => setHoveredServiceId(service.id)}
                     />
                   )
                 })}
