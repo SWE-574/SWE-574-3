@@ -7,7 +7,7 @@
  *  3. Search/filter bar is present and functional
  *  4. Polling does not cause page errors (no console errors after wait)
  *
- * Demo data: 15 services seeded by setup_demo.py across multiple users.
+ * Demo data: 15+ services seeded by setup_demo.py across multiple users.
  *
  * Note: Without geolocation (CI environment) the dashboard may not show
  * In-Person services in the initial listing. These tests use the search
@@ -17,33 +17,41 @@
 import { test, expect } from '@playwright/test'
 import { loginAs, USERS } from './helpers/auth'
 
+/**
+ * Wait for the dashboard to load and search for a service by name.
+ * Waits for the API response to ensure search results are rendered.
+ */
+async function searchDashboard(page: import('@playwright/test').Page, query: string) {
+  await page.goto('/dashboard')
+  const searchInput = page.getByPlaceholder(/search/i).first()
+  await expect(searchInput).toBeVisible({ timeout: 15_000 })
+  // Fill the search input and wait for the debounced API call to complete
+  await Promise.all([
+    page.waitForResponse(
+      (resp) => resp.url().includes('/api/services') && resp.status() === 200,
+      { timeout: 20_000 }
+    ),
+    searchInput.fill(query),
+  ])
+}
+
 test.describe('Dashboard', () => {
   test('authenticated user sees service cards on the dashboard', async ({ page }) => {
     await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
+    await searchDashboard(page, 'Manti')
 
-    // The search input should be visible — proof the dashboard loaded
-    const searchInput = page.getByPlaceholder(/search/i).first()
-    await expect(searchInput).toBeVisible({ timeout: 15_000 })
-
-    // Use search to find a known demo service (search bypasses geolocation)
-    await searchInput.fill('Manti')
     await expect(
       page.getByText(/Manti/i).first(),
-    ).toBeVisible({ timeout: 20_000 })
+    ).toBeVisible({ timeout: 10_000 })
   })
 
   test('dashboard images have lazy loading attribute', async ({ page }) => {
     await loginAs(page, USERS.elif)
-    await page.goto('/dashboard')
+    await searchDashboard(page, 'Manti')
 
-    // Search for a service to ensure cards render
-    const searchInput = page.getByPlaceholder(/search/i).first()
-    await expect(searchInput).toBeVisible({ timeout: 15_000 })
-    await searchInput.fill('Manti')
     await expect(
       page.getByText(/Manti/i).first(),
-    ).toBeVisible({ timeout: 20_000 })
+    ).toBeVisible({ timeout: 10_000 })
 
     // All rendered images should use loading="lazy" (passes even with zero images)
     const nonLazyImages = page.locator('img:not([loading="lazy"])')
@@ -52,17 +60,9 @@ test.describe('Dashboard', () => {
 
   test('search bar is present and filters services', async ({ page }) => {
     await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
+    await searchDashboard(page, 'Chess')
 
-    // Find the search input
-    const searchInput = page.getByPlaceholder(/search/i).first()
-    await expect(searchInput).toBeVisible({ timeout: 15_000 })
-
-    // Type a search term that matches one specific service
-    await searchInput.fill('Chess')
-
-    // After debounce, the Chess service should be visible
-    await expect(page.getByText(/Chess/i).first()).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText(/Chess/i).first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('filter tabs are visible and clickable', async ({ page }) => {

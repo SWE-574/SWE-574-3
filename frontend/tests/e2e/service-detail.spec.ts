@@ -7,8 +7,8 @@
  *  3. Service metadata (type, creator, tags) is displayed
  *  4. The page handles navigation from dashboard correctly
  *
- * Demo data: Uses Elif's "Traditional Manti Cooking Workshop" which has
- * tags, description, and is an Offer type service.
+ * Demo data: Uses Elif's "Neighborhood Manti Cooking Circle" (seeded by
+ * setup_demo.py) which has tags, description, and is an Offer type service.
  *
  * Note: Uses search to find demo services since the dashboard listing
  * depends on geolocation which is unavailable in CI.
@@ -17,15 +17,24 @@
 import { test, expect } from '@playwright/test'
 import { loginAs, USERS } from './helpers/auth'
 
-const DEMO_SERVICE = 'Traditional Manti Cooking Workshop'
+const DEMO_SERVICE = 'Neighborhood Manti Cooking Circle'
 
 /** Search for and click a demo service on the dashboard. */
 async function navigateToService(page: import('@playwright/test').Page, title: string) {
   await page.goto('/dashboard')
   const searchInput = page.getByPlaceholder(/search/i).first()
   await expect(searchInput).toBeVisible({ timeout: 15_000 })
-  await searchInput.fill(title)
-  await expect(page.getByText(title).first()).toBeVisible({ timeout: 20_000 })
+
+  // Fill the search input and wait for the API response
+  await Promise.all([
+    page.waitForResponse(
+      (resp) => resp.url().includes('/api/services') && resp.status() === 200,
+      { timeout: 20_000 }
+    ),
+    searchInput.fill(title.split(' ')[0]), // Search by first word to avoid exact match issues
+  ])
+
+  await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 })
   await page.getByText(title).first().click()
   await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
 }
