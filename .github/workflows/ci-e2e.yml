@@ -173,6 +173,48 @@ jobs:
 
           echo "$RESPONSE" | python3 -c "import json,sys; payload=json.load(sys.stdin); assert ('access' in payload or 'token' in payload), payload; assert 'refresh' in payload, payload"
 
+      # ── 9b. Verify services API returns seeded data ───────────────────────
+      - name: Verify services API returns data
+        run: |
+          # Log in to get a token
+          TOKEN=$(curl --silent --fail \
+            -H "Content-Type: application/json" \
+            -d '{"email":"elif@demo.com","password":"demo123"}' \
+            http://localhost/api/auth/login/ | python3 -c "import json,sys; print(json.load(sys.stdin)['access'])")
+
+          # Fetch services and verify we got results
+          SERVICES=$(curl --silent --fail \
+            -H "Authorization: Bearer $TOKEN" \
+            http://localhost/api/services/)
+
+          COUNT=$(echo "$SERVICES" | python3 -c "
+          import json,sys
+          data = json.load(sys.stdin)
+          results = data.get('results', data) if isinstance(data, dict) else data
+          print(len(results))
+          ")
+
+          echo "Services API returned $COUNT services"
+          if [ "$COUNT" -lt 1 ]; then
+            echo "::error::Services API returned no data after seeding"
+            echo "$SERVICES" | python3 -m json.tool | head -50
+            exit 1
+          fi
+
+          # Also test search
+          SEARCH=$(curl --silent --fail \
+            -H "Authorization: Bearer $TOKEN" \
+            "http://localhost/api/services/?search=Manti")
+
+          SEARCH_COUNT=$(echo "$SEARCH" | python3 -c "
+          import json,sys
+          data = json.load(sys.stdin)
+          results = data.get('results', data) if isinstance(data, dict) else data
+          print(len(results))
+          ")
+
+          echo "Search for 'Manti' returned $SEARCH_COUNT results"
+
       # ── 10. Set up Node.js ────────────────────────────────────────────────
       - name: Set up Node.js
         uses: actions/setup-node@v4
