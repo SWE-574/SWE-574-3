@@ -30,6 +30,7 @@ from .views import (
     AdminUserViewSet,
     AdminCommentViewSet,
     AdminAuditLogViewSet,
+    AdminSettingsView,
     ExpressInterestView,
     TransactionHistoryViewSet,
     WikidataSearchView,
@@ -278,6 +279,7 @@ forum_post_recent = ForumPostViewSet.as_view({
 urlpatterns = [
     path('health/', health_check, name='health_check'),
     path('metrics/', metrics_endpoint, name='metrics'),
+    path('admin/settings/', AdminSettingsView.as_view(), name='admin-settings'),
     path('auth/register/', UserRegistrationView.as_view(), name='register'),
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),

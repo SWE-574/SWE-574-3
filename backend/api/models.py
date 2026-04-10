@@ -680,6 +680,26 @@ class AdminAuditLog(models.Model):
             )
 
 
+class PlatformSetting(models.Model):
+    """Singleton-style platform settings controlled from the admin panel."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    ranking_debug_enabled = models.BooleanField(
+        default=False,
+        help_text='Whether the dashboard ranking debug panel is globally available.',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+
 class ChatRoom(models.Model):
     """Public chat room for service discussions (lobby)"""
     TYPE_CHOICES = (

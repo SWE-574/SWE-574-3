@@ -1,5 +1,5 @@
 import { apiClient } from './api'
-import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminTransaction, AdminUserDetail, AdminUserSummary, PaginatedResponse } from '@/types'
+import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminSettings, AdminTransaction, AdminUserDetail, AdminUserSummary, PaginatedResponse } from '@/types'
 
 export type ReportStatusFilter = 'pending' | 'resolved' | 'dismissed'
 export type CommentStatusFilter = 'active' | 'removed' | 'all'
@@ -25,6 +25,16 @@ function toPaginated<T>(data: PaginatedResponse<T> | T[]): PaginatedResponse<T> 
 }
 
 export const adminAPI = {
+  getSettings: async (signal?: AbortSignal): Promise<AdminSettings> => {
+    const res = await apiClient.get<AdminSettings>('/admin/settings/', { signal })
+    return res.data
+  },
+
+  updateSettings: async (payload: Partial<AdminSettings>, signal?: AbortSignal): Promise<AdminSettings> => {
+    const res = await apiClient.patch<AdminSettings>('/admin/settings/', payload, { signal })
+    return res.data
+  },
+
   getMetrics: async (signal?: AbortSignal): Promise<AdminMetrics> => {
     const res = await apiClient.get<AdminMetrics>('/metrics/', { signal })
     return res.data
