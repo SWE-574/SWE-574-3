@@ -12,6 +12,7 @@ const wsBase = `${wsProtocol}://${apiUrl.host}`;
 export const buildChatWsUrl = (id: string) => `${wsBase}/ws/chat/${id}/`;
 export const buildGroupChatWsUrl = (id: string) => `${wsBase}/ws/group-chat/${id}/`;
 export const buildEventChatWsUrl = (roomId: string) => `${wsBase}/ws/public-chat/${roomId}/`;
+export const buildNotificationWsUrl = () => `${wsBase}/ws/notifications/`;
 
 /** Append auth token to a WebSocket URL for authenticated connections. */
 export function withAuthToken(wsUrl: string): string {

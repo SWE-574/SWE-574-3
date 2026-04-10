@@ -20,6 +20,8 @@ import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
 import AchievementsSection from "../components/AchievementsSection";
+import NotificationBadge from "../components/NotificationBadge";
+import { useNotificationStore } from "../../store/useNotificationStore";
 
 type EditableProfile = {
   first_name: string;
@@ -38,6 +40,7 @@ export default function ProfileScreen() {
       NativeStackNavigationProp<ProfileStackParamList, "ProfileHome">
     >();
   const insets = useSafeAreaInsets();
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
   const styles = useMemo(
     () => getStyles(insets.top, insets.bottom),
     [insets.top, insets.bottom],
@@ -153,6 +156,29 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
+      <TouchableOpacity
+        onPress={() => (navigation as any).navigate("Notifications")}
+        style={{
+          position: "absolute",
+          top: insets.top + 12,
+          right: 16,
+          zIndex: 10,
+          backgroundColor: "rgba(255,255,255,0.9)",
+          borderRadius: 20,
+          width: 40,
+          height: 40,
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: "#000",
+          shadowOpacity: 0.1,
+          shadowRadius: 4,
+          shadowOffset: { width: 0, height: 2 },
+          elevation: 4,
+        }}
+      >
+        <Ionicons name="notifications-outline" size={22} color={colors.GREEN} />
+        <NotificationBadge count={unreadCount} />
+      </TouchableOpacity>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}

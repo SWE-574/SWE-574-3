@@ -39,7 +39,7 @@ from .exceptions import create_error_response, ErrorCodes
 
 from .models import (
     User, Service, Tag, Handshake, ChatMessage,
-    Notification, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
+    Notification, DevicePushToken, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
     ChatRoom, PublicChatMessage, ServiceGroupChatMessage, GroupChatSession, Comment, NegativeRep,
     AdminAuditLog,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
@@ -58,6 +58,7 @@ from .serializers import (
     HandshakeSerializer,
     ChatMessageSerializer,
     NotificationSerializer,
+    DevicePushTokenSerializer,
     ReputationRepSerializer,
     ReportSerializer,
     TransactionHistorySerializer,
@@ -4597,6 +4598,35 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     def unread_count(self, request):
         count = Notification.objects.filter(user=request.user, is_read=False).count()
         return Response({'count': count})
+
+    @extend_schema(
+        summary='Register an Expo push token for this device',
+        request=DevicePushTokenSerializer,
+        responses={201: inline_serializer('PushTokenResponse', {'status': drf_serializers.CharField()})},
+    )
+    @action(detail=False, methods=['post'], url_path='register-push-token')
+    def register_push_token(self, request):
+        serializer = DevicePushTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = serializer.validated_data['token']
+        obj, created = DevicePushToken.objects.update_or_create(
+            token=token,
+            defaults={'user': request.user, 'is_active': True},
+        )
+        return Response({'status': 'created' if created else 'updated'}, status=201 if created else 200)
+
+    @extend_schema(
+        summary='Deregister an Expo push token (e.g. on logout)',
+        request=DevicePushTokenSerializer,
+        responses={200: inline_serializer('PushTokenDeregisterResponse', {'status': drf_serializers.CharField()})},
+    )
+    @action(detail=False, methods=['post'], url_path='deregister-push-token')
+    def deregister_push_token(self, request):
+        serializer = DevicePushTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = serializer.validated_data['token']
+        DevicePushToken.objects.filter(token=token, user=request.user).update(is_active=False)
+        return Response({'status': 'deregistered'})
 
 class ReputationViewSet(viewsets.ModelViewSet):
     """

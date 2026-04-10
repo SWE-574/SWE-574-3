@@ -1,10 +1,16 @@
 import React from "react";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
+import { useNavigation } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
+import { useNotificationSocket } from "../hooks/useNotificationSocket";
+import { usePushNotifications } from "../hooks/usePushNotifications";
 import BottomTabNavigator from "./BottomTabNavigator";
 
 export default function RootNavigator() {
   const { isLoading } = useAuth();
+  const navigation = useNavigation();
+  useNotificationSocket();
+  usePushNotifications(navigation as any);
 
   if (isLoading) {
     return (

@@ -5,6 +5,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { UserSummary } from "../api/types";
 import * as authApi from "../api/auth";
+import { useNotificationStore } from "../store/useNotificationStore";
 import type { LoginRequest, RegisterRequest } from "../api/auth";
 import { getMe } from "../api/users";
 import { getStoredTokens } from "../api/storage";
@@ -50,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     await authApi.logout();
+    useNotificationStore.getState().reset();
     setUser(null);
   }, []);
 
