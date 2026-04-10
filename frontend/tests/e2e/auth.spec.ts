@@ -18,7 +18,7 @@ test.describe('Authentication', () => {
     // Should be on the dashboard
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
     // Navbar is rendered for authenticated users
-    await expect(page.locator('nav')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 10_000 })
   })
 
   test('wrong password → shows error message', async ({ page }) => {
@@ -60,7 +60,7 @@ test.describe('Authentication', () => {
   test('logged-in user can log out', async ({ page }) => {
     await loginAs(page, USERS.elif)
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
-    await expect(page.locator('nav')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 10_000 })
 
     await logout(page)
   })

@@ -13,7 +13,7 @@ test.describe('NFR-01d: Session persistence across page reload', () => {
     await page.reload()
 
     await expect(page).not.toHaveURL(/\/login/, { timeout: 15_000 })
-    await expect(page.locator('nav')).toBeVisible()
+    await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 15_000 })
   })
 
   test('session persists when navigating to another protected route then reloading', async ({ page }) => {
