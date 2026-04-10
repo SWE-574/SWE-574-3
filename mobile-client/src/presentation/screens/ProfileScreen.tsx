@@ -144,8 +144,6 @@ export default function ProfileScreen() {
     achievements?: string[];
   };
 
-  const completedAchievementsCount = typedUser.achievements?.length ?? 0;
-
   const fullName = `${form.first_name} ${form.last_name}`.trim();
   const joinedDate = typedUser.date_joined
     ? new Date(typedUser.date_joined).toLocaleDateString()
@@ -355,7 +353,19 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        <AchievementsSection completedIds={typedUser.achievements ?? []} />
+        <AchievementsSection
+          completedIds={
+            [...new Set([...(typedUser.achievements ?? []), ...(typedUser.badges ?? [])])]
+          }
+          onViewAll={
+            user?.id
+              ? () =>
+                  navigation.navigate("AchievementsList", {
+                    userId: user.id,
+                  })
+              : undefined
+          }
+        />
 
         {!!typedUser.portfolio_images?.length && (
           <View style={styles.sectionCard}>

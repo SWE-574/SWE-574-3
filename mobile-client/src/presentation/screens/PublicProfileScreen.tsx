@@ -8,13 +8,15 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRoute } from "@react-navigation/native";
+import { useRoute, useNavigation } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
 import { getUser } from "../../api/users";
 import type { PublicUserProfile } from "../../api/types";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import { colors } from "../../constants/colors";
+import { useAuth } from "../../context/AuthContext";
 import AchievementsSection from "../components/AchievementsSection";
 
 const DEFAULT_BANNER_URI =
@@ -36,6 +38,11 @@ function achievementIdsForDisplay(user: PublicUserProfile): string[] {
 
 export default function PublicProfileScreen() {
   const route = useRoute<RouteProp<ProfileStackParamList, "PublicProfile">>();
+  const navigation =
+    useNavigation<
+      NativeStackNavigationProp<ProfileStackParamList, "PublicProfile">
+    >();
+  const { user: authUser } = useAuth();
   const { userId } = route.params;
   const insets = useSafeAreaInsets();
   const styles = useMemo(
@@ -124,6 +131,8 @@ export default function PublicProfileScreen() {
     ) ?? [];
 
   const achievementIds = achievementIdsForDisplay(user);
+  const canOpenAchievementsList =
+    authUser?.id != null && String(authUser.id) === String(user.id);
 
   return (
     <View style={styles.container}>
@@ -221,7 +230,17 @@ export default function PublicProfileScreen() {
         ) : null}
 
         {achievementIds.length > 0 ? (
-          <AchievementsSection completedIds={achievementIds} />
+          <AchievementsSection
+            completedIds={achievementIds}
+            onViewAll={
+              canOpenAchievementsList
+                ? () =>
+                    navigation.navigate("AchievementsList", {
+                      userId: user.id,
+                    })
+                : undefined
+            }
+          />
         ) : null}
 
         {portfolioUrls.length > 0 ? (

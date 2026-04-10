@@ -33,9 +33,14 @@ export default function AchievementsSection({
         <Text style={styles.title}>Achievements</Text>
         <TouchableOpacity
           onPress={onViewAll}
+          disabled={!onViewAll}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <Text style={styles.viewAll}>View all</Text>
+          <Text
+            style={[styles.viewAll, !onViewAll && styles.viewAllDisabled]}
+          >
+            View all
+          </Text>
         </TouchableOpacity>
       </View>
       <View style={styles.list}>
@@ -93,6 +98,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "500",
     color: colors.GREEN,
+  },
+  viewAllDisabled: {
+    color: colors.GRAY400,
+    opacity: 0.7,
   },
   list: {
     gap: 10,
