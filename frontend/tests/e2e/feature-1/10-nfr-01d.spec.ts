@@ -3,7 +3,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { loginAs, USERS } from '../helpers/auth'
+import { loginAs, openUserMenu, USERS } from '../helpers/auth'
 
 test.describe('NFR-01d: Session persistence across page reload', () => {
   test('authenticated session survives a full page reload on dashboard', async ({ page }) => {
@@ -38,13 +38,7 @@ test.describe('NFR-01d: Session persistence across page reload', () => {
     expect(hasAccessBefore).toBe(true)
 
     // Log out via nav dropdown, capturing the logout response
-    const avatar = page.locator('img[alt="avatar"]')
-    if (await avatar.isVisible().catch(() => false)) {
-      await avatar.click()
-    } else {
-      const initials = USERS.burak.name.split(' ').map(n => n[0]).join('')
-      await page.locator('nav').getByText(initials).click()
-    }
+    await openUserMenu(page)
 
     const [logoutResponse] = await Promise.all([
       page.waitForResponse(

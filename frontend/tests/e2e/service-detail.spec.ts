@@ -9,41 +9,40 @@
  *
  * Demo data: Uses Elif's "Traditional Manti Cooking Workshop" which has
  * tags, description, and is an Offer type service.
+ *
+ * Note: Uses search to find demo services since the dashboard listing
+ * depends on geolocation which is unavailable in CI.
  */
 
 import { test, expect } from '@playwright/test'
 import { loginAs, USERS } from './helpers/auth'
 
+const DEMO_SERVICE = 'Traditional Manti Cooking Workshop'
+
+/** Search for and click a demo service on the dashboard. */
+async function navigateToService(page: import('@playwright/test').Page, title: string) {
+  await page.goto('/dashboard')
+  const searchInput = page.getByPlaceholder(/search/i).first()
+  await expect(searchInput).toBeVisible({ timeout: 15_000 })
+  await searchInput.fill(title)
+  await expect(page.getByText(title).first()).toBeVisible({ timeout: 20_000 })
+  await page.getByText(title).first().click()
+  await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
+}
+
 test.describe('Service Detail Page', () => {
   test('clicking a service card navigates to its detail page', async ({ page }) => {
     await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
-
-    // Wait for services to load
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-
-    // Click on a service card
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
-
-    // Should navigate to service detail
-    await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
+    await navigateToService(page, DEMO_SERVICE)
   })
 
   test('service detail page shows title and description', async ({ page }) => {
     await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
-
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
-    await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
+    await navigateToService(page, DEMO_SERVICE)
 
     // The service title should appear on the detail page
     await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
+      page.getByText(DEMO_SERVICE).first(),
     ).toBeVisible({ timeout: 10_000 })
 
     // Service type badge (Offer/Need/Event) should be visible
@@ -54,13 +53,7 @@ test.describe('Service Detail Page', () => {
 
   test('service detail images have lazy loading', async ({ page }) => {
     await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
-
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
-    await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
+    await navigateToService(page, DEMO_SERVICE)
 
     // Wait for page to fully render
     await page.waitForTimeout(2_000)
@@ -72,14 +65,7 @@ test.describe('Service Detail Page', () => {
 
   test('service creator info is displayed', async ({ page }) => {
     await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
-
-    // Click on Elif's service
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
-    await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
+    await navigateToService(page, DEMO_SERVICE)
 
     // The service creator name should appear (Elif)
     await expect(
@@ -92,15 +78,9 @@ test.describe('Service Detail Page', () => {
     page.on('pageerror', (err) => errors.push(err.message))
 
     await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
-
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
+    await navigateToService(page, DEMO_SERVICE)
 
     // Capture the URL
-    await page.waitForURL(/\/service-detail\//, { timeout: 10_000 })
     const detailUrl = page.url()
 
     // Navigate away and come back directly
@@ -109,7 +89,7 @@ test.describe('Service Detail Page', () => {
 
     // Should load without errors
     await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
+      page.getByText(DEMO_SERVICE).first(),
     ).toBeVisible({ timeout: 15_000 })
     expect(errors).toHaveLength(0)
   })

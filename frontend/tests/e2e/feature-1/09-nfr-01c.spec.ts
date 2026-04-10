@@ -3,7 +3,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { USERS } from '../helpers/auth'
+import { openUserMenu, USERS } from '../helpers/auth'
 
 const PERF_BUDGET_MS = 2_000
 
@@ -31,13 +31,7 @@ test.describe('NFR-01c: Login and logout complete within 2 seconds', () => {
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
 
     // Open avatar dropdown
-    const avatar = page.locator('img[alt="avatar"]')
-    if (await avatar.isVisible().catch(() => false)) {
-      await avatar.click()
-    } else {
-      const initials = USERS.elif.name.split(' ').map(n => n[0]).join('')
-      await page.locator('nav').getByText(initials).click()
-    }
+    await openUserMenu(page)
 
     const start = Date.now()
     await page.getByText('Log Out').click()

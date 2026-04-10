@@ -6,9 +6,11 @@ test('FR-05a: registered user can create an offer with core details and location
 
   // Open the offer form and confirm the core fields are present.
   await loginAs(page, USERS.cem)
+  // Wait for authenticated state to fully hydrate before navigating
+  await expect(page.locator('nav')).toBeVisible({ timeout: 15_000 })
   await page.goto('/post-offer')
 
-  await expect(page.locator('input[name="title"]')).toBeVisible()
+  await expect(page.locator('input[name="title"]')).toBeVisible({ timeout: 10_000 })
   await expect(page.locator('textarea[name="description"]')).toBeVisible()
   await expect(page.locator('input[name="duration"]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'In-Person' })).toBeVisible()

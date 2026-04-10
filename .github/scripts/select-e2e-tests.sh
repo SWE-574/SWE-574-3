@@ -32,6 +32,8 @@ SMOKE_TESTS=(
   "${TEST_DIR}/feature-1/03-fr-01c.spec.ts"
   "${TEST_DIR}/feature-1/04-fr-01d.spec.ts"
   "${TEST_DIR}/feature-5/01-fr-05a.spec.ts"
+  "${TEST_DIR}/feature-13/01-fr-13a.spec.ts"
+  "${TEST_DIR}/feature-13/02-fr-13b.spec.ts"
 )
 
 # ── Shared paths — if ANY of these change, run the full suite ────────────────

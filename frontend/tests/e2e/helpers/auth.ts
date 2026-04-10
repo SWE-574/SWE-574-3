@@ -27,6 +27,30 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
 
   // Wait until we have left the login page (redirected to dashboard or /)
   await expect(page).not.toHaveURL(/\/login/, { timeout: 20_000 })
+  // Wait for the authenticated shell to render (nav proves auth state is hydrated)
+  await expect(page.locator('nav')).toBeVisible({ timeout: 15_000 })
+}
+
+/**
+ * Open the user dropdown menu in the desktop navbar.
+ * Works regardless of whether the user has an avatar image or initials.
+ */
+export async function openUserMenu(page: Page): Promise<void> {
+  const trigger = page.getByTestId('user-menu-trigger')
+  await expect(trigger).toBeVisible({ timeout: 10_000 })
+  await trigger.click()
+  // Wait for the dropdown to open (Log Out item becomes visible)
+  await expect(page.getByText('Log Out')).toBeVisible({ timeout: 5_000 })
+}
+
+/**
+ * Log the current user out via the navbar dropdown.
+ * Resolves once the page has left the dashboard.
+ */
+export async function logout(page: Page): Promise<void> {
+  await openUserMenu(page)
+  await page.getByText('Log Out').click()
+  await expect(page).not.toHaveURL(/\/dashboard/, { timeout: 10_000 })
 }
 
 /**
