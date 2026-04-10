@@ -1,8 +1,7 @@
 import pytest
 from rest_framework.test import APIClient
 
-from api.models import UserFollow
-from api.tests.helpers.factories import AdminUserFactory, ServiceFactory, UserFactory
+from api.tests.helpers.factories import ServiceFactory, UserFactory
 
 
 @pytest.mark.django_db
@@ -37,24 +36,3 @@ class TestServiceDebugRankingApi:
         assert payload['selected_service']['search_score'] > 0
         assert payload['selected_service']['sankey']['nodes']
         assert payload['selected_service']['sankey']['links']
-
-    def test_admin_can_override_viewer_for_social_boost(self):
-        admin = AdminUserFactory()
-        followed_owner = UserFactory()
-        selected_viewer = UserFactory()
-        service = ServiceFactory(user=followed_owner, status='Active')
-        UserFollow.objects.create(follower=selected_viewer, following=followed_owner)
-
-        client = APIClient()
-        client.force_authenticate(user=admin)
-
-        response = client.post('/api/services/debug-ranking/', {
-            'service_ids': [str(service.id)],
-            'selected_service_id': str(service.id),
-            'viewer_id': str(selected_viewer.id),
-        }, format='json')
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload['effective_viewer']['id'] == str(selected_viewer.id)
-        assert payload['selected_service']['social_boost'] == pytest.approx(1.0)

@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type ReactNode,
 } from 'react'
 import { Box, Flex, Spinner, Stack, Text } from '@chakra-ui/react'
@@ -15,7 +14,6 @@ import { serviceAPI } from '@/services/serviceAPI'
 import type {
   RecommendationDebugLink,
   RecommendationDebugNode,
-  RecommendationDebugOptionsResponse,
   RecommendationDebugResponse,
   Service,
 } from '@/types'
@@ -156,8 +154,6 @@ export default function RecommendationDebugPanel({
   lng?: number
   distance?: number
 }) {
-  const [options, setOptions] = useState<RecommendationDebugOptionsResponse | null>(null)
-  const [viewerId, setViewerId] = useState('')
   const [data, setData] = useState<RecommendationDebugResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -167,23 +163,6 @@ export default function RecommendationDebugPanel({
   const serviceIds = useMemo(() => services.map(service => service.id), [services])
   const selectedServiceId = hoveredServiceId ?? serviceIds[0] ?? null
   const serviceKey = useMemo(() => serviceIds.join(','), [serviceIds])
-
-  useEffect(() => {
-    if (options) return
-
-    const controller = new AbortController()
-    serviceAPI.getRankingDebugOptions(controller.signal)
-      .then(response => {
-        setOptions(response)
-        setViewerId(response.effective_viewer_id)
-      })
-      .catch(errorValue => {
-        if (errorValue?.name === 'CanceledError' || errorValue?.code === 'ERR_CANCELED') return
-        setError(errorValue?.message ?? 'Failed to load debug options')
-      })
-
-    return () => controller.abort()
-  }, [options])
 
   useEffect(() => {
     if (!selectedServiceId || serviceIds.length === 0) {
@@ -202,7 +181,6 @@ export default function RecommendationDebugPanel({
         const response = await serviceAPI.getRankingDebug({
           service_ids: serviceIds,
           selected_service_id: selectedServiceId,
-          viewer_id: viewerId || undefined,
           search,
           lat,
           lng,
@@ -223,7 +201,7 @@ export default function RecommendationDebugPanel({
 
     load()
     return () => controller.abort()
-  }, [activeFilter, distance, lat, lng, search, selectedServiceId, serviceIds, serviceKey, viewerId])
+  }, [activeFilter, distance, lat, lng, search, selectedServiceId, serviceIds, serviceKey])
 
   const selected = data?.selected_service
   const visiblePosition = selectedServiceId ? serviceIds.indexOf(selectedServiceId) + 1 : 0
@@ -263,33 +241,6 @@ export default function RecommendationDebugPanel({
       </Flex>
 
       <Stack gap={3}>
-        {options?.viewers && options.viewers.length > 1 ? (
-          <SectionCard>
-            <Text fontSize="xs" fontWeight="800" color="gray.600" mb={1.5}>
-              Viewer override
-            </Text>
-            <select
-              value={viewerId}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) => setViewerId(event.target.value)}
-              style={{
-                width: '100%',
-                padding: '9px 12px',
-                borderRadius: '12px',
-                border: '1px solid #E2E8F0',
-                background: '#FFFFFF',
-                fontSize: '14px',
-                color: '#0F172A',
-              }}
-            >
-              {options.viewers.map(option => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </SectionCard>
-        ) : null}
-
         <Flex gap={2} wrap="wrap">
           <ContextChip label={`Filter: ${activeFilter}`} color="orange" />
           {search ? <ContextChip label={search} icon={<FiSearch size={11} />} color="blue" /> : null}

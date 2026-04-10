@@ -80,7 +80,7 @@ from .utils import (
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
 )
 from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService, get_social_proximity_boosts
-from .ranking_debug import build_service_debug_payload, get_debug_viewer_options
+from .ranking_debug import build_service_debug_payload
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
@@ -2306,20 +2306,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
-        methods=['get'],
-        url_path='debug-ranking-options',
-        permission_classes=[permissions.IsAuthenticated],
-    )
-    def debug_ranking_options(self, request):
-        is_admin = request.user.role in ADMIN_ROLES
-        return Response({
-            'viewers': get_debug_viewer_options(request.user, is_admin),
-            'effective_viewer_id': str(request.user.id),
-            'can_override_viewer': is_admin,
-        })
-
-    @action(
-        detail=False,
         methods=['post'],
         url_path='debug-ranking',
         permission_classes=[permissions.IsAuthenticated],
@@ -2347,8 +2333,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
             service_ids=service_ids,
             selected_service_id=request.data.get('selected_service_id'),
             request_user=request.user,
-            viewer_override_id=request.data.get('viewer_id'),
-            is_admin=request.user.role in ADMIN_ROLES,
             search=(request.data.get('search') or '').strip(),
             tag_ids=[str(tag_id) for tag_id in (request.data.get('tags') or []) if tag_id],
             lat=_to_float(request.data.get('lat')),

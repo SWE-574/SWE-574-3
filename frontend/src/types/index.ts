@@ -206,12 +206,6 @@ export interface ServiceMedia {
   order?: number
 }
 
-export interface RecommendationDebugViewerOption {
-  id: string
-  label: string
-  email: string
-}
-
 export interface RecommendationDebugNode {
   id: string
   label: string
@@ -265,17 +259,9 @@ export interface RecommendationDebugSelectedService {
 }
 
 export interface RecommendationDebugResponse {
-  viewer_options: RecommendationDebugViewerOption[]
-  effective_viewer: RecommendationDebugViewerOption | null
   active_filter: string
   total_services: number
   selected_service: RecommendationDebugSelectedService | null
-}
-
-export interface RecommendationDebugOptionsResponse {
-  viewers: RecommendationDebugViewerOption[]
-  effective_viewer_id: string
-  can_override_viewer: boolean
 }
 
 export interface Tag {

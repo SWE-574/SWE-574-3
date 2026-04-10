@@ -1,6 +1,5 @@
 import apiClient from './api'
 import type {
-  RecommendationDebugOptionsResponse,
   RecommendationDebugResponse,
   Service,
 } from '@/types'
@@ -22,7 +21,6 @@ export interface ServiceListParams {
 export interface ServiceRankingDebugParams {
   service_ids: string[]
   selected_service_id?: string
-  viewer_id?: string
   search?: string
   tags?: string[]
   lat?: number
@@ -122,11 +120,6 @@ export const serviceAPI = {
 
   setPrimaryMedia: async (serviceId: string, mediaId: string): Promise<Service> => {
     const res = await apiClient.patch<Service>(`/services/${serviceId}/set-primary-media/`, { media_id: mediaId })
-    return res.data
-  },
-
-  getRankingDebugOptions: async (signal?: AbortSignal): Promise<RecommendationDebugOptionsResponse> => {
-    const res = await apiClient.get<RecommendationDebugOptionsResponse>('/services/debug-ranking-options/', { signal })
     return res.data
   },
 

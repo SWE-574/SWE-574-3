@@ -53,37 +53,11 @@ def _viewer_label(user: User) -> str:
     return full_name or user.email
 
 
-def get_debug_viewer_options(request_user: User, is_admin: bool) -> list[dict]:
-    if not request_user.is_authenticated:
-        return []
-
-    if not is_admin:
-        return [{
-            'id': str(request_user.id),
-            'label': _viewer_label(request_user),
-            'email': request_user.email,
-        }]
-
-    users = User.objects.order_by('first_name', 'last_name', 'email').only(
-        'id', 'first_name', 'last_name', 'email',
-    )[:150]
-    return [
-        {
-            'id': str(user.id),
-            'label': _viewer_label(user),
-            'email': user.email,
-        }
-        for user in users
-    ]
-
-
 def build_service_debug_payload(
     *,
     service_ids: list[str],
     selected_service_id: str | None,
     request_user: User,
-    viewer_override_id: str | None,
-    is_admin: bool,
     search: str = '',
     tag_ids: list[str] | None = None,
     lat: float | None = None,
@@ -93,8 +67,6 @@ def build_service_debug_payload(
 ) -> dict:
     if not service_ids:
         return {
-            'viewer_options': get_debug_viewer_options(request_user, is_admin),
-            'effective_viewer': None,
             'selected_service': None,
             'total_services': 0,
             'active_filter': active_filter,
@@ -116,14 +88,6 @@ def build_service_debug_payload(
         selected_id = str(selected_service.id)
 
     effective_viewer = request_user if request_user.is_authenticated else None
-    if is_admin and viewer_override_id:
-        override = User.objects.filter(id=viewer_override_id).only(
-            'id', 'first_name', 'last_name', 'email',
-        ).first()
-        if override is not None:
-            effective_viewer = override
-
-    viewer_options = get_debug_viewer_options(request_user, is_admin)
     social_reasons = get_social_proximity_boosts(effective_viewer.id) if effective_viewer else {}
     social_boost = float(social_reasons.get(selected_service.user_id, 0.0))
 
@@ -233,15 +197,6 @@ def build_service_debug_payload(
     ]
 
     return {
-        'viewer_options': viewer_options,
-        'effective_viewer': (
-            {
-                'id': str(effective_viewer.id),
-                'label': _viewer_label(effective_viewer),
-                'email': effective_viewer.email,
-            }
-            if effective_viewer else None
-        ),
         'active_filter': active_filter,
         'total_services': len(service_ids),
         'selected_service': {
