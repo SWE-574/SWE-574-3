@@ -19,6 +19,9 @@ test.describe('FR-01c: Logout invalidates session and redirects', () => {
 
     await openUserMenu(page)
 
+    // Remove the /users/me/ interception so the app detects the session is gone.
+    await page.unroute('**/api/users/me/')
+
     // Capture the logout response to assert the backend sends a cookie-deletion header
     const [logoutResponse] = await Promise.all([
       page.waitForResponse(

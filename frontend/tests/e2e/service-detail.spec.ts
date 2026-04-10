@@ -23,16 +23,28 @@ const DEMO_SERVICE = 'Neighborhood Manti Cooking Circle'
  * the dashboard search input and waiting for React to re-render.
  */
 async function getDetailUrl(page: import('@playwright/test').Page): Promise<string> {
+  // Retry up to 3 times — the CI backend may need a moment to warm up.
   const result = await page.evaluate(async (title) => {
-    const res = await fetch(`/api/services/?search=${encodeURIComponent(title)}`, {
-      credentials: 'include',
-    })
-    if (!res.ok) return { ok: false, body: await res.text() } as const
-    const data = await res.json()
-    const list = data.results ?? data
-    const match = list.find((s: { title: string }) => s.title === title)
-    if (!match) return { ok: false, body: `No service titled "${title}" in ${list.length} results` } as const
-    return { ok: true, id: String(match.id) } as const
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(
+          `/api/services/?search=${encodeURIComponent(title)}&page_size=100`,
+          { credentials: 'include' },
+        )
+        if (!res.ok) {
+          if (attempt < 2) { await new Promise(r => setTimeout(r, 2_000)); continue }
+          return { ok: false, body: await res.text() } as const
+        }
+        const data = await res.json()
+        const list = data.results ?? data
+        const match = list.find((s: { title: string }) => s.title === title)
+        if (match) return { ok: true, id: String(match.id) } as const
+        if (attempt < 2) await new Promise(r => setTimeout(r, 2_000))
+      } catch {
+        if (attempt < 2) await new Promise(r => setTimeout(r, 2_000))
+      }
+    }
+    return { ok: false, body: `No service titled "${title}" after 3 attempts` } as const
   }, DEMO_SERVICE)
 
   expect(result.ok, `getDetailUrl failed: ${'body' in result ? result.body : ''}`).toBeTruthy()

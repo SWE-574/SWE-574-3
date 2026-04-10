@@ -54,13 +54,13 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
     is_verified: true,
   }
 
-  // 4. Intercept the first /users/me/ call so checkAuth() resolves instantly.
-  //    Without this, the React app shows a "Loading…" spinner while waiting
-  //    for /users/me/ from the (slow-under-load) backend.
-  let intercepted = false
+  // 4. Intercept ALL /users/me/ GET calls so checkAuth() always resolves
+  //    instantly.  Without this the CI Docker backend is too slow and React
+  //    loses auth state (shows "Loading…" or redirects to /login).
+  //    The interception stays active for the entire test; logout() removes
+  //    it before clicking "Log Out" so the app detects the session is gone.
   await page.route('**/api/users/me/', async (route) => {
-    if (!intercepted && route.request().method() === 'GET') {
-      intercepted = true
+    if (route.request().method() === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -76,9 +76,8 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
   await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
   await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 15_000 })
 
-  // 6. Remove the interception so subsequent /users/me/ calls go to the
-  //    real backend (important for tests that modify user state).
-  await page.unroute('**/api/users/me/')
+  // 6. Keep the interception active — it prevents React from losing auth
+  //    state when the CI backend is slow.  logout() unroutes it explicitly.
 }
 
 /**
@@ -100,13 +99,10 @@ export async function loginViaUI(page: Page, user: DemoUser): Promise<void> {
  * Works regardless of whether the user has an avatar image or initials.
  */
 export async function openUserMenu(page: Page): Promise<void> {
-  // Wait for the navbar to stabilise (React re-renders can detach the
-  // trigger during /users/me/ refresh cycles).
+  // The /users/me/ interception from loginAs() keeps React auth state
+  // stable, so the trigger won't be detached by re-renders.
   const trigger = page.getByTestId('user-menu-trigger')
   await expect(trigger).toBeVisible({ timeout: 15_000 })
-  // Small pause lets in-flight React re-renders settle so the element
-  // isn't detached between the visibility check and the click.
-  await page.waitForTimeout(500)
   await trigger.click()
   // Wait for the dropdown to open (Log Out item becomes visible)
   await expect(page.getByText('Log Out')).toBeVisible({ timeout: 5_000 })
@@ -118,6 +114,9 @@ export async function openUserMenu(page: Page): Promise<void> {
  */
 export async function logout(page: Page): Promise<void> {
   await openUserMenu(page)
+  // Remove the /users/me/ interception so the app detects the session is
+  // gone after the backend clears the cookie.
+  await page.unroute('**/api/users/me/')
   await page.getByText('Log Out').click()
   await expect(page).not.toHaveURL(/\/dashboard/, { timeout: 10_000 })
 }
