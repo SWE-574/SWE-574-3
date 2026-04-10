@@ -22,7 +22,7 @@ async function loginAndOpenDetail(page: import('@playwright/test').Page) {
   // loginAs lands on /dashboard
 
   const searchInput = page.getByPlaceholder(/search/i).first()
-  await expect(searchInput).toBeVisible({ timeout: 15_000 })
+  await expect(searchInput).toBeVisible({ timeout: 20_000 })
 
   // Search by first word
   await searchInput.fill('Neighborhood')

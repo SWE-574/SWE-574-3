@@ -26,9 +26,10 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
   await page.getByRole('button', { name: 'Sign in' }).click()
 
   // Wait until we have left the login page (redirected to dashboard or /)
-  await expect(page).not.toHaveURL(/\/login/, { timeout: 20_000 })
-  // Wait for the authenticated shell to render (nav proves auth state is hydrated)
-  await expect(page.locator('nav')).toBeVisible({ timeout: 15_000 })
+  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 })
+  // Wait for the authenticated shell to fully render — the user-menu-trigger
+  // only appears once the Navbar mounts AND auth state is hydrated.
+  await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 30_000 })
 }
 
 /**

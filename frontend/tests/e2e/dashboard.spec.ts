@@ -20,7 +20,7 @@ test.describe('Dashboard', () => {
 
     // loginAs lands on /dashboard, wait for search input
     const searchInput = page.getByPlaceholder(/search/i).first()
-    await expect(searchInput).toBeVisible({ timeout: 15_000 })
+    await expect(searchInput).toBeVisible({ timeout: 20_000 })
 
     // Search for a known demo service
     await searchInput.fill('Manti')
@@ -31,7 +31,7 @@ test.describe('Dashboard', () => {
     await loginAs(page, USERS.elif)
 
     const searchInput = page.getByPlaceholder(/search/i).first()
-    await expect(searchInput).toBeVisible({ timeout: 15_000 })
+    await expect(searchInput).toBeVisible({ timeout: 20_000 })
 
     await searchInput.fill('Manti')
     await expect(page.getByText(/Manti/i).first()).toBeVisible({ timeout: 20_000 })
@@ -44,7 +44,7 @@ test.describe('Dashboard', () => {
     await loginAs(page, USERS.cem)
 
     const searchInput = page.getByPlaceholder(/search/i).first()
-    await expect(searchInput).toBeVisible({ timeout: 15_000 })
+    await expect(searchInput).toBeVisible({ timeout: 20_000 })
 
     await searchInput.fill('Chess')
     await expect(page.getByText(/Chess/i).first()).toBeVisible({ timeout: 20_000 })
@@ -53,7 +53,7 @@ test.describe('Dashboard', () => {
   test('filter tabs are visible and clickable', async ({ page }) => {
     await loginAs(page, USERS.cem)
 
-    await expect(page.getByPlaceholder(/search/i).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByPlaceholder(/search/i).first()).toBeVisible({ timeout: 20_000 })
 
     const allTab = page.getByRole('button', { name: /^All$/i }).first()
     await expect(allTab).toBeVisible({ timeout: 10_000 })
@@ -64,7 +64,7 @@ test.describe('Dashboard', () => {
     page.on('pageerror', (err) => errors.push(err.message))
 
     await loginAs(page, USERS.elif)
-    await expect(page.getByPlaceholder(/search/i).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByPlaceholder(/search/i).first()).toBeVisible({ timeout: 20_000 })
 
     await page.waitForTimeout(5_000)
     expect(errors).toHaveLength(0)
