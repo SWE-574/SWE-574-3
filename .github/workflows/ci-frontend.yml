@@ -8,6 +8,9 @@ on:
     branches: [dev]
     paths: ["frontend/**", ".github/workflows/ci-frontend.yml"]
 
+permissions:
+  contents: read
+
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest

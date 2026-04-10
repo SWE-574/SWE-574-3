@@ -12,6 +12,9 @@ on:
       - "mobile-client/**"
       - ".github/workflows/ci-mobile.yml"
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Lint & Test
