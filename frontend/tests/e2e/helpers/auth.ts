@@ -16,19 +16,51 @@ export const USERS = {
 export type DemoUser = (typeof USERS)[keyof typeof USERS]
 
 /**
- * Navigate to /login and sign in.
- * Resolves once the dashboard / any protected page is fully loaded.
+ * Authenticate via the REST API, then navigate to /dashboard.
+ *
+ * This is far more reliable in CI than filling the login form because it
+ * skips form rendering, button clicks, React state propagation, and the
+ * redirect chain.  The POST sets httponly auth cookies; after that we
+ * simply load the dashboard as a fresh page navigation.
  */
 export async function loginAs(page: Page, user: DemoUser): Promise<void> {
+  // 1. Ensure we have a page loaded on the app origin so cookies can be set.
+  //    Use the login page — it's lightweight and always available.
+  await page.goto('/login', { waitUntil: 'commit' })
+
+  // 2. Authenticate via API — this sets httponly access_token & refresh_token cookies.
+  const loginResult = await page.evaluate(
+    async (creds) => {
+      const res = await fetch('/api/auth/login/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: creds.email, password: creds.password }),
+      })
+      return { ok: res.ok, status: res.status, body: await res.text() }
+    },
+    { email: user.email, password: user.password },
+  )
+  expect(loginResult.ok, `API login failed (${loginResult.status}): ${loginResult.body}`).toBeTruthy()
+
+  // 3. Navigate to dashboard — cookies are set, so the app will recognise the session.
+  await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
+
+  // 4. Wait for the authenticated shell to render (proves auth state is hydrated).
+  await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 30_000 })
+}
+
+/**
+ * Log in using the UI form (fill + click).
+ * Use this ONLY for tests that specifically verify the login flow.
+ */
+export async function loginViaUI(page: Page, user: DemoUser): Promise<void> {
   await page.goto('/login')
   await page.locator('#email').fill(user.email)
   await page.locator('#password').fill(user.password)
   await page.getByRole('button', { name: 'Sign in' }).click()
 
-  // Wait until we have left the login page (redirected to dashboard or /)
   await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 })
-  // Wait for the authenticated shell to fully render — the user-menu-trigger
-  // only appears once the Navbar mounts AND auth state is hydrated.
   await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 30_000 })
 }
 

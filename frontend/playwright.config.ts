@@ -24,6 +24,9 @@ export default defineConfig({
   /* Retry flaky tests only on CI */
   retries: process.env.CI ? 2 : 0,
 
+  /* CI Docker can be slow — give each test enough headroom */
+  timeout: process.env.CI ? 60_000 : 30_000,
+
   /* Reporters */
   reporter: [
     ['list'],

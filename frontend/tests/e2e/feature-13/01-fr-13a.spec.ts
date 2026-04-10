@@ -22,7 +22,7 @@ test('FR-13a: detail page shows core listing details including schedule, capacit
 
   // Open the detail page and verify the minimum user-visible proof for each major metadata block.
   await page.goto(created.detailUrl)
-  await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText(title).first()).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('Feature 13 FR-13a verifies the core detail-page metadata rendering.')).toBeVisible()
   await expect(page.getByText('2 hours').first()).toBeVisible()
   await expect(page.getByText(/Recurrent.*Every Saturday 10:00/i).first()).toBeVisible()
