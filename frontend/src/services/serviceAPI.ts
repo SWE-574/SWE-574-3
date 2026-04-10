@@ -1,5 +1,6 @@
 import apiClient from './api'
 import type {
+  RecommendationDebugAvailabilityResponse,
   RecommendationDebugResponse,
   Service,
 } from '@/types'
@@ -128,6 +129,11 @@ export const serviceAPI = {
     signal?: AbortSignal,
   ): Promise<RecommendationDebugResponse> => {
     const res = await apiClient.post<RecommendationDebugResponse>('/services/debug-ranking/', payload, { signal })
+    return res.data
+  },
+
+  getRankingDebugAvailability: async (signal?: AbortSignal): Promise<RecommendationDebugAvailabilityResponse> => {
+    const res = await apiClient.get<RecommendationDebugAvailabilityResponse>('/services/debug-ranking-availability/', { signal })
     return res.data
   },
 }

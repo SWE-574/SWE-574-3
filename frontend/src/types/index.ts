@@ -264,6 +264,10 @@ export interface RecommendationDebugResponse {
   selected_service: RecommendationDebugSelectedService | null
 }
 
+export interface RecommendationDebugAvailabilityResponse {
+  enabled: boolean
+}
+
 export interface Tag {
   id: string
   name: string
@@ -628,6 +632,11 @@ export interface AdminMetrics {
     total: number
     last_24h: number
   }
+}
+
+export interface AdminSettings {
+  ranking_debug_enabled: boolean
+  updated_at: string
 }
 
 export type AdminCommentStatus = 'active' | 'removed'

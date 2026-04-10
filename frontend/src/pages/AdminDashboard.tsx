@@ -5,7 +5,7 @@ import {
   FiUsers, FiAlertTriangle, FiMessageSquare, FiMessageCircle, FiActivity, FiHome, FiBarChart2,
   FiCheck, FiX, FiLink2, FiAlertCircle, FiSlash, FiMapPin, FiClock,
   FiCalendar, FiTrash2, FiPauseCircle, FiArrowUpRight, FiLock, FiUserX,
-  FiUnlock, FiBookmark, FiRefreshCw, FiMessageCircle as FiCommentIcon,
+  FiUnlock, FiBookmark, FiRefreshCw, FiMessageCircle as FiCommentIcon, FiSettings,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { adminAPI, type AuditTargetFilter, type CommentStatusFilter, type ReportResolveAction, type ReportStatusFilter } from '@/services/adminAPI'
@@ -27,7 +27,7 @@ import {
   WHITE,
 } from '@/theme/tokens'
 
-type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 'audit'
+type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 'audit' | 'settings'
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
 
@@ -154,6 +154,8 @@ const AdminDashboard = () => {
   const [auditLogs, setAuditLogs] = useState<PaginatedResponse<AdminAuditLog> | null>(null)
   const [auditTarget, setAuditTarget] = useState<AuditTargetFilter>('all')
   const [auditPage, setAuditPage] = useState(1)
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const [rankingDebugEnabled, setRankingDebugEnabledState] = useState(false)
 
   const [authIssue, setAuthIssue] = useState<string | null>(null)
 
@@ -329,6 +331,47 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (activeTab === 'audit') loadAuditLogs()
   }, [activeTab, loadAuditLogs])
+
+  const loadAdminSettings = useCallback(async () => {
+    setSettingsLoading(true)
+    try {
+      const result = await adminAPI.getSettings()
+      setRankingDebugEnabledState(result.ranking_debug_enabled)
+      setAuthIssue(null)
+    } catch (error) {
+      if (asStatusCode(error) === 403) {
+        handleForbidden('You no longer have admin access. Please log in again.')
+        return
+      }
+      toast.error(getErrorMessage(error, 'Failed to load admin settings'))
+    } finally {
+      setSettingsLoading(false)
+    }
+  }, [handleForbidden])
+
+  useEffect(() => {
+    if (activeTab === 'settings') void loadAdminSettings()
+  }, [activeTab, loadAdminSettings])
+
+  const handleToggleRankingDebug = useCallback(() => {
+    const nextValue = !rankingDebugEnabled
+    setSettingsLoading(true)
+    void adminAPI.updateSettings({ ranking_debug_enabled: nextValue })
+      .then((result) => {
+        setRankingDebugEnabledState(result.ranking_debug_enabled)
+        toast.success(result.ranking_debug_enabled ? 'Ranking debug enabled for all users' : 'Ranking debug disabled for all users')
+      })
+      .catch((error) => {
+        if (asStatusCode(error) === 403) {
+          handleForbidden('You no longer have admin access. Please log in again.')
+          return
+        }
+        toast.error(getErrorMessage(error, 'Failed to update admin settings'))
+      })
+      .finally(() => {
+        setSettingsLoading(false)
+      })
+  }, [handleForbidden, rankingDebugEnabled])
 
   const handleWarnUser = (user: AdminUserSummary) => {
     setWarnModal({ open: true, user, loading: false })
@@ -728,7 +771,7 @@ const AdminDashboard = () => {
     const tabParam = searchParams.get('tab')
     const reportIdParam = searchParams.get('reportId')
 
-    const validTabs: AdminTab[] = ['dashboard', 'users', 'reports', 'comments', 'moderation', 'audit']
+    const validTabs: AdminTab[] = ['dashboard', 'users', 'reports', 'comments', 'moderation', 'audit', 'settings']
     if (tabParam && validTabs.includes(tabParam as AdminTab) && activeTab !== tabParam) {
       setActiveTab(tabParam as AdminTab)
     }
@@ -827,6 +870,7 @@ const AdminDashboard = () => {
     comments:  { title: 'Comment Moderation', subtitle: 'Remove or restore flagged comments', icon: <FiMessageSquare size={16} /> },
     moderation:{ title: 'Forum Topics', subtitle: 'Lock, pin, or moderate forum content', icon: <FiMessageCircle size={16} /> },
     audit:     { title: 'Audit Logs', subtitle: 'Complete history of admin actions', icon: <FiActivity size={16} /> },
+    settings:  { title: 'Admin Settings', subtitle: 'Control admin-only debug and moderation preferences', icon: <FiSettings size={16} /> },
   }
 
   return (
@@ -1765,6 +1809,93 @@ const AdminDashboard = () => {
           </Box>
         )
       })()}
+
+      {activeTab === 'settings' && (
+        <Stack gap={4}>
+          <Box
+            bg={WHITE}
+            borderRadius="12px"
+            border={`1px solid ${GRAY200}`}
+            p={{ base: 4, md: 5 }}
+            style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+          >
+            <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} gap={4} direction={{ base: 'column', md: 'row' }}>
+              <Box>
+                <Flex align="center" gap={2} mb={2}>
+                  <Box
+                    w="28px"
+                    h="28px"
+                    borderRadius="8px"
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center"
+                    style={{ background: BLUE_LT, color: BLUE }}
+                  >
+                    <FiSettings size={13} />
+                  </Box>
+                  <Text fontSize="14px" fontWeight={700} color={GRAY800}>
+                    Ranking Debug Access
+                  </Text>
+                </Flex>
+                <Text fontSize="13px" color={GRAY600} lineHeight={1.6}>
+                  Control whether the floating ranking debug button is available across the dashboard for all users.
+                </Text>
+                <Text fontSize="12px" color={GRAY400} mt={2}>
+                  When enabled, the dashboard exposes the `Debug on/off` launcher so ranking flow can be inspected on hover. Disabling it removes access globally.
+                </Text>
+              </Box>
+
+              <Flex
+                as="button"
+                align="center"
+                gap={3}
+                px={3}
+                py={2}
+                borderRadius="999px"
+                border={`1px solid ${rankingDebugEnabled ? GREEN_MD : GRAY200}`}
+                bg={rankingDebugEnabled ? GREEN_LT : WHITE}
+                color={rankingDebugEnabled ? GREEN : GRAY600}
+                cursor="pointer"
+                role="switch"
+                aria-checked={rankingDebugEnabled}
+                aria-label="Enable ranking debug globally"
+                onClick={handleToggleRankingDebug}
+                opacity={settingsLoading ? 0.72 : 1}
+                pointerEvents={settingsLoading ? 'none' : 'auto'}
+              >
+                <Box
+                  w="42px"
+                  h="24px"
+                  borderRadius="999px"
+                  position="relative"
+                  bg={rankingDebugEnabled ? GREEN : GRAY300}
+                  transition="background 0.16s ease"
+                >
+                  <Box
+                    position="absolute"
+                    top="3px"
+                    left={rankingDebugEnabled ? '21px' : '3px'}
+                    w="18px"
+                    h="18px"
+                    borderRadius="full"
+                    bg={WHITE}
+                    boxShadow="0 1px 3px rgba(15, 23, 42, 0.18)"
+                    transition="left 0.16s ease"
+                  />
+                </Box>
+                <Box textAlign="left">
+                  <Text fontSize="12px" fontWeight={700}>
+                    {settingsLoading ? 'Saving…' : rankingDebugEnabled ? 'Enabled' : 'Disabled'}
+                  </Text>
+                  <Text fontSize="11px" color={GRAY400}>
+                    Global dashboard ranking debug
+                  </Text>
+                </Box>
+              </Flex>
+            </Flex>
+          </Box>
+        </Stack>
+      )}
 
       {activeTab === 'reports' && openReportId && (
         <Box position="fixed" inset={0} zIndex={1500} style={{ background: 'rgba(15,23,42,0.36)', backdropFilter: 'blur(2px)' }} onClick={closeOpenReportPanel}>
