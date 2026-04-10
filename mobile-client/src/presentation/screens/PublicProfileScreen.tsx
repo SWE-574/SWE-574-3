@@ -2,27 +2,41 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRoute, useNavigation } from "@react-navigation/native";
+import {
+  useRoute,
+  useNavigation,
+  type CompositeNavigationProp,
+} from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
 import { getUser } from "../../api/users";
-import type { PublicUserProfile } from "../../api/types";
+import { listServices } from "../../api/services";
+import type { PublicUserProfile, Service } from "../../api/types";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
+import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import AchievementsSection from "../components/AchievementsSection";
+import ServiceCard from "../components/ServiceCard";
 
 const DEFAULT_BANNER_URI =
   "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80";
 const DEFAULT_AVATAR_URI =
   "https://api.dicebear.com/9.x/avataaars/png?seed=profile";
+
+type PublicProfileNavigation = CompositeNavigationProp<
+  NativeStackNavigationProp<ProfileStackParamList, "PublicProfile">,
+  BottomTabNavigationProp<BottomTabParamList>
+>;
 
 type LoadState =
   | { status: "loading" }
@@ -38,10 +52,7 @@ function achievementIdsForDisplay(user: PublicUserProfile): string[] {
 
 export default function PublicProfileScreen() {
   const route = useRoute<RouteProp<ProfileStackParamList, "PublicProfile">>();
-  const navigation =
-    useNavigation<
-      NativeStackNavigationProp<ProfileStackParamList, "PublicProfile">
-    >();
+  const navigation = useNavigation<PublicProfileNavigation>();
   const { user: authUser } = useAuth();
   const { userId } = route.params;
   const insets = useSafeAreaInsets();
@@ -51,6 +62,8 @@ export default function PublicProfileScreen() {
   );
 
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [activeServices, setActiveServices] = useState<Service[]>([]);
+  const [activeServicesOpen, setActiveServicesOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +78,25 @@ export default function PublicProfileScreen() {
             err instanceof Error ? err.message : "Failed to load profile";
           setState({ status: "error", message });
         }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setActiveServices([]);
+    setActiveServicesOpen(false);
+    listServices({ user: userId, page_size: 50 })
+      .then((res) => {
+        if (cancelled) return;
+        const rows = res.results ?? [];
+        const visible = rows.filter((s) => s.is_visible !== false);
+        setActiveServices(visible);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveServices([]);
       });
     return () => {
       cancelled = true;
@@ -213,6 +245,67 @@ export default function PublicProfileScreen() {
           <View style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>Member since</Text>
             <Text style={styles.joinedValue}>{joinedDate}</Text>
+          </View>
+        ) : null}
+
+        {activeServices.length > 0 ? (
+          <View style={styles.sectionCard}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Active services"
+              accessibilityHint={
+                activeServicesOpen
+                  ? "Double tap to collapse the list"
+                  : "Double tap to expand the list"
+              }
+              accessibilityState={{ expanded: activeServicesOpen }}
+              onPress={() => setActiveServicesOpen((open) => !open)}
+              style={({ pressed }) => [
+                styles.activeServicesAccordionHeader,
+                activeServicesOpen && styles.activeServicesAccordionHeaderOpen,
+                pressed && styles.activeServicesAccordionHeaderPressed,
+              ]}
+            >
+              <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
+                Active services
+              </Text>
+              <View style={styles.activeServicesHeaderTrailing}>
+                <View style={styles.activeServicesCountPill}>
+                  <Text style={styles.activeServicesCountText}>
+                    {activeServices.length}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={activeServicesOpen ? "chevron-up" : "chevron-down"}
+                  size={22}
+                  color={colors.GRAY700}
+                />
+              </View>
+            </Pressable>
+            {activeServicesOpen
+              ? activeServices.map((service) => (
+                  <Pressable
+                    key={service.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open service ${service.title}`}
+                    onPress={() =>
+                      navigation.navigate("Home", {
+                        screen: "ServiceDetail",
+                        params: { id: service.id },
+                      })
+                    }
+                    style={({ pressed }) => [
+                      styles.serviceCardPressable,
+                      pressed && styles.serviceCardPressablePressed,
+                    ]}
+                  >
+                    <ServiceCard
+                      service={service}
+                      style={styles.serviceCardInProfile}
+                    />
+                  </Pressable>
+                ))
+              : null}
           </View>
         ) : null}
 
@@ -427,6 +520,53 @@ const getStyles = (top: number, bottom: number) =>
       fontWeight: "700",
       color: colors.GRAY900,
       marginBottom: 10,
+    },
+    sectionTitleInline: {
+      marginBottom: 0,
+    },
+    activeServicesAccordionHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 4,
+      marginHorizontal: -4,
+      paddingHorizontal: 4,
+      borderRadius: 12,
+    },
+    activeServicesAccordionHeaderOpen: {
+      marginBottom: 12,
+    },
+    activeServicesAccordionHeaderPressed: {
+      opacity: 0.75,
+    },
+    activeServicesHeaderTrailing: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    activeServicesCountPill: {
+      backgroundColor: colors.GREEN_LT,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      minWidth: 32,
+      alignItems: "center",
+    },
+    activeServicesCountText: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: colors.GREEN,
+    },
+    serviceCardPressable: {
+      borderRadius: 14,
+      marginBottom: 12,
+    },
+    serviceCardPressablePressed: {
+      opacity: 0.92,
+    },
+    serviceCardInProfile: {
+      marginHorizontal: 0,
+      marginBottom: 0,
     },
     joinedValue: {
       fontSize: 15,
