@@ -27,6 +27,23 @@ export interface UserSummary {
   featured_achievement_id?: string | null;
 }
 
+/**
+ * Fields from GET /users/{id}/ when loading another user's profile
+ * (backend `PublicUserProfileSerializer`), limited to what the mobile
+ * public profile screen reads. The API returns more keys; callers should
+ * only rely on these unless extended intentionally.
+ */
+export interface PublicUserProfile {
+  id: string;
+  first_name?: string;
+  last_name?: string;
+  bio?: string | null;
+  karma_score?: number;
+  date_joined?: string;
+  /** Not exposed on public serializer today; optional for API drift. */
+  role?: string;
+}
+
 export interface Tag {
   id: string;
   name: string;

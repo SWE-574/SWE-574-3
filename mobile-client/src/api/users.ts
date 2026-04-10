@@ -5,7 +5,7 @@
  */
 
 import { apiRequest } from "./client";
-import type { UserSummary } from "./types";
+import type { PublicUserProfile, UserSummary } from "./types";
 
 export interface UserProfileRequest {
   first_name?: string;
@@ -31,8 +31,8 @@ export function patchMe(
   return apiRequest<UserSummary>("/users/me/", { method: "PATCH", body });
 }
 
-export function getUser(id: string): Promise<UserSummary> {
-  return apiRequest<UserSummary>(`/users/${id}/`);
+export function getUser(id: string): Promise<PublicUserProfile> {
+  return apiRequest<PublicUserProfile>(`/users/${id}/`);
 }
 
 export function updateUser(

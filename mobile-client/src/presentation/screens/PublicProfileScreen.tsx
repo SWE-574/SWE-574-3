@@ -3,13 +3,13 @@ import { ActivityIndicator, Text, View } from "react-native";
 import { useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import { getUser } from "../../api/users";
-import type { UserSummary } from "../../api/types";
+import type { PublicUserProfile } from "../../api/types";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "success"; user: UserSummary };
+  | { status: "success"; user: PublicUserProfile };
 
 export default function PublicProfileScreen() {
   const route = useRoute<RouteProp<ProfileStackParamList, "PublicProfile">>();
@@ -61,11 +61,13 @@ export default function PublicProfileScreen() {
 
   const { user } = state;
   const fullName = [user.first_name, user.last_name]
-    .filter((part) => part && String(part).trim())
+    .map((part) => (part == null ? "" : String(part).trim()))
+    .filter(Boolean)
     .join(" ")
     .trim();
+  const bioRaw = user.bio;
   const bioText =
-    user.bio != null && String(user.bio).trim() ? String(user.bio) : null;
+    bioRaw != null && String(bioRaw).trim() ? String(bioRaw) : null;
 
   return (
     <View style={{ flex: 1, padding: 16 }}>
