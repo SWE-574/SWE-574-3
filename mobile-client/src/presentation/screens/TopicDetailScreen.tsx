@@ -358,6 +358,14 @@ export default function TopicDetailScreen() {
       const newPost = await createTopicPost(id, { body: text });
       setReplyText("");
       setPosts((prev) => [...prev, newPost as ForumPost]);
+      setTopic((prev) =>
+        prev
+          ? {
+              ...prev,
+              reply_count: prev.reply_count + 1,
+            }
+          : prev
+      );
       requestAnimationFrame(() => {
         listRef.current?.scrollToEnd({ animated: true });
       });

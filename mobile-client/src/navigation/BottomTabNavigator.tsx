@@ -8,8 +8,6 @@ import HomeStack from "./HomeStack";
 import type { HomeStackParamList } from "./HomeStack";
 import ForumStack from "./ForumStack";
 import type { ForumStackParamList } from "./ForumStack";
-import PostServiceScreen from "../presentation/screens/PostServiceScreen";
-import ForumScreen from "../presentation/screens/ForumScreen";
 import PostStack from "./PostStack";
 import type { PostStackParamList } from "./PostStack";
 import MessagesStack from "./MessagesStack";
