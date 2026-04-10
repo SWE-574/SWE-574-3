@@ -30,10 +30,16 @@ export default function RecommendationDebugBar({
   })
   const [shouldLoadPanel, setShouldLoadPanel] = useState(isOpen)
 
+  const handleToggle = () => {
+    if (!isOpen) {
+      setShouldLoadPanel(true)
+    }
+    setIsOpen(value => !value)
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     window.localStorage.setItem(STORAGE_KEY, String(isOpen))
-    if (isOpen) setShouldLoadPanel(true)
   }, [isOpen])
 
   return (
@@ -78,7 +84,7 @@ export default function RecommendationDebugBar({
           color="white"
           borderRadius="full"
           boxShadow="0 14px 40px rgba(15, 23, 42, 0.22)"
-          onClick={() => setIsOpen(value => !value)}
+          onClick={handleToggle}
         >
           <Flex align="center" gap={2}>
             <FiCode size={14} />
