@@ -38,7 +38,7 @@ export default function RecommendationDebugBar({
 
   return (
     <Portal>
-      <Box position="fixed" left={{ base: 4, md: 6 }} bottom={{ base: 4, md: 6 }} zIndex={1400}>
+      <Box position="fixed" left={{ base: 4, md: 6 }} bottom={{ base: 4, md: 6 }} zIndex={1400} bg="transparent">
         {isOpen && shouldLoadPanel ? (
           <Suspense
             fallback={(

@@ -242,6 +242,13 @@ export default function RecommendationDebugPanel({
       bg="linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.97) 100%)"
       backdropFilter="blur(16px)"
       boxShadow="0 22px 60px rgba(15, 23, 42, 0.16)"
+      css={{
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
+        '&::-webkit-scrollbar': {
+          display: 'none',
+        },
+      }}
     >
       <Flex align="start" justify="space-between" mb={4}>
         <Box>
