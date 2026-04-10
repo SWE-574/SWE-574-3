@@ -14,11 +14,11 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/e2e',
 
-  /* Tests within a file run serially (shared DB), but different files
-     run in parallel across workers.  Safe because tests use uniqueTitle()
-     and distinct demo users for write operations. */
+  /* Single worker — the backend container in CI cannot handle concurrent
+     browser sessions (API timeouts, empty responses under load).
+     Locally you can bump this to speed up runs if your machine can handle it. */
   fullyParallel: false,
-  workers: process.env.CI ? 3 : 1,
+  workers: 1,
 
   /* Fail CI fast if someone left `.only` in a test file */
   forbidOnly: !!process.env.CI,

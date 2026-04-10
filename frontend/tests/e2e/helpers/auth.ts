@@ -100,8 +100,13 @@ export async function loginViaUI(page: Page, user: DemoUser): Promise<void> {
  * Works regardless of whether the user has an avatar image or initials.
  */
 export async function openUserMenu(page: Page): Promise<void> {
+  // Wait for the navbar to stabilise (React re-renders can detach the
+  // trigger during /users/me/ refresh cycles).
   const trigger = page.getByTestId('user-menu-trigger')
-  await expect(trigger).toBeVisible({ timeout: 10_000 })
+  await expect(trigger).toBeVisible({ timeout: 15_000 })
+  // Small pause lets in-flight React re-renders settle so the element
+  // isn't detached between the visibility check and the click.
+  await page.waitForTimeout(500)
   await trigger.click()
   // Wait for the dropdown to open (Log Out item becomes visible)
   await expect(page.getByText('Log Out')).toBeVisible({ timeout: 5_000 })

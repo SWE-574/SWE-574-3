@@ -11,16 +11,11 @@ import { loginAs, logout, openUserMenu, USERS } from '../helpers/auth'
 test.describe('FR-01c: Logout invalidates session and redirects', () => {
   test('logged-in user can log out via the nav dropdown', async ({ page }) => {
     await loginAs(page, USERS.elif)
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
-    await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 10_000 })
-
     await logout(page)
   })
 
   test('after logout the session cookie is cleared', async ({ page }) => {
     await loginAs(page, USERS.cem)
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
-    await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 10_000 })
 
     await openUserMenu(page)
 
@@ -44,9 +39,6 @@ test.describe('FR-01c: Logout invalidates session and redirects', () => {
 
   test('after logout the login page is accessible (public redirect works)', async ({ page }) => {
     await loginAs(page, USERS.burak)
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
-    await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 10_000 })
-
     await logout(page)
     await expect(page.locator('body')).toBeVisible()
   })

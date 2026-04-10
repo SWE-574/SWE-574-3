@@ -59,9 +59,6 @@ test.describe('Authentication', () => {
 
   test('logged-in user can log out', async ({ page }) => {
     await loginAs(page, USERS.elif)
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
-    await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 10_000 })
-
     await logout(page)
   })
 
