@@ -147,8 +147,6 @@ class TestEventReviewVisibility:
             evaluation_window_starts_at=timezone.now() - timedelta(hours=1),
             evaluation_window_ends_at=hours,
             evaluation_window_closed_at=closed,
-            blind_target_positive_eval=blind_flags,
-            blind_target_negative_eval=blind_flags,
         )
 
     def test_event_handshake_type_is_event(self):
