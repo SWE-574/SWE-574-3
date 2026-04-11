@@ -76,9 +76,11 @@ jobs:
       #    parallel with the host-side npm ci + Playwright install below.
       #    We only BUILD here — containers start AFTER host npm ci finishes
       #    to avoid bind-mount churn from disrupting the Vite file watcher.
+      #    Uses nohup so the process survives the step's shell exit, and
+      #    writes its exit code to a sentinel file for the wait step.
       - name: Build Docker images (background)
         run: |
-          DJANGO_E2E=1 VITE_E2E=1 docker compose build > /tmp/docker-build.log 2>&1 &
+          nohup bash -c 'DJANGO_E2E=1 VITE_E2E=1 docker compose build > /tmp/docker-build.log 2>&1; echo $? > /tmp/docker-build.exit' &
           echo $! > /tmp/docker-build.pid
 
       # ── 5. Set up Node.js ────────────────────────────────────────────────
@@ -120,12 +122,17 @@ jobs:
       # ── 11. Wait for Docker build then start stack ────────────────────────
       #    npm ci is done, so bind-mounted frontend/ is stable. Now wait for
       #    the background Docker build to finish, then start containers.
+      #    Each GHA step runs in a new shell so we poll the sentinel file
+      #    written by the nohup wrapper in step 4.
       - name: Wait for Docker build & start stack
         run: |
-          BUILD_PID=$(cat /tmp/docker-build.pid)
-          echo "Waiting for Docker build (PID $BUILD_PID)..."
-          if ! wait "$BUILD_PID"; then
-            echo "::error::Docker build failed"
+          echo "Waiting for Docker image build to finish..."
+          while [ ! -f /tmp/docker-build.exit ]; do
+            sleep 5
+          done
+          EXIT_CODE=$(cat /tmp/docker-build.exit)
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "::error::Docker build failed (exit $EXIT_CODE)"
             cat /tmp/docker-build.log
             exit 1
           fi
