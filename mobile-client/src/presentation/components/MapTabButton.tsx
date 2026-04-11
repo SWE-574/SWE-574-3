@@ -11,7 +11,6 @@ export default function MapTabButton({
   accessibilityState,
   accessibilityLabel,
   testID,
-  style,
 }: BottomTabBarButtonProps) {
   const focused = accessibilityState?.selected ?? false;
 
@@ -22,14 +21,12 @@ export default function MapTabButton({
       activeOpacity={0.9}
       onLongPress={onLongPress ?? undefined}
       onPress={onPress ?? undefined}
-      style={[style, styles.wrapper]}
+      style={styles.wrapper}
     >
-      <View style={styles.floatingContainer}>
-        <View style={[styles.circle, focused && styles.circleFocused]}>
-          <Image source={hiveIcon} style={styles.logo} />
-        </View>
-        <Text style={[styles.label, focused && styles.labelFocused]}>Map</Text>
+      <View style={[styles.circle, focused && styles.circleFocused]}>
+        <Image source={hiveIcon} style={styles.logo} />
       </View>
+      <Text style={[styles.label, focused && styles.labelFocused]}>Map</Text>
     </TouchableOpacity>
   );
 }
@@ -37,47 +34,39 @@ export default function MapTabButton({
 const styles = StyleSheet.create({
   wrapper: {
     flex: 1,
-    width: "100%",
     alignItems: "center",
-    justifyContent: "center",
-  },
-  floatingContainer: {
-    alignItems: "center",
-    transform: [{ translateY: -16 }],
+    justifyContent: "flex-end",
+    paddingBottom: 6,
   },
   circle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.YELLOW,
-    borderWidth: 4,
+    borderWidth: 3,
     borderColor: colors.WHITE,
+    marginTop: -28,
     shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 8,
   },
   circleFocused: {
     backgroundColor: colors.GREEN,
   },
   logo: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
   },
   label: {
     fontSize: 11,
     fontWeight: "600",
-    marginTop: 4,
+    marginTop: 2,
     color: colors.GRAY500,
-    textAlign: "center",
-    minWidth: 72,
   },
   labelFocused: {
     color: colors.GREEN,

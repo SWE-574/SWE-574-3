@@ -89,7 +89,7 @@ export default function ServiceCard({
       )}
 
       <View style={styles.body}>
-        <View style={styles.badgeStack}>
+        <View style={styles.badgeRow}>
           <View
             style={[
               styles.typeBadge,
@@ -256,13 +256,12 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 14,
   },
-  badgeStack: {
-    position: "absolute",
-    top: 12,
-    right: 12,
-    alignItems: "flex-end",
+  badgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
     gap: 6,
-    maxWidth: "48%",
+    marginBottom: 8,
   },
   typeBadge: {
     paddingVertical: 4,
@@ -283,7 +282,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 8,
     backgroundColor: colors.RED_LT,
-    alignSelf: "flex-end",
   },
   nearlyFullBadgeText: {
     fontSize: 11,

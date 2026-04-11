@@ -50,17 +50,16 @@ export default function BottomTabNavigator() {
         tabBarInactiveTintColor: colors.GRAY500,
         tabBarHideOnKeyboard: true,
         tabBarItemStyle: {
-          paddingTop: 4,
+          paddingTop: 6,
         },
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: "600",
-          marginBottom: 4,
+          marginBottom: 2,
         },
         tabBarStyle: {
-          height: 70 + insets.bottom,
-          paddingTop: 6,
-          paddingBottom: Math.max(insets.bottom, 6),
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
         },
       }}
     >

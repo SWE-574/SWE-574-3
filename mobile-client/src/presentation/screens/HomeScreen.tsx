@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   Modal,
+  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -22,7 +23,6 @@ import { listServices, type ServicesListParams } from "../../api/services";
 import { Service } from "../../api/types";
 import ServiceCard from "../components/ServiceCard";
 import FeaturedSection from "../components/FeaturedSection";
-import QuickFilters from "../components/QuickFilters";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
@@ -58,6 +58,14 @@ const DEFAULT_FILTERS: DiscoveryFilters = {
   nearlyFullOnly: false,
 };
 
+interface ChipDef {
+  id: string;
+  label: string;
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  selected: boolean;
+  onPress: () => void;
+}
+
 export default function HomeScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<HomeStackParamList, "HomeFeed">>();
@@ -68,8 +76,10 @@ export default function HomeScreen() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [chipsVisible, setChipsVisible] = useState(false);
   const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_FILTERS);
-  const [draftFilters, setDraftFilters] = useState<DiscoveryFilters>(DEFAULT_FILTERS);
+  const [draftFilters, setDraftFilters] =
+    useState<DiscoveryFilters>(DEFAULT_FILTERS);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
@@ -81,58 +91,65 @@ export default function HomeScreen() {
     const timeout = setTimeout(() => {
       setDebouncedSearch(search.trim());
     }, 250);
-
     return () => clearTimeout(timeout);
   }, [search]);
 
-  const ensureDeviceLocation = useCallback(async (): Promise<Coordinates | null> => {
-    if (userLocation) {
-      return userLocation;
-    }
+  const ensureDeviceLocation =
+    useCallback(async (): Promise<Coordinates | null> => {
+      if (userLocation) return userLocation;
 
-    try {
-      setResolvingLocation(true);
-      const permission = await Location.requestForegroundPermissionsAsync();
+      try {
+        setResolvingLocation(true);
+        const permission = await Location.requestForegroundPermissionsAsync();
 
-      if (!permission.granted) {
+        if (!permission.granted) {
+          setLocationStatus("denied");
+          setLocationMessage(
+            "Location permission is required to show services nearby to you.",
+          );
+          return null;
+        }
+
+        const currentPosition = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+        const coordinates = {
+          latitude: currentPosition.coords.latitude,
+          longitude: currentPosition.coords.longitude,
+        };
+
+        setUserLocation(coordinates);
+        setLocationStatus("granted");
+        setLocationMessage(null);
+        return coordinates;
+      } catch (error) {
         setLocationStatus("denied");
         setLocationMessage(
-          "Location permission is required to show services nearby to you.",
+          error instanceof Error
+            ? error.message
+            : "Unable to access your location right now.",
         );
         return null;
+      } finally {
+        setResolvingLocation(false);
       }
-
-      const currentPosition = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      const coordinates = {
-        latitude: currentPosition.coords.latitude,
-        longitude: currentPosition.coords.longitude,
-      };
-
-      setUserLocation(coordinates);
-      setLocationStatus("granted");
-      setLocationMessage(null);
-      return coordinates;
-    } catch (error) {
-      setLocationStatus("denied");
-      setLocationMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to access your location right now.",
-      );
-      return null;
-    } finally {
-      setResolvingLocation(false);
-    }
-  }, [userLocation]);
+    }, [userLocation]);
 
   useEffect(() => {
-    if (filters.locationMode === "nearby" && !userLocation && !resolvingLocation) {
+    if (
+      filters.locationMode === "nearby" &&
+      !userLocation &&
+      !resolvingLocation
+    ) {
       ensureDeviceLocation();
     }
-  }, [ensureDeviceLocation, filters.locationMode, resolvingLocation, userLocation]);
+  }, [
+    ensureDeviceLocation,
+    filters.locationMode,
+    resolvingLocation,
+    userLocation,
+  ]);
 
   const fetchServices = useCallback(async () => {
     try {
@@ -167,10 +184,13 @@ export default function HomeScreen() {
   }, [debouncedSearch, filters, userLocation]);
 
   useEffect(() => {
-    if (filters.locationMode === "nearby" && !userLocation && locationStatus !== "denied") {
+    if (
+      filters.locationMode === "nearby" &&
+      !userLocation &&
+      locationStatus !== "denied"
+    ) {
       return;
     }
-
     fetchServices();
   }, [fetchServices, filters.locationMode, locationStatus, userLocation]);
 
@@ -186,7 +206,7 @@ export default function HomeScreen() {
       case "Offer":
       case "Need":
       case "Event":
-        list = list.filter((service) => service.type === filters.serviceType);
+        list = list.filter((s) => s.type === filters.serviceType);
         break;
     }
 
@@ -194,16 +214,16 @@ export default function HomeScreen() {
       case "nearby":
         list = userLocation
           ? list
-              .map((service) => ({
-                service,
-                distanceKm: getServiceDistanceKm(service, userLocation),
+              .map((s) => ({
+                s,
+                d: getServiceDistanceKm(s, userLocation),
               }))
               .filter(
-                (item): item is { service: Service; distanceKm: number } =>
-                  item.distanceKm !== null && item.distanceKm <= filters.distanceKm,
+                (item): item is { s: Service; d: number } =>
+                  item.d !== null && item.d <= filters.distanceKm,
               )
-              .sort((a, b) => a.distanceKm - b.distanceKm)
-              .map((item) => item.service)
+              .sort((a, b) => a.d - b.d)
+              .map((item) => item.s)
           : [];
         break;
       case "in_person":
@@ -214,21 +234,16 @@ export default function HomeScreen() {
         break;
     }
 
-    if (filters.recurringOnly) {
-      list = list.filter(isRecurringService);
-    }
-
-    if (filters.nearlyFullOnly) {
-      list = list.filter(isNearlyFullService);
-    }
+    if (filters.recurringOnly) list = list.filter(isRecurringService);
+    if (filters.nearlyFullOnly) list = list.filter(isNearlyFullService);
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter(
-        (service) =>
-          service.title.toLowerCase().includes(q) ||
-          (service.description || "").toLowerCase().includes(q) ||
-          service.tags?.some((tag) => tag.name.toLowerCase().includes(q)),
+        (s) =>
+          s.title.toLowerCase().includes(q) ||
+          (s.description || "").toLowerCase().includes(q) ||
+          s.tags?.some((t) => t.name.toLowerCase().includes(q)),
       );
     }
 
@@ -236,92 +251,82 @@ export default function HomeScreen() {
   }, [filters, search, services, userLocation]);
 
   const activeFilterCount = useMemo(() => {
-    let count = 0;
-
-    if (filters.serviceType !== "all") count += 1;
-    if (filters.locationMode !== "all") count += 1;
-    if (filters.sortBy !== "latest") count += 1;
-    if (filters.recurringOnly) count += 1;
-    if (filters.nearlyFullOnly) count += 1;
-
-    return count;
+    let c = 0;
+    if (filters.serviceType !== "all") c++;
+    if (filters.locationMode !== "all") c++;
+    if (filters.sortBy !== "latest") c++;
+    if (filters.recurringOnly) c++;
+    if (filters.nearlyFullOnly) c++;
+    return c;
   }, [filters]);
 
-  const quickFilters = useMemo(
+  const quickChips: ChipDef[] = useMemo(
     () => [
       {
         id: "nearby",
-        label: filters.locationMode === "nearby" && userLocation
-          ? `Nearby ${filters.distanceKm} km`
-          : "Nearby",
-        icon: "navigate-outline" as const,
+        label:
+          filters.locationMode === "nearby" && userLocation
+            ? `Nearby ${filters.distanceKm} km`
+            : "Nearby",
+        icon: "navigate-outline",
         selected: filters.locationMode === "nearby",
         onPress: async () => {
           if (filters.locationMode === "nearby") {
-            setFilters((current) => ({ ...current, locationMode: "all" }));
+            setFilters((c) => ({ ...c, locationMode: "all" }));
             return;
           }
-
-          const coordinates = await ensureDeviceLocation();
-          if (coordinates) {
-            setFilters((current) => ({ ...current, locationMode: "nearby" }));
-          }
+          const coords = await ensureDeviceLocation();
+          if (coords) setFilters((c) => ({ ...c, locationMode: "nearby" }));
         },
       },
       {
         id: "hot",
         label: "Hot",
-        icon: "flame-outline" as const,
+        icon: "flame-outline",
         selected: filters.sortBy === "hot",
         onPress: () =>
-          setFilters((current) => ({
-            ...current,
-            sortBy: current.sortBy === "hot" ? "latest" : "hot",
+          setFilters((c) => ({
+            ...c,
+            sortBy: c.sortBy === "hot" ? "latest" : "hot",
           })),
       },
       {
         id: "events",
         label: "Events",
-        icon: "calendar-outline" as const,
+        icon: "calendar-outline",
         selected: filters.serviceType === "Event",
         onPress: () =>
-          setFilters((current) => ({
-            ...current,
-            serviceType: current.serviceType === "Event" ? "all" : "Event",
+          setFilters((c) => ({
+            ...c,
+            serviceType: c.serviceType === "Event" ? "all" : "Event",
           })),
       },
       {
         id: "online",
         label: "Online",
-        icon: "wifi-outline" as const,
+        icon: "wifi-outline",
         selected: filters.locationMode === "online",
         onPress: () =>
-          setFilters((current) => ({
-            ...current,
-            locationMode: current.locationMode === "online" ? "all" : "online",
+          setFilters((c) => ({
+            ...c,
+            locationMode: c.locationMode === "online" ? "all" : "online",
           })),
       },
       {
         id: "full",
         label: "Nearly Full",
-        icon: "hourglass-outline" as const,
+        icon: "hourglass-outline",
         selected: filters.nearlyFullOnly,
         onPress: () =>
-          setFilters((current) => ({
-            ...current,
-            nearlyFullOnly: !current.nearlyFullOnly,
-          })),
+          setFilters((c) => ({ ...c, nearlyFullOnly: !c.nearlyFullOnly })),
       },
       {
         id: "recurring",
         label: "Recurring",
-        icon: "repeat-outline" as const,
+        icon: "repeat-outline",
         selected: filters.recurringOnly,
         onPress: () =>
-          setFilters((current) => ({
-            ...current,
-            recurringOnly: !current.recurringOnly,
-          })),
+          setFilters((c) => ({ ...c, recurringOnly: !c.recurringOnly })),
       },
     ],
     [ensureDeviceLocation, filters, userLocation],
@@ -341,12 +346,18 @@ export default function HomeScreen() {
     />
   );
 
+  const showNearbyStatus =
+    filters.locationMode === "nearby" &&
+    (resolvingLocation || locationMessage != null);
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Top bar: Post + Filters + Notifications */}
+      {/* Top bar */}
       <View style={styles.topBar}>
         <TouchableOpacity
-          onPress={() => tabNavigation.navigate("PostService", { screen: "PostService" })}
+          onPress={() =>
+            tabNavigation.navigate("PostService", { screen: "PostService" })
+          }
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Ionicons name="add-circle-outline" size={28} color={colors.GREEN} />
@@ -355,23 +366,26 @@ export default function HomeScreen() {
         <TouchableOpacity
           style={[
             styles.filterButton,
-            activeFilterCount > 0 && styles.filterButtonActive,
+            (chipsVisible || activeFilterCount > 0) &&
+              styles.filterButtonActive,
           ]}
-          onPress={() => {
-            setDraftFilters(filters);
-            setFiltersOpen(true);
-          }}
+          onPress={() => setChipsVisible((v) => !v)}
           hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         >
           <Ionicons
-            name="options-outline"
+            name={chipsVisible ? "chevron-up" : "options-outline"}
             size={18}
-            color={activeFilterCount > 0 ? colors.WHITE : colors.GRAY600}
+            color={
+              chipsVisible || activeFilterCount > 0
+                ? colors.WHITE
+                : colors.GRAY600
+            }
           />
           <Text
             style={[
               styles.filterButtonLabel,
-              activeFilterCount > 0 && styles.filterButtonLabelActive,
+              (chipsVisible || activeFilterCount > 0) &&
+                styles.filterButtonLabelActive,
             ]}
           >
             Filters
@@ -395,51 +409,92 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Search bar */}
       <View style={styles.searchContainer}>
-        <View style={styles.searchRow}>
-          <View style={styles.searchInputWrapper}>
-            <Ionicons
-              name="search-outline"
-              size={18}
-              color={colors.GRAY500}
-              style={styles.searchIcon}
-            />
-            <TextInput
-              placeholder="Search services, skills, tags..."
-              style={styles.searchInput}
-              value={search}
-              onChangeText={setSearch}
-            />
-          </View>
-          <TouchableOpacity
-            style={styles.searchFilterButton}
-            onPress={() => {
-              setDraftFilters(filters);
-              setFiltersOpen(true);
-            }}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="funnel-outline" size={18} color={colors.GREEN} />
-          </TouchableOpacity>
+        <View style={styles.searchInputWrapper}>
+          <Ionicons
+            name="search-outline"
+            size={18}
+            color={colors.GRAY500}
+            style={styles.searchIcon}
+          />
+          <TextInput
+            placeholder="Search services, skills, tags..."
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholderTextColor={colors.GRAY400}
+          />
         </View>
-        <QuickFilters items={quickFilters} />
-        {(isLoading || resolvingLocation || locationMessage || loadError) && (
-          <View style={styles.statusRow}>
-            {isLoading || resolvingLocation ? (
-              <>
-                <ActivityIndicator size="small" color={colors.GREEN} />
-                <Text style={styles.statusText}>
-                  {resolvingLocation
-                    ? "Finding services near you..."
-                    : "Refreshing discovery feed..."}
-                </Text>
-              </>
-            ) : (
-              <Text style={styles.statusText}>{locationMessage || loadError}</Text>
-            )}
-          </View>
-        )}
       </View>
+
+      {/* Collapsible quick-filter chips */}
+      {chipsVisible && (
+        <View style={styles.chipsContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipsScroll}
+          >
+            {quickChips.map((chip) => (
+              <TouchableOpacity
+                key={chip.id}
+                activeOpacity={0.7}
+                onPress={chip.onPress}
+                style={[styles.chip, chip.selected && styles.chipSelected]}
+              >
+                <Ionicons
+                  name={chip.icon}
+                  size={16}
+                  color={chip.selected ? colors.WHITE : colors.GRAY600}
+                />
+                <Text
+                  style={[
+                    styles.chipLabel,
+                    chip.selected && styles.chipLabelSelected,
+                  ]}
+                >
+                  {chip.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.chipMore}
+              onPress={() => {
+                setDraftFilters(filters);
+                setFiltersOpen(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="options-outline" size={16} color={colors.GREEN} />
+              <Text style={styles.chipMoreLabel}>More</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Nearby status message (only when nearby filter active) */}
+      {showNearbyStatus && (
+        <View style={styles.statusRow}>
+          {resolvingLocation ? (
+            <>
+              <ActivityIndicator size="small" color={colors.GREEN} />
+              <Text style={styles.statusText}>
+                Finding services near you...
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.statusText}>{locationMessage}</Text>
+          )}
+        </View>
+      )}
+
+      {/* Load error (not location-related) */}
+      {loadError && !showNearbyStatus && (
+        <View style={styles.statusRow}>
+          <Text style={styles.statusText}>{loadError}</Text>
+        </View>
+      )}
 
       <FlatList
         data={filteredServices}
@@ -478,10 +533,20 @@ export default function HomeScreen() {
         animationType="fade"
         onRequestClose={() => setFiltersOpen(false)}
       >
-        <Pressable style={styles.modalOverlay} onPress={() => setFiltersOpen(false)}>
-          <View style={styles.modalContent}>
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setFiltersOpen(false)}
+        >
+          <Pressable
+            style={styles.modalContent}
+            onPress={() => {
+              /* prevent closing when tapping inside */
+            }}
+          >
             <Text style={styles.modalTitle}>Filters</Text>
-            <Text style={styles.modalSubtitle}>Refine what shows up on your Home feed.</Text>
+            <Text style={styles.modalSubtitle}>
+              Refine what shows up on your Home feed.
+            </Text>
 
             <Text style={styles.sectionTitle}>Service Type</Text>
             <View style={styles.optionGrid}>
@@ -492,9 +557,12 @@ export default function HomeScreen() {
                 return (
                   <TouchableOpacity
                     key={type}
-                    style={[styles.segmentButton, selected && styles.segmentButtonSelected]}
+                    style={[
+                      styles.segmentButton,
+                      selected && styles.segmentButtonSelected,
+                    ]}
                     onPress={() =>
-                      setDraftFilters((current) => ({ ...current, serviceType: type }))
+                      setDraftFilters((c) => ({ ...c, serviceType: type }))
                     }
                     activeOpacity={0.75}
                   >
@@ -513,20 +581,25 @@ export default function HomeScreen() {
 
             <Text style={styles.sectionTitle}>Location</Text>
             <View style={styles.optionGrid}>
-              {[
-                { id: "all", label: "All" },
-                { id: "nearby", label: "Nearby" },
-                { id: "in_person", label: "In Person" },
-                { id: "online", label: "Online" },
-              ].map((option) => {
+              {(
+                [
+                  { id: "all", label: "All" },
+                  { id: "nearby", label: "Nearby" },
+                  { id: "in_person", label: "In Person" },
+                  { id: "online", label: "Online" },
+                ] as const
+              ).map((option) => {
                 const selected = draftFilters.locationMode === option.id;
                 return (
                   <TouchableOpacity
                     key={option.id}
-                    style={[styles.segmentButton, selected && styles.segmentButtonSelected]}
+                    style={[
+                      styles.segmentButton,
+                      selected && styles.segmentButtonSelected,
+                    ]}
                     onPress={() =>
-                      setDraftFilters((current) => ({
-                        ...current,
+                      setDraftFilters((c) => ({
+                        ...c,
                         locationMode: option.id as LocationFilter,
                       }))
                     }
@@ -549,19 +622,19 @@ export default function HomeScreen() {
               <>
                 <Text style={styles.sectionTitle}>Nearby Radius</Text>
                 <View style={styles.optionGrid}>
-                  {[5, 15, 30].map((distance) => {
-                    const selected = draftFilters.distanceKm === distance;
+                  {[5, 15, 30].map((d) => {
+                    const selected = draftFilters.distanceKm === d;
                     return (
                       <TouchableOpacity
-                        key={distance}
+                        key={d}
                         style={[
                           styles.segmentButton,
                           selected && styles.segmentButtonSelected,
                         ]}
                         onPress={() =>
-                          setDraftFilters((current) => ({
-                            ...current,
-                            distanceKm: distance as 5 | 15 | 30,
+                          setDraftFilters((c) => ({
+                            ...c,
+                            distanceKm: d as 5 | 15 | 30,
                           }))
                         }
                         activeOpacity={0.75}
@@ -572,7 +645,7 @@ export default function HomeScreen() {
                             selected && styles.segmentButtonLabelSelected,
                           ]}
                         >
-                          {distance} km
+                          {d} km
                         </Text>
                       </TouchableOpacity>
                     );
@@ -583,18 +656,23 @@ export default function HomeScreen() {
 
             <Text style={styles.sectionTitle}>Sort</Text>
             <View style={styles.optionGrid}>
-              {[
-                { id: "latest", label: "Latest" },
-                { id: "hot", label: "Hot" },
-              ].map((option) => {
+              {(
+                [
+                  { id: "latest", label: "Latest" },
+                  { id: "hot", label: "Hot" },
+                ] as const
+              ).map((option) => {
                 const selected = draftFilters.sortBy === option.id;
                 return (
                   <TouchableOpacity
                     key={option.id}
-                    style={[styles.segmentButton, selected && styles.segmentButtonSelected]}
+                    style={[
+                      styles.segmentButton,
+                      selected && styles.segmentButtonSelected,
+                    ]}
                     onPress={() =>
-                      setDraftFilters((current) => ({
-                        ...current,
+                      setDraftFilters((c) => ({
+                        ...c,
                         sortBy: option.id as SortFilter,
                       }))
                     }
@@ -613,32 +691,37 @@ export default function HomeScreen() {
               })}
             </View>
 
-            <Text style={styles.sectionTitle}>Extra Filters</Text>
-            {([
-              {
-                key: "recurringOnly",
-                label: "Recurring only",
-                icon: "repeat-outline" as const,
-              },
-              {
-                key: "nearlyFullOnly",
-                label: "Nearly full only",
-                icon: "hourglass-outline" as const,
-              },
-            ] as const satisfies ReadonlyArray<{
-              key: ToggleFilterKey;
-              label: string;
-              icon: React.ComponentProps<typeof Ionicons>["name"];
-            }>).map((option) => {
+            <Text style={styles.sectionTitle}>Extra</Text>
+            {(
+              [
+                {
+                  key: "recurringOnly",
+                  label: "Recurring only",
+                  icon: "repeat-outline",
+                },
+                {
+                  key: "nearlyFullOnly",
+                  label: "Nearly full only",
+                  icon: "hourglass-outline",
+                },
+              ] as const satisfies ReadonlyArray<{
+                key: ToggleFilterKey;
+                label: string;
+                icon: React.ComponentProps<typeof Ionicons>["name"];
+              }>
+            ).map((option) => {
               const selected = draftFilters[option.key];
               return (
                 <TouchableOpacity
                   key={option.key}
-                  style={[styles.modalOption, selected && styles.modalOptionActive]}
+                  style={[
+                    styles.modalOption,
+                    selected && styles.modalOptionActive,
+                  ]}
                   onPress={() =>
-                    setDraftFilters((current) => ({
-                      ...current,
-                      [option.key]: !current[option.key],
+                    setDraftFilters((c) => ({
+                      ...c,
+                      [option.key]: !c[option.key],
                     }))
                   }
                   activeOpacity={0.75}
@@ -680,12 +763,9 @@ export default function HomeScreen() {
                 style={styles.primaryAction}
                 onPress={async () => {
                   if (draftFilters.locationMode === "nearby") {
-                    const coordinates = await ensureDeviceLocation();
-                    if (!coordinates) {
-                      return;
-                    }
+                    const coords = await ensureDeviceLocation();
+                    if (!coords) return;
                   }
-
                   setFilters(draftFilters);
                   setFiltersOpen(false);
                 }}
@@ -694,7 +774,7 @@ export default function HomeScreen() {
                 <Text style={styles.primaryActionText}>Apply Filters</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
     </SafeAreaView>
@@ -750,30 +830,16 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.GREEN,
   },
-  listContent: {
-    paddingBottom: 32,
-  },
-  empty: {
-    textAlign: "center",
-    color: colors.GRAY500,
-    paddingVertical: 32,
-    fontSize: 15,
-  },
   searchContainer: {
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 4,
+    paddingBottom: 6,
     backgroundColor: colors.WHITE,
   },
-  searchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
   searchInputWrapper: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 14,
+    borderRadius: 12,
     backgroundColor: colors.GRAY100,
     borderColor: colors.GRAY300,
     borderWidth: 1,
@@ -784,34 +850,81 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
     fontSize: 14,
     color: "#1a1a1a",
   },
-  searchFilterButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.GREEN_LT,
+  chipsContainer: {
     backgroundColor: colors.WHITE,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.GRAY200,
+  },
+  chipsScroll: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  chip: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    backgroundColor: colors.WHITE,
+    borderWidth: 1,
+    borderColor: colors.GRAY300,
+    borderRadius: 18,
+    gap: 5,
+  },
+  chipSelected: {
+    backgroundColor: colors.GREEN,
+    borderColor: colors.GREEN,
+  },
+  chipLabel: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: colors.GRAY600,
+  },
+  chipLabelSelected: {
+    color: colors.WHITE,
+  },
+  chipMore: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.GREEN,
+    borderRadius: 18,
+    gap: 5,
+    borderStyle: "dashed",
+  },
+  chipMoreLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.GREEN,
   },
   statusRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginTop: 4,
-    paddingHorizontal: 2,
-    paddingBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: colors.GRAY100,
   },
   statusText: {
     flex: 1,
     fontSize: 12,
     color: colors.GRAY500,
   },
-  // Modal styles
+  listContent: {
+    paddingBottom: 32,
+  },
+  empty: {
+    textAlign: "center",
+    color: colors.GRAY500,
+    paddingVertical: 32,
+    fontSize: 15,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
