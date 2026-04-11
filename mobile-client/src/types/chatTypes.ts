@@ -6,6 +6,18 @@ export type ChatScreenParams = {
   otherUserName: string;
   serviceTitle?: string;
   otherUserId?: string;
+  otherUserAvatarUrl?: string;
+  isProvider?: boolean;
+  serviceType?: string;
+  scheduleType?: string;
+  maxParticipants?: number;
+  serviceLocationType?: string;
+  serviceLocationArea?: string | null;
+  serviceExactLocation?: string | null;
+  serviceExactLocationMapsUrl?: string | null;
+  serviceLocationGuide?: string | null;
+  serviceScheduledTime?: string | null;
+  provisionedHours?: number;
 };
 
 export type NavProps = NativeStackScreenProps<
@@ -24,4 +36,14 @@ export type ChatMessageWithMeta = ChatMessage & {
 
 export type HandshakeRole = "initiator" | "other" | "unknown";
 
-export type ActionType = "approve" | "decline" | "cancel" | "confirm";
+export type ActionType =
+  | "approve"
+  | "decline"
+  | "cancel"
+  | "confirm"
+  | "initiate"
+  | "requestCancellation"
+  | "approveCancellation"
+  | "rejectCancellation"
+  | "reportParticipant"
+  | "submitEvaluation";

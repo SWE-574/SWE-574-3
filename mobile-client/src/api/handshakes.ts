@@ -21,6 +21,8 @@ export interface HandshakeRequest {
   [key: string]: unknown;
 }
 
+export type HandshakeIssueType = 'no_show' | 'service_issue' | 'harassment' | 'spam' | 'scam' | 'other'
+
 export interface HandshakesListParams {
   page?: number;
   page_size?: number;
@@ -79,7 +81,31 @@ export function initiateHandshake(id: string, body?: object): Promise<Handshake>
   return apiRequest<Handshake>(`/handshakes/${id}/initiate/`, { method: 'POST', body: body ?? {} });
 }
 
-export function reportHandshake(id: string, body?: { reason?: string }): Promise<unknown> {
+export function requestCancellationHandshake(id: string, body?: { reason?: string }): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/cancel-request/`, {
+    method: 'POST',
+    body: body ?? {},
+  });
+}
+
+export function approveCancellationHandshake(id: string, body?: object): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/cancel-request/approve/`, {
+    method: 'POST',
+    body: body ?? {},
+  });
+}
+
+export function rejectCancellationHandshake(id: string, body?: object): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/cancel-request/reject/`, {
+    method: 'POST',
+    body: body ?? {},
+  });
+}
+
+export function reportHandshake(
+  id: string,
+  body?: { issue_type?: HandshakeIssueType; description?: string; reported_user_id?: string },
+): Promise<unknown> {
   return apiRequest(`/handshakes/${id}/report/`, { method: 'POST', body: body ?? {} });
 }
 

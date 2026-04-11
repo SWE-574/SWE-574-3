@@ -18,10 +18,45 @@ export interface ReputationEntry {
 }
 
 export interface ReputationRequest {
-  handshake: string;
+  handshake?: string;
+  handshake_id?: string;
   rating?: number;
   comment?: string;
   [key: string]: unknown;
+}
+
+export interface SubmitCombinedEvaluationPayload {
+  handshake_id: string;
+  positive: {
+    punctual: boolean;
+    helpful: boolean;
+    kindness: boolean;
+  };
+  negative: {
+    is_late: boolean;
+    is_unhelpful: boolean;
+    is_rude: boolean;
+  };
+  comment?: string;
+}
+
+export interface SubmitCombinedEventEvaluationPayload {
+  handshake_id: string;
+  positive: {
+    well_organized: boolean;
+    engaging: boolean;
+    welcoming: boolean;
+  };
+  negative: {
+    disorganized: boolean;
+    boring: boolean;
+    unwelcoming: boolean;
+  };
+  comment?: string;
+}
+
+function hasTruthyValue(values: Record<string, boolean>): boolean {
+  return Object.values(values).some(Boolean);
 }
 
 export interface ReputationListParams {
@@ -55,4 +90,62 @@ export function deleteReputation(id: string): Promise<void> {
 
 export function createNegativeReputation(body: ReputationRequest): Promise<ReputationEntry> {
   return apiRequest<ReputationEntry>('/reputation/negative/', { method: 'POST', body });
+}
+
+export async function submitCombinedEvaluation(
+  payload: SubmitCombinedEvaluationPayload,
+): Promise<{ positive?: ReputationEntry; negative?: ReputationEntry }> {
+  const result: { positive?: ReputationEntry; negative?: ReputationEntry } = {};
+  const comment = payload.comment?.trim() || undefined;
+
+  if (!hasTruthyValue(payload.positive) && !hasTruthyValue(payload.negative)) {
+    throw new Error('Select at least one trait before submitting.');
+  }
+
+  if (hasTruthyValue(payload.positive)) {
+    result.positive = await createReputation({
+      handshake_id: payload.handshake_id,
+      ...payload.positive,
+      comment,
+    });
+  }
+
+  if (hasTruthyValue(payload.negative)) {
+    result.negative = await createNegativeReputation({
+      handshake_id: payload.handshake_id,
+      ...payload.negative,
+      comment,
+    });
+  }
+
+  return result;
+}
+
+export async function submitCombinedEventEvaluation(
+  payload: SubmitCombinedEventEvaluationPayload,
+): Promise<{ positive?: ReputationEntry; negative?: ReputationEntry }> {
+  const result: { positive?: ReputationEntry; negative?: ReputationEntry } = {};
+  const comment = payload.comment?.trim() || undefined;
+
+  if (!hasTruthyValue(payload.positive) && !hasTruthyValue(payload.negative)) {
+    throw new Error('Select at least one trait before submitting.');
+  }
+
+  if (hasTruthyValue(payload.positive)) {
+    result.positive = await createReputation({
+      handshake_id: payload.handshake_id,
+      ...payload.positive,
+      comment,
+    });
+  }
+
+  if (hasTruthyValue(payload.negative)) {
+    result.negative = await createNegativeReputation({
+      handshake_id: payload.handshake_id,
+      ...payload.negative,
+      comment,
+    });
+  }
+
+  return result;
 }
