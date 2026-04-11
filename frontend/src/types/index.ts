@@ -159,6 +159,7 @@ export interface ServiceFormData {
   tags?: string[]
   tag_names?: string[]
   scheduled_time?: string | null
+  requires_qr_checkin?: boolean
 }
 
 export interface Service {
@@ -195,6 +196,7 @@ export interface Service {
   interest_count?: number
   is_visible?: boolean
   is_pinned?: boolean
+  requires_qr_checkin?: boolean
   comment_count?: number
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null

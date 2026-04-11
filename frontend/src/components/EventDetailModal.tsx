@@ -245,6 +245,7 @@ export default function EventDetailModal({
 
           {activeTab === 'roster' && isOwner && (
             <EventRosterPanel
+              service={service}
               handshakes={handshakes}
               onComplete={onComplete}
               onMarkAttended={onMarkAttended}

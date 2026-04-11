@@ -13,7 +13,7 @@ import logging
 from .models import (
     Handshake, Service, User, ChatMessage, ReputationRep, NegativeRep,
     EventEvaluationSummary, Report, TransactionHistory, Notification,
-    Comment, Badge,
+    Comment, Badge, EventQRToken,
 )
 from .utils import (
     create_notification,
@@ -1507,6 +1507,12 @@ class EventHandshakeService:
         if handshake.service.type != 'Event':
             raise ValueError('Check-in is only valid for Event handshakes.')
 
+        if handshake.service.requires_qr_checkin:
+            raise ValueError(
+                'This event requires QR attendance verification. '
+                'Scan the organizer\'s QR code or enter the attendance code.'
+            )
+
         if handshake.status != 'accepted':
             raise ValueError(
                 f'Cannot check in: handshake is already "{handshake.status}".'
@@ -1538,6 +1544,140 @@ class EventHandshakeService:
 
         return handshake
 
+    # ── QR attendance verification ──────────────────────────────────────
+
+    QR_TOKEN_LIFETIME_MINUTES = 5
+
+    @staticmethod
+    def generate_qr_token(service: Service, organizer: User) -> EventQRToken:
+        """
+        Generate (or rotate) an event-scoped QR token for attendance.
+
+        The organizer displays the resulting QR code + short attendance code
+        at the venue. Participants scan (mobile) or type the code (web).
+
+        Raises:
+            PermissionError: caller is not the organizer.
+            ValueError: service is not an active Event, QR not required, etc.
+        """
+        import secrets
+        import string
+
+        if service.type != 'Event':
+            raise ValueError('QR tokens can only be generated for Events.')
+
+        if service.user_id != organizer.pk:
+            raise PermissionError('Only the event organizer can generate a QR token.')
+
+        if not service.requires_qr_checkin:
+            raise ValueError('This event does not require QR check-in.')
+
+        if service.status not in ('Active', 'Agreed'):
+            raise ValueError(f'Cannot generate QR for event with status "{service.status}".')
+
+        if not service.is_in_lockdown_window:
+            raise ValueError(
+                'QR token can only be generated within 24 hours of the event start.'
+            )
+
+        with transaction.atomic():
+            # Rotation: delete old token (invalidates it immediately)
+            EventQRToken.objects.filter(service=service).delete()
+
+            token_value = secrets.token_urlsafe(32)
+            code_chars = string.ascii_uppercase + string.digits
+            attendance_code = ''.join(secrets.choice(code_chars) for _ in range(6))
+
+            qr_token = EventQRToken.objects.create(
+                service=service,
+                token=token_value,
+                attendance_code=attendance_code,
+                expires_at=timezone.now() + timedelta(
+                    minutes=EventHandshakeService.QR_TOKEN_LIFETIME_MINUTES
+                ),
+            )
+
+        return qr_token
+
+    @staticmethod
+    def checkin_with_qr(
+        handshake: Handshake, requester: User, qr_token: str,
+    ) -> Handshake:
+        """
+        Participant checks in to an Event by providing a QR token or
+        attendance code. Transitions directly to 'attended'.
+
+        Raises:
+            PermissionError: caller is not the participant.
+            ValueError: invalid/expired token, already used, wrong state, etc.
+        """
+        if handshake.requester_id != requester.pk:
+            raise PermissionError('Only the participant can check in.')
+
+        service = handshake.service
+        if service.type != 'Event':
+            raise ValueError('QR check-in is only valid for Event handshakes.')
+
+        if not service.requires_qr_checkin:
+            raise ValueError('This event does not require QR check-in.')
+
+        if handshake.status not in ('accepted', 'checked_in'):
+            raise ValueError(
+                f'Cannot check in: handshake is "{handshake.status}".'
+            )
+
+        if not service.is_in_lockdown_window:
+            raise ValueError(
+                'QR check-in is only available within 24 hours of the event start.'
+            )
+
+        if service.status not in ('Active', 'Agreed'):
+            raise ValueError(
+                f'Cannot check in to event with status "{service.status}".'
+            )
+
+        with transaction.atomic():
+            # Look up the token — accept either full token or short code
+            token_qs = EventQRToken.objects.filter(
+                service=service,
+                expires_at__gt=timezone.now(),
+            ).filter(
+                Q(token=qr_token) | Q(attendance_code=qr_token.upper())
+            )
+            token_obj = token_qs.first()
+
+            if token_obj is None:
+                raise ValueError('Invalid or expired QR token.')
+
+            # Single-use per participant
+            if token_obj.used_by.filter(pk=handshake.pk).exists():
+                raise ValueError('You have already checked in with this token.')
+
+            locked_handshake = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester')
+                .get(pk=handshake.pk)
+            )
+
+            locked_handshake.status = 'attended'
+            locked_handshake.save(update_fields=['status', 'updated_at'])
+            token_obj.used_by.add(locked_handshake)
+
+            create_notification(
+                user=service.user,
+                notification_type='handshake_accepted',
+                title='QR Attendance Verified',
+                message=f"{requester.first_name} {requester.last_name} verified attendance "
+                        f"for '{service.title}' via QR code.",
+                handshake=locked_handshake,
+                service=service,
+            )
+
+        invalidate_conversations(str(requester.id))
+        invalidate_conversations(str(service.user_id))
+        return locked_handshake
+
     @staticmethod
     def mark_attended(handshake: Handshake, organizer: User) -> Handshake:
         """
@@ -1564,7 +1704,14 @@ class EventHandshakeService:
             if locked_handshake.service.user_id != organizer.pk:
                 raise PermissionError('Only the event organizer can mark attendance.')
 
-            if locked_handshake.status != 'checked_in':
+            allowed_statuses = ['checked_in']
+            if locked_handshake.service.requires_qr_checkin:
+                # When QR check-in is required, there is no intermediate
+                # 'checked_in' state — allow organizer to mark directly
+                # from 'accepted' as a fallback for tech issues.
+                allowed_statuses.append('accepted')
+
+            if locked_handshake.status not in allowed_statuses:
                 raise ValueError(
                     f'Cannot mark attended: handshake is "{locked_handshake.status}".'
                 )

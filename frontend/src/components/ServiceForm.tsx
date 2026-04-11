@@ -461,6 +461,7 @@ export default function ServiceForm({
   const [eventDate, setEventDate]           = useState('')
   const [eventTime, setEventTime]           = useState('')
   const [eventDateTimeError, setEventDateTimeError] = useState<string | undefined>()
+  const [requiresQrCheckin, setRequiresQrCheckin]   = useState(false)
 
   const schema = useMemo(() => getSchema(type), [type])
   const { register, handleSubmit, control, watch, trigger, reset, formState } = useForm<FormValues>({
@@ -545,6 +546,10 @@ export default function ServiceForm({
       if (exactLat != null && exactLng != null && Number.isFinite(exactLat) && Number.isFinite(exactLng)) {
         setSessionExactLocationCoords({ lat: exactLat, lng: exactLng })
       }
+    }
+
+    if (initialService.type === 'Event') {
+      setRequiresQrCheckin(!!initialService.requires_qr_checkin)
     }
 
     if ((initialService.type === 'Event' || (
@@ -780,6 +785,9 @@ export default function ServiceForm({
         if (dirtyFields.schedule_details || scheduleTypeChanged) {
           fd.append('schedule_details', values.schedule_details ?? '')
         }
+        if (type === 'Event' && requiresQrCheckin !== !!initialService?.requires_qr_checkin) {
+          fd.append('requires_qr_checkin', requiresQrCheckin ? 'true' : 'false')
+        }
 
         if (values.location_type === 'In-Person' && locationValue && (locationTypeChanged || publicLocationChanged)) {
           fd.append('location_area', locationValue.label.slice(0, 100))
@@ -885,6 +893,9 @@ export default function ServiceForm({
         }
         fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
         fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
+        if (type === 'Event') {
+          fd.append('requires_qr_checkin', requiresQrCheckin ? 'true' : 'false')
+        }
         if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
         if ((type === 'Event' || isFixedGroupOffer) && eventDate && eventTime) {
           // Send as UTC ISO string so the backend stores the correct absolute time
@@ -1145,6 +1156,7 @@ export default function ServiceForm({
             )}
 
             {(type === 'Event' || isFixedGroupOffer) ? (
+              <>
               <Box>
                 <Label required>
                   <FiCalendar size={12} style={{ display: 'inline', marginRight: 5 }} />
@@ -1176,6 +1188,42 @@ export default function ServiceForm({
                     : 'This exact date/time will be reused for every approved participant. It cannot be customized per handshake.'}
                 </Text>
               </Box>
+
+              {type === 'Event' && (
+                <Box
+                  p="14px 16px" borderRadius="12px"
+                  border={`1px solid ${requiresQrCheckin ? GREEN : GRAY200}`}
+                  bg={requiresQrCheckin ? GREEN_LT : WHITE}
+                  cursor="pointer"
+                  onClick={() => setRequiresQrCheckin(!requiresQrCheckin)}
+                  transition="border-color 0.15s, background 0.15s"
+                >
+                  <Flex align="center" justify="space-between">
+                    <Box>
+                      <Text fontSize="sm" fontWeight="600" color={GRAY800}>
+                        Require QR attendance
+                      </Text>
+                      <Text fontSize="11px" color={GRAY500} mt="2px">
+                        Participants must scan a QR code or enter an attendance code at the event
+                      </Text>
+                    </Box>
+                    <Box
+                      w="40px" h="22px" borderRadius="full" flexShrink={0} ml={3}
+                      bg={requiresQrCheckin ? GREEN : GRAY300}
+                      position="relative" transition="background 0.2s"
+                    >
+                      <Box
+                        position="absolute" top="2px"
+                        left={requiresQrCheckin ? '20px' : '2px'}
+                        w="18px" h="18px" borderRadius="full" bg={WHITE}
+                        boxShadow="0 1px 3px rgba(0,0,0,0.15)"
+                        transition="left 0.2s"
+                      />
+                    </Box>
+                  </Flex>
+                </Box>
+              )}
+              </>
             ) : (
               <>
                 <Box>
