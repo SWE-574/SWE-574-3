@@ -374,7 +374,7 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
                 </Text>
                 <Box as="button" w="32px" h="32px" borderRadius="full" bg={GRAY50}
                   border={`1px solid ${GRAY200}`} display="flex" alignItems="center" justifyContent="center"
-                  style={{ cursor: 'pointer' }} onClick={closeLightbox}
+                  style={{ cursor: 'pointer' }} onClick={closeLightbox} aria-label="Close lightbox"
                 >
                   <FiX size={15} />
                 </Box>

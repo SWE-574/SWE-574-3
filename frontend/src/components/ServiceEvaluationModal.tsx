@@ -381,7 +381,7 @@ export default function ServiceEvaluationModal({
                       <FiCamera size={20} color={GRAY400} />
                       <input
                         type="file"
-                        accept="image/jpeg,image/png,image/gif,image/webp"
+                        accept="image/*"
                         style={{ display: 'none' }}
                         onChange={handleImageAdd}
                       />
