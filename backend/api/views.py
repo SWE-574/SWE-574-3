@@ -7116,8 +7116,6 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         if author_id:
             queryset = queryset.filter(author_id=author_id)
         
-=========
->>>>>>>>> Temporary merge branch 2
         # Annotate with reply count
         queryset = queryset.annotate(
             reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False)),
