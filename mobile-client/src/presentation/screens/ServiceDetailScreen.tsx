@@ -28,8 +28,23 @@ import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { HomeStackParamList } from "../../navigation/HomeStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
-import { getService, addServiceInterest } from "../../api/services";
-import { listHandshakes, type Handshake } from "../../api/handshakes";
+import { getService, addServiceInterest, completeEvent } from "../../api/services";
+import {
+  listHandshakes,
+  joinEvent,
+  leaveEvent,
+  checkinEvent,
+  markAttended,
+  type Handshake,
+} from "../../api/handshakes";
+import {
+  isFutureEvent,
+  isPastEvent,
+  isWithinLockdownWindow,
+  isEventFull,
+  spotsLeft,
+  isEventBanned,
+} from "../../utils/eventUtils";
 import type { Service } from "../../api/types";
 import { useAuth } from "../../context/AuthContext";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
@@ -98,7 +113,10 @@ export default function ServiceDetailScreen() {
   const [modalInitialIndex, setModalInitialIndex] = useState(0);
 
   const [myEventHandshake, setMyEventHandshake] = useState<Handshake | null>(null);
+  const [allEventHandshakes, setAllEventHandshakes] = useState<Handshake[]>([]);
   const [showEvaluationModal, setShowEvaluationModal] = useState(false);
+  const [eventActionLoading, setEventActionLoading] = useState(false);
+  const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null);
 
   const sliderRef = useRef<FlatList<MediaItem>>(null);
 
@@ -108,49 +126,149 @@ export default function ServiceDetailScreen() {
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"));
   }, [id]);
 
+  const loadHandshakes = useCallback(() => {
+    if (!service || service.type !== "Event") return;
+    listHandshakes()
+      .then((res) => {
+        const eventHandshakes = res.results.filter((h) => {
+          const svcId = getIdFromField(h.service);
+          return svcId === service.id;
+        });
+        setAllEventHandshakes(eventHandshakes);
+
+        if (currentUser?.id) {
+          const mine = eventHandshakes.find((h) => {
+            const requesterId = getIdFromField(h.requester);
+            return (
+              requesterId === currentUser.id &&
+              ["accepted", "checked_in", "attended", "no_show", "reported", "cancelled"].includes(h.status)
+            );
+          });
+          setMyEventHandshake(mine ?? null);
+        }
+      })
+      .catch(() => {});
+  }, [service, currentUser?.id]);
+
   useEffect(() => {
     loadService().finally(() => setLoading(false));
   }, [loadService]);
 
   useEffect(() => {
-    if (!service || service.type !== "Event" || !currentUser?.id) return;
-    listHandshakes()
-      .then((res) => {
-        const match = res.results.find((h) => {
-          const serviceId = getIdFromField(h.service);
-          const requesterId = getIdFromField(h.requester);
-          return (
-            serviceId === service.id &&
-            requesterId === currentUser.id &&
-            ["accepted", "checked_in", "attended", "no_show", "reported"].includes(h.status)
-          );
-        });
-        setMyEventHandshake(match ?? null);
-      })
-      .catch(() => {});
-  }, [service, currentUser?.id]);
+    loadHandshakes();
+  }, [loadHandshakes]);
+
+  const isOwner = service?.user?.id === currentUser?.id;
 
   const handleEvaluationSubmitted = useCallback(async () => {
     await loadService();
-    if (myEventHandshake) {
-      setMyEventHandshake((prev) => prev ? { ...prev, user_has_reviewed: true } : null);
-    }
-  }, [loadService, myEventHandshake]);
+    setMyEventHandshake((prev) => prev ? { ...prev, user_has_reviewed: true } : null);
+  }, [loadService]);
 
   const handleExpressInterest = () => {
     setInterestLoading(true);
-
     addServiceInterest(id)
-      .then(() => {
-        Alert.alert("Success", "Your interest has been sent to the provider.");
-      })
-      .catch((e) => {
-        Alert.alert(
-          "Error",
-          e instanceof Error ? e.message : "Could not send interest.",
-        );
-      })
+      .then(() => Alert.alert("Success", "Your interest has been sent to the provider."))
+      .catch((e) => Alert.alert("Error", e instanceof Error ? e.message : "Could not send interest."))
       .finally(() => setInterestLoading(false));
+  };
+
+  const handleJoinEvent = async () => {
+    if (!service) return;
+    setEventActionLoading(true);
+    try {
+      await joinEvent(service.id);
+      Alert.alert("Joined!", "You've joined the event.");
+      await loadService();
+      loadHandshakes();
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Could not join event.");
+    } finally {
+      setEventActionLoading(false);
+    }
+  };
+
+  const handleLeaveEvent = async () => {
+    if (!myEventHandshake) return;
+    Alert.alert("Leave Event", "Are you sure you want to leave this event?", [
+      { text: "Stay", style: "cancel" },
+      {
+        text: "Leave",
+        style: "destructive",
+        onPress: async () => {
+          setEventActionLoading(true);
+          try {
+            await leaveEvent(myEventHandshake.id);
+            Alert.alert("Left", "You have left the event.");
+            setMyEventHandshake(null);
+            await loadService();
+            loadHandshakes();
+          } catch (e) {
+            Alert.alert("Error", e instanceof Error ? e.message : "Could not leave event.");
+          } finally {
+            setEventActionLoading(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleCheckin = async () => {
+    if (!myEventHandshake) return;
+    setEventActionLoading(true);
+    try {
+      await checkinEvent(myEventHandshake.id);
+      Alert.alert("Checked in!", "See you there.");
+      loadHandshakes();
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Could not check in.");
+    } finally {
+      setEventActionLoading(false);
+    }
+  };
+
+  const handleMarkAttended = async (handshakeId: string) => {
+    setMarkingAttendedId(handshakeId);
+    try {
+      await markAttended(handshakeId);
+      Alert.alert("Done", "Attendance marked.");
+      loadHandshakes();
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Could not mark attendance.");
+    } finally {
+      setMarkingAttendedId(null);
+    }
+  };
+
+  const handleCompleteEvent = async () => {
+    if (!service) return;
+    Alert.alert("Complete Event", "Mark this event as completed?", [
+      { text: "Not yet", style: "cancel" },
+      {
+        text: "Complete",
+        onPress: async () => {
+          setEventActionLoading(true);
+          try {
+            await completeEvent(service.id);
+            Alert.alert("Done", "Event marked complete!");
+            await loadService();
+            loadHandshakes();
+          } catch (e) {
+            Alert.alert("Error", e instanceof Error ? e.message : "Could not complete event.");
+          } finally {
+            setEventActionLoading(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const openEventChat = () => {
+    if (!service) return;
+    navigation.navigate("Messages", {
+      screen: "PublicChat",
+      params: { roomId: service.id, roomTitle: service.title },
+    } as any);
   };
 
   const onSliderMomentumEnd = (
@@ -517,28 +635,6 @@ export default function ServiceDetailScreen() {
             </View>
           )}
 
-          {isEvent && myEventHandshake?.status === "attended" && (
-            <View style={styles.sectionBlock}>
-              <View style={styles.attendedBanner}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.GREEN} />
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.attendedTitle}>Attendance confirmed!</Text>
-                  <Text style={styles.attendedSubtitle}>The organizer marked you as attended.</Text>
-                </View>
-              </View>
-              {!myEventHandshake.user_has_reviewed && (
-                <TouchableOpacity
-                  style={styles.evaluationButton}
-                  onPress={() => setShowEvaluationModal(true)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="star-outline" size={16} color={colors.WHITE} />
-                  <Text style={styles.evaluationButtonText}>Leave Evaluation</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-
           {isEvent && service.event_evaluation_summary &&
             service.event_evaluation_summary.feedback_submission_count > 0 && (
               <View style={styles.sectionBlock}>
@@ -546,21 +642,233 @@ export default function ServiceDetailScreen() {
               </View>
           )}
 
-          <TouchableOpacity
-            style={[styles.ctaButton, interestLoading && styles.ctaDisabled]}
-            onPress={handleExpressInterest}
-            disabled={interestLoading}
-            activeOpacity={0.9}
-          >
-            {interestLoading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <>
-                <Ionicons name="heart-outline" size={18} color="#fff" />
-                <Text style={styles.ctaText}>Express interest</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          {/* ─── Event lifecycle CTA ─── */}
+          {isEvent && !isOwner && (() => {
+            const status = myEventHandshake?.status;
+            const banned = isEventBanned(currentUser?.is_organizer_banned_until);
+            const full = isEventFull(service.max_participants, service.participant_count ?? 0);
+            const future = isFutureEvent(service.scheduled_time);
+            const past = isPastEvent(service.scheduled_time);
+            const lockdown = isWithinLockdownWindow(service.scheduled_time);
+
+            if (status === "reported") return (
+              <View style={styles.sectionBlock}>
+                <View style={styles.warningBanner}>
+                  <Ionicons name="alert-circle" size={20} color={colors.AMBER} />
+                  <Text style={[styles.bannerText, { color: colors.AMBER }]}>Participation under review</Text>
+                </View>
+              </View>
+            );
+
+            if (status === "cancelled") return (
+              <View style={styles.sectionBlock}>
+                <View style={styles.dangerBanner}>
+                  <Ionicons name="close-circle" size={20} color={colors.RED} />
+                  <Text style={[styles.bannerText, { color: colors.RED }]}>Removed from event</Text>
+                </View>
+              </View>
+            );
+
+            if (status === "attended") return (
+              <View style={styles.sectionBlock}>
+                <View style={styles.attendedBanner}>
+                  <Ionicons name="checkmark-circle" size={20} color={colors.GREEN} />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.attendedTitle}>Attendance confirmed!</Text>
+                    <Text style={styles.attendedSubtitle}>The organizer marked you as attended.</Text>
+                  </View>
+                </View>
+                {!myEventHandshake?.user_has_reviewed && (
+                  <TouchableOpacity style={styles.evaluationButton} onPress={() => setShowEvaluationModal(true)} activeOpacity={0.85}>
+                    <Ionicons name="star-outline" size={16} color={colors.WHITE} />
+                    <Text style={styles.evaluationButtonText}>Leave Evaluation</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.eventChatButton} onPress={openEventChat} activeOpacity={0.85}>
+                  <Ionicons name="chatbubbles-outline" size={16} color={colors.WHITE} />
+                  <Text style={styles.eventChatButtonText}>Event Chat</Text>
+                </TouchableOpacity>
+              </View>
+            );
+
+            if (status === "checked_in") return (
+              <View style={styles.sectionBlock}>
+                <View style={styles.attendedBanner}>
+                  <Ionicons name="checkmark-done" size={20} color={colors.GREEN} />
+                  <Text style={[styles.bannerText, { color: colors.GREEN, marginLeft: 10 }]}>Checked in</Text>
+                </View>
+                <TouchableOpacity style={styles.eventChatButton} onPress={openEventChat} activeOpacity={0.85}>
+                  <Ionicons name="chatbubbles-outline" size={16} color={colors.WHITE} />
+                  <Text style={styles.eventChatButtonText}>Event Chat</Text>
+                </TouchableOpacity>
+              </View>
+            );
+
+            if (status === "accepted" && future) return (
+              <View style={styles.sectionBlock}>
+                <View style={styles.attendedBanner}>
+                  <Ionicons name="calendar-outline" size={20} color={colors.GREEN} />
+                  <Text style={[styles.bannerText, { color: colors.GREEN, marginLeft: 10 }]}>You've joined this event</Text>
+                </View>
+                {lockdown ? (
+                  <TouchableOpacity
+                    style={styles.joinButton}
+                    onPress={handleCheckin}
+                    disabled={eventActionLoading}
+                    activeOpacity={0.85}
+                  >
+                    {eventActionLoading ? <ActivityIndicator color="#fff" size="small" /> : (
+                      <><Ionicons name="log-in-outline" size={16} color={colors.WHITE} /><Text style={styles.joinButtonText}>Check In</Text></>
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.leaveButton}
+                    onPress={handleLeaveEvent}
+                    disabled={eventActionLoading}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="exit-outline" size={16} color={colors.RED} />
+                    <Text style={styles.leaveButtonText}>Leave Event</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.eventChatButton} onPress={openEventChat} activeOpacity={0.85}>
+                  <Ionicons name="chatbubbles-outline" size={16} color={colors.WHITE} />
+                  <Text style={styles.eventChatButtonText}>Event Chat</Text>
+                </TouchableOpacity>
+              </View>
+            );
+
+            if (past && !status) return (
+              <View style={styles.sectionBlock}>
+                <View style={styles.warningBanner}>
+                  <Ionicons name="time-outline" size={20} color={colors.GRAY500} />
+                  <Text style={[styles.bannerText, { color: colors.GRAY500 }]}>Event ended</Text>
+                </View>
+              </View>
+            );
+
+            if (banned) return (
+              <View style={styles.sectionBlock}>
+                <View style={styles.dangerBanner}>
+                  <Ionicons name="ban-outline" size={20} color={colors.RED} />
+                  <Text style={[styles.bannerText, { color: colors.RED }]}>You are temporarily banned from joining events</Text>
+                </View>
+              </View>
+            );
+
+            if (full && !status) return (
+              <View style={styles.sectionBlock}>
+                <View style={styles.warningBanner}>
+                  <Ionicons name="people" size={20} color={colors.AMBER} />
+                  <Text style={[styles.bannerText, { color: colors.AMBER }]}>
+                    Event full ({spotsLeft(service.max_participants, service.participant_count ?? 0)} spots left)
+                  </Text>
+                </View>
+              </View>
+            );
+
+            if (service.status === "Active" && !status) return (
+              <TouchableOpacity
+                style={[styles.joinButton, eventActionLoading && styles.ctaDisabled]}
+                onPress={handleJoinEvent}
+                disabled={eventActionLoading}
+                activeOpacity={0.9}
+              >
+                {eventActionLoading ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <><Ionicons name="add-circle-outline" size={18} color="#fff" /><Text style={styles.joinButtonText}>Join Event</Text></>
+                )}
+              </TouchableOpacity>
+            );
+
+            return null;
+          })()}
+
+          {/* ─── Organizer management ─── */}
+          {isEvent && isOwner && (
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionLabel}>Participants</Text>
+              {allEventHandshakes
+                .filter((h) => ["accepted", "checked_in", "attended", "no_show"].includes(h.status))
+                .map((h) => {
+                  const name = (() => {
+                    const r = h.requester;
+                    if (!r || typeof r === "string") return r ?? "Unknown";
+                    const obj = r as Record<string, unknown>;
+                    return [obj.first_name, obj.last_name].filter(Boolean).join(" ") || String(obj.email ?? "Participant");
+                  })();
+                  const badgeColors: Record<string, { bg: string; fg: string }> = {
+                    accepted: { bg: "#dcfce7", fg: "#166534" },
+                    checked_in: { bg: "#d1fae5", fg: "#065f46" },
+                    attended: { bg: "#d1fae5", fg: "#065f46" },
+                    no_show: { bg: "#fee2e2", fg: "#991b1b" },
+                  };
+                  const badge = badgeColors[h.status] ?? { bg: colors.GRAY100, fg: colors.GRAY500 };
+                  return (
+                    <View key={h.id} style={styles.rosterRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rosterName}>{name}</Text>
+                        <View style={[styles.rosterBadge, { backgroundColor: badge.bg }]}>
+                          <Text style={[styles.rosterBadgeText, { color: badge.fg }]}>
+                            {h.status === "checked_in" ? "Checked In" : h.status === "no_show" ? "No-Show" : h.status.charAt(0).toUpperCase() + h.status.slice(1)}
+                          </Text>
+                        </View>
+                      </View>
+                      {h.status === "checked_in" && (
+                        <TouchableOpacity
+                          style={styles.markAttendedBtn}
+                          onPress={() => handleMarkAttended(h.id)}
+                          disabled={markingAttendedId === h.id}
+                          activeOpacity={0.85}
+                        >
+                          {markingAttendedId === h.id
+                            ? <ActivityIndicator size="small" color={colors.WHITE} />
+                            : <Text style={styles.markAttendedText}>Mark Attended</Text>
+                          }
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })}
+
+              {service.status === "Active" && (
+                <TouchableOpacity
+                  style={[styles.completeEventButton, eventActionLoading && styles.ctaDisabled]}
+                  onPress={handleCompleteEvent}
+                  disabled={eventActionLoading}
+                  activeOpacity={0.85}
+                >
+                  {eventActionLoading ? <ActivityIndicator color="#fff" size="small" /> : (
+                    <><Ionicons name="checkmark-done-outline" size={16} color={colors.WHITE} /><Text style={styles.completeEventText}>Complete Event</Text></>
+                  )}
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity style={styles.eventChatButton} onPress={openEventChat} activeOpacity={0.85}>
+                <Ionicons name="chatbubbles-outline" size={16} color={colors.WHITE} />
+                <Text style={styles.eventChatButtonText}>Event Chat</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ─── Non-event: Express Interest ─── */}
+          {!isEvent && (
+            <TouchableOpacity
+              style={[styles.ctaButton, interestLoading && styles.ctaDisabled]}
+              onPress={handleExpressInterest}
+              disabled={interestLoading}
+              activeOpacity={0.9}
+            >
+              {interestLoading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="heart-outline" size={18} color="#fff" />
+                  <Text style={styles.ctaText}>Express interest</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -1013,6 +1321,34 @@ const getStyles = (topInset: number, bottomInset: number) =>
       marginTop: 2,
     },
 
+    warningBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      backgroundColor: colors.AMBER_LT,
+      borderRadius: 14,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: `${colors.AMBER}30`,
+    },
+
+    dangerBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      backgroundColor: colors.RED_LT,
+      borderRadius: 14,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: `${colors.RED}30`,
+    },
+
+    bannerText: {
+      fontSize: 14,
+      fontWeight: "700",
+      flex: 1,
+    },
+
     evaluationButton: {
       flexDirection: "row",
       alignItems: "center",
@@ -1025,6 +1361,116 @@ const getStyles = (topInset: number, bottomInset: number) =>
     },
 
     evaluationButtonText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.WHITE,
+    },
+
+    joinButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      minHeight: 52,
+      borderRadius: 14,
+      backgroundColor: colors.AMBER,
+      marginTop: 10,
+    },
+
+    joinButtonText: {
+      fontSize: 15,
+      fontWeight: "800",
+      color: colors.WHITE,
+    },
+
+    leaveButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      minHeight: 44,
+      borderRadius: 10,
+      backgroundColor: colors.RED_LT,
+      borderWidth: 1,
+      borderColor: `${colors.RED}30`,
+      marginTop: 10,
+    },
+
+    leaveButtonText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.RED,
+    },
+
+    eventChatButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      minHeight: 44,
+      borderRadius: 10,
+      backgroundColor: colors.GREEN,
+      marginTop: 10,
+    },
+
+    eventChatButtonText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.WHITE,
+    },
+
+    rosterRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.GRAY100,
+    },
+
+    rosterName: {
+      fontSize: 14,
+      fontWeight: "600",
+      color: colors.GRAY800,
+    },
+
+    rosterBadge: {
+      alignSelf: "flex-start",
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      marginTop: 4,
+    },
+
+    rosterBadgeText: {
+      fontSize: 11,
+      fontWeight: "700",
+    },
+
+    markAttendedBtn: {
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: colors.GREEN,
+    },
+
+    markAttendedText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.WHITE,
+    },
+
+    completeEventButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      minHeight: 48,
+      borderRadius: 12,
+      backgroundColor: colors.BLUE,
+      marginTop: 14,
+    },
+
+    completeEventText: {
       fontSize: 14,
       fontWeight: "700",
       color: colors.WHITE,

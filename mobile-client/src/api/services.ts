@@ -112,3 +112,7 @@ export function toggleServiceVisibility(id: string): Promise<Service> {
 export function addServiceInterest(serviceId: string, body?: { message?: string }): Promise<unknown> {
   return apiRequest(`/services/${serviceId}/interest/`, { method: 'POST', body: body ?? {} });
 }
+
+export function completeEvent(serviceId: string): Promise<void> {
+  return apiRequest<void>(`/services/${serviceId}/complete-event/`, { method: 'POST' });
+}

@@ -121,3 +121,21 @@ export function requestHandshakeChanges(id: string, body?: object): Promise<Hand
 export function handshakeServiceInterest(serviceId: string, body?: object): Promise<unknown> {
   return apiRequest(`/handshakes/services/${serviceId}/interest/`, { method: 'POST', body: body ?? {} });
 }
+
+// ─── Event actions ────────────────────────────────────────────────────────
+
+export function joinEvent(serviceId: string): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/services/${serviceId}/join-event/`, { method: 'POST', body: {} });
+}
+
+export function leaveEvent(id: string): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/leave-event/`, { method: 'POST', body: {} });
+}
+
+export function checkinEvent(id: string): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/checkin/`, { method: 'POST', body: {} });
+}
+
+export function markAttended(id: string): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/mark-attended/`, { method: 'POST', body: {} });
+}
