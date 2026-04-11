@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   View,
@@ -17,6 +17,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import * as Location from "expo-location";
+import Slider from "@react-native-community/slider";
 import type { HomeStackParamList } from "../../navigation/HomeStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { listServices, type ServicesListParams } from "../../api/services";
@@ -44,7 +45,7 @@ interface DiscoveryFilters {
   serviceType: ServiceTypeFilter;
   locationMode: LocationFilter;
   sortBy: SortFilter;
-  distanceKm: 5 | 15 | 30;
+  distanceKm: number;
   recurringOnly: boolean;
   nearlyFullOnly: boolean;
 }
@@ -86,6 +87,7 @@ export default function HomeScreen() {
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [resolvingLocation, setResolvingLocation] = useState(false);
+  const locationCheckedRef = useRef(false);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -93,6 +95,33 @@ export default function HomeScreen() {
     }, 250);
     return () => clearTimeout(timeout);
   }, [search]);
+
+  // Silently check if location is already granted on mount
+  useEffect(() => {
+    if (locationCheckedRef.current) return;
+    locationCheckedRef.current = true;
+
+    (async () => {
+      try {
+        const { granted } = await Location.getForegroundPermissionsAsync();
+        if (granted) {
+          setResolvingLocation(true);
+          const pos = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          setUserLocation({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          });
+          setLocationStatus("granted");
+        }
+      } catch {
+        // Silent fail -- user hasn't granted yet, that's fine
+      } finally {
+        setResolvingLocation(false);
+      }
+    })();
+  }, []);
 
   const ensureDeviceLocation =
     useCallback(async (): Promise<Coordinates | null> => {
@@ -105,7 +134,7 @@ export default function HomeScreen() {
         if (!permission.granted) {
           setLocationStatus("denied");
           setLocationMessage(
-            "Location permission is required to show services nearby to you.",
+            "Location permission is required to show services nearby.",
           );
           return null;
         }
@@ -266,7 +295,7 @@ export default function HomeScreen() {
         id: "nearby",
         label:
           filters.locationMode === "nearby" && userLocation
-            ? `Nearby ${filters.distanceKm} km`
+            ? `Nearby ${Math.round(filters.distanceKm)} km`
             : "Nearby",
         icon: "navigate-outline",
         selected: filters.locationMode === "nearby",
@@ -343,12 +372,16 @@ export default function HomeScreen() {
       onServicePress={handleServicePress}
       userLocation={userLocation}
       locationStatus={locationStatus}
+      maxNearbyKm={filters.distanceKm}
     />
   );
 
   const showNearbyStatus =
     filters.locationMode === "nearby" &&
     (resolvingLocation || locationMessage != null);
+
+  const showLocationBanner =
+    locationStatus === "idle" && !userLocation && !resolvingLocation;
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -427,6 +460,20 @@ export default function HomeScreen() {
           />
         </View>
       </View>
+
+      {/* Location banner -- shown when permission not yet requested */}
+      {showLocationBanner && (
+        <Pressable
+          style={styles.locationBanner}
+          onPress={() => ensureDeviceLocation()}
+        >
+          <Ionicons name="location-outline" size={18} color={colors.GREEN} />
+          <Text style={styles.locationBannerText}>
+            Enable location for nearby services
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.GRAY400} />
+        </Pressable>
+      )}
 
       {/* Collapsible quick-filter chips */}
       {chipsVisible && (
@@ -539,9 +586,7 @@ export default function HomeScreen() {
         >
           <Pressable
             style={styles.modalContent}
-            onPress={() => {
-              /* prevent closing when tapping inside */
-            }}
+            onPress={() => {}}
           >
             <Text style={styles.modalTitle}>Filters</Text>
             <Text style={styles.modalSubtitle}>
@@ -620,36 +665,28 @@ export default function HomeScreen() {
 
             {draftFilters.locationMode === "nearby" && (
               <>
-                <Text style={styles.sectionTitle}>Nearby Radius</Text>
-                <View style={styles.optionGrid}>
-                  {[5, 15, 30].map((d) => {
-                    const selected = draftFilters.distanceKm === d;
-                    return (
-                      <TouchableOpacity
-                        key={d}
-                        style={[
-                          styles.segmentButton,
-                          selected && styles.segmentButtonSelected,
-                        ]}
-                        onPress={() =>
-                          setDraftFilters((c) => ({
-                            ...c,
-                            distanceKm: d as 5 | 15 | 30,
-                          }))
-                        }
-                        activeOpacity={0.75}
-                      >
-                        <Text
-                          style={[
-                            styles.segmentButtonLabel,
-                            selected && styles.segmentButtonLabelSelected,
-                          ]}
-                        >
-                          {d} km
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                <Text style={styles.sectionTitle}>
+                  Nearby Radius: {Math.round(draftFilters.distanceKm)} km
+                </Text>
+                <View style={styles.sliderContainer}>
+                  <Text style={styles.sliderBound}>1 km</Text>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={1}
+                    maximumValue={50}
+                    step={1}
+                    value={draftFilters.distanceKm}
+                    onValueChange={(val) =>
+                      setDraftFilters((c) => ({
+                        ...c,
+                        distanceKm: Math.round(val),
+                      }))
+                    }
+                    minimumTrackTintColor={colors.GREEN}
+                    maximumTrackTintColor={colors.GRAY300}
+                    thumbTintColor={colors.GREEN}
+                  />
+                  <Text style={styles.sliderBound}>50 km</Text>
                 </View>
               </>
             )}
@@ -854,6 +891,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#1a1a1a",
   },
+  locationBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginBottom: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: colors.GREEN_LT,
+    borderRadius: 10,
+    gap: 8,
+  },
+  locationBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "500",
+    color: colors.GREEN,
+  },
   chipsContainer: {
     backgroundColor: colors.WHITE,
     borderBottomWidth: 1,
@@ -980,6 +1034,21 @@ const styles = StyleSheet.create({
   },
   segmentButtonLabelSelected: {
     color: colors.WHITE,
+  },
+  sliderContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 2,
+  },
+  slider: {
+    flex: 1,
+    height: 40,
+  },
+  sliderBound: {
+    fontSize: 11,
+    color: colors.GRAY500,
+    fontWeight: "500",
   },
   modalOption: {
     flexDirection: "row",

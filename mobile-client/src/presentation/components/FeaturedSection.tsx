@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import type { Service } from "../../api/types";
+import { listServices } from "../../api/services";
 import {
   getFeatured,
   type FeaturedResponse,
@@ -55,11 +56,14 @@ const TABS: TabConfig[] = [
   },
 ];
 
+const DEFAULT_MAX_NEARBY_KM = 30;
+
 interface FeaturedSectionProps {
   services: Service[];
   onServicePress: (id: string) => void;
   userLocation: Coordinates | null;
   locationStatus: "idle" | "granted" | "denied";
+  maxNearbyKm?: number;
 }
 
 export default function FeaturedSection({
@@ -67,10 +71,12 @@ export default function FeaturedSection({
   onServicePress,
   userLocation,
   locationStatus,
+  maxNearbyKm = DEFAULT_MAX_NEARBY_KM,
 }: FeaturedSectionProps) {
   const [featuredData, setFeaturedData] = useState<FeaturedResponse | null>(
     null,
   );
+  const [hotFallback, setHotFallback] = useState<Service[]>([]);
   const [apiFailed, setApiFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>("friends");
@@ -82,9 +88,24 @@ export default function FeaturedSection({
       .then((data) => {
         if (cancelled) return;
         setFeaturedData(data);
+
+        if (!data.friends || data.friends.length === 0) {
+          listServices({ sort: "hot", page_size: 8 })
+            .then(({ results }) => {
+              if (!cancelled) setHotFallback(results ?? []);
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {
-        if (!cancelled) setApiFailed(true);
+        if (!cancelled) {
+          setApiFailed(true);
+          listServices({ sort: "hot", page_size: 8 })
+            .then(({ results }) => {
+              if (!cancelled) setHotFallback(results ?? []);
+            })
+            .catch(() => {});
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -110,9 +131,11 @@ export default function FeaturedSection({
     user: item.user,
   });
 
-  const friendsItems = useMemo(
-    () =>
-      (featuredData?.friends ?? []).map((item) => ({
+  const friendsItems = useMemo(() => {
+    const apiItems = featuredData?.friends ?? [];
+
+    if (apiItems.length > 0) {
+      return apiItems.map((item) => ({
         service: normalizeFeaturedService(item),
         contextBadge:
           item.friend_count && item.friend_count > 0
@@ -122,9 +145,22 @@ export default function FeaturedSection({
                 tone: "purple" as const,
               }
             : undefined,
-      })),
-    [featuredData],
-  );
+      }));
+    }
+
+    if (hotFallback.length > 0) {
+      return hotFallback.slice(0, 8).map((service) => ({
+        service,
+        contextBadge: {
+          text: "Suggested for you",
+          icon: "sparkles" as const,
+          tone: "purple" as const,
+        },
+      }));
+    }
+
+    return [];
+  }, [featuredData, hotFallback]);
 
   const nearbyItems = useMemo(
     () =>
@@ -136,7 +172,9 @@ export default function FeaturedSection({
             }))
             .filter(
               (item): item is { service: Service; distanceKm: number } =>
-                item.distanceKm !== null && isInPersonService(item.service),
+                item.distanceKm !== null &&
+                item.distanceKm <= maxNearbyKm &&
+                isInPersonService(item.service),
             )
             .sort((a, b) => a.distanceKm - b.distanceKm)
             .slice(0, 8)
@@ -149,7 +187,7 @@ export default function FeaturedSection({
               },
             }))
         : [],
-    [services, userLocation],
+    [services, userLocation, maxNearbyKm],
   );
 
   const nearlyFullItems = useMemo(
@@ -201,10 +239,10 @@ export default function FeaturedSection({
     }
     if (activeTab === "nearby") {
       if (locationStatus === "denied")
-        return "Enable location in Filters to see services nearby.";
+        return "Enable location to see services nearby.";
       if (locationStatus === "idle" || !userLocation)
-        return "Turn on Nearby in Filters to populate this tab.";
-      return "No nearby services yet for your current area.";
+        return "Enable location to populate this tab.";
+      return "No nearby services within your radius.";
     }
     return "No nearly full services right now.";
   };
@@ -226,7 +264,6 @@ export default function FeaturedSection({
         <Text style={styles.headerTitle}>Featured</Text>
       </View>
 
-      {/* Tab pills — plain View, no ScrollView needed for 3 items */}
       <View style={styles.tabRow}>
         {TABS.map((tab) => {
           const isSelected = activeTab === tab.key;
@@ -272,7 +309,6 @@ export default function FeaturedSection({
         })}
       </View>
 
-      {/* Card row or empty message */}
       {currentItems.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>{getEmptyMessage()}</Text>
