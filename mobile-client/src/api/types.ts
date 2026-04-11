@@ -30,6 +30,8 @@ export interface UserSummary {
   is_verified?: boolean;
   is_onboarded?: boolean;
   is_organizer_banned_until?: string | null;
+  followers_count?: number;
+  following_count?: number;
 }
 
 /**
@@ -55,6 +57,10 @@ export interface PublicUserProfile {
   portfolio_images?: string[];
   /** Public exchange history visibility; when false, do not fetch history for viewers. */
   show_history?: boolean;
+  /** Present for authenticated viewers; whether the current user follows this profile. */
+  is_following?: boolean;
+  followers_count?: number;
+  following_count?: number;
 }
 
 /** GET /users/{id}/history/ row shape (web `UserHistoryItem`). */

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
@@ -15,6 +15,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import {
+  useFocusEffect,
   useNavigation,
   type CompositeNavigationProp,
 } from "@react-navigation/native";
@@ -53,7 +54,7 @@ type EditableProfile = {
 };
 
 export default function ProfileScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const navigation = useNavigation<ProfileHomeNavigation>();
   const insets = useSafeAreaInsets();
   const unreadCount = useNotificationStore((s) => s.unreadCount);
@@ -83,6 +84,14 @@ export default function ProfileScreen() {
   );
 
   const [form, setForm] = useState<EditableProfile>(initialForm);
+
+  const profileUserId = user?.id;
+  useFocusEffect(
+    useCallback(() => {
+      if (!profileUserId) return;
+      void refreshUser();
+    }, [profileUserId, refreshUser]),
+  );
 
   useEffect(() => {
     if (!user?.id) return;
@@ -203,6 +212,8 @@ export default function ProfileScreen() {
     kind_count?: number;
     punctual_count?: number;
     achievements?: string[];
+    followers_count?: number;
+    following_count?: number;
   };
 
   const fullName = `${form.first_name} ${form.last_name}`.trim();
@@ -282,6 +293,40 @@ export default function ProfileScreen() {
                 {form.email ? (
                   <Text style={styles.email}>{form.email}</Text>
                 ) : null}
+
+                <View style={styles.followMetaRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="View your followers"
+                    onPress={() => {
+                      if (!user?.id) return;
+                      navigation.navigate("FollowList", {
+                        userId: String(user.id),
+                        kind: "followers",
+                      });
+                    }}
+                  >
+                    <Text style={styles.followMetaLink}>
+                      {typedUser.followers_count ?? 0} followers
+                    </Text>
+                  </Pressable>
+                  <Text style={styles.followMetaDot}> · </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="View users you follow"
+                    onPress={() => {
+                      if (!user?.id) return;
+                      navigation.navigate("FollowList", {
+                        userId: String(user.id),
+                        kind: "following",
+                      });
+                    }}
+                  >
+                    <Text style={styles.followMetaLink}>
+                      {typedUser.following_count ?? 0} following
+                    </Text>
+                  </Pressable>
+                </View>
 
                 {form.location ? (
                   <Text style={styles.location}>{form.location}</Text>
@@ -703,6 +748,22 @@ const getStyles = (top: number, bottom: number) =>
       fontSize: 14,
       color: colors.GRAY500,
       marginBottom: 6,
+    },
+    followMetaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      marginBottom: 8,
+    },
+    followMetaLink: {
+      fontSize: 13,
+      fontWeight: "600",
+      color: colors.GREEN,
+      textDecorationLine: "underline",
+    },
+    followMetaDot: {
+      fontSize: 13,
+      color: colors.GRAY500,
     },
     location: {
       fontSize: 14,
