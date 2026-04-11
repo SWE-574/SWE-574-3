@@ -138,7 +138,6 @@ class TestForumTopicViewSet:
         })
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
-
 @pytest.mark.django_db
 @pytest.mark.integration
 class TestForumActivityView:
@@ -164,11 +163,12 @@ class TestForumActivityView:
         response = client.get('/api/forum/my-activity/')
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.data == {
-            'my_topics': 2,
-            'my_replies': 3,
-            'open_topics': 1,
-        }
+        assert response.data['my_topics'] == 2
+        assert response.data['my_replies'] == 3
+        assert response.data['open_topics'] == 1
+        assert len(response.data['open_topic_items']) == 1
+        assert response.data['open_topic_items'][0]['id'] == str(open_topic.id)
+        assert response.data['open_topic_items'][0]['is_locked'] is False
 
     def test_forum_activity_requires_authentication(self):
         response = APIClient().get('/api/forum/my-activity/')

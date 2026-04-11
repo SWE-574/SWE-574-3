@@ -6,7 +6,7 @@ import TopicDetailScreen from "../presentation/screens/TopicDetailScreen";
 
 export type ForumStackParamList = {
   ForumFeed: undefined;
-  CreateTopic: undefined;
+  CreateTopic: { categoryId?: string } | undefined;
   TopicDetail: { id: string; title: string };
 };
 

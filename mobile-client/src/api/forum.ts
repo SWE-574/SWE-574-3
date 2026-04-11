@@ -85,6 +85,13 @@ export interface ReportResponse {
   created_at: string;
 }
 
+export interface ForumActivity {
+  my_topics: number;
+  my_replies: number;
+  open_topics: number;
+  open_topic_items: ForumTopic[];
+}
+
 export function listCategories(): Promise<ForumCategory[]> {
   return apiRequest<ForumCategory[]>('/forum/categories/');
 }
@@ -105,8 +112,19 @@ export function deleteCategory(slug: string): Promise<void> {
   return apiRequest<void>(`/forum/categories/${encodeURIComponent(slug)}/`, { method: 'DELETE' });
 }
 
-export function listTopics(params?: { page?: number; page_size?: number; category?: string }): Promise<PaginatedResponse<ForumTopic>> {
-  return apiRequest<PaginatedResponse<ForumTopic>>('/forum/topics/', { params: params as Record<string, string | number | undefined> });
+export function listTopics(params?: {
+  page?: number;
+  page_size?: number;
+  category?: string;
+}): Promise<PaginatedResponse<ForumTopic>> {
+  return apiRequest<PaginatedResponse<ForumTopic>>(
+    '/forum/topics/',
+    { params: params as Record<string, string | number | undefined> }
+  );
+}
+
+export function getMyActivity(): Promise<ForumActivity> {
+  return apiRequest<ForumActivity>('/forum/my-activity/');
 }
 
 export function createTopic(body: TopicRequest): Promise<ForumTopic> {

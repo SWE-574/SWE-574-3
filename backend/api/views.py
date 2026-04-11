@@ -6739,7 +6739,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         else:
             # Only show topics from active categories
             queryset = queryset.filter(category__is_active=True)
-        
+
         # Annotate with reply count
         queryset = queryset.annotate(
             reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False))
@@ -6982,6 +6982,13 @@ class ForumActivityView(APIView):
             author=request.user,
             category__is_active=True,
         )
+        open_topic_queryset = (
+            topic_queryset
+            .filter(is_locked=False)
+            .select_related('author', 'category')
+            .annotate(reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False)))
+            .order_by('-is_pinned', '-created_at')
+        )
         return Response(
             {
                 'my_topics': topic_queryset.count(),
@@ -6991,6 +6998,7 @@ class ForumActivityView(APIView):
                     is_deleted=False,
                 ).count(),
                 'open_topics': topic_queryset.filter(is_locked=False).count(),
+                'open_topic_items': ForumTopicSerializer(open_topic_queryset, many=True).data,
             }
         )
 

@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -16,9 +17,10 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import type { ForumTopic, ForumPost } from "../../api/forum";
+import type { ForumTopic, ForumPost, ForumCategory } from "../../api/forum";
 import {
   getTopic,
+  listCategories,
   listTopicPosts,
   createTopicPost,
   patchTopic,
@@ -39,8 +41,33 @@ import type { UserSummary } from "../../api/types";
 
 type NavProp = NativeStackNavigationProp<ForumStackParamList, "TopicDetail">;
 type RouteParam = RouteProp<ForumStackParamList, "TopicDetail">;
+type TopicTone = {
+  bg: string;
+  light: string;
+};
 
 const PAGE_SIZE = 20;
+const TOPIC_TONE = {
+  bg: colors.GREEN,
+  light: colors.GREEN_LT,
+};
+
+function getCategoryTone(color?: string | null): TopicTone {
+  switch (color) {
+    case "blue":
+      return { bg: colors.BLUE, light: colors.BLUE_LT };
+    case "purple":
+      return { bg: colors.PURPLE, light: colors.PURPLE_LT };
+    case "amber":
+    case "orange":
+      return { bg: colors.AMBER, light: colors.AMBER_LT };
+    case "red":
+      return { bg: colors.RED, light: colors.RED_LT };
+    case "green":
+    default:
+      return TOPIC_TONE;
+  }
+}
 
 function parseApiError(err: unknown): string {
   if (err && typeof err === "object") {
@@ -53,6 +80,42 @@ function parseApiError(err: unknown): string {
     if (typeof e.title === "string") return e.title;
   }
   return "Something went wrong. Please try again.";
+}
+
+function AvatarCircle({
+  name,
+  avatarUrl,
+  size = 26,
+  tone = TOPIC_TONE,
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  size?: number;
+  tone?: TopicTone;
+}) {
+  return (
+    <View
+      style={[
+        styles.avatar,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: colors.WHITE,
+          borderWidth: 1,
+          borderColor: colors.GRAY200,
+        },
+      ]}
+    >
+      {avatarUrl ? (
+        <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+      ) : (
+        <Text style={[styles.avatarText, { color: tone.bg }]}>
+          {getInitials(name) || "?"}
+        </Text>
+      )}
+    </View>
+  );
 }
 
 function EditActionButtons({
@@ -89,6 +152,7 @@ function EditActionButtons({
 interface TopicHeaderProps {
   topic: ForumTopic;
   user: UserSummary | null;
+  tone: TopicTone;
   isEditing: boolean;
   editTitle: string;
   editBody: string;
@@ -104,6 +168,7 @@ interface TopicHeaderProps {
 function TopicHeader({
   topic,
   user,
+  tone,
   isEditing,
   editTitle,
   editBody,
@@ -119,13 +184,30 @@ function TopicHeader({
   const canReport = !!user && !isOwner;
 
   return (
-    <View style={styles.topicHeader}>
+    <View style={styles.topicCard}>
+      <View style={[styles.topicAccentBar, { backgroundColor: tone.bg }]} />
+
       <View style={styles.topicHeaderTop}>
-        <View style={styles.categoryChip}>
-          <Text style={styles.categoryText} numberOfLines={1}>
-            {topic.category_name}
-          </Text>
+        <View style={styles.topicBadgeRow}>
+          <View style={[styles.categoryChip, { backgroundColor: tone.light }]}>
+            <Text style={[styles.categoryText, { color: tone.bg }]} numberOfLines={1}>
+              {topic.category_name}
+            </Text>
+          </View>
+          {topic.is_locked && (
+            <View style={styles.statusBadge}>
+              <Ionicons name="lock-closed" size={11} color={colors.GRAY500} />
+              <Text style={styles.statusBadgeText}>Locked</Text>
+            </View>
+          )}
+          {topic.is_pinned && (
+            <View style={styles.pinnedBadge}>
+              <Ionicons name="pin" size={11} color={colors.AMBER} />
+              <Text style={styles.pinnedText}>Pinned</Text>
+            </View>
+          )}
         </View>
+
         {isOwner && !isEditing && (
           <Pressable style={styles.menuButton} onPress={onMenu} hitSlop={8}>
             <Ionicons name="ellipsis-vertical" size={18} color={colors.GRAY500} />
@@ -164,9 +246,12 @@ function TopicHeader({
         <>
           <Text style={styles.topicTitle}>{topic.title}</Text>
           <View style={styles.authorRow}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{getInitials(topic.author_name)}</Text>
-            </View>
+            <AvatarCircle
+              name={topic.author_name}
+              avatarUrl={topic.author_avatar_url}
+              size={30}
+              tone={tone}
+            />
             <Text style={styles.authorName}>{topic.author_name}</Text>
             <Text style={styles.dot}>·</Text>
             <Text style={styles.timeAgo}>{formatTimeAgo(topic.created_at)}</Text>
@@ -175,12 +260,19 @@ function TopicHeader({
         </>
       )}
 
-      <View style={styles.repliesDivider}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.repliesLabel}>
-          {topic.reply_count === 1 ? "1 Reply" : `${topic.reply_count} Replies`}
-        </Text>
-        <View style={styles.dividerLine} />
+      <View style={styles.topicMetaRow}>
+        <View style={styles.metaPill}>
+          <Ionicons name="chatbubble-outline" size={14} color={colors.GRAY500} />
+          <Text style={styles.metaPillText}>
+            {topic.reply_count === 1 ? "1 reply" : `${topic.reply_count} replies`}
+          </Text>
+        </View>
+        <View style={styles.metaPill}>
+          <Ionicons name="eye-outline" size={14} color={colors.GRAY500} />
+          <Text style={styles.metaPillText}>
+            {topic.view_count === 1 ? "1 view" : `${topic.view_count} views`}
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -191,6 +283,8 @@ function TopicHeader({
 interface PostItemProps {
   post: ForumPost;
   user: UserSummary | null;
+  topicAuthorId: string;
+  tone: TopicTone;
   isEditing: boolean;
   editingPostBody: string;
   savingPost: boolean;
@@ -204,6 +298,8 @@ interface PostItemProps {
 function PostItem({
   post,
   user,
+  topicAuthorId,
+  tone,
   isEditing,
   editingPostBody,
   savingPost,
@@ -215,15 +311,24 @@ function PostItem({
 }: PostItemProps) {
   const isOwner = !!user && user.id === post.author_id;
   const canReport = !!user && !isOwner;
+  const isTopicAuthor = post.author_id === topicAuthorId;
 
   return (
-    <View style={styles.postItem}>
+    <View style={styles.postCard}>
       <View style={styles.postHeaderRow}>
         <View style={styles.authorRow}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{getInitials(post.author_name)}</Text>
-          </View>
+          <AvatarCircle
+            name={post.author_name}
+            avatarUrl={post.author_avatar_url}
+            size={28}
+            tone={tone}
+          />
           <Text style={styles.authorName}>{post.author_name}</Text>
+          {isTopicAuthor && (
+            <View style={[styles.authorBadge, { backgroundColor: tone.light }]}>
+              <Text style={[styles.authorBadgeText, { color: tone.bg }]}>Author</Text>
+            </View>
+          )}
           <Text style={styles.dot}>·</Text>
           <Text style={styles.timeAgo}>{formatTimeAgo(post.created_at)}</Text>
         </View>
@@ -269,7 +374,7 @@ function PostItem({
 
 export default function TopicDetailScreen() {
   const navigation = useNavigation<NavProp>();
-  const { id, title } = useRoute<RouteParam>().params;
+  const { id } = useRoute<RouteParam>().params;
   const { isAuthenticated, user } = useAuth();
 
   const [topic, setTopic] = useState<ForumTopic | null>(null);
@@ -297,6 +402,7 @@ export default function TopicDetailScreen() {
     | { kind: "post"; post: ForumPost }
     | null
   >(null);
+  const [topicTone, setTopicTone] = useState<TopicTone>(TOPIC_TONE);
 
   const listRef = useRef<FlatList<ForumPost>>(null);
   const loadingMoreRef = useRef(false);
@@ -312,15 +418,20 @@ export default function TopicDetailScreen() {
       setLoading(true);
       setError(null);
       try {
-        const [topicData, postsData] = await Promise.all([
+        const [topicData, postsData, categoryData] = await Promise.all([
           getTopic(id),
           listTopicPosts(id, { page: 1, page_size: PAGE_SIZE }),
+          listCategories().catch(() => [] as ForumCategory[]),
         ]);
         if (cancelled) return;
         setTopic(topicData as ForumTopic);
         setPosts(postsData.results);
         setHasMore(postsData.next !== null);
         setPage(1);
+        const matchedCategory = categoryData.find(
+          (category) => category.slug === (topicData as ForumTopic).category_slug
+        );
+        setTopicTone(getCategoryTone(matchedCategory?.color));
       } catch {
         if (!cancelled) setError("Failed to load topic.");
       } finally {
@@ -459,6 +570,14 @@ export default function TopicDetailScreen() {
                 try {
                   await deletePost(post.id);
                   setPosts((prev) => prev.filter((p) => p.id !== post.id));
+                  setTopic((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          reply_count: Math.max(0, prev.reply_count - 1),
+                        }
+                      : prev
+                  );
                 } catch (err) {
                   Alert.alert("Error", parseApiError(err));
                 }
@@ -543,6 +662,36 @@ export default function TopicDetailScreen() {
     return null;
   };
 
+  const renderListHeader = () => {
+    if (!topic) return null;
+
+    return (
+      <>
+        <TopicHeader
+          topic={topic}
+          user={user}
+          tone={topicTone}
+          isEditing={isEditingTopic}
+          editTitle={editTitle}
+          editBody={editBody}
+          saving={savingTopic}
+          onEditTitleChange={setEditTitle}
+          onEditBodyChange={setEditBody}
+          onMenu={handleTopicMenu}
+          onReport={() => setReportTarget({ kind: "topic" })}
+          onSave={handleSaveTopic}
+          onCancel={handleCancelTopicEdit}
+        />
+        <View style={styles.repliesSectionHeader}>
+          <Text style={styles.sectionHeadingTitle}>Replies</Text>
+          <Text style={styles.sectionHeadingMeta}>
+            {topic.reply_count === 1 ? "1 message" : `${topic.reply_count} messages`}
+          </Text>
+        </View>
+      </>
+    );
+  };
+
   const renderComposer = () => {
     if (!topic) return null;
     if (topic.is_locked) {
@@ -575,13 +724,16 @@ export default function TopicDetailScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
-      <View style={styles.header}>
+      <View style={styles.topBar}>
         <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color={colors.GRAY900} />
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {title}
-        </Text>
+        <View style={styles.topBarTextWrap}>
+          <Text style={styles.topBarTitle}>Community Forum</Text>
+          <Text style={styles.topBarSubtitle} numberOfLines={1}>
+            Topic details and replies
+          </Text>
+        </View>
       </View>
 
       {loading ? (
@@ -599,6 +751,8 @@ export default function TopicDetailScreen() {
               <PostItem
                 post={item}
                 user={user}
+                topicAuthorId={topic?.author_id ?? ""}
+                tone={topicTone}
                 isEditing={editingPostId === item.id}
                 editingPostBody={editingPostBody}
                 savingPost={savingPost}
@@ -609,30 +763,13 @@ export default function TopicDetailScreen() {
                 onCancel={handleCancelPostEdit}
               />
             )}
-            ListHeaderComponent={
-              topic ? (
-                <TopicHeader
-                  topic={topic}
-                  user={user}
-                  isEditing={isEditingTopic}
-                  editTitle={editTitle}
-                  editBody={editBody}
-                  saving={savingTopic}
-                  onEditTitleChange={setEditTitle}
-                  onEditBodyChange={setEditBody}
-                  onMenu={handleTopicMenu}
-                  onReport={() => setReportTarget({ kind: "topic" })}
-                  onSave={handleSaveTopic}
-                  onCancel={handleCancelTopicEdit}
-                />
-              ) : null
-            }
+            ListHeaderComponent={renderListHeader}
             ListEmptyComponent={renderEmpty}
             ListFooterComponent={renderFooter}
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.3}
             contentContainerStyle={styles.listContent}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
+            ItemSeparatorComponent={() => <View style={styles.cardGap} />}
           />
           {renderComposer()}
         </KeyboardAvoidingView>
@@ -658,7 +795,7 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  header: {
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
@@ -671,42 +808,98 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 4,
   },
-  headerTitle: {
+  topBarTextWrap: {
     flex: 1,
-    fontSize: 16,
+  },
+  topBarTitle: {
+    fontSize: 18,
     fontWeight: "700",
     color: colors.GRAY900,
+  },
+  topBarSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: colors.GRAY500,
   },
   fullScreenSpinner: {
     flex: 1,
   },
   listContent: {
-    paddingBottom: 8,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
     flexGrow: 1,
   },
-  // Topic header
-  topicHeader: {
+  topicCard: {
     backgroundColor: colors.WHITE,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.GRAY200,
+    marginBottom: 12,
+    shadowColor: colors.GRAY900,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  topicAccentBar: {
+    height: 4,
+    borderRadius: 999,
+    marginBottom: 14,
   },
   topicHeaderTop: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: 12,
+    gap: 8,
+  },
+  topicBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    flex: 1,
   },
   categoryChip: {
-    backgroundColor: "#D1FAE5",
-    paddingVertical: 3,
+    backgroundColor: TOPIC_TONE.light,
+    paddingVertical: 4,
     paddingHorizontal: 10,
-    borderRadius: 6,
+    borderRadius: 999,
   },
   categoryText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
-    color: colors.GREEN,
+    color: TOPIC_TONE.bg,
+  },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.GRAY100,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.GRAY500,
+  },
+  pinnedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.AMBER_LT,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+  },
+  pinnedText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.AMBER,
   },
   menuButton: {
     padding: 6,
@@ -722,16 +915,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
+    flexWrap: "wrap",
     marginBottom: 12,
   },
   avatar: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
     backgroundColor: colors.GREEN,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 7,
+    marginRight: 8,
+    overflow: "hidden",
+  },
+  avatarImage: {
+    width: "100%",
+    height: "100%",
   },
   avatarText: {
     fontSize: 10,
@@ -757,44 +953,84 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.GRAY900,
     lineHeight: 23,
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  repliesDivider: {
+  topicMetaRow: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 8,
-    marginTop: 4,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.GRAY200,
+  metaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.GRAY100,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 999,
   },
-  repliesLabel: {
+  metaPillText: {
     fontSize: 12,
     fontWeight: "600",
-    color: colors.GRAY500,
+    color: colors.GRAY600,
   },
-  // Post items
-  postItem: {
-    backgroundColor: colors.WHITE,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  postHeaderRow: {
+  repliesSectionHeader: {
+    marginBottom: 12,
+    paddingHorizontal: 4,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 8,
+    gap: 12,
+  },
+  sectionHeadingTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.GRAY900,
+  },
+  sectionHeadingMeta: {
+    fontSize: 12,
+    color: colors.GRAY500,
+  },
+  postCard: {
+    backgroundColor: colors.WHITE,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    shadowColor: colors.GRAY900,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  postHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 10,
+    gap: 8,
+  },
+  authorBadge: {
+    marginLeft: 8,
+    backgroundColor: colors.GREEN_LT,
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+    borderRadius: 999,
+  },
+  authorBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.GREEN,
   },
   postBody: {
     fontSize: 14,
     color: colors.GRAY900,
-    lineHeight: 21,
+    lineHeight: 22,
   },
-  separator: {
-    height: 1,
-    backgroundColor: colors.GRAY100,
+  cardGap: {
+    height: 12,
   },
   footerSpinner: {
     paddingVertical: 16,
@@ -858,6 +1094,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 40,
+    backgroundColor: colors.WHITE,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
     gap: 8,
   },
   emptyText: {
@@ -877,7 +1117,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 12,
+    paddingVertical: 14,
     backgroundColor: colors.WHITE,
     borderTopWidth: 1,
     borderTopColor: colors.GRAY200,
