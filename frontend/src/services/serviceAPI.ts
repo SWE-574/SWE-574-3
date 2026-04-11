@@ -1,7 +1,12 @@
 import apiClient from './api'
-import type { Service } from '@/types'
+import type {
+  RecommendationDebugAvailabilityResponse,
+  RecommendationDebugResponse,
+  Service,
+} from '@/types'
 
 export interface ServiceListParams {
+  sort?: 'latest' | 'hot'
   lat?: number
   lng?: number
   distance?: number
@@ -14,6 +19,17 @@ export interface ServiceListParams {
   user_id?: string
 }
 
+export interface ServiceRankingDebugParams {
+  service_ids: string[]
+  selected_service_id?: string
+  search?: string
+  tags?: string[]
+  lat?: number
+  lng?: number
+  distance?: number
+  active_filter?: string
+}
+
 type ServiceListResponse = Service[] | { results: Service[]; count?: number }
 
 export const serviceAPI = {
@@ -21,6 +37,7 @@ export const serviceAPI = {
     // URLSearchParams preserves repeated keys (?tags=a&tags=b) as expected by
     // DRF's request.query_params.getlist('tags').
     const queryParams = new URLSearchParams()
+    if (params?.sort) queryParams.set('sort', params.sort)
     if (params?.lat != null) queryParams.set('lat', String(params.lat))
     if (params?.lng != null) queryParams.set('lng', String(params.lng))
     if (params?.distance != null) queryParams.set('distance', String(params.distance))
@@ -104,6 +121,19 @@ export const serviceAPI = {
 
   setPrimaryMedia: async (serviceId: string, mediaId: string): Promise<Service> => {
     const res = await apiClient.patch<Service>(`/services/${serviceId}/set-primary-media/`, { media_id: mediaId })
+    return res.data
+  },
+
+  getRankingDebug: async (
+    payload: ServiceRankingDebugParams,
+    signal?: AbortSignal,
+  ): Promise<RecommendationDebugResponse> => {
+    const res = await apiClient.post<RecommendationDebugResponse>('/services/debug-ranking/', payload, { signal })
+    return res.data
+  },
+
+  getRankingDebugAvailability: async (signal?: AbortSignal): Promise<RecommendationDebugAvailabilityResponse> => {
+    const res = await apiClient.get<RecommendationDebugAvailabilityResponse>('/services/debug-ranking-availability/', { signal })
     return res.data
   },
 }

@@ -184,6 +184,51 @@ Without a key, email features are silently disabled — the app still works.
 
 ---
 
+## Audit Log Retention SLA
+
+`AdminAuditLog` records document every moderation and administrative action taken within The Hive. These records are **immutable** and must be retained for a minimum of **7 years (2,555 days)** from creation.
+
+### Enforcement
+
+| Layer | Mechanism |
+|-------|-----------|
+| Application | `AdminAuditLog.save()` and `AdminAuditLog.delete()` raise `AuditLogImmutabilityError` |
+| Database | PostgreSQL `BEFORE UPDATE OR DELETE` trigger `audit_log_immutability_trigger` |
+| FK integrity | `admin` ForeignKey uses `on_delete=PROTECT`; deleting a User with audit records is blocked |
+
+### Archival
+
+Records past the retention window can be exported (not deleted) using:
+
+```bash
+# Dry run: count records eligible for archival
+python manage.py archive_audit_logs --dry-run
+
+# Export to JSON (default)
+python manage.py archive_audit_logs --output-dir=/mnt/audit-archives
+
+# Export to CSV
+python manage.py archive_audit_logs --format=csv --output-dir=/mnt/audit-archives
+```
+
+The retention threshold is controlled by `AUDIT_RETENTION_DAYS` in settings (default: `2555`). To override:
+
+```dotenv
+AUDIT_RETENTION_DAYS=3650   # 10 years
+```
+
+### Recommended archival cron (production)
+
+```cron
+# Run every Sunday at 02:00 UTC
+0 2 * * 0  cd /opt/thehive && docker compose -f docker-compose.prod.yml exec -T backend \
+           python manage.py archive_audit_logs --output-dir=/mnt/audit-archives
+```
+
+> **Important:** Archived records are **not deleted** after export. Permanent deletion requires a DBA to manually disable the database trigger, which provides an additional governance checkpoint.
+
+---
+
 ## Make Targets
 
 ```

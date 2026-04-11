@@ -2,6 +2,7 @@ import { apiClient } from './api'
 import type { ForumActivity, ForumCategory, ForumTopic, ForumPost } from '@/types'
 
 export type ForumReportType = 'inappropriate_content' | 'spam' | 'scam' | 'harassment' | 'other'
+export type TopicSortOption = 'newest' | 'most_active'
 
 interface PaginatedResponse<T> {
   count: number
@@ -23,7 +24,7 @@ export const forumAPI = {
   },
 
   // ── Topics ────────────────────────────────────────────────────────────────
-  listTopics: async (params: { category?: string; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<PaginatedResponse<ForumTopic>> => {
+  listTopics: async (params: { category?: string; page?: number; page_size?: number; sort?: TopicSortOption } = {}, signal?: AbortSignal): Promise<PaginatedResponse<ForumTopic>> => {
     const res = await apiClient.get<PaginatedResponse<ForumTopic>>('/forum/topics/', { params, signal })
     return res.data
   },

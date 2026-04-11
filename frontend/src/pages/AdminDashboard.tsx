@@ -5,7 +5,7 @@ import {
   FiUsers, FiAlertTriangle, FiMessageSquare, FiMessageCircle, FiActivity, FiHome, FiBarChart2,
   FiCheck, FiX, FiLink2, FiAlertCircle, FiSlash, FiMapPin, FiClock,
   FiCalendar, FiTrash2, FiPauseCircle, FiArrowUpRight, FiLock, FiUserX,
-  FiUnlock, FiBookmark, FiRefreshCw, FiMessageCircle as FiCommentIcon,
+  FiUnlock, FiBookmark, FiRefreshCw, FiMessageCircle as FiCommentIcon, FiSettings,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { adminAPI, type AuditTargetFilter, type CommentStatusFilter, type ReportResolveAction, type ReportStatusFilter } from '@/services/adminAPI'
@@ -27,9 +27,16 @@ import {
   WHITE,
 } from '@/theme/tokens'
 
-type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 'audit'
+type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 'audit' | 'settings'
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
+
+const ROLE_TIER: Record<string, number> = {
+  super_admin: 3,
+  admin: 2,
+  moderator: 1,
+  member: 0,
+}
 
 function asStatusCode(error: unknown): number | undefined {
   return (error as { response?: { status?: number } })?.response?.status
@@ -52,7 +59,7 @@ function asLabel(value: string | null | undefined, fallback = 'N/A') {
 function getReportedObjectPath(report: AdminReport): string | null {
   if (report.reported_service) return `/service-detail/${report.reported_service}`
   if (report.reported_forum_topic) return `/forum/topic/${report.reported_forum_topic}`
-  if (report.reported_user) return `/public-profile/${report.reported_user}`
+  if (report.reported_user) return `/admin/users/${report.reported_user}`
   return null
 }
 
@@ -92,134 +99,7 @@ function canRemoveReportedUserFromEvent(report: AdminReport): boolean {
   return ['accepted', 'checked_in', 'reported', 'paused'].includes(report.handshake_status ?? '')
 }
 
-// ── Shared modal primitives ────────────────────────────────────────────────────
-const ModalBackdrop = ({ onClick, children }: { onClick: () => void; children: React.ReactNode }) => (
-  <Box position="fixed" inset={0} zIndex={3000} display="flex" alignItems="center" justifyContent="center" p={4}
-    style={{ background: 'rgba(15,23,42,0.48)', backdropFilter: 'blur(2px)' }} onClick={onClick}>
-    {children}
-  </Box>
-)
-const ModalCard = ({ maxW = '420px', children, onClick }: { maxW?: string; children: React.ReactNode; onClick: (e: React.MouseEvent) => void }) => (
-  <Box bg={WHITE} borderRadius="16px" w="100%" maxW={maxW} border={`1px solid ${GRAY200}`}
-    style={{ boxShadow: '0 20px 48px rgba(0,0,0,0.18)' }} onClick={onClick}>
-    {children}
-  </Box>
-)
-const ModalHeader = ({ icon, iconBg, iconColor, title, subtitle }: { icon: React.ReactNode; iconBg: string; iconColor: string; title: string; subtitle?: string }) => (
-  <Flex align="center" gap="12px" px={5} pt={5} pb={4} borderBottom={`1px solid ${GRAY100}`}>
-    <Box w="34px" h="34px" borderRadius="10px" display="flex" alignItems="center" justifyContent="center" flexShrink={0}
-      style={{ background: iconBg, color: iconColor }}>
-      {icon}
-    </Box>
-    <Box>
-      <Text fontSize="15px" fontWeight={700} color={GRAY800} lineHeight={1.2}>{title}</Text>
-      {subtitle && <Text fontSize="12px" color={GRAY400} mt="2px">{subtitle}</Text>}
-    </Box>
-  </Flex>
-)
-const ModalFooter = ({ onClose, confirmLabel, accent, accentLt, onConfirm, loading, disabled }: { onClose: () => void; confirmLabel: string; accent: string; accentLt: string; onConfirm: () => void; loading: boolean; disabled?: boolean }) => (
-  <Flex px={5} py={4} gap={3} justify="flex-end" borderTop={`1px solid ${GRAY100}`}>
-    <Box as="button" px="16px" py="8px" borderRadius="9px" fontSize="13px" fontWeight={500}
-      style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = GRAY200 }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = GRAY100 }}
-      onClick={onClose}>Cancel</Box>
-    <Box as="button" px="18px" py="8px" borderRadius="9px" fontSize="13px" fontWeight={600}
-      style={{ background: accentLt, color: accent, border: `1px solid ${accent}40`, cursor: (loading || disabled) ? 'not-allowed' : 'pointer', opacity: (loading || disabled) ? 0.6 : 1, transition: 'filter 0.12s' }}
-      onMouseEnter={(e) => { if (!loading && !disabled) (e.currentTarget as HTMLElement).style.filter = 'brightness(0.9)' }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = 'none' }}
-      onClick={() => { if (!loading && !disabled) onConfirm() }}>
-      {loading ? 'Working…' : confirmLabel}
-    </Box>
-  </Flex>
-)
-const ModalFieldLabel = ({ children }: { children: React.ReactNode }) => (
-  <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb="6px">{children}</Text>
-)
-
-// ── AdminConfirmModal ─────────────────────────────────────────────────────────
-interface ConfirmModalProps {
-  isOpen: boolean; title: string; description: string; confirmLabel: string
-  accent: string; accentLt: string; onConfirm: () => void; onClose: () => void; loading: boolean
-}
-function AdminConfirmModal({ isOpen, title, description, confirmLabel, accent, accentLt, onConfirm, onClose, loading }: ConfirmModalProps) {
-  if (!isOpen) return null
-  const isDestructive = accent === RED
-  return (
-    <ModalBackdrop onClick={onClose}>
-      <ModalCard onClick={(e) => e.stopPropagation()}>
-        <ModalHeader
-          icon={isDestructive ? <FiAlertTriangle size={15} /> : <FiAlertCircle size={15} />}
-          iconBg={accentLt} iconColor={accent}
-          title={title} />
-        <Box px={5} py={4}>
-          <Text fontSize="13px" color={GRAY500} lineHeight={1.6}>{description}</Text>
-        </Box>
-        <ModalFooter onClose={onClose} confirmLabel={confirmLabel} accent={accent} accentLt={accentLt} onConfirm={onConfirm} loading={loading} />
-      </ModalCard>
-    </ModalBackdrop>
-  )
-}
-
-// ── AdminWarnModal ────────────────────────────────────────────────────────────
-interface WarnModalProps { isOpen: boolean; userName: string; onConfirm: (msg: string) => void; onClose: () => void; loading: boolean }
-function AdminWarnModal({ isOpen, userName, onConfirm, onClose, loading }: WarnModalProps) {
-  const [message, setMessage] = useState('Please follow community guidelines.')
-  if (!isOpen) return null
-  const canSubmit = !loading && message.trim().length > 0
-  return (
-    <ModalBackdrop onClick={onClose}>
-      <ModalCard maxW="460px" onClick={(e) => e.stopPropagation()}>
-        <ModalHeader
-          icon={<FiAlertCircle size={15} />} iconBg={BLUE_LT} iconColor={BLUE}
-          title={`Warn ${userName}`} subtitle="Message will be sent as a warning notification" />
-        <Box px={5} py={4}>
-          <ModalFieldLabel>Warning message</ModalFieldLabel>
-          <Textarea value={message} onChange={(e) => setMessage(e.target.value)}
-            rows={4} bg={GRAY50} borderColor={GRAY200} borderRadius="10px" fontSize="13px"
-            placeholder="Describe the violation and expected behaviour…" />
-          <Text fontSize="11px" color={GRAY400} mt={2}>{message.trim().length} chars</Text>
-        </Box>
-        <ModalFooter onClose={onClose} confirmLabel="Send Warning" accent={BLUE} accentLt={BLUE_LT}
-          onConfirm={() => { if (canSubmit) onConfirm(message.trim()) }} loading={loading} disabled={!canSubmit} />
-      </ModalCard>
-    </ModalBackdrop>
-  )
-}
-
-// ── AdminKarmaModal ───────────────────────────────────────────────────────────
-interface KarmaModalProps { isOpen: boolean; userName: string; onConfirm: (n: number) => void; onClose: () => void; loading: boolean }
-function AdminKarmaModal({ isOpen, userName, onConfirm, onClose, loading }: KarmaModalProps) {
-  const [value, setValue] = useState('0')
-  if (!isOpen) return null
-  const num = Number.parseInt(value, 10)
-  const isValid = !Number.isNaN(num) && value.trim() !== '' && num !== 0
-  return (
-    <ModalBackdrop onClick={onClose}>
-      <ModalCard maxW="380px" onClick={(e) => e.stopPropagation()}>
-        <ModalHeader
-          icon={<FiBarChart2 size={15} />} iconBg={AMBER_LT} iconColor={AMBER}
-          title="Adjust Karma" subtitle={userName} />
-        <Box px={5} py={4}>
-          <ModalFieldLabel>Amount (use negative to subtract)</ModalFieldLabel>
-          <Input value={value} onChange={(e) => setValue(e.target.value)} type="number"
-            bg={GRAY50} borderColor={GRAY200} borderRadius="10px" fontSize="14px" />
-          {isValid && (
-            <Flex align="center" gap="6px" mt={3} px={3} py="8px" borderRadius="8px"
-              style={{ background: num > 0 ? GREEN_LT : RED_LT, border: `1px solid ${(num > 0 ? GREEN : RED)}30` }}>
-              <Box w="6px" h="6px" borderRadius="full" style={{ background: num > 0 ? GREEN : RED, flexShrink: 0 }} />
-              <Text fontSize="12px" fontWeight={600} color={num > 0 ? GREEN : RED}>
-                {num > 0 ? `+${num}` : num} karma will be applied to {userName}
-              </Text>
-            </Flex>
-          )}
-        </Box>
-        <ModalFooter onClose={onClose} confirmLabel="Apply" accent={AMBER} accentLt={AMBER_LT}
-          onConfirm={() => { if (!loading && isValid) onConfirm(num) }} loading={loading} disabled={!isValid} />
-      </ModalCard>
-    </ModalBackdrop>
-  )
-}
+import { AdminConfirmModal, AdminKarmaModal, AdminWarnModal } from '@/components/AdminModals'
 
 
 // ── AdminDashboard ────────────────────────────────────────────────────────────
@@ -274,12 +154,14 @@ const AdminDashboard = () => {
   const [auditLogs, setAuditLogs] = useState<PaginatedResponse<AdminAuditLog> | null>(null)
   const [auditTarget, setAuditTarget] = useState<AuditTargetFilter>('all')
   const [auditPage, setAuditPage] = useState(1)
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const [rankingDebugEnabled, setRankingDebugEnabledState] = useState(false)
 
   const [authIssue, setAuthIssue] = useState<string | null>(null)
 
   // ── Modal state ──────────────────────────────────────────────────────────
   const [warnModal,    setWarnModal]    = useState<{ open: boolean; user: AdminUserSummary | null; loading: boolean }>({ open: false, user: null, loading: false })
-  const [karmaModal,   setKarmaModal]   = useState<{ open: boolean; user: AdminUserSummary | null; loading: boolean }>({ open: false, user: null, loading: false })
+  const [karmaModal,   setKarmaModal]   = useState<{ open: boolean; user: AdminUserSummary | null }>({ open: false, user: null })
   const [confirmModal, setConfirmModal] = useState<{
     open: boolean; title: string; description: string; confirmLabel: string
     accent: string; accentLt: string; onConfirm: () => Promise<void>
@@ -450,6 +332,47 @@ const AdminDashboard = () => {
     if (activeTab === 'audit') loadAuditLogs()
   }, [activeTab, loadAuditLogs])
 
+  const loadAdminSettings = useCallback(async () => {
+    setSettingsLoading(true)
+    try {
+      const result = await adminAPI.getSettings()
+      setRankingDebugEnabledState(result.ranking_debug_enabled)
+      setAuthIssue(null)
+    } catch (error) {
+      if (asStatusCode(error) === 403) {
+        handleForbidden('You no longer have admin access. Please log in again.')
+        return
+      }
+      toast.error(getErrorMessage(error, 'Failed to load admin settings'))
+    } finally {
+      setSettingsLoading(false)
+    }
+  }, [handleForbidden])
+
+  useEffect(() => {
+    if (activeTab === 'settings') void loadAdminSettings()
+  }, [activeTab, loadAdminSettings])
+
+  const handleToggleRankingDebug = useCallback(() => {
+    const nextValue = !rankingDebugEnabled
+    setSettingsLoading(true)
+    void adminAPI.updateSettings({ ranking_debug_enabled: nextValue })
+      .then((result) => {
+        setRankingDebugEnabledState(result.ranking_debug_enabled)
+        toast.success(result.ranking_debug_enabled ? 'Ranking debug enabled for all users' : 'Ranking debug disabled for all users')
+      })
+      .catch((error) => {
+        if (asStatusCode(error) === 403) {
+          handleForbidden('You no longer have admin access. Please log in again.')
+          return
+        }
+        toast.error(getErrorMessage(error, 'Failed to update admin settings'))
+      })
+      .finally(() => {
+        setSettingsLoading(false)
+      })
+  }, [handleForbidden, rankingDebugEnabled])
+
   const handleWarnUser = (user: AdminUserSummary) => {
     setWarnModal({ open: true, user, loading: false })
   }
@@ -502,21 +425,7 @@ const AdminDashboard = () => {
   }
 
   const handleAdjustKarma = (user: AdminUserSummary) => {
-    setKarmaModal({ open: true, user, loading: false })
-  }
-
-  const submitKarma = async (adjustment: number) => {
-    if (!karmaModal.user) return
-    setKarmaModal((prev) => ({ ...prev, loading: true }))
-    try {
-      await adminAPI.adjustKarma(karmaModal.user.id, adjustment)
-      toast.success('Karma updated')
-      await loadUsers()
-      setKarmaModal({ open: false, user: null, loading: false })
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to update karma'))
-      setKarmaModal((prev) => ({ ...prev, loading: false }))
-    }
+    setKarmaModal({ open: true, user })
   }
 
   const handleResolveReport = (report: AdminReport, action: ReportResolveAction) => {
@@ -862,8 +771,9 @@ const AdminDashboard = () => {
     const tabParam = searchParams.get('tab')
     const reportIdParam = searchParams.get('reportId')
 
-    if (tabParam === 'reports' && activeTab !== 'reports') {
-      setActiveTab('reports')
+    const validTabs: AdminTab[] = ['dashboard', 'users', 'reports', 'comments', 'moderation', 'audit', 'settings']
+    if (tabParam && validTabs.includes(tabParam as AdminTab) && activeTab !== tabParam) {
+      setActiveTab(tabParam as AdminTab)
     }
 
     if (reportIdParam) {
@@ -879,20 +789,21 @@ const AdminDashboard = () => {
     if (!reportIdParam && openReportId) {
       closeOpenReport()
     }
+
+    if (tabParam && validTabs.includes(tabParam as AdminTab) && activeTab !== tabParam) {
+      setActiveTab(tabParam as AdminTab)
+    }
   }, [activeTab, closeOpenReport, openReportId, openReportPanel, searchParams])
 
   const handleTabChange = useCallback((tab: AdminTab) => {
     setActiveTab(tab)
-    if (tab === 'reports') {
-      if (!searchParams.get('tab')) {
-        navigate('/admin?tab=reports', { replace: true })
-      }
-      return
-    }
-
     closeOpenReport()
-    navigate('/admin', { replace: true })
-  }, [closeOpenReport, navigate, searchParams])
+    if (tab === 'dashboard') {
+      navigate('/admin', { replace: true })
+    } else {
+      navigate(`/admin?tab=${tab}`, { replace: true })
+    }
+  }, [closeOpenReport, navigate])
 
   const handleLockTopic = async (topicId: string) => {
     try {
@@ -959,6 +870,7 @@ const AdminDashboard = () => {
     comments:  { title: 'Comment Moderation', subtitle: 'Remove or restore flagged comments', icon: <FiMessageSquare size={16} /> },
     moderation:{ title: 'Forum Topics', subtitle: 'Lock, pin, or moderate forum content', icon: <FiMessageCircle size={16} /> },
     audit:     { title: 'Audit Logs', subtitle: 'Complete history of admin actions', icon: <FiActivity size={16} /> },
+    settings:  { title: 'Admin Settings', subtitle: 'Control admin-only debug and moderation preferences', icon: <FiSettings size={16} /> },
   }
 
   return (
@@ -1228,6 +1140,10 @@ const AdminDashboard = () => {
                   const initials = [user.first_name?.[0], user.last_name?.[0]].filter(Boolean).join('').toUpperCase() || user.email[0].toUpperCase()
                   const avatarColor = AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
                   const isSelf = currentUser?.id === user.id
+                  const actorTier = ROLE_TIER[currentUser?.role ?? ''] ?? 0
+                  const targetTier = ROLE_TIER[user.role] ?? 0
+                  const canActOn = !isSelf && actorTier > targetTier
+                  const canWarn = !isSelf && actorTier >= targetTier
                   const isLast = idx === (users?.results || []).length - 1
                   const mkUserBtn = (title: string, icon: React.ReactNode, bg: string, border: string, color: string, onClick: () => void, disabled?: boolean) => (
                     <Box as="button" title={title}
@@ -1245,22 +1161,36 @@ const AdminDashboard = () => {
                       {/* User */}
                       <Flex flex={1} minW={0} align="center" gap="10px" pr={3}>
                         <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center"
-                          style={{ background:avatarColor, color:WHITE, fontSize:'12px', fontWeight:700 }}>
-                          {initials}
+                          style={{ background:avatarColor, color:WHITE, fontSize:'12px', fontWeight:700, overflow:'hidden' }}>
+                          {user.avatar_url
+                            ? <img src={user.avatar_url} alt={initials} style={{ width:'32px', height:'32px', objectFit:'cover' }} />
+                            : initials}
                         </Flex>
                         <Box minW={0}>
                           <Text fontSize="13px" fontWeight={600} color={GRAY800}
-                            style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{name}</Text>
+                            style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'pointer' }}
+                            onClick={() => navigate(`/admin/users/${user.id}`, { state: { from: 'users' } })}
+                            _hover={{ color: GREEN }}>{name}</Text>
                           <Text fontSize="11px" color={GRAY400}
                             style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{user.email}</Text>
                         </Box>
                       </Flex>
                       {/* Role */}
                       <Box w="90px" flexShrink={0}>
-                        <Box display="inline-flex" px="7px" py="2px" borderRadius="6px" fontSize="11px" fontWeight={500}
-                          style={{ background:user.role==='admin'?PURPLE_LT:GRAY100, color:user.role==='admin'?PURPLE:GRAY600 }}>
-                          {user.role === 'admin' ? 'Admin' : 'Member'}
-                        </Box>
+                        {(() => {
+                          const roleMeta: Record<string, { label: string; bg: string; color: string }> = {
+                            super_admin: { label: 'Super Admin', bg: RED_LT,    color: RED    },
+                            admin:       { label: 'Admin',       bg: PURPLE_LT, color: PURPLE },
+                            moderator:   { label: 'Moderator',   bg: AMBER_LT,  color: AMBER  },
+                          }
+                          const meta = roleMeta[user.role] ?? { label: 'Member', bg: GRAY100, color: GRAY600 }
+                          return (
+                            <Box display="inline-flex" px="7px" py="2px" borderRadius="6px" fontSize="11px" fontWeight={500}
+                              style={{ background: meta.bg, color: meta.color }}>
+                              {meta.label}
+                            </Box>
+                          )
+                        })()}
                       </Box>
                       {/* Status */}
                       <Box w="100px" flexShrink={0}>
@@ -1278,15 +1208,15 @@ const AdminDashboard = () => {
                       </Box>
                       {/* Actions */}
                       <Flex w="108px" flexShrink={0} justify="flex-end" gap="4px">
-                        {mkUserBtn('View profile', <FiArrowUpRight size={11}/>, GRAY100, GRAY200, GRAY600, () => navigate(`/public-profile/${user.id}`))}
-                        {mkUserBtn('Warn user', <FiAlertCircle size={11}/>, BLUE_LT, BLUE+'40', BLUE, () => handleWarnUser(user), isSelf)}
+                        {mkUserBtn('View profile', <FiArrowUpRight size={11}/>, GRAY100, GRAY200, GRAY600, () => navigate(`/admin/users/${user.id}`, { state: { from: 'users' } }))}
+                        {mkUserBtn('Warn user', <FiAlertCircle size={11}/>, BLUE_LT, BLUE+'40', BLUE, () => handleWarnUser(user), !canWarn)}
                         {mkUserBtn(user.is_active?'Suspend user':'Activate user',
                           user.is_active ? <FiSlash size={11}/> : <FiCheck size={11}/>,
                           user.is_active ? RED_LT : GREEN_LT,
                           (user.is_active ? RED : GREEN)+'40',
                           user.is_active ? RED : GREEN,
-                          () => handleBanToggle(user), isSelf)}
-                        {mkUserBtn('Adjust karma', <FiBarChart2 size={11}/>, AMBER_LT, AMBER+'40', AMBER, () => handleAdjustKarma(user))}
+                          () => handleBanToggle(user), !canActOn)}
+                        {mkUserBtn('Adjust karma', <FiBarChart2 size={11}/>, AMBER_LT, AMBER+'40', AMBER, () => handleAdjustKarma(user), !canActOn)}
                       </Flex>
                     </Flex>
                   )
@@ -1880,6 +1810,93 @@ const AdminDashboard = () => {
         )
       })()}
 
+      {activeTab === 'settings' && (
+        <Stack gap={4}>
+          <Box
+            bg={WHITE}
+            borderRadius="12px"
+            border={`1px solid ${GRAY200}`}
+            p={{ base: 4, md: 5 }}
+            style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+          >
+            <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} gap={4} direction={{ base: 'column', md: 'row' }}>
+              <Box>
+                <Flex align="center" gap={2} mb={2}>
+                  <Box
+                    w="28px"
+                    h="28px"
+                    borderRadius="8px"
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center"
+                    style={{ background: BLUE_LT, color: BLUE }}
+                  >
+                    <FiSettings size={13} />
+                  </Box>
+                  <Text fontSize="14px" fontWeight={700} color={GRAY800}>
+                    Ranking Debug Access
+                  </Text>
+                </Flex>
+                <Text fontSize="13px" color={GRAY600} lineHeight={1.6}>
+                  Control whether the floating ranking debug button is available across the dashboard for all users.
+                </Text>
+                <Text fontSize="12px" color={GRAY400} mt={2}>
+                  When enabled, the dashboard exposes the `Debug on/off` launcher so ranking flow can be inspected on hover. Disabling it removes access globally.
+                </Text>
+              </Box>
+
+              <Flex
+                as="button"
+                align="center"
+                gap={3}
+                px={3}
+                py={2}
+                borderRadius="999px"
+                border={`1px solid ${rankingDebugEnabled ? GREEN_MD : GRAY200}`}
+                bg={rankingDebugEnabled ? GREEN_LT : WHITE}
+                color={rankingDebugEnabled ? GREEN : GRAY600}
+                cursor="pointer"
+                role="switch"
+                aria-checked={rankingDebugEnabled}
+                aria-label="Enable ranking debug globally"
+                onClick={handleToggleRankingDebug}
+                opacity={settingsLoading ? 0.72 : 1}
+                pointerEvents={settingsLoading ? 'none' : 'auto'}
+              >
+                <Box
+                  w="42px"
+                  h="24px"
+                  borderRadius="999px"
+                  position="relative"
+                  bg={rankingDebugEnabled ? GREEN : GRAY300}
+                  transition="background 0.16s ease"
+                >
+                  <Box
+                    position="absolute"
+                    top="3px"
+                    left={rankingDebugEnabled ? '21px' : '3px'}
+                    w="18px"
+                    h="18px"
+                    borderRadius="full"
+                    bg={WHITE}
+                    boxShadow="0 1px 3px rgba(15, 23, 42, 0.18)"
+                    transition="left 0.16s ease"
+                  />
+                </Box>
+                <Box textAlign="left">
+                  <Text fontSize="12px" fontWeight={700}>
+                    {settingsLoading ? 'Saving…' : rankingDebugEnabled ? 'Enabled' : 'Disabled'}
+                  </Text>
+                  <Text fontSize="11px" color={GRAY400}>
+                    Global dashboard ranking debug
+                  </Text>
+                </Box>
+              </Flex>
+            </Flex>
+          </Box>
+        </Stack>
+      )}
+
       {activeTab === 'reports' && openReportId && (
         <Box position="fixed" inset={0} zIndex={1500} style={{ background: 'rgba(15,23,42,0.36)', backdropFilter: 'blur(2px)' }} onClick={closeOpenReportPanel}>
           <Box
@@ -1922,7 +1939,8 @@ const AdminDashboard = () => {
             ) : (
               <>
                 {(() => {
-                  const reportedProfilePath = openReport.reported_user ? `/public-profile/${openReport.reported_user}` : null
+                  const reportedProfilePath = openReport.reported_user ? `/admin/users/${openReport.reported_user}` : null
+                  const reporterProfilePath = openReport.reporter ? `/admin/users/${openReport.reporter}` : null
                   const reportedServicePath = openReport.reported_service ? `/service-detail/${openReport.reported_service}` : null
                   const ownerUserId = openReport.reported_service_owner || openReport.reported_user || null
                   const hasReportedUserInfo = !!(openReport.reported_user_name || openReport.reported_user_email || openReport.reported_user_karma_score != null)
@@ -2028,7 +2046,16 @@ const AdminDashboard = () => {
                         {/* Reporter */}
                         <Box flex={1} minW={0} display="flex" flexDirection="column">
                           <PanelCard mb={0} fill>
-                            <PanelSectionHead label="Reporter" />
+                            <PanelSectionHead label="Reporter"
+                              right={reporterProfilePath && (
+                                <Box as="button" title="View admin profile"
+                                  style={{ background:GRAY100, border:`1px solid ${GRAY200}`, color:GRAY600, cursor:'pointer', width:'24px', height:'24px', display:'inline-flex', alignItems:'center', justifyContent:'center', borderRadius:'6px' }}
+                                  onMouseEnter={(e)=>{(e.currentTarget as HTMLElement).style.filter='brightness(0.88)'}}
+                                  onMouseLeave={(e)=>{(e.currentTarget as HTMLElement).style.filter='none'}}
+                                  onClick={() => navigate(reporterProfilePath, { state: { from: 'reports' } })}>
+                                  <FiArrowUpRight size={11} />
+                                </Box>
+                              )} />
                             <Box px={4} py={3}>
                               <Flex align="center" gap="10px" mb={3}>
                                 <Box w="34px" h="34px" borderRadius="9px" display="flex" alignItems="center" justifyContent="center" flexShrink={0}
@@ -2063,11 +2090,11 @@ const AdminDashboard = () => {
                             <PanelCard mb={0} fill>
                               <PanelSectionHead label="Reported user"
                                 right={reportedProfilePath && (
-                                  <Box as="button" title="View profile"
+                                  <Box as="button" title="View admin profile"
                                     style={{ background:GRAY100, border:`1px solid ${GRAY200}`, color:GRAY600, cursor:'pointer', width:'24px', height:'24px', display:'inline-flex', alignItems:'center', justifyContent:'center', borderRadius:'6px' }}
                                     onMouseEnter={(e)=>{(e.currentTarget as HTMLElement).style.filter='brightness(0.88)'}}
                                     onMouseLeave={(e)=>{(e.currentTarget as HTMLElement).style.filter='none'}}
-                                    onClick={() => navigate(reportedProfilePath)}>
+                                    onClick={() => navigate(reportedProfilePath, { state: { from: 'reports' } })}>
                                     <FiArrowUpRight size={11} />
                                   </Box>
                                 )} />
@@ -2284,9 +2311,10 @@ const AdminDashboard = () => {
     <AdminKarmaModal
       isOpen={karmaModal.open}
       userName={karmaModal.user ? userDisplayName(karmaModal.user) : ''}
-      onConfirm={submitKarma}
-      onClose={() => setKarmaModal({ open: false, user: null, loading: false })}
-      loading={karmaModal.loading}
+      currentKarma={karmaModal.user?.karma_score ?? 0}
+      userId={karmaModal.user?.id ?? ''}
+      onDone={() => { setKarmaModal({ open: false, user: null }); loadUsers() }}
+      onClose={() => setKarmaModal({ open: false, user: null })}
     />
   </>
   )
