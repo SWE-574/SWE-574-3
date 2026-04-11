@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import {
+  EMPTY_SUMMARY,
   listTransactions,
   type Transaction,
   type TransactionDirection,
@@ -23,12 +24,6 @@ import { listHandshakes, type Handshake } from "../../api/handshakes";
 
 const PAGE_SIZE = 20;
 const ACTIVE_HANDSHAKE_STATUSES = new Set(["accepted", "checked_in", "attended"]);
-
-const EMPTY_SUMMARY: TransactionSummary = {
-  current_balance: 0,
-  total_earned: 0,
-  total_spent: 0,
-};
 
 const FILTERS: Array<{ key: TransactionDirection; label: string }> = [
   { key: "all", label: "All" },

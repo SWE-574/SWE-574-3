@@ -34,6 +34,7 @@ import {
   type ProfileReview,
 } from "../../api/users";
 import {
+  EMPTY_SUMMARY,
   listTransactions,
   type TransactionSummary,
 } from "../../api/transactions";
@@ -42,6 +43,12 @@ import {
   groupHistoryItems,
   isOwnHistoryItem,
 } from "../../utils/historyGrouping";
+import {
+  activityCardAccent,
+  formatHours,
+  formatShortDate,
+  getInitials,
+} from "../../utils/profileFormatters";
 import AchievementsSection from "../components/AchievementsSection";
 import ProfileSkillsSection from "../components/ProfileSkillsSection";
 import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
@@ -68,65 +75,11 @@ const DEFAULT_BANNER_URI =
 const DEFAULT_AVATAR_URI =
   "https://api.dicebear.com/9.x/avataaars/png?seed=profile";
 
-const EMPTY_SUMMARY: TransactionSummary = {
-  current_balance: 0,
-  total_earned: 0,
-  total_spent: 0,
-};
-
 type ProfileTabKey = "offers" | "needs" | "events" | "history" | "reviews";
 
 function safeNumber(value: string | number | undefined | null): number {
   const next = Number(value ?? 0);
   return Number.isFinite(next) ? next : 0;
-}
-
-function formatShortDate(value?: string | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  return date.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatHours(value?: string | number | null) {
-  const amount = safeNumber(value);
-  return `${amount}h`;
-}
-
-function getInitials(name?: string | null) {
-  return (name || "?").trim().slice(0, 1).toUpperCase() || "?";
-}
-
-function activityCardAccent(type: Service["type"]) {
-  if (type === "Offer") {
-    return {
-      color: colors.GREEN,
-      bg: colors.GREEN_LT,
-      label: "Offer",
-      icon: "leaf-outline" as const,
-    };
-  }
-
-  if (type === "Need") {
-    return {
-      color: colors.BLUE,
-      bg: colors.BLUE_LT,
-      label: "Need",
-      icon: "layers-outline" as const,
-    };
-  }
-
-  return {
-    color: colors.AMBER,
-    bg: colors.AMBER_LT,
-    label: "Event",
-    icon: "sparkles-outline" as const,
-  };
 }
 
 export default function ProfileScreen() {

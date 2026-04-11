@@ -11,14 +11,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import {
-  useRoute,
-  useNavigation,
-  type CompositeNavigationProp,
-} from "@react-navigation/native";
+import { useRoute, useNavigation } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
 import {
   followUser,
@@ -38,8 +33,12 @@ import {
   groupHistoryItems,
   isOwnHistoryItem,
 } from "../../utils/historyGrouping";
-import type { ProfileStackParamList } from "../../navigation/ProfileStack";
-import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
+import {
+  activityCardAccent,
+  formatHours,
+  formatShortDate,
+  getInitials,
+} from "../../utils/profileFormatters";
 import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import AchievementsSection from "../components/AchievementsSection";
@@ -51,9 +50,16 @@ const DEFAULT_BANNER_URI =
 const DEFAULT_AVATAR_URI =
   "https://api.dicebear.com/9.x/avataaars/png?seed=profile";
 
-type PublicProfileNavigation = CompositeNavigationProp<
-  NativeStackNavigationProp<ProfileStackParamList, "PublicProfile">,
-  BottomTabNavigationProp<BottomTabParamList>
+type PublicProfileHostStackParamList = {
+  PublicProfile: { userId: string };
+  ServiceDetail: { id: string };
+  AchievementsList: { userId: string };
+  FollowList: { userId: string; kind: "followers" | "following" };
+};
+
+type PublicProfileNavigation = NativeStackNavigationProp<
+  PublicProfileHostStackParamList,
+  "PublicProfile"
 >;
 
 type LoadState =
@@ -69,56 +75,8 @@ function achievementIdsForDisplay(user: PublicUserProfile): string[] {
   return [...new Set([...achievements, ...badges])];
 }
 
-function formatShortDate(value?: string | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  return date.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatHours(value?: string | number | null) {
-  const amount = Number(value ?? 0);
-  return `${Number.isFinite(amount) ? amount : 0}h`;
-}
-
-function getInitials(name?: string | null) {
-  return (name || "?").trim().slice(0, 1).toUpperCase() || "?";
-}
-
-function activityCardAccent(type: Service["type"]) {
-  if (type === "Offer") {
-    return {
-      color: colors.GREEN,
-      bg: colors.GREEN_LT,
-      label: "Offer",
-      icon: "leaf-outline" as const,
-    };
-  }
-
-  if (type === "Need") {
-    return {
-      color: colors.BLUE,
-      bg: colors.BLUE_LT,
-      label: "Need",
-      icon: "layers-outline" as const,
-    };
-  }
-
-  return {
-    color: colors.AMBER,
-    bg: colors.AMBER_LT,
-    label: "Event",
-    icon: "sparkles-outline" as const,
-  };
-}
-
 export default function PublicProfileScreen() {
-  const route = useRoute<RouteProp<ProfileStackParamList, "PublicProfile">>();
+  const route = useRoute<RouteProp<PublicProfileHostStackParamList, "PublicProfile">>();
   const navigation = useNavigation<PublicProfileNavigation>();
   const { user: authUser, refreshUser } = useAuth();
   const { userId } = route.params;

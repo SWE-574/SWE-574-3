@@ -52,7 +52,7 @@ export interface TransactionsListParams {
   direction?: TransactionDirection;
 }
 
-const EMPTY_SUMMARY: TransactionSummary = {
+export const EMPTY_SUMMARY: TransactionSummary = {
   current_balance: 0,
   total_earned: 0,
   total_spent: 0,
