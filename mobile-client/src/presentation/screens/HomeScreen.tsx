@@ -388,7 +388,7 @@ export default function HomeScreen() {
       <View style={styles.topBar}>
         <TouchableOpacity
           onPress={() =>
-            tabNavigation.navigate("PostService", { screen: "PostService" })
+            tabNavigation.navigate("PostService", { screen: "PostServiceHome" })
           }
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >

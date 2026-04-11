@@ -3,12 +3,13 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+from django.core.cache import cache as django_cache
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import ReputationRep, UserFollow
+from api.models import ReputationRep, Service, UserFollow
 from api.tests.helpers.factories import (
     HandshakeFactory,
     ReputationRepFactory,
@@ -25,6 +26,15 @@ def _auth_client(user):
     token = RefreshToken.for_user(user)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
     return client
+
+
+@pytest.fixture(autouse=True)
+def _clear_featured_cache():
+    """Ensure no cached featured responses leak between tests."""
+    django_cache.delete('featured:trending')
+    django_cache.delete('featured:top_providers')
+    yield
+    django_cache.clear()
 
 
 @pytest.mark.django_db
@@ -211,3 +221,83 @@ class TestFeaturedEndpoint:
         provider_ids = [p["id"] for p in top_providers]
         assert str(recent_provider.id) in provider_ids
         assert str(old_provider.id) not in provider_ids
+
+    # ------------------------------------------------------------------ #
+    # 8. Trending excludes services older than the time window
+    # ------------------------------------------------------------------ #
+    def test_trending_excludes_services_older_than_window(self):
+        user = UserFactory()
+        old_service = ServiceFactory(
+            title="Old Service", status="Active", is_visible=True
+        )
+        # Backdate beyond the 30-day trending window
+        thirty_five_days_ago = timezone.now() - timedelta(days=35)
+        Service.objects.filter(pk=old_service.pk).update(created_at=thirty_five_days_ago)
+
+        recent_service = ServiceFactory(
+            title="Recent Service", status="Active", is_visible=True
+        )
+
+        fake_scores = {old_service.id: 100, recent_service.id: 10}
+        with patch("api.views_featured.calculate_hot_scores_batch", return_value=fake_scores):
+            client = _auth_client(user)
+            response = client.get(FEATURED_URL)
+
+        data = response.json()
+        trending = data["trending"]
+        titles = [s["title"] for s in trending]
+        assert "Recent Service" in titles
+        assert "Old Service" not in titles
+
+    # ------------------------------------------------------------------ #
+    # 9. Friends tab excludes pending-only handshakes
+    # ------------------------------------------------------------------ #
+    def test_friends_excludes_pending_only_handshakes(self):
+        me = UserFactory()
+        friend = UserFactory(first_name="Bob", last_name="Jones")
+        UserFollow.objects.create(follower=me, following=friend)
+
+        pending_service = ServiceFactory(
+            title="Pending Only", status="Active", is_visible=True
+        )
+        HandshakeFactory(service=pending_service, requester=friend, status="pending")
+
+        accepted_service = ServiceFactory(
+            title="Accepted", status="Active", is_visible=True
+        )
+        HandshakeFactory(service=accepted_service, requester=friend, status="accepted")
+
+        client = _auth_client(me)
+        response = client.get(FEATURED_URL)
+
+        data = response.json()
+        friends_list = data["friends"]
+        titles = [s["title"] for s in friends_list]
+        assert "Accepted" in titles
+        assert "Pending Only" not in titles
+
+    # ------------------------------------------------------------------ #
+    # 10. Top providers positive_rep_count counts distinct reps
+    # ------------------------------------------------------------------ #
+    def test_top_providers_counts_distinct_reps_not_flag_sum(self):
+        provider = UserFactory(first_name="Multi")
+        requester = UserFactory()
+
+        service = ServiceFactory(user=provider, status="Active")
+        hs = HandshakeFactory(service=service, requester=requester, status="completed")
+        ReputationRepFactory(
+            handshake=hs,
+            giver=requester,
+            receiver=provider,
+            is_punctual=True,
+            is_helpful=True,
+            is_kind=True,
+        )
+
+        client = _auth_client(requester)
+        response = client.get(FEATURED_URL)
+
+        data = response.json()
+        top_providers = data["top_providers"]
+        entry = next(p for p in top_providers if p["id"] == str(provider.id))
+        assert entry["positive_rep_count"] == 1

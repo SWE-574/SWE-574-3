@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.db.models import Count, F, Q
+from django.core.cache import cache
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -11,8 +12,14 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from api.authentication import CookieJWTAuthentication
-from api.models import Handshake, ReputationRep, Service, User, UserFollow
+from api.models import Handshake, Service, User, UserFollow
 from api.ranking import calculate_hot_scores_batch
+
+TRENDING_WINDOW_DAYS = 30
+CACHE_TTL_SHARED = 120
+CACHE_TTL_PER_USER = 120
+
+CONFIRMED_STATUSES = ['accepted', 'completed', 'checked_in', 'attended']
 
 
 def _serialize_service(service, extra=None):
@@ -45,9 +52,23 @@ class FeaturedView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        trending = self._get_trending()
-        friends = self._get_friends(request.user)
-        top_providers = self._get_top_providers()
+        trending = cache.get('featured:trending')
+        if trending is None:
+            trending = self._get_trending()
+            cache.set('featured:trending', trending, CACHE_TTL_SHARED)
+
+        user_id = str(request.user.id)
+        friends_key = f'featured:friends:{user_id}'
+        friends = cache.get(friends_key)
+        if friends is None:
+            friends = self._get_friends(request.user)
+            cache.set(friends_key, friends, CACHE_TTL_PER_USER)
+
+        top_providers = cache.get('featured:top_providers')
+        if top_providers is None:
+            top_providers = self._get_top_providers()
+            cache.set('featured:top_providers', top_providers, CACHE_TTL_SHARED)
+
         return Response({
             "trending": trending,
             "friends": friends,
@@ -58,17 +79,21 @@ class FeaturedView(APIView):
     # Trending
     # ------------------------------------------------------------------
     def _get_trending(self):
+        window_start = timezone.now() - timedelta(days=TRENDING_WINDOW_DAYS)
         services = (
-            Service.objects.filter(status='Active', is_visible=True)
+            Service.objects.filter(
+                status='Active',
+                is_visible=True,
+                created_at__gte=window_start,
+            )
             .select_related('user')
             .prefetch_related('tags')
             .annotate(
                 _participant_count=Count(
                     'handshakes',
-                    filter=Q(handshakes__status__in=['accepted', 'completed', 'checked_in', 'attended']),
+                    filter=Q(handshakes__status__in=CONFIRMED_STATUSES),
                 ),
             )
-            .order_by('-created_at')[:200]
         )
         service_list = list(services)
         if not service_list:
@@ -90,14 +115,12 @@ class FeaturedView(APIView):
         if not friend_ids:
             return []
 
-        # Services that friends have handshakes on
-        friend_statuses = ['pending', 'accepted', 'completed', 'checked_in', 'attended']
         service_qs = (
             Service.objects.filter(
                 status='Active',
                 is_visible=True,
                 handshakes__requester_id__in=friend_ids,
-                handshakes__status__in=friend_statuses,
+                handshakes__status__in=CONFIRMED_STATUSES,
             )
             .exclude(user=user)
             .select_related('user')
@@ -105,13 +128,13 @@ class FeaturedView(APIView):
             .annotate(
                 _participant_count=Count(
                     'handshakes',
-                    filter=Q(handshakes__status__in=['accepted', 'completed', 'checked_in', 'attended']),
+                    filter=Q(handshakes__status__in=CONFIRMED_STATUSES),
                 ),
                 friend_count=Count(
                     'handshakes__requester',
                     filter=Q(
                         handshakes__requester_id__in=friend_ids,
-                        handshakes__status__in=friend_statuses,
+                        handshakes__status__in=CONFIRMED_STATUSES,
                     ),
                     distinct=True,
                 ),
@@ -119,7 +142,6 @@ class FeaturedView(APIView):
             .order_by('-friend_count')[:10]
         )
 
-        # Collect friend names per service
         service_ids = [s.id for s in service_qs]
         friend_name_map: dict[str, list[str]] = {}
         if service_ids:
@@ -127,7 +149,7 @@ class FeaturedView(APIView):
                 Handshake.objects.filter(
                     service_id__in=service_ids,
                     requester_id__in=friend_ids,
-                    status__in=friend_statuses,
+                    status__in=CONFIRMED_STATUSES,
                 )
                 .select_related('requester')
                 .values_list('service_id', 'requester__first_name', 'requester__last_name')
@@ -162,22 +184,12 @@ class FeaturedView(APIView):
                     'received_reps',
                     filter=Q(
                         received_reps__created_at__gte=seven_days_ago,
-                        received_reps__is_punctual=True,
+                    ) & (
+                        Q(received_reps__is_punctual=True)
+                        | Q(received_reps__is_helpful=True)
+                        | Q(received_reps__is_kind=True)
                     ),
-                )
-                + Count(
-                    'received_reps',
-                    filter=Q(
-                        received_reps__created_at__gte=seven_days_ago,
-                        received_reps__is_helpful=True,
-                    ),
-                )
-                + Count(
-                    'received_reps',
-                    filter=Q(
-                        received_reps__created_at__gte=seven_days_ago,
-                        received_reps__is_kind=True,
-                    ),
+                    distinct=True,
                 ),
                 completed_count=Count(
                     'services__handshakes',
