@@ -1,8 +1,7 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
-  FlatList,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -95,36 +94,6 @@ export default function FeaturedSection({
     };
   }, []);
 
-  const renderServiceCard = useCallback(
-    ({ item }: { item: FeaturedService }) => (
-      <FeaturedServiceCard
-        service={item}
-        showFriendInfo={activeTab === "friends"}
-        onPress={() => onServicePress?.(item.id)}
-      />
-    ),
-    [activeTab, onServicePress]
-  );
-
-  const renderProviderCard = useCallback(
-    ({ item }: { item: FeaturedProvider }) => (
-      <FeaturedProviderCard
-        provider={item}
-        onPress={() => onProviderPress?.(item.id)}
-      />
-    ),
-    [onProviderPress]
-  );
-
-  const serviceKeyExtractor = useCallback(
-    (item: FeaturedService) => item.id,
-    []
-  );
-  const providerKeyExtractor = useCallback(
-    (item: FeaturedProvider) => item.id,
-    []
-  );
-
   // Loading state
   if (loading) {
     return (
@@ -160,9 +129,6 @@ export default function FeaturedSection({
       {/* Header row */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Featured</Text>
-        <TouchableOpacity>
-          <Text style={styles.seeAll}>See all →</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Tab pills */}
@@ -208,24 +174,29 @@ export default function FeaturedSection({
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>{activeConfig.emptyMessage}</Text>
         </View>
-      ) : isServiceTab ? (
-        <FlatList
-          data={featuredData[activeTab] as FeaturedService[]}
-          renderItem={renderServiceCard}
-          keyExtractor={serviceKeyExtractor}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.cardRow}
-        />
       ) : (
-        <FlatList
-          data={featuredData.top_providers}
-          renderItem={renderProviderCard}
-          keyExtractor={providerKeyExtractor}
+        <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.cardRow}
-        />
+        >
+          {isServiceTab
+            ? (featuredData[activeTab] as FeaturedService[]).map((item) => (
+                <FeaturedServiceCard
+                  key={item.id}
+                  service={item}
+                  showFriendInfo={activeTab === "friends"}
+                  onPress={() => onServicePress?.(item.id)}
+                />
+              ))
+            : featuredData.top_providers.map((item) => (
+                <FeaturedProviderCard
+                  key={item.id}
+                  provider={item}
+                  onPress={() => onProviderPress?.(item.id)}
+                />
+              ))}
+        </ScrollView>
       )}
     </View>
   );
@@ -246,11 +217,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     color: colors.GRAY800,
-  },
-  seeAll: {
-    fontSize: 13,
-    color: colors.GREEN,
-    fontWeight: "500",
   },
   tabRow: {
     paddingHorizontal: 16,

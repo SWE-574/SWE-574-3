@@ -6,8 +6,9 @@ import { useNavigationState } from "@react-navigation/native";
 import { colors } from "../../constants/colors";
 
 export default function MapTabButton({ onPress }: BottomTabBarButtonProps) {
-  const state = useNavigationState((s) => s);
-  const focused = state.routes[state.index]?.name === "MapTab";
+  const focused = useNavigationState(
+    (s) => s.routes[s.index]?.name === "MapTab"
+  );
 
   return (
     <TouchableOpacity

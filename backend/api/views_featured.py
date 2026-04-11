@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -30,9 +30,7 @@ def _serialize_service(service, extra=None):
             else None,
         },
         "tags": [{"id": tag.id, "name": tag.name} for tag in service.tags.all()],
-        "participant_count": service.participant_count
-        if hasattr(service, 'participant_count')
-        else 0,
+        "participant_count": getattr(service, '_participant_count', 0),
         "max_participants": service.max_participants,
         "location_area": service.location_area,
         "created_at": service.created_at.isoformat(),
@@ -64,6 +62,13 @@ class FeaturedView(APIView):
             Service.objects.filter(status='Active', is_visible=True)
             .select_related('user')
             .prefetch_related('tags')
+            .annotate(
+                _participant_count=Count(
+                    'handshakes',
+                    filter=Q(handshakes__status__in=['accepted', 'completed', 'checked_in', 'attended']),
+                ),
+            )
+            .order_by('-created_at')[:200]
         )
         service_list = list(services)
         if not service_list:
@@ -98,6 +103,10 @@ class FeaturedView(APIView):
             .select_related('user')
             .prefetch_related('tags')
             .annotate(
+                _participant_count=Count(
+                    'handshakes',
+                    filter=Q(handshakes__status__in=['accepted', 'completed', 'checked_in', 'attended']),
+                ),
                 friend_count=Count(
                     'handshakes__requester',
                     filter=Q(

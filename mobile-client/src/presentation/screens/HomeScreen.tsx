@@ -88,7 +88,12 @@ export default function HomeScreen() {
     <>
       <FeaturedSection
         onServicePress={(id) => navigation.navigate("ServiceDetail", { id })}
-        onProviderPress={(id) => navigation.navigate("ServiceDetail", { id })}
+        onProviderPress={(id) =>
+          tabNavigation.navigate("Profile", {
+            screen: "PublicProfile",
+            params: { userId: id },
+          })
+        }
       />
       <QuickFilters selectedId={quickFilter} onSelect={setQuickFilter} />
     </>
