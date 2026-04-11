@@ -113,6 +113,8 @@ export default function ServiceEvaluationModal({
   const removeImage = (idx: number) => {
     setImages((prev) => prev.filter((_, i) => i !== idx))
     setImagePreviews((prev) => prev.filter((_, i) => i !== idx))
+    setImages([])
+    setImagePreviews([])
   }
 
   const handleClose = () => {
@@ -163,6 +165,9 @@ export default function ServiceEvaluationModal({
         })
       }
 
+      if (images.length > 0) {
+        await reputationAPI.attachReviewImages(handshakeId, images)
+      }
       toast.success('Evaluation submitted. Thank you for your feedback!')
       // Attach images after the main evaluation — a failure here should not block the flow.
       if (images.length > 0) {
@@ -335,7 +340,7 @@ export default function ServiceEvaluationModal({
               {/* Photo attachment */}
               <Box mt={3}>
                 <Text fontSize="12px" fontWeight={700} color={GRAY700} mb={2}>
-                  Photos (optional · max 3 )
+                  Photos (optional · max 3 · JPG/PNG/WebP/GIF · 10 MB each)
                 </Text>
                 <Flex gap={2} flexWrap="wrap">
                   {imagePreviews.map((src, i) => (
@@ -381,7 +386,7 @@ export default function ServiceEvaluationModal({
                       <FiCamera size={20} color={GRAY400} />
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/png,image/gif,image/webp"
                         style={{ display: 'none' }}
                         onChange={handleImageAdd}
                       />
