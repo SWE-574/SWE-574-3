@@ -27,6 +27,9 @@ export interface UserSummary {
   featured_achievement_id?: string | null;
   /** When false, other users should not see exchange history (web parity). */
   show_history?: boolean;
+  is_verified?: boolean;
+  is_onboarded?: boolean;
+  is_organizer_banned_until?: string | null;
 }
 
 /**
@@ -95,13 +98,23 @@ export interface Service {
   max_participants: number;
   schedule_type?: ScheduleType;
   schedule_details?: string | null;
+  scheduled_time?: string | null;
   participant_count?: number;
   created_at: string;
   tags: Tag[];
   comment_count?: number;
   hot_score?: number;
   is_visible?: boolean;
-  media?: unknown[];
+  session_exact_location?: string | null;
+  session_exact_location_lat?: string | null;
+  session_exact_location_lng?: string | null;
+  session_location_guide?: string | null;
+  media?: Array<{
+    id: string;
+    file_url: string;
+    media_type?: string;
+    display_order?: number;
+  }>;
 }
 
 export interface TokenPair {

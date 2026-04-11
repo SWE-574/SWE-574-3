@@ -75,6 +75,17 @@ describe("client", () => {
       expect(init?.headers).toMatchObject({ "Content-Type": "application/json" });
     });
 
+    it("sends FormData without forcing JSON content-type", async () => {
+      mockFetchResolve({ id: "1" });
+      const body = new FormData();
+      body.append("title", "Test");
+      await apiRequest("/services/", { method: "POST", body });
+      const { init } = getLastFetchCall();
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBe(body);
+      expect(init?.headers).not.toMatchObject({ "Content-Type": "application/json" });
+    });
+
     it("adds Authorization header when auth token is set", async () => {
       setAuthToken("secret-token");
       mockFetchResolve({});
