@@ -879,6 +879,21 @@ class Comment(models.Model):
         ]
 
 
+class CommentMedia(models.Model):
+    """Images attached to verified review comments."""
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    comment    = models.ForeignKey(Comment, on_delete=models.CASCADE, related_name='media')
+    file       = models.FileField(upload_to='comment_media/', blank=True, null=True)
+    file_url   = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Media for comment {self.comment_id}"
+
+
 class NegativeRep(models.Model):
     """Negative reputation feedback for completed handshakes"""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

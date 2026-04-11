@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Box, Flex, SimpleGrid, Text } from '@chakra-ui/react'
-import { FiAlertTriangle, FiCheckCircle, FiClock, FiFlag, FiSlash, FiStar, FiUsers, FiX } from 'react-icons/fi'
+import { FiAlertTriangle, FiCamera, FiCheckCircle, FiClock, FiFlag, FiSlash, FiStar, FiUsers, FiX } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { reputationAPI } from '@/services/reputationAPI'
 
@@ -72,6 +72,8 @@ export default function ServiceEvaluationModal({
 }: Props) {
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [comment, setComment] = useState('')
+  const [images, setImages] = useState<File[]>([])
+  const [imagePreviews, setImagePreviews] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
 
   const traitSet = isEventEvaluation ? EVENT_TRAITS : SERVICE_TRAITS
@@ -92,6 +94,25 @@ export default function ServiceEvaluationModal({
   const reset = () => {
     setSelected({})
     setComment('')
+    setImages([])
+    setImagePreviews([])
+  }
+
+  const handleImageAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || images.length >= 3) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setImagePreviews((p) => [...p, ev.target?.result as string])
+    }
+    reader.readAsDataURL(file)
+    setImages((prev) => [...prev, file])
+    e.target.value = ''
+  }
+
+  const removeImage = (idx: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== idx))
+    setImagePreviews((prev) => prev.filter((_, i) => i !== idx))
   }
 
   const handleClose = () => {
@@ -143,6 +164,14 @@ export default function ServiceEvaluationModal({
       }
 
       toast.success('Evaluation submitted. Thank you for your feedback!')
+      // Attach images after the main evaluation — a failure here should not block the flow.
+      if (images.length > 0) {
+        try {
+          await reputationAPI.attachReviewImages(handshakeId, images)
+        } catch {
+          toast.warning('Evaluation saved, but photo upload failed. You can re-upload photos later.')
+        }
+      }
       await onSubmitted?.()
       reset()
       onClose()
@@ -302,6 +331,64 @@ export default function ServiceEvaluationModal({
               <Text fontSize="11px" color={GRAY400} mt={1} textAlign="right">
                 {comment.length}/500
               </Text>
+
+              {/* Photo attachment */}
+              <Box mt={3}>
+                <Text fontSize="12px" fontWeight={700} color={GRAY700} mb={2}>
+                  Photos (optional · max 3 · JPG/PNG/WebP/GIF · 10 MB each)
+                </Text>
+                <Flex gap={2} flexWrap="wrap">
+                  {imagePreviews.map((src, i) => (
+                    <Box key={i} position="relative" w="72px" h="72px" flexShrink={0}>
+                      <img
+                        src={src}
+                        alt={`Preview ${i + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }}
+                      />
+                      <Box
+                        as="button"
+                        position="absolute"
+                        top="2px"
+                        right="2px"
+                        onClick={() => removeImage(i)}
+                        style={{
+                          background: 'rgba(0,0,0,0.55)',
+                          border: 'none',
+                          borderRadius: '50%',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          lineHeight: 1,
+                          padding: '2px 5px',
+                          fontSize: 13,
+                        }}
+                      >
+                        ×
+                      </Box>
+                    </Box>
+                  ))}
+                  {images.length < 3 && (
+                    <Box
+                      as="label"
+                      w="72px"
+                      h="72px"
+                      border={`2px dashed ${GRAY200}`}
+                      borderRadius="8px"
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="center"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <FiCamera size={20} color={GRAY400} />
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/gif,image/webp"
+                        style={{ display: 'none' }}
+                        onChange={handleImageAdd}
+                      />
+                    </Box>
+                  )}
+                </Flex>
+              </Box>
             </>
           )}
         </Box>

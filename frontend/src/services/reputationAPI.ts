@@ -58,6 +58,15 @@ function hasNegativeEventTraits(n: SubmitCombinedEventEvaluationPayload['negativ
 }
 
 export const reputationAPI = {
+  attachReviewImages: async (handshakeId: string, images: File[]): Promise<void> => {
+    const fd = new FormData()
+    fd.append('handshake_id', handshakeId)
+    images.forEach((img) => fd.append('images', img))
+    await apiClient.post('/reputation/add-review/', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
   submitPositive: async (payload: ReputationData): Promise<PositiveReputationResponse> => {
     const res = await apiClient.post<PositiveReputationResponse>('/reputation/', payload)
     return res.data

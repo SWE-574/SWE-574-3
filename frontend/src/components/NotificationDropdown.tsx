@@ -45,7 +45,12 @@ export function NotificationDropdown() {
     (notification: Notification) => {
       if (!notification.is_read) markAsRead(notification.id)
       setOpen(false)
-      if (notification.related_handshake) {
+      // Feedback/reputation notifications with a related service → go to the service detail
+      // so users can leave their evaluation there. Other handshake notifications → messages.
+      const isFeedbackNotif = notification.type === 'positive_rep'
+      if (notification.related_service && isFeedbackNotif) {
+        navigate(`/service-detail/${notification.related_service}`)
+      } else if (notification.related_handshake) {
         navigate(`/messages?handshake=${notification.related_handshake}`)
       } else if (notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)

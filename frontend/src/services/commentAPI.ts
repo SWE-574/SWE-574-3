@@ -1,4 +1,5 @@
 import apiClient from './api'
+import type { CommentMediaItem } from '@/types'
 
 export interface Comment {
   id: string
@@ -18,6 +19,7 @@ export interface Comment {
   handshake_completed_at?: string
   reply_count: number
   replies: CommentReply[]
+  media?: CommentMediaItem[]
   created_at: string
   updated_at: string
 }

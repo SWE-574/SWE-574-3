@@ -2492,6 +2492,7 @@ class CommentSerializer(serializers.ModelSerializer):
     handshake_hours = serializers.SerializerMethodField()
     handshake_completed_at = serializers.SerializerMethodField()
     reviewed_user_role = serializers.SerializerMethodField()
+    media = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
@@ -2501,7 +2502,7 @@ class CommentSerializer(serializers.ModelSerializer):
             'parent', 'parent_id', 'body', 'is_deleted', 'is_verified_review',
             'handshake_id', 'handshake_hours', 'handshake_completed_at',
             'reviewed_user_role',
-            'reply_count', 'replies', 'created_at', 'updated_at'
+            'reply_count', 'replies', 'media', 'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'service', 'user_id', 'parent', 'is_deleted',
@@ -2572,6 +2573,14 @@ class CommentSerializer(serializers.ModelSerializer):
         if obj.user_id == provider.id:
             return 'receiver'
         return 'provider'
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_media(self, obj):
+        """Return list of images attached to this comment/review."""
+        media_qs = getattr(obj, '_prefetched_objects_cache', {}).get('media')
+        if media_qs is None:
+            media_qs = obj.media.all()
+        return [{'id': str(m.id), 'file_url': m.file_url} for m in media_qs]
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_reply_count(self, obj):
@@ -2765,6 +2774,7 @@ class UserHistorySerializer(serializers.Serializer):
     partner_avatar_url = serializers.CharField(allow_null=True)
     completed_date = serializers.DateTimeField()
     was_provider = serializers.BooleanField()
+    evaluation_pending = serializers.BooleanField(default=False)
 
 
 # Forum Serializers

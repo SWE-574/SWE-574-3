@@ -329,6 +329,11 @@ export default function PublicProfileScreen() {
               </Pressable>
             </View>
 
+            <Text style={styles.followMetaRow}>
+              {user.followers_count ?? 0} followers ·{" "}
+              {user.following_count ?? 0} following
+            </Text>
+
             {locationText ? (
               <Text style={styles.location}>{locationText}</Text>
             ) : null}

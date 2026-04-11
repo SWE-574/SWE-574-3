@@ -21,6 +21,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 import logging
+import os
 import bleach
 from typing import List
 
@@ -44,7 +45,7 @@ from .models import (
     AdminAuditLog, PlatformSetting,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
     EmailVerificationToken, PasswordResetToken,
-    UserFollow, UserFollowEvent,
+    UserFollow, UserFollowEvent, CommentMedia,
 )
 from .serializers import (
     UserRegistrationSerializer, 
@@ -447,6 +448,11 @@ def _apply_blind_review_visibility(queryset):
             )
         ),
     ).exclude(
+        # Blind-review suppression applies only to non-Event (1-to-1) handshakes.
+        # For Events, the organizer never submits a reciprocal evaluation, so both
+        # eval flags are always False — applying this would hide event reviews for
+        # the entire 48-hour window.
+        related_handshake__service__type__in=['Offer', 'Need'],
         related_handshake__evaluation_window_ends_at__gt=now,
         blind_target_positive_eval=False,
         blind_target_negative_eval=False,
@@ -1279,7 +1285,9 @@ class UserHistoryView(APIView):
                 'partner_id': partner.id,
                 'partner_avatar_url': partner.avatar_url,
                 'completed_date': handshake.updated_at,
-                'was_provider': was_provider
+                'was_provider': was_provider,
+                # For events: True when the attendee's evaluation window is still open.
+                'evaluation_pending': handshake.service.type == 'Event' and handshake.status == 'attended',
             })
 
         # Include owner-completed events that currently have no qualifying
@@ -1309,6 +1317,7 @@ class UserHistoryView(APIView):
                 'partner_avatar_url': target_user.avatar_url,
                 'completed_date': event.event_completed_at or event.updated_at,
                 'was_provider': True,
+                'evaluation_pending': False,
             })
 
         history.sort(key=lambda item: item['completed_date'], reverse=True)
@@ -1418,24 +1427,39 @@ class UserVerifiedReviewsView(APIView):
         # - Reviews about the requester: handshake.requester == target_user AND comment.user == service.owner
         from django.db.models import F, Q
         from .models import Comment
-        base_filter = (
-            Q(service__user=target_user, related_handshake__requester=F('user'))
-            | Q(related_handshake__requester=target_user, service__user=F('user'))
-        )
         role_param = (request.query_params.get('role') or '').strip().lower()
-        if role_param in ('provider', 'receiver'):
-            base_filter = base_filter & get_verified_reviews_role_filter(target_user, role_param)
+
+        if role_param == 'organizer':
+            # Event reviews written by attendees about this user as the event organizer.
+            # Filter through comment.service (not handshake.service) to avoid double-JOIN ambiguity.
+            review_filter = Q(
+                service__type='Event',
+                service__user=target_user,
+                related_handshake__requester=F('user'),
+            )
+        else:
+            # Restrict to Offer/Need only — Event reviews belong in the organizer section.
+            review_filter = (
+                Q(service__user=target_user, related_handshake__requester=F('user'),
+                  related_handshake__service__type__in=['Offer', 'Need'])
+                | Q(related_handshake__requester=target_user, service__user=F('user'),
+                    related_handshake__service__type__in=['Offer', 'Need'])
+            )
+            if role_param in ('provider', 'receiver'):
+                review_filter = review_filter & get_verified_reviews_role_filter(target_user, role_param)
+
         comments = Comment.objects.filter(
             is_verified_review=True,
             is_deleted=False,
             related_handshake__isnull=False,
-        ).filter(base_filter).select_related(
+        ).filter(review_filter).select_related(
             'user', 'service', 'related_handshake', 'related_handshake__service'
         ).prefetch_related(
             Prefetch(
                 'user__badges',
                 queryset=UserBadge.objects.select_related('badge')
-            )
+            ),
+            'media',
         ).order_by('-created_at')
         comments = _apply_blind_review_visibility(comments)
         
@@ -3888,33 +3912,69 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
-        existing_review = Comment.objects.filter(
+        cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000] if raw_comment else ''
+        images = request.FILES.getlist('images')
+
+        # Validate images
+        _ALLOWED_IMG_EXT = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+        _MAX_IMG_SIZE = 10 * 1024 * 1024  # 10 MB
+        if images:
+            if len(images) > 3:
+                return create_error_response(
+                    'Maximum 3 images allowed per review.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            for img in images:
+                ext = os.path.splitext(img.name)[1].lower()
+                if ext not in _ALLOWED_IMG_EXT:
+                    return create_error_response(
+                        f'Unsupported image format: {ext}. Allowed: JPG, PNG, GIF, WebP.',
+                        code=ErrorCodes.VALIDATION_ERROR,
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                    )
+                if img.size > _MAX_IMG_SIZE:
+                    return create_error_response(
+                        'Each image must be under 10 MB.',
+                        code=ErrorCodes.VALIDATION_ERROR,
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        if not cleaned_comment and not images:
+            return Response(
+                {'status': 'success', 'message': 'Evaluation already recorded. No review text or images provided.'},
+                status=status.HTTP_200_OK,
+            )
+
+        # Resolve or create the Comment for this handshake+user pair.
+        # The Comment may already exist if the reputation submission included a comment text —
+        # in that case we attach images to the existing record rather than rejecting.
+        comment = Comment.objects.filter(
             related_handshake=handshake,
             user=user,
             is_verified_review=True,
             is_deleted=False,
-        ).exists()
-        if existing_review:
-            return create_error_response(
-                'Review already submitted',
-                code=ErrorCodes.ALREADY_EXISTS,
-                status_code=status.HTTP_400_BAD_REQUEST,
+        ).first()
+
+        if comment and cleaned_comment:
+            # Update body if the existing comment was empty (images-first path)
+            if not comment.body:
+                comment.body = cleaned_comment
+                comment.save(update_fields=['body'])
+        elif not comment:
+            comment = Comment.objects.create(
+                service=handshake.service,
+                user=user,
+                body=cleaned_comment,
+                is_verified_review=True,
+                related_handshake=handshake,
             )
 
-        cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000]
-        if not cleaned_comment:
-            return Response(
-                {'status': 'success', 'message': 'Evaluation already recorded. No review text provided.'},
-                status=status.HTTP_200_OK,
-            )
-
-        comment = Comment.objects.create(
-            service=handshake.service,
-            user=user,
-            body=cleaned_comment,
-            is_verified_review=True,
-            related_handshake=handshake,
-        )
+        for img in images:
+            media_obj = CommentMedia(comment=comment)
+            media_obj.file.save(img.name, img, save=True)
+            media_obj.file_url = media_obj.file.url
+            media_obj.save(update_fields=['file_url'])
 
         return Response(CommentSerializer(comment).data, status=status.HTTP_201_CREATED)
 
@@ -5641,7 +5701,8 @@ class CommentViewSet(viewsets.ViewSet):
                     'user', 'related_handshake'
                 ).prefetch_related(user_badges_prefetch),
                 to_attr='active_replies'
-            )
+            ),
+            'media',
         ).order_by('-created_at')
         comments = _apply_blind_review_visibility(comments)
 

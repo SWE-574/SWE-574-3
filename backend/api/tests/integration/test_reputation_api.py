@@ -1219,9 +1219,9 @@ class TestEventEvaluationCommentHistory:
         Helper: returns (event, handshake) with evaluation window open.
 
         The window must be open so POST /api/reputation/ accepts the submission.
-        After calling this helper the test is responsible for expiring the window
-        (via _expire_window) before fetching the organizer profile so that
-        _apply_blind_review_visibility does not hide the comment.
+        Event reviews are NOT hidden by _apply_blind_review_visibility (the filter
+        was fixed to skip Events), so calling _expire_window is no longer required
+        before reading comments — but existing tests that do so continue to pass.
         """
         event = ServiceFactory(
             user=organizer,
@@ -1245,6 +1245,36 @@ class TestEventEvaluationCommentHistory:
         handshake.evaluation_window_ends_at = timezone.now() - timedelta(seconds=1)
         handshake.evaluation_window_closed_at = timezone.now() - timedelta(seconds=1)
         handshake.save(update_fields=['evaluation_window_ends_at', 'evaluation_window_closed_at'])
+
+    def test_event_review_visible_during_evaluation_window(self):
+        """
+        Event reviews must be visible immediately after submission, even while the
+        48-hour evaluation window is still open. The blind-review filter must not
+        apply to Event handshakes — the organizer never submits a reciprocal evaluation.
+        """
+        organizer = UserFactory()
+        participant = UserFactory()
+
+        event, handshake = self._completed_event_handshake(organizer, participant)
+        # Do NOT expire the window — this is the regression case.
+
+        Comment.objects.create(
+            service=event,
+            user=participant,
+            body='Great event!',
+            is_verified_review=True,
+            related_handshake=handshake,
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(participant)
+        response = client.get(f'/api/services/{event.id}/comments/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['count'] == 1, (
+            "Event reviews must not be hidden during the evaluation window — "
+            "blind-review filter must skip Event handshakes"
+        )
 
     def test_event_comment_appears_in_organizer_event_comments_history(self):
         """Commented evaluation is present in the organizer profile payload with expected metadata."""

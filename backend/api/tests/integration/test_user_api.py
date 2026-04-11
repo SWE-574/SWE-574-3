@@ -666,7 +666,10 @@ class TestEventCommentsHistoryOnProfile:
         assert history[0]['comments'][0]['body'] == 'Newest review on newer event'
         assert history[0]['comments'][1]['body'] == 'Older review on newer event'
 
-    def test_event_comment_hidden_until_reciprocal_evaluation(self):
+    def test_event_comment_visible_immediately_no_blind_review(self):
+        """FR-15h: event reviews must be visible immediately, regardless of whether
+        the organizer has submitted a reciprocal evaluation.  The blind-review
+        suppression window only applies to Offer/Need handshakes."""
         organizer = UserFactory()
         viewer = UserFactory()
         attendee = UserFactory()
@@ -683,16 +686,25 @@ class TestEventCommentsHistoryOnProfile:
         Comment.objects.create(
             service=event,
             user=attendee,
-            body='Should stay hidden until organizer also evaluates.',
+            body='Visible immediately — no blind-review suppression for events.',
             is_verified_review=True,
             related_handshake=handshake,
         )
 
         client = AuthenticatedAPIClient().authenticate_user(viewer)
-        hidden_response = client.get(f'/api/users/{organizer.id}/')
-        assert hidden_response.status_code == status.HTTP_200_OK
-        assert hidden_response.data['event_comments_history'] == []
 
+        # Comment must be visible even before the organizer submits any evaluation.
+        response = client.get(f'/api/users/{organizer.id}/')
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data['event_comments_history']) == 1, (
+            'Event review must be visible immediately — blind-review suppression '
+            'must not apply to Event handshakes.'
+        )
+        assert response.data['event_comments_history'][0]['comments'][0]['body'] == (
+            'Visible immediately — no blind-review suppression for events.'
+        )
+
+        # Adding the organizer's evaluation must not break visibility.
         ReputationRep.objects.create(
             handshake=handshake,
             giver=organizer,
@@ -702,12 +714,9 @@ class TestEventCommentsHistoryOnProfile:
             is_kind=False,
         )
 
-        visible_response = client.get(f'/api/users/{organizer.id}/')
-        assert visible_response.status_code == status.HTTP_200_OK
-        assert len(visible_response.data['event_comments_history']) == 1
-        assert visible_response.data['event_comments_history'][0]['comments'][0]['body'] == (
-            'Should stay hidden until organizer also evaluates.'
-        )
+        after_response = client.get(f'/api/users/{organizer.id}/')
+        assert after_response.status_code == status.HTTP_200_OK
+        assert len(after_response.data['event_comments_history']) == 1
 
 
 @pytest.mark.django_db

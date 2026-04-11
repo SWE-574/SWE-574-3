@@ -13,6 +13,8 @@ export interface UserHistoryItem {
   partner_avatar_url?: string | null
   completed_date: string
   was_provider: boolean
+  /** True when service_type is Event and the attendee's evaluation window is still open */
+  evaluation_pending?: boolean
 }
 
 export interface UserUpdateData {
@@ -200,7 +202,7 @@ export const userAPI = {
    */
   getVerifiedReviews: async (
     userId: string,
-    options?: { role?: 'provider' | 'receiver'; signal?: AbortSignal },
+    options?: { role?: 'provider' | 'receiver' | 'organizer'; signal?: AbortSignal },
   ): Promise<ProfileReviewsResponse> => {
     const params = options?.role ? { role: options.role } : {}
     const res = await apiClient.get<ProfileReviewsResponse>(

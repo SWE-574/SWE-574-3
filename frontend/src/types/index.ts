@@ -197,6 +197,31 @@ export interface Service {
   is_pinned?: boolean
   comment_count?: number
   hot_score?: number
+  event_evaluation_summary?: EventEvaluationSummary | null
+}
+
+export interface EventEvaluationSummary {
+  total_attended: number
+  positive_feedback_count: number
+  negative_feedback_count: number
+  unique_evaluator_count: number
+  positive_score_total: number
+  negative_score_total: number
+  well_organized_count: number
+  engaging_count: number
+  welcoming_count: number
+  disorganized_count: number
+  boring_count: number
+  unwelcoming_count: number
+  well_organized_average: number
+  engaging_average: number
+  welcoming_average: number
+  disorganized_average: number
+  boring_average: number
+  unwelcoming_average: number
+  organizer_event_hot_score: number
+  feedback_submission_count: number
+  updated_at: string
 }
 
 export interface ServiceMedia {
@@ -382,6 +407,11 @@ export interface Transaction {
 
 // ─── Profile review (verified reviews on user profile) ───────────────────────
 
+export interface CommentMediaItem {
+  id: string
+  file_url: string
+}
+
 export interface ProfileReview {
   id: string
   service: string
@@ -400,6 +430,7 @@ export interface ProfileReview {
   reviewed_user_role?: 'provider' | 'receiver' | null
   reply_count: number
   replies: unknown[]
+  media?: CommentMediaItem[]
   created_at: string
   updated_at: string
 }
