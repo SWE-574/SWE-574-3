@@ -27,6 +27,8 @@ export interface UserSummary {
   featured_achievement_id?: string | null;
   /** When false, other users should not see exchange history (web parity). */
   show_history?: boolean;
+  followers_count?: number;
+  following_count?: number;
 }
 
 /**

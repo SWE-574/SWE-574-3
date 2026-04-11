@@ -198,6 +198,8 @@ export default function ProfileScreen() {
     kind_count?: number;
     punctual_count?: number;
     achievements?: string[];
+    followers_count?: number;
+    following_count?: number;
   };
 
   const fullName = `${form.first_name} ${form.last_name}`.trim();
@@ -254,6 +256,40 @@ export default function ProfileScreen() {
                 {form.email ? (
                   <Text style={styles.email}>{form.email}</Text>
                 ) : null}
+
+                <View style={styles.followMetaRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="View your followers"
+                    onPress={() => {
+                      if (!user?.id) return;
+                      navigation.navigate("FollowList", {
+                        userId: String(user.id),
+                        kind: "followers",
+                      });
+                    }}
+                  >
+                    <Text style={styles.followMetaLink}>
+                      {typedUser.followers_count ?? 0} followers
+                    </Text>
+                  </Pressable>
+                  <Text style={styles.followMetaDot}> · </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="View users you follow"
+                    onPress={() => {
+                      if (!user?.id) return;
+                      navigation.navigate("FollowList", {
+                        userId: String(user.id),
+                        kind: "following",
+                      });
+                    }}
+                  >
+                    <Text style={styles.followMetaLink}>
+                      {typedUser.following_count ?? 0} following
+                    </Text>
+                  </Pressable>
+                </View>
 
                 {form.location ? (
                   <Text style={styles.location}>{form.location}</Text>
@@ -675,6 +711,22 @@ const getStyles = (top: number, bottom: number) =>
       fontSize: 14,
       color: colors.GRAY500,
       marginBottom: 6,
+    },
+    followMetaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      marginBottom: 8,
+    },
+    followMetaLink: {
+      fontSize: 13,
+      fontWeight: "600",
+      color: colors.GREEN,
+      textDecorationLine: "underline",
+    },
+    followMetaDot: {
+      fontSize: 13,
+      color: colors.GRAY500,
     },
     location: {
       fontSize: 14,

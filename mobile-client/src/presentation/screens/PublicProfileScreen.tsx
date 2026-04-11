@@ -203,6 +203,17 @@ export default function PublicProfileScreen() {
     authUser?.id != null && String(authUser.id) === String(user.id);
   const showFollowButton = authUser != null && !isOwnProfile;
 
+  const openFollowList = (kind: "followers" | "following") => {
+    if (!authUser) {
+      Alert.alert(
+        "Sign in required",
+        "Sign in to see who follows this user and who they follow.",
+      );
+      return;
+    }
+    navigation.navigate("FollowList", { userId, kind });
+  };
+
   const handleFollowToggle = () => {
     if (state.status !== "success" || followActionLoading) return;
     const currentlyFollowing = Boolean(user.is_following);
@@ -295,10 +306,27 @@ export default function PublicProfileScreen() {
               ) : null}
             </View>
 
-            <Text style={styles.followMeta}>
-              {user.followers_count ?? 0} followers ·{" "}
-              {user.following_count ?? 0} following
-            </Text>
+            <View style={styles.followMetaRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="View followers"
+                onPress={() => openFollowList("followers")}
+              >
+                <Text style={styles.followMetaLink}>
+                  {user.followers_count ?? 0} followers
+                </Text>
+              </Pressable>
+              <Text style={styles.followMetaDot}> · </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="View following"
+                onPress={() => openFollowList("following")}
+              >
+                <Text style={styles.followMetaLink}>
+                  {user.following_count ?? 0} following
+                </Text>
+              </Pressable>
+            </View>
 
             {locationText ? (
               <Text style={styles.location}>{locationText}</Text>
@@ -598,10 +626,21 @@ const getStyles = (top: number, bottom: number) =>
     followButtonDisabled: {
       opacity: 0.7,
     },
-    followMeta: {
+    followMetaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      marginBottom: 8,
+    },
+    followMetaLink: {
+      fontSize: 13,
+      fontWeight: "600",
+      color: colors.GREEN,
+      textDecorationLine: "underline",
+    },
+    followMetaDot: {
       fontSize: 13,
       color: colors.GRAY500,
-      marginBottom: 8,
     },
     location: {
       fontSize: 14,
