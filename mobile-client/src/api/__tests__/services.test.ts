@@ -12,6 +12,7 @@ import {
   reportService,
   toggleServiceVisibility,
   addServiceInterest,
+  completeEvent,
 } from "../services";
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
 
@@ -108,5 +109,12 @@ describe("services", () => {
     await addServiceInterest("s1", { message: "Hi" });
     expect(getLastFetchCall().url).toContain("/services/s1/interest/");
     expect(getLastFetchBody()).toEqual({ message: "Hi" });
+  });
+
+  it("completeEvent POSTs to /services/:id/complete-event/", async () => {
+    mockFetchResolve(undefined);
+    await completeEvent("svc-1");
+    expect(getLastFetchCall().url).toContain("/services/svc-1/complete-event/");
+    expect(getLastFetchCall().init?.method).toBe("POST");
   });
 });

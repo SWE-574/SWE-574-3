@@ -9,13 +9,18 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Image,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../../constants/colors";
 import {
   submitCombinedEvaluation,
   submitCombinedEventEvaluation,
+  attachReviewImages,
 } from "../../../api/reputation";
+
+const MAX_IMAGES = 3;
 
 type TraitOption = {
   key: string;
@@ -63,6 +68,7 @@ export function ChatEvaluationModal({
 }: Props) {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [comment, setComment] = useState("");
+  const [imageUris, setImageUris] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const traitSet = isEventEvaluation ? EVENT_TRAITS : SERVICE_TRAITS;
@@ -78,6 +84,26 @@ export function ChatEvaluationModal({
   const reset = () => {
     setSelected({});
     setComment("");
+    setImageUris([]);
+  };
+
+  const pickImages = async () => {
+    if (imageUris.length >= MAX_IMAGES) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      selectionLimit: MAX_IMAGES - imageUris.length,
+      quality: 0.8,
+    });
+    if (!result.canceled) {
+      setImageUris((prev) =>
+        [...prev, ...result.assets.map((a) => a.uri)].slice(0, MAX_IMAGES),
+      );
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setImageUris((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleClose = () => {
@@ -129,6 +155,14 @@ export function ChatEvaluationModal({
           },
           comment,
         });
+      }
+
+      if (imageUris.length > 0) {
+        try {
+          await attachReviewImages(handshakeId, imageUris);
+        } catch {
+          // Images are best-effort; trait submission already succeeded
+        }
       }
 
       Alert.alert("Evaluation submitted", "Thank you for your feedback.");
@@ -242,6 +276,28 @@ export function ChatEvaluationModal({
                 textAlignVertical="top"
                 maxLength={400}
               />
+
+              <View style={styles.imageSection}>
+                <View style={styles.imageRow}>
+                  {imageUris.map((uri, idx) => (
+                    <View key={uri} style={styles.imageThumbWrap}>
+                      <Image source={{ uri }} style={styles.imageThumb} />
+                      <Pressable
+                        style={styles.imageRemoveBtn}
+                        onPress={() => removeImage(idx)}
+                      >
+                        <Ionicons name="close" size={12} color={colors.WHITE} />
+                      </Pressable>
+                    </View>
+                  ))}
+                  {imageUris.length < MAX_IMAGES && (
+                    <Pressable style={styles.imageAddBtn} onPress={pickImages}>
+                      <Ionicons name="camera-outline" size={20} color={colors.GRAY500} />
+                      <Text style={styles.imageAddLabel}>Photo</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
             </ScrollView>
           )}
 
@@ -379,6 +435,52 @@ const styles = StyleSheet.create({
     backgroundColor: colors.GRAY50,
     fontSize: 14,
     color: colors.GRAY900,
+  },
+  imageSection: {
+    marginTop: 12,
+  },
+  imageRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  imageThumbWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  imageThumb: {
+    width: "100%",
+    height: "100%",
+  },
+  imageRemoveBtn: {
+    position: "absolute",
+    top: 3,
+    right: 3,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  imageAddBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.GRAY50,
+  },
+  imageAddLabel: {
+    fontSize: 10,
+    color: colors.GRAY500,
+    fontWeight: "600",
+    marginTop: 2,
   },
   footer: {
     flexDirection: "row",

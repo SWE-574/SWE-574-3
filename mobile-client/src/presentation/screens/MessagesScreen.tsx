@@ -110,7 +110,7 @@ type GroupChatListEntry = {
   previewAt: string | null;
 };
 
-type ChatTab = "private" | "group";
+type ChatTab = "private" | "group" | "events";
 
 function isServiceOwner(chat: Chat): boolean {
   const type = chat.service_type?.toLowerCase();
@@ -183,10 +183,16 @@ function timeAgo(dateStr: string): string {
   });
 }
 
+type EventChatEntry = {
+  serviceId: string;
+  serviceTitle: string;
+};
+
 type ListItem =
   | { kind: "sectionHeader"; label: string; count: number; id: string }
   | { kind: "closedToggle"; count: number; expanded: boolean }
   | { kind: "groupChat"; data: GroupChatListEntry }
+  | { kind: "eventChat"; data: EventChatEntry }
   | { kind: "chat"; data: Chat };
 
 export default function MessagesScreen() {
@@ -266,6 +272,13 @@ export default function MessagesScreen() {
     });
   };
 
+  const openEventChat = (entry: EventChatEntry) => {
+    navigation.navigate("PublicChat", {
+      roomId: entry.serviceId,
+      roomTitle: entry.serviceTitle,
+    });
+  };
+
   const goToLogin = () => {
     const tabNav = navigation.getParent() as
       | import("@react-navigation/native").NavigationProp<BottomTabParamList>
@@ -302,6 +315,20 @@ export default function MessagesScreen() {
   const activeGroupEntries = buildGroupChatEntries(activeGroupSourceChats);
   const closedGroupEntries = buildGroupChatEntries(closedGroupSourceChats);
 
+  const eventChatEntries: EventChatEntry[] = (() => {
+    const seen = new Set<string>();
+    const entries: EventChatEntry[] = [];
+    for (const c of chatList) {
+      if (c.service_type?.toLowerCase() !== "event" || !c.service_id) continue;
+      const st = c.status?.toLowerCase();
+      if (!["accepted", "checked_in", "attended"].includes(st)) continue;
+      if (seen.has(c.service_id)) continue;
+      seen.add(c.service_id);
+      entries.push({ serviceId: c.service_id, serviceTitle: c.service_title ?? "Event" });
+    }
+    return entries;
+  })();
+
   const listData: ListItem[] = [];
   if (selectedTab === "private") {
     if (activePrivateChats.length > 0) {
@@ -336,6 +363,18 @@ export default function MessagesScreen() {
         for (const c of closedPrivateChats) {
           listData.push({ kind: "chat", data: c });
         }
+      }
+    }
+  } else if (selectedTab === "events") {
+    if (eventChatEntries.length > 0) {
+      listData.push({
+        kind: "sectionHeader",
+        id: "header-events",
+        label: "JOINED EVENTS",
+        count: eventChatEntries.length,
+      });
+      for (const e of eventChatEntries) {
+        listData.push({ kind: "eventChat", data: e });
       }
     }
   } else {
@@ -485,6 +524,33 @@ export default function MessagesScreen() {
     </TouchableOpacity>
   );
 
+  const renderEventRow = (entry: EventChatEntry) => (
+    <TouchableOpacity
+      style={styles.groupChatItem}
+      onPress={() => openEventChat(entry)}
+      activeOpacity={0.75}
+    >
+      <View style={[styles.groupChatIconWrap, { backgroundColor: "#FFF7ED" }]}>
+        <Ionicons name="calendar" size={22} color={colors.AMBER} />
+      </View>
+      <View style={styles.chatContent}>
+        <View style={styles.chatHeaderRow}>
+          <Text style={styles.groupChatTitle} numberOfLines={1}>
+            {entry.serviceTitle}
+          </Text>
+          <View style={styles.rightMeta}>
+            <View style={[styles.groupBadge, { backgroundColor: "#FFF7ED" }]}>
+              <Text style={[styles.groupBadgeText, { color: colors.AMBER }]}>EVENT</Text>
+            </View>
+          </View>
+        </View>
+        <Text style={styles.groupChatSub} numberOfLines={1}>
+          Tap to open event chat
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+
   const renderItem = ({ item }: { item: ListItem }) => {
     if (item.kind === "sectionHeader") {
       return (
@@ -522,6 +588,9 @@ export default function MessagesScreen() {
     if (item.kind === "groupChat") {
       return renderGroupRow(item.data);
     }
+    if (item.kind === "eventChat") {
+      return renderEventRow(item.data);
+    }
     return renderChatRow(item.data);
   };
 
@@ -529,6 +598,7 @@ export default function MessagesScreen() {
     if (item.kind === "sectionHeader") return item.id;
     if (item.kind === "closedToggle") return "closed-toggle";
     if (item.kind === "groupChat") return `group-${item.data.serviceId}`;
+    if (item.kind === "eventChat") return `event-${item.data.serviceId}`;
     return item.data.handshake_id;
   };
 
@@ -610,6 +680,29 @@ export default function MessagesScreen() {
                   ]}
                 />
               </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.tabButton,
+                  selectedTab === "events" && styles.tabButtonActive,
+                ]}
+                onPress={() => setSelectedTab("events")}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={[
+                    styles.tabButtonText,
+                    selectedTab === "events" && styles.tabButtonTextActive,
+                  ]}
+                >
+                  Events · {eventChatEntries.length}
+                </Text>
+                <View
+                  style={[
+                    styles.tabUnderline,
+                    selectedTab === "events" && styles.tabUnderlineActive,
+                  ]}
+                />
+              </TouchableOpacity>
             </View>
 
             <FlatList
@@ -636,14 +729,18 @@ export default function MessagesScreen() {
               ListEmptyComponent={
                 <View style={styles.centerState}>
                   <Text style={styles.stateTitle}>
-                    {selectedTab === "group"
-                      ? "No group conversations yet"
-                      : "No private conversations yet"}
+                    {selectedTab === "events"
+                      ? "No event chats yet"
+                      : selectedTab === "group"
+                        ? "No group conversations yet"
+                        : "No private conversations yet"}
                   </Text>
                   <Text style={styles.subheader}>
-                    {selectedTab === "group"
-                      ? "Accepted multi-member services will appear here as group chats."
-                      : "Express interest in a service to start chatting."}
+                    {selectedTab === "events"
+                      ? "Join an event to access its chat."
+                      : selectedTab === "group"
+                        ? "Accepted multi-member services will appear here as group chats."
+                        : "Express interest in a service to start chatting."}
                   </Text>
                 </View>
               }
