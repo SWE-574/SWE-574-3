@@ -5,6 +5,9 @@ import ChatScreen from "../presentation/screens/ChatScreen";
 import GroupChatScreen from "../presentation/screens/GroupChatScreen";
 import PublicChatScreen from "../presentation/screens/PublicChatScreen";
 import PublicProfileScreen from "../presentation/screens/PublicProfileScreen";
+import ServiceDetailScreen from "../presentation/screens/ServiceDetailScreen";
+import AchievementsListScreen from "../presentation/screens/AchievementsListScreen";
+import FollowListScreen from "../presentation/screens/FollowListScreen";
 
 export type MessagesStackParamList = {
   MessagesList: undefined;
@@ -14,7 +17,7 @@ export type MessagesStackParamList = {
     serviceTitle?: string;
     otherUserId?: string;
     otherUserAvatarUrl?: string;
-  isProvider?: boolean;
+    isProvider?: boolean;
     serviceType?: string;
     scheduleType?: string;
     maxParticipants?: number;
@@ -37,6 +40,9 @@ export type MessagesStackParamList = {
   UserPublicProfile: {
     userId: string;
   };
+  ServiceDetail: { id: string };
+  AchievementsList: { userId: string };
+  FollowList: { userId: string; kind: "followers" | "following" };
 };
 
 const Stack = createNativeStackNavigator<MessagesStackParamList>();
@@ -75,8 +81,19 @@ export default function MessagesStack() {
       <Stack.Screen
         name="UserPublicProfile"
         component={PublicProfileScreen}
-        options={{ title: "Profile", headerBackTitle: "Back" }}
+        options={{ headerShown: false }}
       />
+      <Stack.Screen
+        name="ServiceDetail"
+        component={ServiceDetailScreen}
+        options={{ title: "Service Detail" }}
+      />
+      <Stack.Screen
+        name="AchievementsList"
+        component={AchievementsListScreen}
+        options={{ title: "Achievements" }}
+      />
+      <Stack.Screen name="FollowList" component={FollowListScreen} />
     </Stack.Navigator>
   );
 }
