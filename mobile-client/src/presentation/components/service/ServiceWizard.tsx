@@ -375,7 +375,7 @@ export default function ServiceWizard({
 
     if (result.canceled) return;
 
-    const nextImages = result.assets.map((asset, index) => ({
+    const nextImages = result.assets.map((asset: ImagePicker.ImagePickerAsset, index: number) => ({
       uri: asset.uri,
       name: asset.fileName ?? `service-photo-${Date.now()}-${index}.jpg`,
       type: asset.mimeType ?? "image/jpeg",

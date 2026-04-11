@@ -280,7 +280,6 @@ function EventEvaluationSummaryCard({ summary }: { summary: EventEvaluationSumma
             const avg = summary[`${key}_average` as keyof EventEvaluationSummary] as number
             const pct = Math.round(avg * 100)
             const barColor = positive ? GREEN : RED
-            const barBg = positive ? GREEN_LT : RED_LT
             return (
               <Flex key={key} align="center" gap={3}>
                 <Text fontSize="12px" color={GRAY700} fontWeight={600} w="110px" flexShrink={0}>
