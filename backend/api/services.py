@@ -8,6 +8,7 @@ from django.db import models as django_models
 from django.db.models import F, Q
 from django.db.utils import OperationalError
 from django.utils import timezone
+import logging
 
 from .models import (
     Handshake, Service, User, ChatMessage, ReputationRep, NegativeRep,
@@ -45,6 +46,8 @@ class HandshakeServiceError(Exception):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+
+logger = logging.getLogger(__name__)
 
 
 class HandshakeService:
@@ -229,8 +232,18 @@ class HandshakeService:
             # Send notifications (use locked service_owner)
             HandshakeService._send_notifications(service, handshake, requester, service_owner)
             
-            # Create initial chat message
-            HandshakeService._create_initial_message(handshake, requester, service)
+            # Create initial chat message.
+            initial_message = HandshakeService._create_initial_message(handshake, requester, service)
+
+            # Broadcast only after the transaction is committed, so websocket consumers
+            # can read the message row and we avoid rolling back handshake creation if
+            # websocket transport is temporarily unavailable.
+            transaction.on_commit(
+                lambda: HandshakeService._broadcast_private_message(
+                    handshake_id=handshake.id,
+                    message_id=initial_message.id,
+                )
+            )
         
         # Invalidate caches AFTER transaction commits to prevent race condition:
         # If we invalidate before commit, another request could see cache miss,
@@ -319,6 +332,36 @@ class HandshakeService:
             sender=requester,
             body=f"Hi! I'm interested in your service: {service.title}"
         )
+
+    @staticmethod
+    def _broadcast_private_message(handshake_id, message_id) -> None:
+        """Push a private chat message over websocket group transport."""
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            from .serializers import ChatMessageSerializer
+
+            channel_layer = get_channel_layer()
+            if not channel_layer:
+                return
+
+            message = ChatMessage.objects.select_related('sender', 'handshake').get(id=message_id)
+            serializer = ChatMessageSerializer(message)
+
+            async_to_sync(channel_layer.group_send)(
+                f'chat_{handshake_id}',
+                {
+                    'type': 'chat_message',
+                    'message': serializer.data,
+                },
+            )
+        except Exception:
+            # Realtime delivery should not block core interest/handshake creation.
+            logger.warning(
+                "Failed to broadcast private chat message",
+                extra={"handshake_id": str(handshake_id), "message_id": str(message_id)},
+                exc_info=True,
+            )
     
     @staticmethod
     def _invalidate_caches(requester: User, service_owner: User) -> None:
@@ -564,11 +607,21 @@ class HandshakeService:
             raise HandshakeServiceError(
                 'Provider must initiate the handshake first', code=ErrorCodes.INVALID_STATE,
             )
-        if not handshake.exact_location or not handshake.exact_duration or not handshake.scheduled_time:
-            err = HandshakeServiceError(
-                'Provider must provide exact location, duration, and scheduled time before approval',
-                code=ErrorCodes.INVALID_STATE,
+        # Online sessions do not share an exact location, but in-person sessions still require it.
+        requires_exact_location = handshake.service.location_type != 'Online'
+        if requires_exact_location:
+            missing = (
+                not handshake.exact_location
+                or not handshake.exact_duration
+                or not handshake.scheduled_time
             )
+            msg = 'Provider must provide exact location, duration, and scheduled time before approval'
+        else:
+            missing = not handshake.exact_duration or not handshake.scheduled_time
+            msg = 'Provider must provide duration and scheduled time before approval'
+
+        if missing:
+            err = HandshakeServiceError(msg, code=ErrorCodes.INVALID_STATE)
             err.extra = {'requires_details': True}
             raise err
 
@@ -592,10 +645,13 @@ class HandshakeService:
 
         summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
         loc = handshake.exact_location or ''
+        approve_body = f"Session approved! See you on {summary_time}."
+        if loc:
+            approve_body = f"Session approved! See you on {summary_time} at {loc}."
         approve_msg = ChatMessage.objects.create(
             handshake=handshake,
             sender=user,
-            body=f"Session approved! See you on {summary_time} at {loc}.",
+            body=approve_body,
         )
 
         create_notification(
@@ -1765,7 +1821,7 @@ class EventNoShowAppealService:
         admin_notes: str | None = None,
     ) -> Report:
         """Resolve a pending no-show appeal with uphold or overturn outcome."""
-        if admin_user.role != 'admin':
+        if admin_user.role not in ('admin', 'super_admin', 'moderator'):
             raise PermissionError('Admin access required')
 
         with transaction.atomic():

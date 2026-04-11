@@ -11,7 +11,7 @@
 import { test, expect } from '@playwright/test'
 import {
   createServiceViaApi,
-  joinEventViaApi,
+  joinEventViaApiForFeature20,
   loginAs,
   openServiceFromDashboard,
   uniqueTitle,
@@ -60,7 +60,7 @@ test('FR-RANK-03c: "Nearly Full" badge does NOT appear for a low-capacity event 
 
   // Join as 1 user (10% capacity) — well below 75%
   await loginAs(page, USERS.cem)
-  await joinEventViaApi(page, created.id)
+  await joinEventViaApiForFeature20(page, created.id)
 
   await page.goto(created.detailUrl)
   await expect(page.getByText(title).first()).toBeVisible({ timeout: 15_000 })
