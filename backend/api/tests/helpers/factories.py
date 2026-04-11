@@ -207,7 +207,7 @@ class ForumCategoryFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = ForumCategory
     
-    name = factory.Faker('word')
+    name = factory.Sequence(lambda n: f'forum-category-{n}')
     description = factory.Faker('sentence')
     slug = factory.Sequence(lambda n: f'category-{n}')
     icon = 'message-square'
