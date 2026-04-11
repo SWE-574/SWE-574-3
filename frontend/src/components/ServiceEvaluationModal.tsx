@@ -113,8 +113,6 @@ export default function ServiceEvaluationModal({
   const removeImage = (idx: number) => {
     setImages((prev) => prev.filter((_, i) => i !== idx))
     setImagePreviews((prev) => prev.filter((_, i) => i !== idx))
-    setImages([])
-    setImagePreviews([])
   }
 
   const handleClose = () => {
@@ -165,9 +163,6 @@ export default function ServiceEvaluationModal({
         })
       }
 
-      if (images.length > 0) {
-        await reputationAPI.attachReviewImages(handshakeId, images)
-      }
       toast.success('Evaluation submitted. Thank you for your feedback!')
       // Attach images after the main evaluation — a failure here should not block the flow.
       if (images.length > 0) {

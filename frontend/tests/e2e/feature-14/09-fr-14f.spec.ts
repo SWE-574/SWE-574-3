@@ -40,7 +40,7 @@ test('FR-14f: user can attach a photo when submitting evaluation', async ({ page
   await page.getByRole('button', { name: 'Helpful', exact: true }).click()
 
   // Attach a photo using the file input inside the modal
-  const fileInput = page.locator('input[type="file"][accept="image/*"]')
+  const fileInput = page.locator('input[type="file"][accept*="image/"]')
   await fileInput.setInputFiles(SAMPLE_JPEG)
 
   // Thumbnail preview should appear
@@ -65,7 +65,7 @@ test('FR-14f: camera icon button is present in evaluation modal', async ({ page 
   await page.goto(serviceDetailUrl)
   await page.getByText(/Leave Evaluation/i).first().click()
 
-  await expect(page.locator('input[type="file"][accept="image/*"]')).toBeAttached({ timeout: 10_000 })
+  await expect(page.locator('input[type="file"][accept*="image/"]')).toBeAttached({ timeout: 10_000 })
   // The label containing the file input should be visible (camera trigger)
   await expect(page.locator('label:has(input[type="file"])').first()).toBeVisible()
 })
@@ -85,9 +85,9 @@ test('FR-14f: removing a photo preview works before submission', async ({ page }
   await page.goto(serviceDetailUrl)
   await page.getByText(/Leave Evaluation/i).first().click()
 
-  await expect(page.locator('input[type="file"][accept="image/*"]')).toBeAttached({ timeout: 10_000 })
+  await expect(page.locator('input[type="file"][accept*="image/"]')).toBeAttached({ timeout: 10_000 })
 
-  const fileInput = page.locator('input[type="file"][accept="image/*"]')
+  const fileInput = page.locator('input[type="file"][accept*="image/"]')
   await fileInput.setInputFiles(SAMPLE_JPEG)
 
   // Preview appears

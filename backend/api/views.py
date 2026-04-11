@@ -22,7 +22,6 @@ from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 import logging
 import os
-import os
 import bleach
 from typing import List
 
@@ -1433,28 +1432,27 @@ class UserVerifiedReviewsView(APIView):
         if role_param == 'organizer':
             # Event reviews written by attendees about this user as the event organizer.
             # Filter through comment.service (not handshake.service) to avoid double-JOIN ambiguity.
-            event_filter = Q(
+            review_filter = Q(
                 service__type='Event',
                 service__user=target_user,
                 related_handshake__requester=F('user'),
             )
         else:
             # Restrict to Offer/Need only — Event reviews belong in the organizer section.
-            base_filter = (
+            review_filter = (
                 Q(service__user=target_user, related_handshake__requester=F('user'),
                   related_handshake__service__type__in=['Offer', 'Need'])
                 | Q(related_handshake__requester=target_user, service__user=F('user'),
                     related_handshake__service__type__in=['Offer', 'Need'])
             )
             if role_param in ('provider', 'receiver'):
-                base_filter = base_filter & get_verified_reviews_role_filter(target_user, role_param)
-            event_filter = base_filter
+                review_filter = review_filter & get_verified_reviews_role_filter(target_user, role_param)
 
         comments = Comment.objects.filter(
             is_verified_review=True,
             is_deleted=False,
             related_handshake__isnull=False,
-        ).filter(event_filter).select_related(
+        ).filter(review_filter).select_related(
             'user', 'service', 'related_handshake', 'related_handshake__service'
         ).prefetch_related(
             Prefetch(
@@ -3942,37 +3940,8 @@ class ReputationViewSet(viewsets.ModelViewSet):
                         status_code=status.HTTP_400_BAD_REQUEST,
                     )
 
-        cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000]
-        images = request.FILES.getlist('images')
-
-        # Validate images
-        _ALLOWED_IMG_EXT = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
-        _MAX_IMG_SIZE = 10 * 1024 * 1024  # 10 MB
-        if images:
-            if len(images) > 3:
-                return create_error_response(
-                    'Maximum 3 images allowed per review.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-            for img in images:
-                ext = os.path.splitext(img.name)[1].lower()
-                if ext not in _ALLOWED_IMG_EXT:
-                    return create_error_response(
-                        f'Unsupported image format: {ext}. Allowed: JPG, PNG, GIF, WebP.',
-                        code=ErrorCodes.VALIDATION_ERROR,
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                    )
-                if img.size > _MAX_IMG_SIZE:
-                    return create_error_response(
-                        'Each image must be under 10 MB.',
-                        code=ErrorCodes.VALIDATION_ERROR,
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                    )
-
         if not cleaned_comment and not images:
             return Response(
-                {'status': 'success', 'message': 'Evaluation already recorded. No review text or images provided.'},
                 {'status': 'success', 'message': 'Evaluation already recorded. No review text or images provided.'},
                 status=status.HTTP_200_OK,
             )
@@ -3987,42 +3956,19 @@ class ReputationViewSet(viewsets.ModelViewSet):
             is_deleted=False,
         ).first()
 
-        if comment is None:
-            comment = None
-        if cleaned_comment:
-            comment = Comment.objects.create(
-                    service=handshake.service,
-                    user=user,
-                    body=cleaned_comment,
-                    is_verified_review=True,
-                related_handshake=handshake,
-            )
-        else:
-            # Images only — attach to existing Comment if present, or create a placeholder
-            comment = Comment.objects.filter(
-                related_handshake=handshake,
-                user=user,
-                is_verified_review=True,
-                is_deleted=False,
-            ).first()
-            if not comment:
-                comment = Comment.objects.create(
-                    service=handshake.service,
-                    user=user,
-                    body='',
-                    is_verified_review=True,
-                        related_handshake=handshake,
-                    )
-            elif cleaned_comment and not comment.body:
-                # Fill in body if it was previously empty (images-first path)
+        if comment and cleaned_comment:
+            # Update body if the existing comment was empty (images-first path)
+            if not comment.body:
                 comment.body = cleaned_comment
                 comment.save(update_fields=['body'])
-
-        for img in images:
-            media_obj = CommentMedia(comment=comment)
-            media_obj.file.save(img.name, img, save=True)
-            media_obj.file_url = media_obj.file.url
-            media_obj.save(update_fields=['file_url'])
+        elif not comment:
+            comment = Comment.objects.create(
+                service=handshake.service,
+                user=user,
+                body=cleaned_comment,
+                is_verified_review=True,
+                related_handshake=handshake,
+            )
 
         for img in images:
             media_obj = CommentMedia(comment=comment)

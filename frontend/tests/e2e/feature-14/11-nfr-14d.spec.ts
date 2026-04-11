@@ -37,7 +37,7 @@ test('NFR-14d: evaluation is saved even when image upload fails', async ({ page 
   })
 
   // Attach a dummy file so the upload path is triggered
-  const fileInput = page.locator('input[type="file"][accept="image/*"]')
+  const fileInput = page.locator('input[type="file"][accept*="image/"]')
   await fileInput.setInputFiles({
     name: 'fail.jpg',
     mimeType: 'image/jpeg',
@@ -92,7 +92,7 @@ test('NFR-14d: evaluation modal closes after submission regardless of image uplo
     route.fulfill({ status: 503, body: '{}' })
   })
 
-  const fileInput = page.locator('input[type="file"][accept="image/*"]')
+  const fileInput = page.locator('input[type="file"][accept*="image/"]')
   await fileInput.setInputFiles({
     name: 'fail2.jpg',
     mimeType: 'image/jpeg',
