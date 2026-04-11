@@ -12,7 +12,7 @@ test.describe('FR-01b: Session creation and redirect on login', () => {
   test('after login user is redirected to the default landing page (dashboard)', async ({ page }) => {
     await loginAs(page, USERS.cem)
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
-    await expect(page.locator('nav')).toBeVisible()
+    await expect(page.getByTestId('user-menu-trigger')).toBeVisible()
   })
 
   test('unauthenticated visit to a protected route redirects to login', async ({ page }) => {

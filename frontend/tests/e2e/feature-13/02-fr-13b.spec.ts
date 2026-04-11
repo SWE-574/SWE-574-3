@@ -17,7 +17,7 @@ test('FR-13b: detail page shows the poster profile summary with name, karma, and
 
   // The poster summary should expose identity and reputation cues without opening the profile page.
   await page.goto(created.detailUrl)
-  await expect(page.getByText(USERS.elif.name).first()).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText(USERS.elif.name).first()).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText(/^Karma$/).first()).toBeVisible()
   await expect(page.getByText(/^Joined$/).first()).toBeVisible()
   await expect(page.getByRole('button', { name: /View Profile/i }).first()).toBeVisible()

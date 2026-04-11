@@ -50,6 +50,7 @@ from .views import (
     VerifyEmailView,
     SendVerificationEmailView,
     ResendVerificationView,
+    E2ESetBalanceView,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .views import CustomTokenObtainPairView
@@ -335,6 +336,9 @@ urlpatterns = [
     path('forum/posts/<uuid:pk>/report/', forum_post_report, name='forum-post-report'),
     path('forum/posts/<uuid:pk>/restore/', forum_post_restore, name='forum-post-restore'),
     path('forum/posts/recent/', forum_post_recent, name='forum-post-recent'),
+    # E2E test utilities (only active when DJANGO_E2E=1)
+    path('e2e/set-balance/', E2ESetBalanceView.as_view(), name='e2e-set-balance'),
+
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),

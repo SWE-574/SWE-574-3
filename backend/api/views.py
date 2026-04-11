@@ -80,7 +80,12 @@ from .utils import (
     can_user_post_offer, provision_timebank, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
 )
-from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService, get_social_proximity_boosts
+from .services import (
+    HandshakeService, HandshakeServiceError,
+    EventHandshakeService, EventEvaluationService, EventNoShowAppealService,
+    ReputationService, ReputationServiceError,
+    get_social_proximity_boosts,
+)
 from .ranking_debug import build_service_debug_payload
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
@@ -698,7 +703,7 @@ class ForgotPasswordView(APIView):
     def post(self, request, *args, **kwargs):
         email = request.data.get('email', '').strip().lower()
         if not email:
-            return Response({'detail': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Email is required.', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         try:
             user = User.objects.get(email=email)
             _send_password_reset_email(user)
@@ -851,7 +856,7 @@ class VerifyEmailView(APIView):
     def post(self, request, *args, **kwargs):
         token_str = request.data.get('token', '').strip()
         if not token_str:
-            return Response({'detail': 'Token is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Token is required.', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         try:
             ev_token = EmailVerificationToken.objects.select_related('user').get(
                 token=token_str, is_used=False
@@ -907,7 +912,7 @@ class SendVerificationEmailView(APIView):
     def post(self, request, *args, **kwargs):
         user = request.user
         if user.is_verified:
-            return Response({'detail': 'Email is already verified.'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Email is already verified.', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         _send_verification_email(user)
         return Response({'detail': 'Verification email sent.'}, status=status.HTTP_200_OK)
 
@@ -936,7 +941,7 @@ class ResendVerificationView(APIView):
     def post(self, request, *args, **kwargs):
         email = request.data.get('email', '').strip().lower()
         if not email:
-            return Response({'detail': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Email is required.', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         try:
             user = User.objects.get(email=email)
             if not user.is_verified:
@@ -2190,7 +2195,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
         service = self.get_object()
         if service.type != 'Event':
-            return Response({'error': 'Only events can be pinned'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Only events can be pinned', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
 
         service.is_pinned = not service.is_pinned
         service.save(update_fields=['is_pinned'])
@@ -2822,102 +2827,13 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         The other party (the one who expressed interest) then approves.
         """
         handshake = self.get_object()
-        user = request.user
-        
-        # Service owner always initiates — works for both Offer and Need
-        if handshake.service.user != user:
-            return create_error_response(
-                'Only the service owner can initiate the handshake',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
+        try:
+            handshake, session_msg = HandshakeService.initiate(handshake, request.user, request.data)
+        except HandshakeServiceError as exc:
+            extra = getattr(exc, 'extra', {})
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code, **extra)
 
-        if handshake.status != 'pending':
-            return create_error_response(
-                'Handshake is not pending',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Provider has already initiated
-        if handshake.provider_initiated:
-            return create_error_response(
-                'You have already initiated this handshake',
-                code=ErrorCodes.ALREADY_EXISTS,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        service = handshake.service
-        is_fixed_group_offer = (
-            service.type == 'Offer'
-            and service.schedule_type == 'One-Time'
-            and service.max_participants > 1
-        )
-
-        if is_fixed_group_offer:
-            if not service.location_area or not service.scheduled_time:
-                return create_error_response(
-                    'This group offer is missing its fixed meeting details.',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            handshake.provider_initiated = True
-            handshake.exact_duration = service.duration
-            handshake.scheduled_time = service.scheduled_time
-            if service.location_type == 'Online':
-                handshake.exact_location = ''
-                handshake.exact_location_guide = ''
-                handshake.exact_location_maps_url = None
-            else:
-                handshake.exact_location = service.session_exact_location or service.location_area
-                handshake.exact_location_guide = service.session_location_guide
-                from urllib.parse import quote
-                if service.session_exact_location_lat is not None and service.session_exact_location_lng is not None:
-                    handshake.exact_location_maps_url = (
-                        f"https://www.google.com/maps?q={float(service.session_exact_location_lat)},{float(service.session_exact_location_lng)}"
-                    )
-                elif service.location_lat is not None and service.location_lng is not None:
-                    handshake.exact_location_maps_url = (
-                        f"https://www.google.com/maps?q={float(service.location_lat)},{float(service.location_lng)}"
-                    )
-                else:
-                    handshake.exact_location_maps_url = (
-                        f"https://www.google.com/maps/search/?api=1&query={quote((service.session_exact_location or service.location_area or ''))}"
-                    )
-            handshake.save()
-
-            service_owner = handshake.service.user
-            other_party = handshake.requester
-            invalidate_conversations(str(service_owner.id))
-            invalidate_conversations(str(other_party.id))
-
-            create_notification(
-                user=other_party,
-                notification_type='handshake_request',
-                title='Group Offer Details Shared',
-                message=f"{user.first_name} shared the fixed session details for '{handshake.service.title}'. Please review and approve.",
-                handshake=handshake,
-                service=handshake.service
-            )
-
-            # Auto-post structured session summary to chat (use stored Google Maps URL)
-            from django.utils import timezone as tz
-            loc = handshake.exact_location or ''
-            guide = (handshake.exact_location_guide or '').strip()
-            summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
-            summary_parts = [f"\U0001F4C5 {summary_time}"]
-            if loc:
-                summary_parts.append(f"\U0001F4CD {loc}")
-            if guide:
-                summary_parts.append(f"\U0001F9ED {guide}")
-            if handshake.exact_location_maps_url:
-                summary_parts.append(f"\U0001F517 {handshake.exact_location_maps_url}")
-            session_msg = ChatMessage.objects.create(
-                handshake=handshake,
-                sender=user,
-                body=" | ".join(summary_parts)
-            )
+        if session_msg:
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync
             channel_layer = get_channel_layer()
@@ -2926,167 +2842,6 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                     f'chat_{handshake.id}',
                     {'type': 'chat_message', 'message': ChatMessageSerializer(session_msg).data}
                 )
-
-            serializer = self.get_serializer(handshake)
-            return Response(serializer.data, status=200)
-
-        # Require all details from provider
-        exact_location = request.data.get('exact_location', '').strip()
-        exact_duration = request.data.get('exact_duration')
-        scheduled_time = request.data.get('scheduled_time')
-        exact_location_lat = request.data.get('exact_location_lat')
-        exact_location_lng = request.data.get('exact_location_lng')
-
-        requires_exact_location = handshake.service.location_type != 'Online'
-
-        if requires_exact_location and not exact_location:
-            return create_error_response(
-                'Exact location is required',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not exact_duration:
-            return create_error_response(
-                'Exact duration is required',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not scheduled_time:
-            return create_error_response(
-                'Scheduled time is required',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Parse and validate scheduled time using timezone utilities
-        from .timezone_utils import validate_and_normalize_datetime, validate_future_datetime
-        
-        parsed_time, parse_error = validate_and_normalize_datetime(scheduled_time)
-        
-        if parse_error:
-            return create_error_response(
-                parse_error,
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Validate that the time is in the future
-        future_error = validate_future_datetime(parsed_time)
-        if future_error:
-            return create_error_response(
-                future_error,
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Validate duration
-        try:
-            exact_duration_decimal = Decimal(str(exact_duration))
-            if exact_duration_decimal <= 0:
-                return create_error_response(
-                    'Duration must be greater than 0',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-            if (
-                handshake.service.type in ('Offer', 'Need')
-                and exact_duration_decimal != exact_duration_decimal.to_integral_value()
-            ):
-                return create_error_response(
-                    'Duration must be a whole number of hours',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-        except (InvalidOperation, ValueError, TypeError):
-            return create_error_response(
-                'Invalid duration format',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Check for schedule conflicts
-        from .schedule_utils import check_schedule_conflict
-        duration_hours = float(exact_duration_decimal)
-        conflicts = check_schedule_conflict(user, parsed_time, duration_hours, exclude_handshake=handshake)
-        
-        if conflicts:
-            conflict_info = conflicts[0]
-            other_user_name = f"{conflict_info['other_user'].first_name} {conflict_info['other_user'].last_name}".strip()
-            conflict_time = conflict_info['scheduled_time'].strftime('%Y-%m-%d %H:%M')
-            return create_error_response(
-                'Schedule conflict detected',
-                code=ErrorCodes.CONFLICT,
-                status_code=status.HTTP_400_BAD_REQUEST,
-                conflict=True,
-                conflict_details={
-                    'service_title': conflict_info['service_title'],
-                    'scheduled_time': conflict_time,
-                    'other_user': other_user_name
-                }
-            )
-
-        # Build and store Google Maps URL (coordinates preferred for accuracy)
-        if exact_location:
-            from urllib.parse import quote
-            if exact_location_lat is not None and exact_location_lng is not None:
-                try:
-                    lat_f = float(exact_location_lat)
-                    lng_f = float(exact_location_lng)
-                    handshake.exact_location_maps_url = f"https://www.google.com/maps?q={lat_f},{lng_f}"
-                except (TypeError, ValueError):
-                    handshake.exact_location_maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
-            else:
-                handshake.exact_location_maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
-        else:
-            handshake.exact_location_maps_url = None
-
-        # Set handshake details
-        handshake.provider_initiated = True
-        handshake.exact_location = exact_location
-        handshake.exact_duration = exact_duration_decimal
-        handshake.scheduled_time = parsed_time
-        handshake.save()
-        
-        # Invalidate conversations cache for both users
-        # service_owner = initiator (user), other party = handshake.requester
-        service_owner = handshake.service.user
-        other_party   = handshake.requester
-        invalidate_conversations(str(service_owner.id))
-        invalidate_conversations(str(other_party.id))
-
-        # Notify the other party (requester) that session details are ready
-        create_notification(
-            user=other_party,
-            notification_type='handshake_request',
-            title='Service Details Provided',
-            message=f"{user.first_name} has provided session details for '{handshake.service.title}'. Please review and approve.",
-            handshake=handshake,
-            service=handshake.service
-        )
-
-        # Auto-post structured session summary to chat (use stored Google Maps URL)
-        from django.utils import timezone as tz
-        summary_time = tz.localtime(parsed_time).strftime('%b %d, %Y %I:%M %p')
-        summary_parts = [f"\U0001F4C5 {summary_time}"]
-        if exact_location:
-            summary_parts.append(f"\U0001F4CD {exact_location}")
-        if handshake.exact_location_maps_url:
-            summary_parts.append(f"\U0001F517 {handshake.exact_location_maps_url}")
-        session_msg = ChatMessage.objects.create(
-            handshake=handshake,
-            sender=user,
-            body=" | ".join(summary_parts)
-        )
-        from channels.layers import get_channel_layer
-        from asgiref.sync import async_to_sync
-        channel_layer = get_channel_layer()
-        if channel_layer:
-            async_to_sync(channel_layer.group_send)(
-                f'chat_{handshake.id}',
-                {'type': 'chat_message', 'message': ChatMessageSerializer(session_msg).data}
-            )
 
         serializer = self.get_serializer(handshake)
         return Response(serializer.data, status=200)
@@ -3099,83 +2854,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         Works for both Offer and Need service types.
         """
         handshake = self.get_object()
-        user = request.user
-        
-        # Only the requester (the one who expressed interest) can approve
-        if handshake.requester != user:
-            return create_error_response(
-                'Only the requester can approve the handshake',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        if handshake.status != 'pending':
-            return create_error_response(
-                'Handshake is not pending',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Provider must have initiated first
-        if not handshake.provider_initiated:
-            return create_error_response(
-                'Provider must initiate the handshake first',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Online sessions do not share an exact location, but in-person sessions still require it.
-        requires_exact_location = handshake.service.location_type != 'Online'
-        if requires_exact_location:
-            missing_required_details = (
-                not handshake.exact_location
-                or not handshake.exact_duration
-                or not handshake.scheduled_time
-            )
-            missing_details_message = 'Provider must provide exact location, duration, and scheduled time before approval'
-        else:
-            missing_required_details = not handshake.exact_duration or not handshake.scheduled_time
-            missing_details_message = 'Provider must provide duration and scheduled time before approval'
-
-        if missing_required_details:
-            return create_error_response(
-                missing_details_message,
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST,
-                requires_details=True
-            )
-
-        # Use negotiated duration instead of original post duration for TimeBank provisioning.
-        if handshake.service.type in ('Offer', 'Need') and handshake.exact_duration is not None:
-            handshake.provisioned_hours = handshake.exact_duration
-            handshake.save(update_fields=['provisioned_hours'])
-
-        # Provision TimeBank and accept handshake
         try:
-            provision_timebank(handshake)
-        except ValueError as e:
-            return create_error_response(
-                str(e),
-                code=ErrorCodes.INSUFFICIENT_BALANCE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-        
-        handshake.status = 'accepted'
-        handshake.requester_initiated = True  # Mark requester as having approved
-        handshake.save()
+            handshake, approve_msg = HandshakeService.approve(handshake, request.user)
+        except HandshakeServiceError as exc:
+            extra = getattr(exc, 'extra', {})
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code, **extra)
 
-        # Auto-post confirmation to chat and broadcast via WebSocket
-        from django.utils import timezone as tz
-        summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
-        loc = handshake.exact_location or ''
-        approve_body = f"Session approved! See you on {summary_time}."
-        if loc:
-            approve_body = f"Session approved! See you on {summary_time} at {loc}."
-        approve_msg = ChatMessage.objects.create(
-            handshake=handshake,
-            sender=user,
-            body=approve_body
-        )
         from channels.layers import get_channel_layer
         from asgiref.sync import async_to_sync
         channel_layer = get_channel_layer()
@@ -3185,60 +2869,6 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 {'type': 'chat_message', 'message': ChatMessageSerializer(approve_msg).data}
             )
 
-        # Notify provider that handshake was approved
-        create_notification(
-            user=handshake.service.user,
-            notification_type='handshake_accepted',
-            title='Handshake Approved',
-            message=f"{user.first_name} has approved the handshake for '{handshake.service.title}'. The handshake is now accepted.",
-            handshake=handshake,
-            service=handshake.service
-        )
-        
-        # Schedule reminders
-        from django.utils import timezone
-        from datetime import timedelta
-        
-        service_time = handshake.scheduled_time
-        duration_hours = float(handshake.exact_duration)
-        completion_time = service_time + timedelta(hours=duration_hours)
-        
-        if service_time > timezone.now():
-            create_notification(
-                user=handshake.service.user,
-                notification_type='service_reminder',
-                title='Service Reminder',
-                message=f"Your service '{handshake.service.title}' is scheduled for {service_time.strftime('%Y-%m-%d %H:%M')}",
-                handshake=handshake,
-                service=handshake.service
-            )
-            create_notification(
-                user=handshake.requester,
-                notification_type='service_reminder',
-                title='Service Reminder',
-                message=f"Your service '{handshake.service.title}' is scheduled for {service_time.strftime('%Y-%m-%d %H:%M')}",
-                handshake=handshake,
-                service=handshake.service
-            )
-        
-        if completion_time > timezone.now():
-            create_notification(
-                user=handshake.service.user,
-                notification_type='service_confirmation',
-                title='Service Completion Reminder',
-                message=f"Please confirm completion of '{handshake.service.title}' after {completion_time.strftime('%Y-%m-%d %H:%M')}",
-                handshake=handshake,
-                service=handshake.service
-            )
-            create_notification(
-                user=handshake.requester,
-                notification_type='service_confirmation',
-                title='Service Completion Reminder',
-                message=f"Please confirm completion of '{handshake.service.title}' after {completion_time.strftime('%Y-%m-%d %H:%M')}",
-                handshake=handshake,
-                service=handshake.service
-            )
-        
         serializer = self.get_serializer(handshake)
         return Response(serializer.data, status=200)
     
@@ -3355,86 +2985,10 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @track_performance
     def accept_handshake(self, request, pk=None):
         handshake = self.get_object()
-        
-        if handshake.service.user != request.user:
-            return create_error_response(
-                'Only the service provider can accept',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        if handshake.status != 'pending':
-            return create_error_response(
-                'Handshake is not pending',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
         try:
-            provision_timebank(handshake)
-        except ValueError as e:
-            return create_error_response(
-                str(e),
-                code=ErrorCodes.INSUFFICIENT_BALANCE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        service = handshake.service
-        with transaction.atomic():
-            handshake.status = 'accepted'
-            handshake.save()
-
-            # For One-Time services: check whether all slots are now filled.
-            # Only when capacity is reached do we deny remaining pending handshakes
-            # and transition the service to Agreed.
-            # Recurrent services stay Active so new participants can always join.
-            if service.schedule_type == 'One-Time':
-                accepted_count = Handshake.objects.filter(
-                    service=service,
-                    status__in=['accepted', 'completed', 'reported', 'paused'],
-                ).count()
-
-                if accepted_count >= service.max_participants:
-                    # Capacity is now full — deny all remaining pending handshakes.
-                    other_pending = Handshake.objects.filter(
-                        service=service,
-                        status='pending',
-                    ).exclude(pk=handshake.pk)
-
-                    denied_requesters = list(other_pending.values_list('requester_id', flat=True))
-                    other_pending.update(status='denied')
-
-                    # Bulk-load all requester users to avoid N+1 queries.
-                    users_by_id = User.objects.in_bulk(denied_requesters)
-
-                    for requester_id in denied_requesters:
-                        user = users_by_id.get(requester_id)
-                        if user is None:
-                            continue
-                        create_notification(
-                            user=user,
-                            notification_type='handshake_denied',
-                            title='Request Not Accepted',
-                            message=f"All slots for '{service.title}' are now filled.",
-                            service=service
-                        )
-                        invalidate_conversations(str(requester_id))
-
-                    # Mark service as Agreed so it is hidden from the public listing.
-                    if service.status == 'Active':
-                        Service.objects.filter(pk=service.pk).update(status='Agreed')
-
-        invalidate_conversations(str(handshake.requester.id))
-        invalidate_conversations(str(handshake.service.user.id))
-
-        create_notification(
-            user=handshake.requester,
-            notification_type='handshake_accepted',
-            title='Handshake Accepted',
-            message=f"Your interest in '{service.title}' has been accepted!",
-            handshake=handshake,
-            service=service
-        )
+            handshake = HandshakeService.accept(handshake, request.user)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
         serializer = self.get_serializer(handshake)
         return Response(serializer.data)
@@ -3466,416 +3020,57 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='cancel')
     def cancel_handshake(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        if handshake.service.user != user and handshake.requester != user:
-            return create_error_response(
-                'Only the service owner or the requester can cancel this handshake',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
+        try:
+            handshake = HandshakeService.cancel(handshake, request.user)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
-        with transaction.atomic():
-            locked_handshake = (
-                Handshake.objects
-                .select_for_update()
-                .select_related('service', 'requester', 'service__user')
-                .get(pk=handshake.pk)
-            )
-
-            if locked_handshake.status == 'accepted' and locked_handshake.service.type != 'Event':
-                return create_error_response(
-                    'Accepted handshakes require a cancellation request and approval',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.status != 'pending':
-                return create_error_response(
-                    'Can only directly cancel pending handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            locked_handshake.status = 'cancelled'
-            locked_handshake.save(update_fields=['status', 'updated_at'])
-
-            if user == locked_handshake.requester:
-                create_notification(
-                    user=locked_handshake.service.user,
-                    notification_type='handshake_cancelled',
-                    title='Handshake Cancelled',
-                    message=f"{user.first_name} {user.last_name} cancelled their request for '{locked_handshake.service.title}'.",
-                    handshake=locked_handshake,
-                    service=locked_handshake.service,
-                )
-
-            serializer = self.get_serializer(locked_handshake)
-            return Response(serializer.data)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='cancel-request')
     def request_cancellation(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        if handshake.service.user != user and handshake.requester != user:
-            return create_error_response(
-                'Only the service owner or the requester can request cancellation',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
         reason = str(request.data.get('reason') or '').strip()
+        try:
+            handshake = HandshakeService.request_cancellation(handshake, request.user, reason)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
-        with transaction.atomic():
-            locked_handshake = (
-                Handshake.objects
-                .select_for_update()
-                .select_related('service', 'requester', 'service__user')
-                .get(pk=handshake.pk)
-            )
-
-            if locked_handshake.service.type == 'Event':
-                return create_error_response(
-                    'Cancellation requests are only available for Offer and Need handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.status != 'accepted':
-                return create_error_response(
-                    'Can only request cancellation for accepted handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id is not None:
-                return create_error_response(
-                    'A cancellation request is already pending for this handshake',
-                    code=ErrorCodes.ALREADY_EXISTS,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            locked_handshake.cancellation_requested_by = user
-            locked_handshake.cancellation_requested_at = timezone.now()
-            locked_handshake.cancellation_reason = reason
-            locked_handshake.save(update_fields=[
-                'cancellation_requested_by',
-                'cancellation_requested_at',
-                'cancellation_reason',
-                'updated_at',
-            ])
-
-            other_user = (
-                locked_handshake.requester
-                if locked_handshake.service.user == user
-                else locked_handshake.service.user
-            )
-            display_name = f"{user.first_name} {user.last_name}".strip() or user.email
-            message = f"{display_name} requested to cancel '{locked_handshake.service.title}'."
-            if reason:
-                message = f"{message} Reason: {reason}"
-
-            create_notification(
-                user=other_user,
-                notification_type='handshake_cancellation_requested',
-                title='Cancellation Requested',
-                message=message,
-                handshake=locked_handshake,
-                service=locked_handshake.service,
-            )
-            invalidate_conversations(str(locked_handshake.requester_id))
-            invalidate_conversations(str(locked_handshake.service.user_id))
-
-            serializer = self.get_serializer(locked_handshake)
-            return Response(serializer.data)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='cancel-request/approve')
     def approve_cancellation_request(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        if handshake.service.user != user and handshake.requester != user:
-            return create_error_response(
-                'Only the service owner or the requester can approve cancellation',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
+        try:
+            handshake = HandshakeService.approve_cancellation(handshake, request.user)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
-        with transaction.atomic():
-            locked_handshake = (
-                Handshake.objects
-                .select_for_update()
-                .select_related('service', 'requester', 'service__user')
-                .get(pk=handshake.pk)
-            )
-
-            if locked_handshake.service.type == 'Event':
-                return create_error_response(
-                    'Cancellation requests are only available for Offer and Need handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.status != 'accepted':
-                return create_error_response(
-                    'Can only approve cancellation for accepted handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id is None:
-                return create_error_response(
-                    'There is no pending cancellation request for this handshake',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id == user.id:
-                return create_error_response(
-                    'The user who requested cancellation cannot approve it',
-                    code=ErrorCodes.PERMISSION_DENIED,
-                    status_code=status.HTTP_403_FORBIDDEN
-                )
-
-            svc = locked_handshake.service
-            requester_name = (
-                f"{locked_handshake.cancellation_requested_by.first_name} "
-                f"{locked_handshake.cancellation_requested_by.last_name}"
-            ).strip() or locked_handshake.cancellation_requested_by.email
-
-            cancel_timebank_transfer(locked_handshake)
-
-            if svc.status == 'Agreed':
-                Service.objects.filter(pk=svc.pk).update(status='Active')
-
-            create_notification(
-                user=svc.user,
-                notification_type='handshake_cancelled',
-                title='Cancellation Approved',
-                message=f"The cancellation request for '{svc.title}' was approved by mutual agreement. Requested by {requester_name}.",
-                handshake=locked_handshake,
-                service=svc,
-            )
-
-            serializer = self.get_serializer(locked_handshake)
-            return Response(serializer.data)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='cancel-request/reject')
     def reject_cancellation_request(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        if handshake.service.user != user and handshake.requester != user:
-            return create_error_response(
-                'Only the service owner or the requester can reject cancellation',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
+        try:
+            handshake = HandshakeService.reject_cancellation(handshake, request.user)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
-        with transaction.atomic():
-            locked_handshake = (
-                Handshake.objects
-                .select_for_update()
-                .select_related('service', 'requester', 'service__user')
-                .get(pk=handshake.pk)
-            )
-
-            if locked_handshake.service.type == 'Event':
-                return create_error_response(
-                    'Cancellation requests are only available for Offer and Need handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.status != 'accepted':
-                return create_error_response(
-                    'Can only reject cancellation for accepted handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id is None:
-                return create_error_response(
-                    'There is no pending cancellation request for this handshake',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id == user.id:
-                return create_error_response(
-                    'The user who requested cancellation cannot reject it',
-                    code=ErrorCodes.PERMISSION_DENIED,
-                    status_code=status.HTTP_403_FORBIDDEN
-                )
-
-            request_user = locked_handshake.cancellation_requested_by
-            locked_handshake.cancellation_requested_by = None
-            locked_handshake.cancellation_requested_at = None
-            locked_handshake.cancellation_reason = ''
-            locked_handshake.save(update_fields=[
-                'cancellation_requested_by',
-                'cancellation_requested_at',
-                'cancellation_reason',
-                'updated_at',
-            ])
-
-            responder_name = f"{user.first_name} {user.last_name}".strip() or user.email
-            create_notification(
-                user=request_user,
-                notification_type='handshake_cancellation_rejected',
-                title='Cancellation Request Declined',
-                message=f"{responder_name} declined your cancellation request for '{locked_handshake.service.title}'.",
-                handshake=locked_handshake,
-                service=locked_handshake.service,
-            )
-            invalidate_conversations(str(locked_handshake.requester_id))
-            invalidate_conversations(str(locked_handshake.service.user_id))
-
-            serializer = self.get_serializer(locked_handshake)
-            return Response(serializer.data)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='confirm', throttle_classes=[ConfirmationThrottle])
     @track_performance
     def confirm_completion(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-
-        is_provider = provider == user
-        is_receiver = receiver == user
-
-        if not (is_provider or is_receiver):
-            return create_error_response(
-                'Not authorized',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        if handshake.status != 'accepted':
-            return create_error_response(
-                'Handshake must be accepted',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
         hours = request.data.get('hours')
-        if hours is not None:
-            try:
-                hours_decimal = Decimal(str(hours))
-                if hours_decimal <= 0:
-                    return create_error_response(
-                        'Hours must be greater than 0',
-                        code=ErrorCodes.VALIDATION_ERROR,
-                        status_code=status.HTTP_400_BAD_REQUEST
-                    )
-                if hours_decimal > 24:
-                    return create_error_response(
-                        'Hours cannot exceed 24',
-                        code=ErrorCodes.VALIDATION_ERROR,
-                        status_code=status.HTTP_400_BAD_REQUEST
-                    )
-                if (
-                    handshake.service.type in ('Offer', 'Need')
-                    and hours_decimal != hours_decimal.to_integral_value()
-                ):
-                    return create_error_response(
-                        'Hours must be a whole number',
-                        code=ErrorCodes.VALIDATION_ERROR,
-                        status_code=status.HTTP_400_BAD_REQUEST
-                    )
-                
-                # If hours changed and handshake was already accepted (provisioned), 
-                # we need to adjust the provisioned amount
-                old_hours = handshake.provisioned_hours
-                if handshake.status == 'accepted' and hours_decimal != old_hours:
-                    # Adjust the escrowed amount
-                    difference = hours_decimal - old_hours
-                    receiver = handshake.requester
-                    with transaction.atomic():
-                        receiver_locked = User.objects.select_for_update().get(id=receiver.id)
-                        if difference > 0:
-                            # Need more hours - check balance and deduct
-                            if receiver_locked.timebank_balance < difference:
-                                return create_error_response(
-                                    f'Insufficient balance. Need {difference} more hours',
-                                    code=ErrorCodes.INSUFFICIENT_BALANCE,
-                                    status_code=status.HTTP_400_BAD_REQUEST
-                                )
-                            
-                            # Use F() expression for atomic balance update
-                            receiver_locked.timebank_balance = F("timebank_balance") - difference
-                            receiver_locked.save(update_fields=["timebank_balance"])
-                            receiver_locked.refresh_from_db(fields=["timebank_balance"])
-                            
-                            # Record adjustment transaction
-                            TransactionHistory.objects.create(
-                                user=receiver_locked,
-                                transaction_type='provision',
-                                amount=-difference,
-                                balance_after=receiver_locked.timebank_balance,
-                                handshake=handshake,
-                                description=f"Additional hours escrowed for '{handshake.service.title}' (adjusted from {old_hours} to {hours_decimal} hours)"
-                            )
-                            invalidate_transactions(str(receiver_locked.id))
-                        else:
-                            # Refund excess hours - use F() expression for atomic balance update
-                            receiver_locked.timebank_balance = F("timebank_balance") + abs(difference)
-                            receiver_locked.save(update_fields=["timebank_balance"])
-                            receiver_locked.refresh_from_db(fields=["timebank_balance"])
-                            
-                            # Record refund transaction
-                            TransactionHistory.objects.create(
-                                user=receiver_locked,
-                                transaction_type='refund',
-                                amount=abs(difference),
-                                balance_after=receiver_locked.timebank_balance,
-                                handshake=handshake,
-                                description=f"Hours adjusted for '{handshake.service.title}' (refunded {abs(difference)} hours, changed from {old_hours} to {hours_decimal} hours)"
-                            )
-                            invalidate_transactions(str(receiver_locked.id))
-                
-                handshake.provisioned_hours = hours_decimal
-            except (InvalidOperation, ValueError, TypeError):
-                return create_error_response(
-                    'Invalid hours value',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-        if is_provider:
-            handshake.provider_confirmed_complete = True
-        else:
-            handshake.receiver_confirmed_complete = True
-
-        handshake.save()
-        
-        # Invalidate conversations cache for both users so UI updates immediately
-        invalidate_conversations(str(handshake.service.user.id))
-        invalidate_conversations(str(handshake.requester.id))
-
-        if handshake.provider_confirmed_complete and handshake.receiver_confirmed_complete:
-            with transaction.atomic():
-                complete_timebank_transfer(handshake)
-                window_start = timezone.now()
-                Handshake.objects.filter(id=handshake.id).update(
-                    evaluation_window_starts_at=window_start,
-                    evaluation_window_ends_at=window_start + timedelta(hours=settings.FEEDBACK_WINDOW_HOURS),
-                    evaluation_window_closed_at=None,
-                )
-                handshake.refresh_from_db(fields=['status', 'evaluation_window_starts_at', 'evaluation_window_ends_at', 'evaluation_window_closed_at'])
-                create_notification(
-                    user=handshake.service.user,
-                    notification_type='positive_rep',
-                    title='Leave Feedback',
-                    message=f"Service completed! Would you like to leave positive feedback for {handshake.requester.first_name}?",
-                    handshake=handshake
-                )
-                create_notification(
-                    user=handshake.requester,
-                    notification_type='positive_rep',
-                    title='Leave Feedback',
-                    message=f"Service completed! Would you like to leave positive feedback for {handshake.service.user.first_name}?",
-                    handshake=handshake
-                )
+        try:
+            handshake = HandshakeService.confirm_completion(handshake, request.user, hours=hours)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
         serializer = self.get_serializer(handshake)
         return Response(serializer.data)
@@ -3883,150 +3078,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='report', throttle_classes=[ConfirmationThrottle])
     def report_issue(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        issue_type = (request.data.get('issue_type') or 'no_show').strip().lower()
-        description = (request.data.get('description') or '').strip()
-        is_event_handshake = handshake.service.type == 'Event'
-
-        # Both event and non-event handshakes support behavior issue reports.
-        # Non-event handshakes still do not support target overrides.
-        allowed_types = {'no_show', 'service_issue', 'harassment', 'spam', 'scam', 'other'}
-
-        if issue_type not in allowed_types:
+        try:
+            report = HandshakeService.report_issue(handshake, request.user, request.data)
+        except HandshakeServiceError as exc:
             return create_error_response(
-                'Invalid issue_type.',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST,
+                str(exc), code=exc.code, status_code=exc.status_code,
             )
-        
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-
-        is_provider = provider == user
-        is_receiver = receiver == user
-
-        if not (is_provider or is_receiver):
-            return create_error_response(
-                'Not authorized',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        if is_event_handshake and issue_type == 'no_show':
-            event_start = handshake.service.scheduled_time or handshake.scheduled_time
-            if not event_start:
-                return create_error_response(
-                    'Event start time is required to submit reports.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            now = timezone.now()
-            report_window_ends_at = event_start + timedelta(hours=24)
-            if now < event_start or now > report_window_ends_at:
-                return create_error_response(
-                    'Event no-show reports are allowed from event start time up to 24 hours after start.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-        reported_user = receiver if is_provider else provider
-        reported_user_id = request.data.get('reported_user_id')
-        if reported_user_id is not None:
-            if not is_event_handshake:
-                return create_error_response(
-                    'reported_user_id can only be used for event reports.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            event_member_ids = set(
-                handshake.service.handshakes.filter(
-                    status__in=['accepted', 'reported', 'paused', 'checked_in', 'attended', 'no_show', 'completed']
-                ).values_list('requester_id', flat=True)
-            )
-            event_member_ids.add(handshake.service.user_id)
-
-            try:
-                target_user = User.objects.get(id=reported_user_id)
-            except (ValueError, TypeError, User.DoesNotExist):
-                return create_error_response(
-                    'Invalid reported_user_id.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if target_user.id not in event_member_ids:
-                return create_error_response(
-                    'reported_user_id must belong to the event organizer or an active participant.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if str(target_user.id) == str(user.id):
-                return create_error_response(
-                    'You cannot report yourself.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            reported_user = target_user
-
-        has_open_duplicate = Report.objects.filter(
-            reporter=user,
-            reported_user=reported_user,
-            related_handshake=handshake,
-            type=issue_type,
-            status='pending',
-        ).exists()
-        if has_open_duplicate:
-            return create_error_response(
-                'You already have an open report for this issue and user in this event.',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not description:
-            default_descriptions = {
-                'no_show': 'No-show dispute reported',
-                'service_issue': 'Service issue reported',
-                'harassment': 'Harassment or abusive behavior reported',
-                'spam': 'Spam or disruptive behavior reported',
-                'scam': 'Scam or fraud concern reported',
-                'other': 'Other issue reported',
-            }
-            description = default_descriptions.get(issue_type, 'Issue reported')
-        
-        report = Report.objects.create(
-            reporter=user,
-            reported_user=reported_user,
-            related_handshake=handshake,
-            reported_service=handshake.service,
-            type=issue_type,
-            description=description,
-        )
-
-        # Only mark the reporter's handshake as 'reported' when reporting the
-        # event organizer — participant-vs-participant reports should not affect
-        # the reporter's own event participation status.
-        reported_is_organizer = (
-            reported_user is not None
-            and str(reported_user.id) == str(handshake.service.user_id)
-        )
-        if is_event_handshake and reported_is_organizer and handshake.status != 'reported':
-            handshake.status = 'reported'
-            handshake.save(update_fields=['status', 'updated_at'])
-
-        admins = User.objects.filter(role='admin')
-        for admin in admins:
-            create_notification(
-                user=admin,
-                notification_type='admin_warning',
-                title='New Report Requires Review',
-                message=f"New {report.get_type_display()} report for service '{handshake.service.title}'",
-                handshake=handshake
-            )
-
         return Response({'status': 'success', 'report_id': str(report.id)}, status=201)
 
     # ------------------------------------------------------------------
@@ -4744,7 +3801,7 @@ class ReputationViewSet(viewsets.ModelViewSet):
         """Submit positive reputation"""
         handshake_id = request.data.get('handshake_id')
         raw_comment = (request.data.get('comment') or '').strip()
-        
+
         try:
             handshake = Handshake.objects.select_related(
                 'service', 'service__user', 'requester'
@@ -4753,155 +3810,13 @@ class ReputationViewSet(viewsets.ModelViewSet):
             return create_error_response(
                 'Handshake not found',
                 code=ErrorCodes.NOT_FOUND,
-                status_code=status.HTTP_404_NOT_FOUND
-            )
-
-        required_status = 'attended' if handshake.service.type == 'Event' else 'completed'
-        if handshake.status != required_status:
-            return create_error_response(
-                'Handshake not found or not eligible for evaluation',
-                code=ErrorCodes.NOT_FOUND,
-                status_code=status.HTTP_404_NOT_FOUND
-            )
-
-        in_window, window_error = _validate_feedback_window(handshake)
-        if not in_window:
-            return create_error_response(
-                window_error,
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_410_GONE
-            )
-
-        user = request.user
-        
-        # Determine provider/receiver, then target the *other* party.
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-
-        # Check if user is not a participant
-        if user not in [provider, receiver]:
-            return create_error_response(
-                'Not authorized - you are not a participant in this handshake',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        is_event_evaluation = handshake.service.type == 'Event'
-        if is_event_evaluation:
-            if handshake.requester_id != user.id:
-                return create_error_response(
-                    'Only verified attendees can evaluate the organizer for events',
-                    code=ErrorCodes.PERMISSION_DENIED,
-                    status_code=status.HTTP_403_FORBIDDEN
-                )
-            target_user = handshake.service.user
-            is_punctual = request.data.get('well_organized', request.data.get('punctual', False))
-            is_helpful = request.data.get('engaging', request.data.get('helpful', False))
-            is_kind = request.data.get('welcoming', request.data.get('kindness', False))
-        else:
-            target_user = receiver if user == provider else provider
-            is_punctual = request.data.get('punctual', False)
-            is_helpful = request.data.get('helpful', False)
-            is_kind = request.data.get('kindness', False)
-
-        # Check if rep already given
-        existing = ReputationRep.objects.filter(handshake=handshake, giver=user).first()
-        if existing:
-            return create_error_response(
-                'Reputation already submitted',
-                code=ErrorCodes.ALREADY_EXISTS,
-                status_code=status.HTTP_400_BAD_REQUEST
+                status_code=status.HTTP_404_NOT_FOUND,
             )
 
         try:
-            cleaned_comment = None
-            if raw_comment:
-                cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000]
-                if not cleaned_comment:
-                    cleaned_comment = None
-
-            rep = ReputationRep.objects.create(
-                handshake=handshake,
-                giver=user,
-                receiver=target_user,  # Reputation goes to the other party
-                is_punctual=is_punctual,
-                is_helpful=is_helpful,
-                is_kind=is_kind,
-                comment=cleaned_comment
-            )
-        except IntegrityError:
-            # Handle race condition where duplicate rep was created between check and create
-            return create_error_response(
-                'Reputation already submitted',
-                code=ErrorCodes.ALREADY_EXISTS,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Create a verified review entry for Service Detail from the reputation comment.
-        # This is intentionally the only write-path for service verified reviews.
-        if rep.comment:
-            existing_review = Comment.objects.filter(
-                related_handshake=handshake,
-                user=user,
-                is_verified_review=True,
-                is_deleted=False
-            ).exists()
-            if not existing_review:
-                Comment.objects.create(
-                    service=handshake.service,
-                    user=user,
-                    body=rep.comment,
-                    is_verified_review=True,
-                    related_handshake=handshake
-                )
-
-        # Check and assign badges for receiver
-        target_badges = check_and_assign_badges(target_user)
-        if target_badges:
-            # Fetch all badges at once to avoid N+1 queries
-            badges_dict = {badge.id: badge.name for badge in Badge.objects.filter(id__in=target_badges)}
-            badge_names = [badges_dict.get(bid, f"Badge {bid}") for bid in target_badges]
-            create_notification(
-                user=target_user,
-                notification_type='positive_rep',
-                title='New Badge Earned!',
-                message=f"Congratulations! You earned: {', '.join(badge_names)}",
-                handshake=handshake,
-                service=handshake.service
-            )
-
-        # For Offer/Need services, notify the reviewed user only when there is
-        # at least one positive trait or a review comment.
-        if not is_event_evaluation and (
-            rep.is_punctual or rep.is_helpful or rep.is_kind or bool(rep.comment)
-        ):
-            create_notification(
-                user=target_user,
-                notification_type='positive_rep',
-                title='Feedback Received',
-                message=f"{user.first_name} left feedback for '{handshake.service.title}'.",
-                handshake=handshake,
-                service=handshake.service,
-            )
-        
-        # Update karma (REQ-REP-006)
-        karma_gain = 0
-        if rep.is_punctual:
-            karma_gain += 1
-        if rep.is_helpful:
-            karma_gain += 1
-        if rep.is_kind:
-            karma_gain += 1
-        
-        target_user.karma_score += karma_gain
-        target_user.save()
-        
-        # Invalidate conversations cache so UI updates to show reputation was submitted
-        invalidate_conversations(str(provider.id))
-        invalidate_conversations(str(receiver.id))
-
-        if handshake.service.type == 'Event':
-            EventEvaluationService.refresh_summary(handshake.service)
+            rep = ReputationService.submit(handshake, request.user, request.data, raw_comment)
+        except ReputationServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
         serializer = self.get_serializer(rep)
         return Response(serializer.data, status=201)
@@ -6492,11 +5407,9 @@ class GroupChatViewSet(viewsets.ViewSet):
         try:
             session = GroupChatSession.objects.select_related('service').get(id=session_id)
         except (GroupChatSession.DoesNotExist, DjangoValidationError, ValueError):
-            from rest_framework.exceptions import NotFound
-            return None, Response({'detail': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+            return None, create_error_response('Session not found', code=ErrorCodes.NOT_FOUND, status_code=status.HTTP_404_NOT_FOUND)
         if str(session.service_id) != str(service.id):
-            from rest_framework.exceptions import PermissionDenied
-            return None, Response({'detail': 'Session does not belong to this service'}, status=status.HTTP_400_BAD_REQUEST)
+            return None, create_error_response('Session does not belong to this service', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         return session, None
 
     def _user_has_session_access(self, request, service, session):
@@ -7640,3 +6553,58 @@ class ForumPostViewSet(viewsets.ViewSet):
             )
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
+
+# ── E2E Test Utilities ──────────────────────────────────────────────────────
+# These endpoints are ONLY available when DJANGO_E2E=1 (non-production).
+# They allow Playwright tests to set deterministic user state.
+
+class E2ESetBalanceView(APIView):
+    """
+    Set the authenticated user's timebank balance to an exact value.
+
+    Only available when DJANGO_E2E is enabled (non-production).
+
+    POST /api/e2e/set-balance/
+    Body: { "balance": 5.0 }
+    Response: { "id": "...", "email": "...", "balance": 5.0 }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if not getattr(settings, 'DJANGO_E2E', False):
+            return Response(
+                {'detail': 'This endpoint is only available in E2E mode.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        balance_raw = request.data.get('balance')
+        if balance_raw is None:
+            return Response(
+                {'detail': 'balance field is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            balance = Decimal(str(balance_raw))
+        except (InvalidOperation, ValueError, TypeError):
+            return Response(
+                {'detail': 'balance must be a valid number.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if balance < Decimal('-10.00') or balance > Decimal('99999999.99'):
+            return Response(
+                {'detail': 'balance out of allowed range.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user
+        user.timebank_balance = balance
+        user.save(update_fields=['timebank_balance'])
+
+        return Response({
+            'id': str(user.id),
+            'email': user.email,
+            'balance': float(user.timebank_balance),
+        })
