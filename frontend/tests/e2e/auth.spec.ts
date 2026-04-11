@@ -9,7 +9,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { loginAs, USERS } from './helpers/auth'
+import { loginAs, logout, USERS } from './helpers/auth'
 
 test.describe('Authentication', () => {
   test('valid credentials → lands on dashboard', async ({ page }) => {
@@ -18,7 +18,7 @@ test.describe('Authentication', () => {
     // Should be on the dashboard
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
     // Navbar is rendered for authenticated users
-    await expect(page.locator('nav')).toBeVisible()
+    await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 10_000 })
   })
 
   test('wrong password → shows error message', async ({ page }) => {
@@ -59,23 +59,7 @@ test.describe('Authentication', () => {
 
   test('logged-in user can log out', async ({ page }) => {
     await loginAs(page, USERS.elif)
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
-
-    // The avatar dropdown is a custom component (not ARIA menus).
-    // Click the avatar area to open the dropdown, then click "Log Out".
-    const avatar = page.locator('img[alt="avatar"]')
-    if (await avatar.isVisible().catch(() => false)) {
-      await avatar.click()
-    } else {
-      // Fallback: initials-based avatar — click the chevron area next to it
-      await page.locator('nav').getByText(USERS.elif.name.split(' ').map(n => n[0]).join('')).click()
-    }
-
-    // Click the "Log Out" item in the dropdown
-    await page.getByText('Log Out').click()
-
-    // After logout the user should be redirected away from protected areas
-    await expect(page).not.toHaveURL(/\/dashboard/, { timeout: 10_000 })
+    await logout(page)
   })
 
   test('visiting /profile while unauthenticated redirects to login', async ({ page }) => {

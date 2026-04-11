@@ -10,30 +10,50 @@ import { apiRequest } from './client';
 import type { PaginatedResponse } from './types';
 
 export interface ForumCategory {
+  id: string;
   slug: string;
-  name?: string;
-  description?: string;
-  [key: string]: unknown;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  display_order: number;
+  is_active: boolean;
+  topic_count: number;
+  post_count: number;
+  last_activity: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ForumTopic {
   id: string;
-  title?: string;
-  category?: string;
-  author?: string | object;
-  created_at?: string;
-  is_pinned?: boolean;
-  is_locked?: boolean;
-  [key: string]: unknown;
+  category: string;
+  category_name: string;
+  category_slug: string;
+  author_id: string;
+  author_name: string;
+  author_avatar_url: string | null;
+  title: string;
+  body: string;
+  is_pinned: boolean;
+  is_locked: boolean;
+  view_count: number;
+  reply_count: number;
+  last_activity: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ForumPost {
   id: string;
-  topic?: string;
-  author?: string | object;
-  content?: string;
-  created_at?: string;
-  [key: string]: unknown;
+  topic: string;
+  author_id: string;
+  author_name: string;
+  author_avatar_url: string | null;
+  body: string;
+  is_deleted: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CategoryRequest {
@@ -45,15 +65,35 @@ export interface CategoryRequest {
 export interface TopicRequest {
   title: string;
   category: string;
-  content?: string;
+  body: string;
 }
 
 export interface PostRequest {
-  content: string;
+  body: string;
 }
 
-export function listCategories(): Promise<ForumCategory[] | PaginatedResponse<ForumCategory>> {
-  return apiRequest('/forum/categories/');
+export interface ReportRequest {
+  type: 'inappropriate_content' | 'spam' | 'harassment' | 'scam' | 'other';
+  description?: string;
+}
+
+export interface ReportResponse {
+  id: string;
+  type: string;
+  status: string;
+  description: string;
+  created_at: string;
+}
+
+export interface ForumActivity {
+  my_topics: number;
+  my_replies: number;
+  open_topics: number;
+  open_topic_items: ForumTopic[];
+}
+
+export function listCategories(): Promise<ForumCategory[]> {
+  return apiRequest<ForumCategory[]>('/forum/categories/');
 }
 
 export function createCategory(body: CategoryRequest): Promise<ForumCategory> {
@@ -72,8 +112,19 @@ export function deleteCategory(slug: string): Promise<void> {
   return apiRequest<void>(`/forum/categories/${encodeURIComponent(slug)}/`, { method: 'DELETE' });
 }
 
-export function listTopics(params?: { page?: number; page_size?: number; category?: string }): Promise<PaginatedResponse<ForumTopic>> {
-  return apiRequest<PaginatedResponse<ForumTopic>>('/forum/topics/', { params: params as Record<string, string | number | undefined> });
+export function listTopics(params?: {
+  page?: number;
+  page_size?: number;
+  category?: string;
+}): Promise<PaginatedResponse<ForumTopic>> {
+  return apiRequest<PaginatedResponse<ForumTopic>>(
+    '/forum/topics/',
+    { params: params as Record<string, string | number | undefined> }
+  );
+}
+
+export function getMyActivity(): Promise<ForumActivity> {
+  return apiRequest<ForumActivity>('/forum/my-activity/');
 }
 
 export function createTopic(body: TopicRequest): Promise<ForumTopic> {
@@ -118,4 +169,12 @@ export function deletePost(id: string): Promise<void> {
 
 export function listRecentPosts(params?: { limit?: number }): Promise<ForumPost[]> {
   return apiRequest<ForumPost[]>('/forum/posts/recent/', { params: params as Record<string, number | undefined> });
+}
+
+export function reportTopic(id: string, body: ReportRequest): Promise<ReportResponse> {
+  return apiRequest<ReportResponse>(`/forum/topics/${id}/report/`, { method: 'POST', body });
+}
+
+export function reportPost(id: string, body: ReportRequest): Promise<ReportResponse> {
+  return apiRequest<ReportResponse>(`/forum/posts/${id}/report/`, { method: 'POST', body });
 }

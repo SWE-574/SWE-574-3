@@ -262,6 +262,7 @@ const Navbar = () => {
                 <Dropdown
                   trigger={
                     <Flex
+                      data-testid="user-menu-trigger"
                       align="center" gap="6px" p="5px" borderRadius="10px"
                       style={{ cursor: 'pointer', transition: 'background 0.15s' }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GRAY100 }}

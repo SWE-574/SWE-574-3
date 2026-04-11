@@ -6,6 +6,7 @@ import RegisterScreen from "../presentation/screens/RegisterScreen";
 import PublicProfileScreen from "../presentation/screens/PublicProfileScreen";
 import AchievementsListScreen from "../presentation/screens/AchievementsListScreen";
 import FollowListScreen from "../presentation/screens/FollowListScreen";
+import NotificationsScreen from "../presentation/screens/NotificationsScreen";
 
 export type ProfileStackParamList = {
   ProfileHome: undefined;
@@ -14,6 +15,7 @@ export type ProfileStackParamList = {
   PublicProfile: { userId: string };
   AchievementsList: { userId: string };
   FollowList: { userId: string; kind: "followers" | "following" };
+  Notifications: undefined;
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -54,6 +56,7 @@ export default function ProfileStack() {
           animation: "slide_from_right",
         }}
       />
+      <Stack.Screen name="Notifications" component={NotificationsScreen} />
     </Stack.Navigator>
   );
 }

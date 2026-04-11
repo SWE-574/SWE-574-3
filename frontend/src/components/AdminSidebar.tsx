@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Box, Flex, Text, Button, VStack } from '@chakra-ui/react'
 import {
-  FiHome, FiUsers, FiAlertCircle, FiMessageSquare, FiMessageCircle, FiActivity, FiMenu, FiX,
+  FiHome, FiUsers, FiAlertCircle, FiMessageSquare, FiMessageCircle, FiActivity, FiMenu, FiX, FiSettings,
 } from 'react-icons/fi'
 import { GREEN, GREEN_LT, GRAY500, GRAY700, WHITE, GRAY100 } from '@/theme/tokens'
 
-export type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 'audit'
+export type AdminTab = 'dashboard' | 'users' | 'reports' | 'comments' | 'moderation' | 'audit' | 'settings'
 
 interface AdminSidebarProps {
   activeTab: AdminTab
@@ -19,6 +19,7 @@ const navItems: Array<{ tab: AdminTab; label: string; icon: React.ReactNode }> =
   { tab: 'comments', label: 'Comments', icon: <FiMessageSquare size={20} /> },
   { tab: 'moderation', label: 'Forum Topics', icon: <FiMessageCircle size={20} /> },
   { tab: 'audit', label: 'Audit Logs', icon: <FiActivity size={20} /> },
+  { tab: 'settings', label: 'Admin Settings', icon: <FiSettings size={20} /> },
 ]
 
 const MOBILE_BREAKPOINT = 768

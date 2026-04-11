@@ -1017,15 +1017,10 @@ export default function ForumPage() {
   useEffect(() => {
     if (!user) return
     const ac = new AbortController()
-    const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ')
-      || user.email || ''
-    forumAPI.listTopics({ page_size: 100 }, ac.signal)
-      .then((res) => {
-        const mine = res.results.filter((t) =>
-          t.author_name === displayName || t.author_name === user.email
-        )
-        setMyTopics(mine.length)
-        setMyReplies(mine.reduce((s, t) => s + (t.reply_count ?? 0), 0))
+    forumAPI.getMyActivity(ac.signal)
+      .then((activity) => {
+        setMyTopics(activity.my_topics)
+        setMyReplies(activity.my_replies)
       })
       .catch(() => {})
     return () => ac.abort()

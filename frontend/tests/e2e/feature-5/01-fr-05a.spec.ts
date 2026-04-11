@@ -4,11 +4,14 @@ import { createOffer, loginAs, openServiceFromDashboard, uniqueTitle, USERS } fr
 test('FR-05a: registered user can create an offer with core details and location type', async ({ page }) => {
   const title = uniqueTitle('FR-05a Offer')
 
-  // Open the offer form and confirm the core fields are present.
+  // Log in (lands on /dashboard), then navigate to offer form.
   await loginAs(page, USERS.cem)
-  await page.goto('/post-offer')
 
-  await expect(page.locator('input[name="title"]')).toBeVisible()
+  // Now navigate to the offer form — auth cookies are set.
+  await page.goto('/post-offer')
+  await expect(page).toHaveURL(/\/post-offer/, { timeout: 10_000 })
+
+  await expect(page.locator('input[name="title"]')).toBeVisible({ timeout: 20_000 })
   await expect(page.locator('textarea[name="description"]')).toBeVisible()
   await expect(page.locator('input[name="duration"]')).toBeVisible()
   await expect(page.getByRole('button', { name: 'In-Person' })).toBeVisible()

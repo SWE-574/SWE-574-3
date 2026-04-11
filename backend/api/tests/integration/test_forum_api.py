@@ -140,6 +140,42 @@ class TestForumTopicViewSet:
         })
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestForumActivityView:
+    """Test current-user forum activity summary endpoint."""
+
+    def test_forum_activity_returns_authenticated_user_counts(self):
+        user = UserFactory(first_name='Elif', last_name='Yilmaz')
+        other_user = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+
+        open_topic = ForumTopicFactory(author=user, category=category, is_locked=False)
+        locked_topic = ForumTopicFactory(author=user, category=category, is_locked=True)
+        ForumTopicFactory(author=other_user, category=category, is_locked=False)
+
+        ForumPostFactory.create_batch(2, topic=open_topic, is_deleted=False)
+        ForumPostFactory(topic=locked_topic, is_deleted=False)
+        ForumPostFactory(topic=locked_topic, is_deleted=True)
+        ForumPostFactory(topic=ForumTopicFactory(author=other_user, category=category), is_deleted=False)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.get('/api/forum/my-activity/')
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['my_topics'] == 2
+        assert response.data['my_replies'] == 3
+        assert response.data['open_topics'] == 1
+        assert len(response.data['open_topic_items']) == 1
+        assert response.data['open_topic_items'][0]['id'] == str(open_topic.id)
+        assert response.data['open_topic_items'][0]['is_locked'] is False
+
+    def test_forum_activity_requires_authentication(self):
+        response = APIClient().get('/api/forum/my-activity/')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
 
 @pytest.mark.django_db
 @pytest.mark.integration

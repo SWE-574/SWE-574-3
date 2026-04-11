@@ -516,6 +516,23 @@ class Notification(models.Model):
         ]
         ordering = ['-created_at']
 
+class DevicePushToken(models.Model):
+    """Stores Expo push tokens for sending push notifications to mobile devices."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='push_tokens')
+    token = models.CharField(max_length=255, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"PushToken({self.user_id}, active={self.is_active})"
+
+
 class ReputationRep(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     handshake = models.ForeignKey(Handshake, on_delete=models.CASCADE, related_name='reps')
@@ -678,6 +695,26 @@ class AdminAuditLog(models.Model):
             raise AuditLogImmutabilityError(
                 f"AdminAuditLog records are immutable. Update of record {self.pk} is not permitted."
             )
+
+
+class PlatformSetting(models.Model):
+    """Singleton-style platform settings controlled from the admin panel."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    ranking_debug_enabled = models.BooleanField(
+        default=False,
+        help_text='Whether the dashboard ranking debug panel is globally available.',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
 
 
 class ChatRoom(models.Model):

@@ -30,6 +30,7 @@ from .views import (
     AdminUserViewSet,
     AdminCommentViewSet,
     AdminAuditLogViewSet,
+    AdminSettingsView,
     ExpressInterestView,
     TransactionHistoryViewSet,
     WikidataSearchView,
@@ -40,6 +41,7 @@ from .views import (
     ForumCategoryViewSet,
     ForumTopicViewSet,
     ForumPostViewSet,
+    ForumActivityView,
     LogoutView,
     WsTokenView,
     ChangePasswordView,
@@ -48,6 +50,7 @@ from .views import (
     VerifyEmailView,
     SendVerificationEmailView,
     ResendVerificationView,
+    E2ESetBalanceView,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .views import CustomTokenObtainPairView
@@ -278,6 +281,7 @@ forum_post_recent = ForumPostViewSet.as_view({
 urlpatterns = [
     path('health/', health_check, name='health_check'),
     path('metrics/', metrics_endpoint, name='metrics'),
+    path('admin/settings/', AdminSettingsView.as_view(), name='admin-settings'),
     path('auth/register/', UserRegistrationView.as_view(), name='register'),
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
@@ -320,6 +324,7 @@ urlpatterns = [
     # Forum endpoints
     path('forum/categories/', forum_category_list, name='forum-category-list'),
     path('forum/categories/<slug:slug>/', forum_category_detail, name='forum-category-detail'),
+    path('forum/my-activity/', ForumActivityView.as_view(), name='forum-my-activity'),
     path('forum/topics/', forum_topic_list, name='forum-topic-list'),
     path('forum/topics/<uuid:pk>/', forum_topic_detail, name='forum-topic-detail'),
     path('forum/topics/<uuid:pk>/pin/', forum_topic_pin, name='forum-topic-pin'),
@@ -330,6 +335,9 @@ urlpatterns = [
     path('forum/posts/<uuid:pk>/report/', forum_post_report, name='forum-post-report'),
     path('forum/posts/<uuid:pk>/restore/', forum_post_restore, name='forum-post-restore'),
     path('forum/posts/recent/', forum_post_recent, name='forum-post-recent'),
+    # E2E test utilities (only active when DJANGO_E2E=1)
+    path('e2e/set-balance/', E2ESetBalanceView.as_view(), name='e2e-set-balance'),
+
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
