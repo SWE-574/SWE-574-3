@@ -5,7 +5,7 @@ import LoginScreen from "../presentation/screens/LoginScreen";
 import RegisterScreen from "../presentation/screens/RegisterScreen";
 import PublicProfileScreen from "../presentation/screens/PublicProfileScreen";
 import AchievementsListScreen from "../presentation/screens/AchievementsListScreen";
-import NotificationsScreen from "../presentation/screens/NotificationsScreen";
+import FollowListScreen from "../presentation/screens/FollowListScreen";
 
 export type ProfileStackParamList = {
   ProfileHome: undefined;
@@ -13,7 +13,7 @@ export type ProfileStackParamList = {
   Register: undefined;
   PublicProfile: { userId: string };
   AchievementsList: { userId: string };
-  Notifications: undefined;
+  FollowList: { userId: string; kind: "followers" | "following" };
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -42,7 +42,18 @@ export default function ProfileStack() {
           animation: "slide_from_right",
         }}
       />
-      <Stack.Screen name="Notifications" component={NotificationsScreen} />
+      <Stack.Screen
+        name="FollowList"
+        component={FollowListScreen}
+        options={{
+          headerShown: true,
+          headerStyle: { backgroundColor: "#fff" },
+          headerTitleStyle: { fontSize: 17, fontWeight: "600" },
+          headerShadowVisible: true,
+          gestureEnabled: true,
+          animation: "slide_from_right",
+        }}
+      />
     </Stack.Navigator>
   );
 }

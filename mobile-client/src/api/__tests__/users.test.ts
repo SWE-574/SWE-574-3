@@ -14,6 +14,8 @@ import {
   getVerifiedReviews,
   followUser,
   unfollowUser,
+  getFollowers,
+  getFollowing,
 } from "../users";
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
 
@@ -98,5 +100,19 @@ describe("users", () => {
     const { url, init } = getLastFetchCall();
     expect(url).toContain("/users/u2/follow/");
     expect(init?.method).toBe("DELETE");
+  });
+
+  it("getFollowers GETs /users/:id/followers/ and normalizes results", async () => {
+    mockFetchResolve({ results: [{ id: "a", first_name: "A", last_name: "B" }] });
+    const list = await getFollowers("u1");
+    expect(getLastFetchCall().url).toContain("/users/u1/followers/");
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe("a");
+  });
+
+  it("getFollowing GETs /users/:id/following/", async () => {
+    mockFetchResolve({ results: [] });
+    await getFollowing("u1");
+    expect(getLastFetchCall().url).toContain("/users/u1/following/");
   });
 });

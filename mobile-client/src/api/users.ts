@@ -5,7 +5,12 @@
  */
 
 import { apiRequest } from "./client";
-import type { PublicUserProfile, UserHistoryItem, UserSummary } from "./types";
+import type {
+  PaginatedResponse,
+  PublicUserProfile,
+  UserHistoryItem,
+  UserSummary,
+} from "./types";
 
 export interface UserProfileRequest {
   first_name?: string;
@@ -44,6 +49,25 @@ export function followUser(userId: string): Promise<void> {
 
 export function unfollowUser(userId: string): Promise<void> {
   return apiRequest<void>(`/users/${userId}/follow/`, { method: "DELETE" });
+}
+
+function normalizeUserSummaryList(
+  data: UserSummary[] | PaginatedResponse<UserSummary>,
+): UserSummary[] {
+  if (Array.isArray(data)) return data;
+  return data.results ?? [];
+}
+
+export function getFollowers(userId: string): Promise<UserSummary[]> {
+  return apiRequest<UserSummary[] | PaginatedResponse<UserSummary>>(
+    `/users/${userId}/followers/`,
+  ).then(normalizeUserSummaryList);
+}
+
+export function getFollowing(userId: string): Promise<UserSummary[]> {
+  return apiRequest<UserSummary[] | PaginatedResponse<UserSummary>>(
+    `/users/${userId}/following/`,
+  ).then(normalizeUserSummaryList);
 }
 
 export function updateUser(
