@@ -23,10 +23,12 @@ export interface ServiceRequest {
 export interface ServicesListParams {
   page?: number;
   page_size?: number;
-  type?: 'Offer' | 'Need';
+  type?: 'Offer' | 'Need' | 'Event';
   search?: string;
   tags?: string;
   location_type?: string;
+  /** Owner filter; matches web `serviceAPI.list` (`?user=`). */
+  user?: string;
 }
 
 export function listServices(params?: ServicesListParams): Promise<PaginatedResponse<Service>> {

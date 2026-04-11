@@ -9,7 +9,7 @@ from contextlib import nullcontext
 from django.db import transaction
 from django.db.models import F, Q
 
-from .models import Handshake, Notification, Service, User, TransactionHistory
+from .models import DevicePushToken, Handshake, Notification, Service, User, TransactionHistory
 
 logger = logging.getLogger(__name__)
 from .cache_utils import invalidate_conversations, invalidate_transactions
@@ -291,7 +291,8 @@ def create_notification(
 
 
 def _broadcast_notification(notification: Notification) -> None:
-    """Push a notification to the user's WebSocket group."""
+    """Push a notification to the user's WebSocket group and send push notifications."""
+    # WebSocket broadcast
     try:
         from channels.layers import get_channel_layer
         from asgiref.sync import async_to_sync
@@ -309,4 +310,67 @@ def _broadcast_notification(notification: Notification) -> None:
         )
     except Exception:
         logger.exception('Failed to broadcast notification %s', notification.id)
+
+    # Expo push notification
+    _send_push_notification(notification)
+
+
+def _send_push_notification(notification: Notification) -> None:
+    """Send an Expo push notification to all active devices for the user."""
+    try:
+        from exponent_server_sdk import (
+            DeviceNotRegisteredError,
+            PushClient,
+            PushMessage,
+            PushServerError,
+        )
+    except ImportError:
+        logger.debug('exponent-server-sdk not installed, skipping push notification')
+        return
+
+    tokens = DevicePushToken.objects.filter(
+        user=notification.user, is_active=True,
+    ).values_list('token', flat=True)
+
+    if not tokens:
+        return
+
+    badge_count = Notification.objects.filter(
+        user=notification.user, is_read=False,
+    ).count()
+
+    push_data = {
+        'type': notification.type,
+        'notification_id': str(notification.id),
+        'related_handshake': str(notification.related_handshake_id) if notification.related_handshake_id else None,
+        'related_service': str(notification.related_service_id) if notification.related_service_id else None,
+    }
+
+    messages = [
+        PushMessage(
+            to=token,
+            title=notification.title,
+            body=notification.message,
+            data=push_data,
+            sound='default',
+            badge=badge_count,
+        )
+        for token in tokens
+    ]
+
+    try:
+        push_client = PushClient()
+        responses = push_client.publish_multiple(messages)
+        for i, response in enumerate(responses):
+            try:
+                response.validate_response()
+            except DeviceNotRegisteredError:
+                DevicePushToken.objects.filter(token=tokens[i]).update(is_active=False)
+                logger.info('Deactivated unregistered push token for user %s', notification.user_id)
+            except Exception:
+                logger.warning('Push delivery error for token %s', tokens[i])
+    except PushServerError:
+        logger.exception('Expo push server error for notification %s', notification.id)
+    except Exception:
+        logger.exception('Failed to send push notification %s', notification.id)
 

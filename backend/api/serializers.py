@@ -4,7 +4,7 @@ from rest_framework import serializers
 from .models import (
     User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, UserBadge, Report, TransactionHistory,
-    ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
+    ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog, PlatformSetting,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow
 )
 from django.db.models import Q
@@ -1845,6 +1845,15 @@ class NotificationSerializer(serializers.ModelSerializer):
             'related_handshake', 'related_service', 'created_at'
         ]
 
+class DevicePushTokenSerializer(serializers.Serializer):
+    token = serializers.CharField(max_length=255)
+
+    def validate_token(self, value):
+        if not value.startswith('ExponentPushToken['):
+            raise serializers.ValidationError('Invalid Expo push token format.')
+        return value
+
+
 # Reputation Serializer
 @extend_schema_serializer(
     examples=[
@@ -2316,6 +2325,12 @@ class AdminAuditLogSerializer(serializers.ModelSerializer):
     def get_admin_name(self, obj):
         full = f"{obj.admin.first_name} {obj.admin.last_name}".strip()
         return full or obj.admin.email
+
+
+class PlatformSettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PlatformSetting
+        fields = ['ranking_debug_enabled', 'updated_at']
 
 
 # Public Chat Serializers

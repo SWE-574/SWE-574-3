@@ -25,6 +25,48 @@ export interface UserSummary {
   badges?: string[];
   featured_badge?: string | null;
   featured_achievement_id?: string | null;
+  /** When false, other users should not see exchange history (web parity). */
+  show_history?: boolean;
+}
+
+/**
+ * Fields from GET /users/{id}/ for another user (`PublicUserProfileSerializer`)
+ * that the mobile public profile screen consumes. The API may return more keys.
+ */
+export interface PublicUserProfile {
+  id: string;
+  first_name?: string;
+  last_name?: string;
+  bio?: string | null;
+  avatar_url?: string | null;
+  banner_url?: string | null;
+  location?: string | null;
+  karma_score?: number;
+  date_joined?: string;
+  helpful_count?: number;
+  kind_count?: number;
+  punctual_count?: number;
+  badges?: string[];
+  achievements?: string[];
+  skills?: Array<{ id: string; name: string }>;
+  portfolio_images?: string[];
+  /** Public exchange history visibility; when false, do not fetch history for viewers. */
+  show_history?: boolean;
+}
+
+/** GET /users/{id}/history/ row shape (web `UserHistoryItem`). */
+export interface UserHistoryItem {
+  service_id: string;
+  service_title: string;
+  service_type: "Offer" | "Need" | "Event";
+  schedule_type: "One-Time" | "Recurrent";
+  max_participants: number;
+  duration: number | string;
+  partner_name: string;
+  partner_id: string;
+  partner_avatar_url?: string | null;
+  completed_date: string;
+  was_provider: boolean;
 }
 
 export interface Tag {

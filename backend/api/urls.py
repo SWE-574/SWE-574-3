@@ -30,6 +30,7 @@ from .views import (
     AdminUserViewSet,
     AdminCommentViewSet,
     AdminAuditLogViewSet,
+    AdminSettingsView,
     ExpressInterestView,
     TransactionHistoryViewSet,
     WikidataSearchView,
@@ -40,6 +41,7 @@ from .views import (
     ForumCategoryViewSet,
     ForumTopicViewSet,
     ForumPostViewSet,
+    ForumActivityView,
     LogoutView,
     WsTokenView,
     ChangePasswordView,
@@ -278,6 +280,7 @@ forum_post_recent = ForumPostViewSet.as_view({
 urlpatterns = [
     path('health/', health_check, name='health_check'),
     path('metrics/', metrics_endpoint, name='metrics'),
+    path('admin/settings/', AdminSettingsView.as_view(), name='admin-settings'),
     path('auth/register/', UserRegistrationView.as_view(), name='register'),
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
@@ -320,6 +323,7 @@ urlpatterns = [
     # Forum endpoints
     path('forum/categories/', forum_category_list, name='forum-category-list'),
     path('forum/categories/<slug:slug>/', forum_category_detail, name='forum-category-detail'),
+    path('forum/my-activity/', ForumActivityView.as_view(), name='forum-my-activity'),
     path('forum/topics/', forum_topic_list, name='forum-topic-list'),
     path('forum/topics/<uuid:pk>/', forum_topic_detail, name='forum-topic-detail'),
     path('forum/topics/<uuid:pk>/pin/', forum_topic_pin, name='forum-topic-pin'),

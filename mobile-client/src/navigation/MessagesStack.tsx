@@ -11,6 +11,7 @@ export type MessagesStackParamList = {
     handshakeId: string;
     otherUserName: string;
     serviceTitle?: string;
+    otherUserId?: string;
   };
   GroupChat: {
     groupId: string;

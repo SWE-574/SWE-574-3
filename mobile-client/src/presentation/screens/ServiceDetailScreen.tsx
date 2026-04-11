@@ -18,10 +18,16 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
-import { useRoute, useNavigation } from "@react-navigation/native";
+import {
+  useRoute,
+  useNavigation,
+  type CompositeNavigationProp,
+} from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { HomeStackParamList } from "../../navigation/HomeStack";
+import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { getService, addServiceInterest } from "../../api/services";
 import type { Service } from "../../api/types";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
@@ -53,13 +59,15 @@ type MediaItem = {
   image: string;
 };
 
+type ServiceDetailNavigation = CompositeNavigationProp<
+  NativeStackNavigationProp<HomeStackParamList, "ServiceDetail">,
+  BottomTabNavigationProp<BottomTabParamList>
+>;
+
 export default function ServiceDetailScreen() {
   const insets = useSafeAreaInsets();
   const route = useRoute<RouteProp<HomeStackParamList, "ServiceDetail">>();
-  const navigation =
-    useNavigation<
-      NativeStackNavigationProp<HomeStackParamList, "ServiceDetail">
-    >();
+  const navigation = useNavigation<ServiceDetailNavigation>();
 
   const styles = useMemo(
     () => getStyles(insets.top, insets.bottom),
@@ -114,6 +122,15 @@ export default function ServiceDetailScreen() {
     setImageModalVisible(true);
   };
 
+  const openProviderPublicProfile = () => {
+    const userId = service?.user?.id;
+    if (!userId) return;
+    navigation.navigate("Profile", {
+      screen: "PublicProfile",
+      params: { userId },
+    });
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
@@ -160,6 +177,17 @@ export default function ServiceDetailScreen() {
 
   const headerColor = headerColorFor(service.id);
   const isOffer = service.type === "Offer";
+  const isEvent = service.type === "Event";
+  const providerSectionLabel = isOffer
+    ? "Service Provider"
+    : isEvent
+      ? "Event Organizer"
+      : "Posted by";
+  const viewProfileLinkColor = isEvent
+    ? colors.AMBER
+    : isOffer
+      ? colors.GREEN
+      : colors.BLUE;
   const displayName =
     [service.user.first_name, service.user.last_name]
       .filter(Boolean)
@@ -344,6 +372,29 @@ export default function ServiceDetailScreen() {
           <Text style={styles.serviceTitle}>{service.title}</Text>
 
           <View style={styles.userSection}>
+            <View style={styles.providerHeaderRow}>
+              <Text style={styles.providerHeaderLabel}>
+                {providerSectionLabel}
+              </Text>
+              {service.user.id ? (
+                <TouchableOpacity
+                  onPress={openProviderPublicProfile}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                  accessibilityRole="link"
+                  accessibilityLabel="View profile"
+                >
+                  <Text
+                    style={[
+                      styles.viewProfileLink,
+                      { color: viewProfileLinkColor },
+                    ]}
+                  >
+                    View Profile →
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
             <View style={styles.userRow}>
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{initials}</Text>
@@ -697,6 +748,25 @@ const getStyles = (topInset: number, bottomInset: number) =>
     },
     userSection: {
       marginBottom: 10,
+    },
+    providerHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 12,
+    },
+    providerHeaderLabel: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: "#98a2b3",
+      textTransform: "uppercase",
+      letterSpacing: 0.9,
+      flex: 1,
+      marginRight: 8,
+    },
+    viewProfileLink: {
+      fontSize: 12,
+      fontWeight: "600",
     },
     userRow: {
       flexDirection: "row",

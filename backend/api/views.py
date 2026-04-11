@@ -39,9 +39,9 @@ from .exceptions import create_error_response, ErrorCodes
 
 from .models import (
     User, Service, Tag, Handshake, ChatMessage,
-    Notification, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
+    Notification, DevicePushToken, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
     ChatRoom, PublicChatMessage, ServiceGroupChatMessage, GroupChatSession, Comment, NegativeRep,
-    AdminAuditLog,
+    AdminAuditLog, PlatformSetting,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
     EmailVerificationToken, PasswordResetToken,
     UserFollow, UserFollowEvent,
@@ -52,12 +52,13 @@ from .serializers import (
     AdminUserListSerializer,
     AdminUserDetailSerializer,
     AdminCommentSerializer,
-    AdminAuditLogSerializer,
+    AdminAuditLogSerializer, PlatformSettingSerializer,
     ServiceSerializer,
     TagSerializer,
     HandshakeSerializer,
     ChatMessageSerializer,
     NotificationSerializer,
+    DevicePushTokenSerializer,
     ReputationRepSerializer,
     ReportSerializer,
     TransactionHistorySerializer,
@@ -85,6 +86,7 @@ from .services import (
     ReputationService, ReputationServiceError,
     get_social_proximity_boosts,
 )
+from .ranking_debug import build_service_debug_payload
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
@@ -2309,6 +2311,62 @@ class ServiceViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(
+        detail=False,
+        methods=['get'],
+        url_path='debug-ranking-availability',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def debug_ranking_availability(self, request):
+        platform_settings = PlatformSetting.get_solo()
+        return Response({'enabled': platform_settings.ranking_debug_enabled})
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='debug-ranking',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def debug_ranking(self, request):
+        platform_settings = PlatformSetting.get_solo()
+        if not platform_settings.ranking_debug_enabled:
+            return create_error_response(
+                'Ranking debug is currently disabled by an administrator.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        raw_service_ids = request.data.get('service_ids') or []
+        service_ids = [str(service_id) for service_id in raw_service_ids if service_id]
+
+        if not service_ids:
+            return create_error_response(
+                'service_ids is required.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        def _to_float(value):
+            if value in (None, ''):
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        payload = build_service_debug_payload(
+            service_ids=service_ids,
+            selected_service_id=request.data.get('selected_service_id'),
+            request_user=request.user,
+            search=(request.data.get('search') or '').strip(),
+            tag_ids=[str(tag_id) for tag_id in (request.data.get('tags') or []) if tag_id],
+            lat=_to_float(request.data.get('lat')),
+            lng=_to_float(request.data.get('lng')),
+            distance=_to_float(request.data.get('distance')),
+            active_filter=(request.data.get('active_filter') or 'all').strip() or 'all',
+        )
+        return Response(payload)
+
+    @action(
         detail=True,
         methods=['post'],
         url_path='report',
@@ -3655,6 +3713,35 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         count = Notification.objects.filter(user=request.user, is_read=False).count()
         return Response({'count': count})
 
+    @extend_schema(
+        summary='Register an Expo push token for this device',
+        request=DevicePushTokenSerializer,
+        responses={201: inline_serializer('PushTokenResponse', {'status': drf_serializers.CharField()})},
+    )
+    @action(detail=False, methods=['post'], url_path='register-push-token')
+    def register_push_token(self, request):
+        serializer = DevicePushTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = serializer.validated_data['token']
+        obj, created = DevicePushToken.objects.update_or_create(
+            token=token,
+            defaults={'user': request.user, 'is_active': True},
+        )
+        return Response({'status': 'created' if created else 'updated'}, status=201 if created else 200)
+
+    @extend_schema(
+        summary='Deregister an Expo push token (e.g. on logout)',
+        request=DevicePushTokenSerializer,
+        responses={200: inline_serializer('PushTokenDeregisterResponse', {'status': drf_serializers.CharField()})},
+    )
+    @action(detail=False, methods=['post'], url_path='deregister-push-token')
+    def deregister_push_token(self, request):
+        serializer = DevicePushTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = serializer.validated_data['token']
+        DevicePushToken.objects.filter(token=token, user=request.user).update(is_active=False)
+        return Response({'status': 'deregistered'})
+
 class ReputationViewSet(viewsets.ModelViewSet):
     """
     Reputation Management
@@ -4885,6 +4972,38 @@ class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
         return queryset.order_by('-created_at')
 
+
+class AdminSettingsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _check_admin(self, request):
+        if request.user.role not in ADMIN_ROLES:
+            return create_error_response(
+                'Admin access required',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def get(self, request):
+        admin_check = self._check_admin(request)
+        if admin_check:
+            return admin_check
+
+        serializer = PlatformSettingSerializer(PlatformSetting.get_solo())
+        return Response(serializer.data)
+
+    def patch(self, request):
+        admin_check = self._check_admin(request)
+        if admin_check:
+            return admin_check
+
+        settings_obj = PlatformSetting.get_solo()
+        serializer = PlatformSettingSerializer(settings_obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
 class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Transaction History
@@ -5971,7 +6090,6 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
-    
     @track_performance
     def retrieve(self, request, pk=None):
         """Get a specific topic with its posts"""
@@ -6159,6 +6277,56 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
             )
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
+
+class ForumActivityView(APIView):
+    """
+    Authenticated forum activity summary for the current user.
+
+    Returns stable user-scoped counts so clients do not need to infer
+    activity metrics from paginated public topic lists.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        tags=['Forum'],
+        responses={
+            200: inline_serializer(
+                'ForumActivityResponse',
+                {
+                    'my_topics': drf_serializers.IntegerField(),
+                    'my_replies': drf_serializers.IntegerField(),
+                    'open_topics': drf_serializers.IntegerField(),
+                },
+            ),
+        },
+    )
+    @track_performance
+    def get(self, request):
+        topic_queryset = ForumTopic.objects.filter(
+            author=request.user,
+            category__is_active=True,
+        )
+        open_topic_queryset = (
+            topic_queryset
+            .filter(is_locked=False)
+            .select_related('author', 'category')
+            .annotate(reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False)))
+            .order_by('-is_pinned', '-created_at')
+        )
+        return Response(
+            {
+                'my_topics': topic_queryset.count(),
+                'my_replies': ForumPost.objects.filter(
+                    topic__author=request.user,
+                    topic__category__is_active=True,
+                    is_deleted=False,
+                ).count(),
+                'open_topics': topic_queryset.filter(is_locked=False).count(),
+                'open_topic_items': ForumTopicSerializer(open_topic_queryset, many=True).data,
+            }
+        )
 
 
 class ForumPostViewSet(viewsets.ViewSet):

@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { colors } from "../../../constants/colors";
 
 export type ChatTopMetaProps = {
@@ -9,6 +9,7 @@ export type ChatTopMetaProps = {
   formatStatusLabel: (status: string) => string;
   connected: boolean;
   reconnectAttempts: number;
+  onViewProfile?: () => void;
 };
 
 export function ChatTopMeta({
@@ -18,11 +19,29 @@ export function ChatTopMeta({
   formatStatusLabel,
   connected,
   reconnectAttempts,
+  onViewProfile,
 }: ChatTopMetaProps) {
   return (
     <View style={styles.topMeta}>
       <View style={styles.topMetaTextWrap}>
-        <Text style={styles.topMetaTitle}>{otherUserName}</Text>
+        <View style={styles.titleRow}>
+          <Text
+            style={[styles.topMetaTitle, styles.titleRowName]}
+            numberOfLines={1}
+          >
+            {otherUserName}
+          </Text>
+          {onViewProfile ? (
+            <TouchableOpacity
+              onPress={onViewProfile}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="link"
+              accessibilityLabel="View profile"
+            >
+              <Text style={styles.viewProfileLink}>View profile</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
         {!!subtitle ? (
           <Text style={styles.topMetaSubtitle} numberOfLines={1}>
             {subtitle}
@@ -69,10 +88,25 @@ export const styles = StyleSheet.create({
     flex: 1,
     marginRight: 12,
   },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "nowrap",
+    gap: 10,
+  },
+  titleRowName: {
+    flexShrink: 1,
+    minWidth: 0,
+  },
   topMetaTitle: {
     fontSize: 16,
     fontWeight: "700",
     color: colors.GRAY900 ?? "#111827",
+  },
+  viewProfileLink: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.BLUE,
   },
   topMetaSubtitle: {
     marginTop: 2,
