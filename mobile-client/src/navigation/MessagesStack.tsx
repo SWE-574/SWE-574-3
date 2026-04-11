@@ -5,11 +5,13 @@ import ChatScreen from "../presentation/screens/ChatScreen";
 import GroupChatScreen from "../presentation/screens/GroupChatScreen";
 import PublicChatScreen from "../presentation/screens/PublicChatScreen";
 import PublicProfileScreen from "../presentation/screens/PublicProfileScreen";
+import ServiceDetailScreen from "../presentation/screens/ServiceDetailScreen";
 
 export type MessagesStackParamList = {
   MessagesList: undefined;
   Chat: {
     handshakeId: string;
+    serviceId?: string;
     otherUserName: string;
     serviceTitle?: string;
     otherUserId?: string;
@@ -33,6 +35,9 @@ export type MessagesStackParamList = {
   PublicChat: {
     roomId: string;
     roomTitle?: string;
+  };
+  ServiceDetail: {
+    id: string;
   };
   UserPublicProfile: {
     userId: string;
@@ -71,6 +76,11 @@ export default function MessagesStack() {
         name="PublicChat"
         component={PublicChatScreen}
         options={{ title: "Event chat" }}
+      />
+      <Stack.Screen
+        name="ServiceDetail"
+        component={ServiceDetailScreen}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="UserPublicProfile"
