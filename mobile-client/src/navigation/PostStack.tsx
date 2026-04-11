@@ -7,9 +7,9 @@ import PostEventScreen from "../presentation/screens/PostEventScreen";
 
 export type PostStackParamList = {
   PostServiceHome: undefined;
-  PostOffer: undefined;
-  PostNeed: undefined;
-  PostEvent: undefined;
+  PostOffer: { serviceId?: string } | undefined;
+  PostNeed: { serviceId?: string } | undefined;
+  PostEvent: { serviceId?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<PostStackParamList>();

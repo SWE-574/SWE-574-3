@@ -13,6 +13,7 @@ export type MessagesStackParamList = {
   MessagesList: undefined;
   Chat: {
     handshakeId: string;
+    serviceId?: string;
     otherUserName: string;
     serviceTitle?: string;
     otherUserId?: string;
@@ -79,14 +80,14 @@ export default function MessagesStack() {
         options={{ title: "Event chat" }}
       />
       <Stack.Screen
-        name="UserPublicProfile"
-        component={PublicProfileScreen}
+        name="ServiceDetail"
+        component={ServiceDetailScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
-        name="ServiceDetail"
-        component={ServiceDetailScreen}
-        options={{ title: "Service Detail" }}
+        name="UserPublicProfile"
+        component={PublicProfileScreen}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="AchievementsList"

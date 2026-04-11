@@ -25,7 +25,7 @@ describe("servicesComments", () => {
   });
 
   it("createServiceComment POSTs to /services/:id/comments/", async () => {
-    const body = { content: "Great service!", is_review: true };
+    const body = { body: "Great service!", is_review: true };
     mockFetchResolve({ id: "c1", ...body });
     await createServiceComment("s1", body);
     expect(getLastFetchCall().url).toContain("/services/s1/comments/");
@@ -34,11 +34,11 @@ describe("servicesComments", () => {
   });
 
   it("patchServiceComment PATCHes /services/:sid/comments/:cid/", async () => {
-    mockFetchResolve({ id: "c1", content: "Updated" });
-    await patchServiceComment("s1", "c1", { content: "Updated" });
+    mockFetchResolve({ id: "c1", body: "Updated" });
+    await patchServiceComment("s1", "c1", { body: "Updated" });
     expect(getLastFetchCall().url).toContain("/services/s1/comments/c1/");
     expect(getLastFetchCall().init?.method).toBe("PATCH");
-    expect(getLastFetchBody()).toEqual({ content: "Updated" });
+    expect(getLastFetchBody()).toEqual({ body: "Updated" });
   });
 
   it("deleteServiceComment DELETEs comment", async () => {

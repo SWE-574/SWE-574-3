@@ -11,16 +11,27 @@ import {
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../constants/colors";
-import type { ReportRequest } from "../../api/forum";
 
-type ReportType = ReportRequest["type"];
+export type ReportType =
+  | "inappropriate_content"
+  | "spam"
+  | "harassment"
+  | "scam"
+  | "other"
+  | "service_issue"
+  | "no_show";
 
-interface ReportOption {
+export interface ReportOption {
   value: ReportType;
   label: string;
 }
 
-const REPORT_OPTIONS: ReportOption[] = [
+export interface ReportModalRequest {
+  type: ReportType;
+  description?: string;
+}
+
+const DEFAULT_REPORT_OPTIONS: ReportOption[] = [
   { value: "inappropriate_content", label: "Inappropriate Content" },
   { value: "spam", label: "Spam" },
   { value: "harassment", label: "Harassment" },
@@ -31,8 +42,11 @@ const REPORT_OPTIONS: ReportOption[] = [
 interface ReportModalProps {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (req: ReportRequest) => Promise<void>;
+  onSubmit: (req: ReportModalRequest) => Promise<void>;
   targetLabel?: string;
+  title?: string;
+  subtitle?: string;
+  options?: ReportOption[];
 }
 
 export default function ReportModal({
@@ -40,14 +54,18 @@ export default function ReportModal({
   onClose,
   onSubmit,
   targetLabel = "content",
+  title,
+  subtitle = "Select a reason to help our moderators review this report.",
+  options = DEFAULT_REPORT_OPTIONS,
 }: ReportModalProps) {
-  const [selectedType, setSelectedType] = useState<ReportType>("inappropriate_content");
+  const initialType = options[0]?.value ?? "other";
+  const [selectedType, setSelectedType] = useState<ReportType>(initialType);
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const handleClose = () => {
     if (submitting) return;
-    setSelectedType("inappropriate_content");
+    setSelectedType(initialType);
     setDescription("");
     onClose();
   };
@@ -56,8 +74,9 @@ export default function ReportModal({
     setSubmitting(true);
     try {
       await onSubmit({ type: selectedType, description: description.trim() || undefined });
-      setSelectedType("inappropriate_content");
+      setSelectedType(initialType);
       setDescription("");
+      onClose();
     } finally {
       setSubmitting(false);
     }
@@ -78,18 +97,18 @@ export default function ReportModal({
             <View style={styles.flagIconWrap}>
               <Ionicons name="flag" size={18} color={colors.RED} />
             </View>
-            <Text style={styles.title}>Report {targetLabel}</Text>
+            <Text style={styles.title}>{title ?? `Report ${targetLabel}`}</Text>
             <Pressable onPress={handleClose} hitSlop={8} disabled={submitting}>
               <Ionicons name="close" size={22} color={colors.GRAY500} />
             </Pressable>
           </View>
 
           <Text style={styles.subtitle}>
-            Select a reason to help our moderators review this report.
+            {subtitle}
           </Text>
 
           <ScrollView style={styles.optionList} showsVerticalScrollIndicator={false}>
-            {REPORT_OPTIONS.map((opt) => (
+            {options.map((opt) => (
               <Pressable
                 key={opt.value}
                 style={[

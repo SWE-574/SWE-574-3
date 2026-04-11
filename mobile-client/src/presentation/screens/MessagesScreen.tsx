@@ -12,6 +12,9 @@ import {
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { type Chat, listChats } from "../../api/chats";
+import { getService, listServices } from "../../api/services";
+import { listHandshakes, type Handshake } from "../../api/handshakes";
+import type { Service } from "../../api/types";
 import type { MessagesStackParamList } from "../../navigation/MessagesStack";
 import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
@@ -41,6 +44,15 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const ACTIVE_STATUSES = new Set(["pending", "accepted"]);
+const EVENT_TAB_HANDSHAKE_STATUSES = new Set([
+  "accepted",
+  "checked_in",
+  "attended",
+  "completed",
+  "cancelled",
+  "no_show",
+]);
+const CLOSED_EVENT_LABELS = new Set(["Completed", "Cancelled"]);
 
 function getEvaluationWindowState(chat: Chat): {
   isPending: boolean;
@@ -186,6 +198,13 @@ function timeAgo(dateStr: string): string {
 type EventChatEntry = {
   serviceId: string;
   serviceTitle: string;
+  memberCount: number | null;
+  previewBody: string | null;
+  previewAt: string | null;
+  statusLabel: string;
+  relationLabel: string;
+  isEvaluationPending: boolean;
+  evaluationTimeLeftLabel: string | null;
 };
 
 type ListItem =
@@ -195,15 +214,32 @@ type ListItem =
   | { kind: "eventChat"; data: EventChatEntry }
   | { kind: "chat"; data: Chat };
 
+function getIdFromField(value: string | object | undefined): string | undefined {
+  if (!value) return undefined;
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && "id" in value) {
+    return String((value as { id: unknown }).id);
+  }
+  return undefined;
+}
+
+function getServiceFromHandshake(value: string | object | undefined): Partial<Service> | null {
+  if (!value || typeof value === "string") return null;
+  return value as Partial<Service>;
+}
+
 export default function MessagesScreen() {
   const navigation = useNavigation<Nav>();
   const [chats, setChats] = useState<Chat[]>([]);
+  const [eventServices, setEventServices] = useState<Service[]>([]);
+  const [joinedEventServices, setJoinedEventServices] = useState<Service[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedTab, setSelectedTab] = useState<ChatTab>("private");
   const [showClosedPrivate, setShowClosedPrivate] = useState(false);
   const [showClosedGroup, setShowClosedGroup] = useState(false);
+  const [showClosedEvents, setShowClosedEvents] = useState(false);
   const { user } = useAuth();
 
   const fetchChats = useCallback(
@@ -217,12 +253,102 @@ export default function MessagesScreen() {
         if (isRefresh) setRefreshing(true);
         else setLoading(true);
         setError(null);
-        const data = await listChats();
+        const [data, ownEvents, handshakePage] = await Promise.all([
+          listChats(),
+          listServices({ type: "Event", user: user.id, page_size: 100 }),
+          listHandshakes({ page_size: 200 }),
+        ]);
         setChats(data);
+
+        const relevantEventHandshakes = handshakePage.results.filter((handshake) =>
+          EVENT_TAB_HANDSHAKE_STATUSES.has(handshake.status?.toLowerCase() ?? ""),
+        );
+
+        const ownEventList = (ownEvents.results ?? []).filter(
+          (service) => service.type?.toLowerCase() === "event",
+        );
+
+        const embeddedEventServices = relevantEventHandshakes
+          .map((handshake) => getServiceFromHandshake(handshake.service))
+          .filter(
+            (service): service is Partial<Service> & { id: string; type: string } =>
+              Boolean(service?.id) &&
+              typeof service?.type === "string" &&
+              service.type.toLowerCase() === "event",
+          );
+
+        const handshakeEventIds = Array.from(
+          new Set(
+            relevantEventHandshakes
+              .map((handshake) => getIdFromField(handshake.service))
+              .filter((serviceId): serviceId is string => Boolean(serviceId)),
+          ),
+        );
+
+        const previewEventIds = Array.from(
+          new Set(
+            data
+              .filter(
+                (chat) =>
+                  chat.service_type?.toLowerCase() === "event" && Boolean(chat.service_id),
+              )
+              .map((chat) => chat.service_id),
+          ),
+        );
+
+        const candidateEventServices: Service[] = [
+          ...ownEventList,
+          ...embeddedEventServices.map((service) => service as Service),
+        ];
+
+        const knownEventIds = new Set(
+          candidateEventServices.map((service) => service.id).filter(Boolean),
+        );
+
+        const missingEventIds = Array.from(
+          new Set([...handshakeEventIds, ...previewEventIds]),
+        ).filter(
+          (serviceId) => !knownEventIds.has(serviceId),
+        );
+
+        const fetchedMissingEventServices = await Promise.all(
+          missingEventIds.map(async (serviceId) => {
+            try {
+              return await getService(serviceId);
+            } catch {
+              return null;
+            }
+          }),
+        );
+
+        const uniqueEventServices = [
+          ...candidateEventServices,
+          ...fetchedMissingEventServices.filter(
+            (service): service is Service => Boolean(service),
+          ),
+        ].filter(
+          (service, index, array) =>
+            service.type?.toLowerCase() === "event" &&
+            Boolean(service.id) &&
+            array.findIndex((candidate) => candidate.id === service.id) === index,
+        );
+
+        setEventServices(
+          uniqueEventServices.filter(
+            (service) => String(service.user?.id ?? "") === String(user.id),
+          ),
+        );
+        setJoinedEventServices(
+          uniqueEventServices.filter(
+            (service) => String(service.user?.id ?? "") !== String(user.id),
+          ),
+        );
       } catch (err) {
         console.error("Failed to load chats:", err);
         setError("Failed to load messages.");
         setChats([]);
+        setEventServices([]);
+        setJoinedEventServices([]);
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -234,6 +360,8 @@ export default function MessagesScreen() {
   useEffect(() => {
     if (!user) {
       setChats([]);
+      setEventServices([]);
+      setJoinedEventServices([]);
       setError(null);
       setLoading(false);
     }
@@ -248,6 +376,7 @@ export default function MessagesScreen() {
   const openChat = (item: Chat) => {
     navigation.navigate("Chat", {
       handshakeId: item.handshake_id,
+      serviceId: item.service_id,
       otherUserName: item.other_user?.name ?? "Unknown",
       serviceTitle: item.service_title,
       otherUserId: item.other_user?.id,
@@ -316,18 +445,134 @@ export default function MessagesScreen() {
   const closedGroupEntries = buildGroupChatEntries(closedGroupSourceChats);
 
   const eventChatEntries: EventChatEntry[] = (() => {
-    const seen = new Set<string>();
-    const entries: EventChatEntry[] = [];
-    for (const c of chatList) {
-      if (c.service_type?.toLowerCase() !== "event" || !c.service_id) continue;
-      const st = c.status?.toLowerCase();
-      if (!["accepted", "checked_in", "attended"].includes(st)) continue;
-      if (seen.has(c.service_id)) continue;
-      seen.add(c.service_id);
-      entries.push({ serviceId: c.service_id, serviceTitle: c.service_title ?? "Event" });
+    const previewByService = new Map<string, Chat>();
+    for (const chat of chatList) {
+      if (chat.service_type?.toLowerCase() !== "event" || !chat.service_id) continue;
+      const current = previewByService.get(chat.service_id);
+      const currentTs = current
+        ? Math.max(
+            current.last_message?.created_at ? new Date(current.last_message.created_at).getTime() : 0,
+            current.updated_at ? new Date(current.updated_at).getTime() : 0,
+          )
+        : 0;
+      const nextTs = Math.max(
+        chat.last_message?.created_at ? new Date(chat.last_message.created_at).getTime() : 0,
+        chat.updated_at ? new Date(chat.updated_at).getTime() : 0,
+      );
+      if (!current || nextTs >= currentTs) {
+        previewByService.set(chat.service_id, chat);
+      }
     }
-    return entries;
+
+    const rows = new Map<string, EventChatEntry>();
+    const organizerEventIds = new Set(eventServices.map((service) => service.id));
+    const joinedEventIds = new Set(joinedEventServices.map((service) => service.id));
+    const pushEventRow = (service: Partial<Service>) => {
+      if (!service.id || service.type?.toLowerCase() !== "event") return;
+      const preview = previewByService.get(service.id);
+      const scheduledTime = service.scheduled_time ?? null;
+      const relationLabel =
+        organizerEventIds.has(service.id)
+          ? "Organizer"
+          : joinedEventIds.has(service.id)
+            ? "Joined"
+            : service.user?.id === user?.id
+              ? "Organizer"
+              : "Joined";
+      const status = preview?.status?.toLowerCase();
+      const eventEvaluationPending =
+        ["attended", "completed"].includes(status ?? "") &&
+        !preview?.user_has_reviewed &&
+        Boolean(
+          preview?.evaluation_window_ends_at ||
+            preview?.evaluation_window_starts_at ||
+            preview?.evaluation_window_closed_at,
+        );
+      let evaluationTimeLeftLabel: string | null = null;
+      if (eventEvaluationPending) {
+        if (preview?.evaluation_window_closed_at) {
+          evaluationTimeLeftLabel = null;
+        } else {
+          const deadlineMs = preview?.evaluation_window_ends_at
+            ? new Date(preview.evaluation_window_ends_at).getTime()
+            : preview?.evaluation_window_starts_at
+              ? new Date(preview.evaluation_window_starts_at).getTime() + 48 * 60 * 60 * 1000
+              : null;
+          if (deadlineMs && !Number.isNaN(deadlineMs)) {
+            const msLeft = deadlineMs - Date.now();
+            if (msLeft > 0) {
+              const totalMinutes = Math.ceil(msLeft / 60000);
+              const hours = Math.floor(totalMinutes / 60);
+              const minutes = totalMinutes % 60;
+              evaluationTimeLeftLabel = `${hours}h ${minutes}m left`;
+            }
+          }
+        }
+      }
+      const statusLabel =
+        status === "checked_in"
+          ? "Ongoing"
+          : status === "attended" || service.status?.toLowerCase() === "completed"
+            ? "Completed"
+            : service.status?.toLowerCase() === "cancelled"
+              ? "Cancelled"
+              : "Upcoming";
+
+      rows.set(service.id, {
+        serviceId: service.id,
+        serviceTitle: service.title ?? "Event",
+        memberCount:
+          typeof preview?.service_member_count === "number"
+            ? preview.service_member_count
+            : typeof service.participant_count === "number"
+              ? service.participant_count
+              : null,
+        previewBody:
+          preview?.last_message?.body ??
+          (eventEvaluationPending
+            ? "Leave your event evaluation."
+            : statusLabel === "Ongoing"
+              ? "Event is currently live."
+              : statusLabel === "Completed"
+                ? "Event completed."
+                : statusLabel === "Cancelled"
+                  ? "Event cancelled."
+                  : scheduledTime
+                    ? `Starts ${timeAgo(scheduledTime)}`
+                    : "Tap to open event chat"),
+        previewAt:
+          preview?.last_message?.created_at ??
+          preview?.updated_at ??
+          scheduledTime ??
+          service.created_at ??
+          null,
+        statusLabel,
+        relationLabel,
+        isEvaluationPending: eventEvaluationPending,
+        evaluationTimeLeftLabel,
+      });
+    };
+
+    for (const service of eventServices) {
+      pushEventRow(service);
+    }
+    for (const service of joinedEventServices) {
+      if (rows.has(service.id)) continue;
+      pushEventRow(service);
+    }
+
+    return Array.from(rows.values()).sort((a, b) => {
+      const ta = a.previewAt ? new Date(a.previewAt).getTime() : 0;
+      const tb = b.previewAt ? new Date(b.previewAt).getTime() : 0;
+      return tb - ta;
+    });
   })();
+  const activeEventEntries = eventChatEntries.filter(
+    (entry) => !CLOSED_EVENT_LABELS.has(entry.statusLabel),
+  );
+  const closedEventEntries = eventChatEntries.filter((entry) =>
+    CLOSED_EVENT_LABELS.has(entry.statusLabel),
+  );
 
   const listData: ListItem[] = [];
   if (selectedTab === "private") {
@@ -366,15 +611,27 @@ export default function MessagesScreen() {
       }
     }
   } else if (selectedTab === "events") {
-    if (eventChatEntries.length > 0) {
+    if (activeEventEntries.length > 0) {
       listData.push({
         kind: "sectionHeader",
         id: "header-events",
-        label: "JOINED EVENTS",
-        count: eventChatEntries.length,
+        label: "ACTIVE",
+        count: activeEventEntries.length,
       });
-      for (const e of eventChatEntries) {
+      for (const e of activeEventEntries) {
         listData.push({ kind: "eventChat", data: e });
+      }
+    }
+    if (closedEventEntries.length > 0) {
+      listData.push({
+        kind: "closedToggle",
+        count: closedEventEntries.length,
+        expanded: showClosedEvents,
+      });
+      if (showClosedEvents) {
+        for (const e of closedEventEntries) {
+          listData.push({ kind: "eventChat", data: e });
+        }
       }
     }
   } else {
@@ -542,10 +799,29 @@ export default function MessagesScreen() {
             <View style={[styles.groupBadge, { backgroundColor: "#FFF7ED" }]}>
               <Text style={[styles.groupBadgeText, { color: colors.AMBER }]}>EVENT</Text>
             </View>
+            <View style={[styles.groupBadge, { backgroundColor: colors.GREEN_LT }]}>
+              <Text style={[styles.groupBadgeText, { color: colors.GREEN }]}>{entry.relationLabel}</Text>
+            </View>
+            <View style={[styles.groupBadge, { backgroundColor: colors.GRAY100 }]}>
+              <Text style={[styles.groupBadgeText, { color: colors.GRAY700 }]}>
+                {entry.statusLabel}
+              </Text>
+            </View>
+            {entry.previewAt ? (
+              <Text style={styles.itemTime}>{timeAgo(entry.previewAt)}</Text>
+            ) : null}
           </View>
         </View>
         <Text style={styles.groupChatSub} numberOfLines={1}>
-          Tap to open event chat
+          {entry.memberCount !== null
+            ? `${entry.memberCount} participant${entry.memberCount !== 1 ? "s" : ""} · Event chat`
+            : "Event chat"}
+        </Text>
+        {entry.isEvaluationPending && entry.evaluationTimeLeftLabel ? (
+          <Text style={styles.evaluationTimeLabel}>{entry.evaluationTimeLeftLabel}</Text>
+        ) : null}
+        <Text style={styles.itemBody} numberOfLines={1}>
+          {entry.previewBody ?? "Tap to open event chat"}
         </Text>
       </View>
     </TouchableOpacity>
@@ -569,6 +845,8 @@ export default function MessagesScreen() {
           onPress={() =>
             selectedTab === "private"
               ? setShowClosedPrivate((v) => !v)
+              : selectedTab === "events"
+                ? setShowClosedEvents((v) => !v)
               : setShowClosedGroup((v) => !v)
           }
           activeOpacity={0.7}
@@ -596,7 +874,7 @@ export default function MessagesScreen() {
 
   const keyExtractor = (item: ListItem) => {
     if (item.kind === "sectionHeader") return item.id;
-    if (item.kind === "closedToggle") return "closed-toggle";
+    if (item.kind === "closedToggle") return `closed-toggle-${selectedTab}`;
     if (item.kind === "groupChat") return `group-${item.data.serviceId}`;
     if (item.kind === "eventChat") return `event-${item.data.serviceId}`;
     return item.data.handshake_id;
@@ -714,7 +992,9 @@ export default function MessagesScreen() {
                 listData.length === 0 && styles.emptyListContent,
               ]}
               ItemSeparatorComponent={({ leadingItem }) =>
-                leadingItem?.kind === "chat" || leadingItem?.kind === "groupChat" ? (
+                leadingItem?.kind === "chat" ||
+                leadingItem?.kind === "groupChat" ||
+                leadingItem?.kind === "eventChat" ? (
                   <View style={styles.separator} />
                 ) : null
               }

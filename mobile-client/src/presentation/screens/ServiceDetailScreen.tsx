@@ -13,6 +13,8 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Dimensions,
+  Pressable,
+  RefreshControl,
 } from "react-native";
 import {
   SafeAreaView,
@@ -26,16 +28,27 @@ import {
 import type { RouteProp } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import * as SecureStore from "expo-secure-store";
 import type { HomeStackParamList } from "../../navigation/HomeStack";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
-import { getService, addServiceInterest, completeEvent } from "../../api/services";
+import {
+  addServiceInterest,
+  cancelEvent,
+  completeEvent,
+  deleteService,
+  getService,
+  pinEvent,
+  reportService,
+  setPrimaryMedia,
+} from "../../api/services";
 import {
   listHandshakes,
   joinEvent,
   leaveEvent,
   checkinEvent,
   markAttended,
+  reportHandshake,
   type Handshake,
 } from "../../api/handshakes";
 import {
@@ -48,12 +61,21 @@ import {
 } from "../../utils/eventUtils";
 import type { Service } from "../../api/types";
 import { useAuth } from "../../context/AuthContext";
+import { getMapboxToken } from "../../constants/env";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../constants/colors";
 import ImagePreviewModal from "../components/ImagePreviewModal";
 import { ChatEvaluationModal } from "../components/chat/ChatEvaluationModal";
 import { EventEvaluationSummaryCard } from "../components/service/EventEvaluationSummaryCard";
+import ServiceCommentsSection from "../components/service/ServiceCommentsSection";
+import EventDetailModal, {
+  type EventDetailModalTab,
+} from "../components/service/EventDetailModal";
+import ReportModal, {
+  type ReportModalRequest,
+  type ReportOption,
+} from "../components/ReportModal";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SLIDER_WIDTH = SCREEN_WIDTH;
@@ -73,6 +95,137 @@ function getInitials(firstName: string, lastName: string): string {
   const f = (firstName || "").trim().charAt(0) || "";
   const l = (lastName || "").trim().charAt(0) || "";
   return (f + l).toUpperCase() || "?";
+}
+
+function getDisplayNameFromUnknown(value: unknown): string {
+  if (!value) return "Unknown";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const looksLikeUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        trimmed,
+      );
+    if (looksLikeUuid) return "Participant";
+    return trimmed || "Unknown";
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const fullName = [obj.first_name, obj.last_name].filter(Boolean).join(" ").trim();
+    if (fullName) return fullName;
+    if (typeof obj.email === "string" && obj.email.trim()) return obj.email.trim();
+    return "Participant";
+  }
+  return "Unknown";
+}
+
+function getAvatarFromUnknown(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const obj = value as Record<string, unknown>;
+  return typeof obj.avatar_url === "string" ? obj.avatar_url : null;
+}
+
+function formatJoinedDate(value?: string | null): string {
+  if (!value) return "Recently joined";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Recently joined";
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatScheduledDateTime(value?: string | null): string {
+  if (!value) return "Not scheduled";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not scheduled";
+  return date.toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function timeUntilLabel(value?: string | null): string {
+  if (!value) return "Not scheduled";
+  const target = new Date(value).getTime();
+  if (Number.isNaN(target)) return "Not scheduled";
+  const diff = target - Date.now();
+  if (diff <= 0) return "Started";
+  const totalMinutes = Math.ceil(diff / 60000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function getEvaluationWindowInfo(handshake?: Handshake | null) {
+  if (!handshake) {
+    return { isOpen: false, label: "" };
+  }
+
+  if (handshake.evaluation_window_closed_at) {
+    return { isOpen: false, label: "Evaluation window closed" };
+  }
+
+  let deadlineMs: number | null = null;
+  if (handshake.evaluation_window_ends_at) {
+    const parsed = new Date(handshake.evaluation_window_ends_at).getTime();
+    if (!Number.isNaN(parsed)) deadlineMs = parsed;
+  }
+
+  if (deadlineMs == null) {
+    const startIso = handshake.evaluation_window_starts_at ?? handshake.updated_at ?? handshake.created_at;
+    const parsedStart = new Date(startIso).getTime();
+    if (!Number.isNaN(parsedStart)) {
+      deadlineMs = parsedStart + 48 * 60 * 60 * 1000;
+    }
+  }
+
+  if (deadlineMs == null) {
+    return { isOpen: true, label: "48h evaluation window active" };
+  }
+
+  const msLeft = deadlineMs - Date.now();
+  if (msLeft <= 0) {
+    return { isOpen: false, label: "Evaluation window closed" };
+  }
+
+  const totalMinutes = Math.ceil(msLeft / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return { isOpen: true, label: `${hours}h ${minutes}m left to evaluate` };
+}
+
+function getMapPreviewUrl(service: Service): string | null {
+  const token = getMapboxToken();
+  const lat = Number(service.location_lat);
+  const lng = Number(service.location_lng);
+  if (!token || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/pin-s+22c55e(${lng},${lat})/${lng},${lat},13/800x400@2x?access_token=${token}`;
+}
+
+function getReportKey(userId: string, suffix: string) {
+  return `reported:${userId}:${suffix}`;
+}
+
+function getHandshakeRequesterName(handshake: Handshake): string {
+  const requesterName = (handshake as Record<string, unknown>).requester_name;
+  if (typeof requesterName === "string" && requesterName.trim()) {
+    return requesterName.trim();
+  }
+  return getDisplayNameFromUnknown(handshake.requester);
+}
+
+function upsertHandshake(list: Handshake[], next: Handshake): Handshake[] {
+  const existingIndex = list.findIndex((item) => item.id === next.id);
+  if (existingIndex === -1) return [next, ...list];
+  const clone = [...list];
+  clone[existingIndex] = next;
+  return clone;
 }
 
 type MediaItem = {
@@ -99,7 +252,7 @@ export default function ServiceDetailScreen() {
   const insets = useSafeAreaInsets();
   const route = useRoute<RouteProp<ServiceDetailRouteParams, "ServiceDetail">>();
   const navigation = useNavigation<ServiceDetailNavigation>();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isAuthenticated } = useAuth();
 
   const styles = useMemo(
     () => getStyles(insets.top, insets.bottom),
@@ -109,82 +262,314 @@ export default function ServiceDetailScreen() {
   const { id } = route.params;
   const [service, setService] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [interestLoading, setInterestLoading] = useState(false);
+  const [ownerActionLoading, setOwnerActionLoading] = useState<string | null>(null);
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [modalInitialIndex, setModalInitialIndex] = useState(0);
 
-  const [myEventHandshake, setMyEventHandshake] = useState<Handshake | null>(null);
-  const [allEventHandshakes, setAllEventHandshakes] = useState<Handshake[]>([]);
+  const [serviceHandshakes, setServiceHandshakes] = useState<Handshake[]>([]);
   const [showEvaluationModal, setShowEvaluationModal] = useState(false);
+  const [showListingReportModal, setShowListingReportModal] = useState(false);
+  const [selectedParticipantReport, setSelectedParticipantReport] = useState<Handshake | null>(null);
+  const [reportedListing, setReportedListing] = useState(false);
+  const [reportedParticipantIds, setReportedParticipantIds] = useState<Record<string, boolean>>({});
+  const [commentRefreshKey, setCommentRefreshKey] = useState(0);
+  const [showEventDetailModal, setShowEventDetailModal] = useState(false);
+  const [eventDetailModalTab, setEventDetailModalTab] =
+    useState<EventDetailModalTab>("details");
   const [eventActionLoading, setEventActionLoading] = useState(false);
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null);
 
   const sliderRef = useRef<FlatList<MediaItem>>(null);
 
-  const loadService = useCallback(() => {
-    return getService(id)
-      .then(setService)
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"));
+  const loadService = useCallback(async () => {
+    try {
+      setError(null);
+      const next = await getService(id);
+      setService(next);
+      return next;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to load";
+      setError(message);
+      throw e;
+    }
   }, [id]);
 
-  const loadHandshakes = useCallback(() => {
-    if (!service || service.type !== "Event") return;
-    listHandshakes()
-      .then((res) => {
-        const eventHandshakes = res.results.filter((h) => {
-          const svcId = getIdFromField(h.service);
-          return svcId === service.id;
-        });
-        setAllEventHandshakes(eventHandshakes);
+  const loadHandshakes = useCallback(async (targetService?: Service | null) => {
+    const activeService = targetService;
+    if (!activeService || !isAuthenticated) {
+      setServiceHandshakes([]);
+      return [] as Handshake[];
+    }
+    try {
+      const res = await listHandshakes({ page_size: 200 });
+      const filtered = res.results.filter((h) => getIdFromField(h.service) === activeService.id);
+      setServiceHandshakes(filtered);
+      return filtered;
+    } catch {
+      setServiceHandshakes([]);
+      return [] as Handshake[];
+    }
+  }, [isAuthenticated]);
 
-        if (currentUser?.id) {
-          const mine = eventHandshakes.find((h) => {
-            const requesterId = getIdFromField(h.requester);
-            return (
-              requesterId === currentUser.id &&
-              ["accepted", "checked_in", "attended", "no_show", "reported", "cancelled"].includes(h.status)
-            );
-          });
-          setMyEventHandshake(mine ?? null);
-        }
-      })
-      .catch(() => {});
-  }, [service, currentUser?.id]);
+  const loadReportState = useCallback(async (
+    targetService?: Service | null,
+    handshakes: Handshake[] = [],
+  ) => {
+    const activeService = targetService;
+    if (!activeService || !currentUser?.id) {
+      setReportedListing(false);
+      setReportedParticipantIds({});
+      return;
+    }
+    try {
+      const listing = await SecureStore.getItemAsync(
+        getReportKey(currentUser.id, `service:${activeService.id}`),
+      );
+      setReportedListing(Boolean(listing));
+      const reportMap: Record<string, boolean> = {};
+      await Promise.all(
+        handshakes.map(async (handshake) => {
+          const value = await SecureStore.getItemAsync(
+            getReportKey(currentUser.id, `handshake:${handshake.id}`),
+          );
+          if (value) reportMap[handshake.id] = true;
+        }),
+      );
+      setReportedParticipantIds(reportMap);
+    } catch {
+      setReportedListing(false);
+      setReportedParticipantIds({});
+    }
+  }, [currentUser?.id]);
 
   useEffect(() => {
-    loadService().finally(() => setLoading(false));
+    loadService()
+      .finally(() => setLoading(false));
   }, [loadService]);
 
   useEffect(() => {
-    loadHandshakes();
-  }, [loadHandshakes]);
+    if (!service) return;
+    void loadHandshakes(service);
+  }, [isAuthenticated, loadHandshakes, service]);
+
+  useEffect(() => {
+    if (!service) return;
+    void loadReportState(service, serviceHandshakes);
+  }, [currentUser?.id, loadReportState, service, serviceHandshakes]);
 
   const isOwner = service?.user?.id === currentUser?.id;
+  const isAdmin =
+    currentUser?.role === "admin" ||
+    currentUser?.role === "super_admin" ||
+    currentUser?.role === "moderator";
+  const isEvent = service?.type === "Event";
+  const isOffer = service?.type === "Offer";
+
+  const myHandshake = useMemo(() => {
+    if (!currentUser?.id) return null;
+    const mine = serviceHandshakes.filter(
+      (h) => getIdFromField(h.requester) === currentUser.id,
+    );
+    return (
+      mine.find((h) => ["pending", "accepted"].includes(h.status?.toLowerCase())) ??
+      mine[0] ??
+      null
+    );
+  }, [currentUser?.id, serviceHandshakes]);
+
+  const ownerIncomingHandshakes = useMemo(
+    () =>
+      serviceHandshakes.filter(
+        (h) => getIdFromField(h.requester) !== currentUser?.id,
+      ),
+    [currentUser?.id, serviceHandshakes],
+  );
+
+  const myEventHandshake = isEvent ? myHandshake : null;
+  const allEventHandshakes = isEvent ? serviceHandshakes : [];
+  const eventEvaluationTarget =
+    isEvent && myEventHandshake?.status?.toLowerCase() === "attended"
+      ? myEventHandshake
+      : null;
+  const eventParticipantStatus = myEventHandshake?.status?.toLowerCase() ?? null;
+  const evaluationHandshake = useMemo(() => {
+    if (isEvent) return null;
+    return (
+      serviceHandshakes.find(
+        (h) =>
+          h.status?.toLowerCase() === "completed" &&
+          !h.user_has_reviewed,
+      ) ?? null
+    );
+  }, [isEvent, serviceHandshakes]);
+
+  const evaluationWindow = getEvaluationWindowInfo(evaluationHandshake);
+  const participantCount = service?.participant_count ?? 0;
+  const maxParticipants = service?.max_participants ?? 1;
+  const isFull =
+    maxParticipants > 0 ? participantCount >= maxParticipants : false;
+  const nearlyFull =
+    maxParticipants > 1 && participantCount / maxParticipants >= 0.8;
+  const mapPreviewUrl = service ? getMapPreviewUrl(service) : null;
+  const ownerEditLocked = useMemo(() => {
+    if (!service) return false;
+    if (service.type === "Event") {
+      return (
+        isWithinLockdownWindow(service.scheduled_time) ||
+        serviceHandshakes.some((h) =>
+          ["accepted", "checked_in", "attended"].includes(h.status?.toLowerCase()),
+        )
+      );
+    }
+    return serviceHandshakes.some((h) =>
+      ["pending", "accepted"].includes(h.status?.toLowerCase()),
+    );
+  }, [service, serviceHandshakes]);
+  const ownerEditLockReason = useMemo(() => {
+    if (!ownerEditLocked || !service) return null;
+    if (service.type === "Event" && isWithinLockdownWindow(service.scheduled_time)) {
+      return "Editing is locked within 24 hours of the event.";
+    }
+    if (service.type === "Event") {
+      return "Editing is locked because the event already has active participants.";
+    }
+    return "Editing is locked while there are pending or accepted handshakes.";
+  }, [ownerEditLocked, service]);
+
+  const openLogin = useCallback(() => {
+    navigation.navigate("Profile", { screen: "Login" } as never);
+  }, [navigation]);
+
+  const openEventDetailModal = useCallback(
+    (tab: EventDetailModalTab = "details") => {
+      setEventDetailModalTab(tab);
+      setShowEventDetailModal(true);
+    },
+    [],
+  );
+
+  const refreshAll = useCallback(async () => {
+    if (!service && !loading) return;
+    setRefreshing(true);
+    try {
+      const next = await loadService();
+      const handshakes = await loadHandshakes(next);
+      await loadReportState(next, handshakes);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadHandshakes, loadReportState, loadService, loading, service]);
 
   const handleEvaluationSubmitted = useCallback(async () => {
-    await loadService();
-    setMyEventHandshake((prev) => prev ? { ...prev, user_has_reviewed: true } : null);
-  }, [loadService]);
+    const next = await loadService();
+    const handshakes = await loadHandshakes(next);
+    await loadReportState(next, handshakes);
+    setCommentRefreshKey((value) => value + 1);
+  }, [loadHandshakes, loadReportState, loadService]);
 
-  const handleExpressInterest = () => {
+  const openChatForHandshake = useCallback(
+    (handshake: Handshake, fallbackName: string, fallbackAvatar?: string | null) => {
+      if (!service) return;
+      const requester = handshake.requester;
+      const isRequester =
+        getIdFromField(requester) === currentUser?.id;
+      const otherName = isOwner
+        ? getHandshakeRequesterName(handshake)
+        : fallbackName;
+      const otherAvatar = isOwner
+        ? getAvatarFromUnknown(requester)
+        : fallbackAvatar;
+      const otherUserId = isOwner
+        ? getIdFromField(requester)
+        : service.user.id;
+
+      navigation.navigate("Messages", {
+        screen: "Chat",
+        params: {
+          handshakeId: handshake.id,
+          otherUserName: otherName,
+          otherUserId,
+          otherUserAvatarUrl: otherAvatar ?? service.user.avatar_url ?? undefined,
+          isProvider: Boolean((handshake as Record<string, unknown>).is_current_user_provider),
+          serviceTitle: service.title,
+          serviceType: service.type,
+          scheduleType: service.schedule_type,
+          maxParticipants: service.max_participants,
+          serviceLocationType: service.location_type,
+          serviceLocationArea: service.location_area,
+          serviceExactLocation: service.session_exact_location,
+          serviceLocationGuide: service.session_location_guide,
+          serviceScheduledTime: service.scheduled_time,
+          provisionedHours:
+            typeof (handshake as Record<string, unknown>).provisioned_hours === "number"
+              ? ((handshake as Record<string, unknown>).provisioned_hours as number)
+              : Number(service.duration) || 1,
+        },
+      } as never);
+    },
+    [currentUser?.id, isOwner, navigation, service],
+  );
+
+  const handleExpressInterest = async () => {
+    if (!service) return;
+    if (!isAuthenticated) {
+      openLogin();
+      return;
+    }
     setInterestLoading(true);
-    addServiceInterest(id)
-      .then(() => Alert.alert("Success", "Your interest has been sent to the provider."))
-      .catch((e) => Alert.alert("Error", e instanceof Error ? e.message : "Could not send interest."))
-      .finally(() => setInterestLoading(false));
+    try {
+      const createdHandshake = await addServiceInterest(id);
+      const optimisticHandshakes = upsertHandshake(serviceHandshakes, createdHandshake);
+      setServiceHandshakes(optimisticHandshakes);
+      Alert.alert("Success", "Your interest has been sent.", [
+        {
+          text: "Later",
+          style: "cancel",
+        },
+        {
+          text: "Go to Chat",
+          onPress: () =>
+            openChatForHandshake(
+              createdHandshake,
+              displayName,
+              service.user.avatar_url,
+            ),
+        },
+      ]);
+      const handshakes = await loadHandshakes(service);
+      await loadReportState(service, handshakes);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Could not send interest.";
+      if (message.toLowerCase().includes("already")) {
+        Alert.alert("Already requested", "You already have a handshake for this service.");
+        const handshakes = await loadHandshakes(service);
+        await loadReportState(service, handshakes);
+      } else {
+        Alert.alert("Error", message);
+      }
+    } finally {
+      setInterestLoading(false);
+    }
   };
 
   const handleJoinEvent = async () => {
     if (!service) return;
+    if (!isAuthenticated) {
+      openLogin();
+      return;
+    }
     setEventActionLoading(true);
     try {
       await joinEvent(service.id);
       Alert.alert("Joined!", "You've joined the event.");
-      await loadService();
-      loadHandshakes();
+      const next = await loadService();
+      const handshakes = await loadHandshakes(next);
+      await loadReportState(next, handshakes);
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : "Could not join event.");
     } finally {
@@ -204,9 +589,9 @@ export default function ServiceDetailScreen() {
           try {
             await leaveEvent(myEventHandshake.id);
             Alert.alert("Left", "You have left the event.");
-            setMyEventHandshake(null);
-            await loadService();
-            loadHandshakes();
+            const next = await loadService();
+            const handshakes = await loadHandshakes(next);
+            await loadReportState(next, handshakes);
           } catch (e) {
             Alert.alert("Error", e instanceof Error ? e.message : "Could not leave event.");
           } finally {
@@ -223,7 +608,8 @@ export default function ServiceDetailScreen() {
     try {
       await checkinEvent(myEventHandshake.id);
       Alert.alert("Checked in!", "See you there.");
-      loadHandshakes();
+      const handshakes = await loadHandshakes(service);
+      await loadReportState(service, handshakes);
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : "Could not check in.");
     } finally {
@@ -236,7 +622,8 @@ export default function ServiceDetailScreen() {
     try {
       await markAttended(handshakeId);
       Alert.alert("Done", "Attendance marked.");
-      loadHandshakes();
+      const handshakes = await loadHandshakes(service);
+      await loadReportState(service, handshakes);
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : "Could not mark attendance.");
     } finally {
@@ -255,8 +642,9 @@ export default function ServiceDetailScreen() {
           try {
             await completeEvent(service.id);
             Alert.alert("Done", "Event marked complete!");
-            await loadService();
-            loadHandshakes();
+            const next = await loadService();
+            const handshakes = await loadHandshakes(next);
+            await loadReportState(next, handshakes);
           } catch (e) {
             Alert.alert("Error", e instanceof Error ? e.message : "Could not complete event.");
           } finally {
@@ -274,6 +662,138 @@ export default function ServiceDetailScreen() {
       params: { roomId: service.id, roomTitle: service.title },
     } as any);
   };
+
+  const handleDeleteService = async () => {
+    if (!service) return;
+    Alert.alert("Remove listing", "This action cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          setOwnerActionLoading("delete");
+          try {
+            await deleteService(service.id);
+            Alert.alert("Removed", "The listing has been removed.");
+            navigation.navigate("Home", { screen: "HomeFeed" } as never);
+          } catch (e) {
+            Alert.alert("Error", e instanceof Error ? e.message : "Could not remove listing.");
+          } finally {
+            setOwnerActionLoading(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleEditService = () => {
+    if (!service) return;
+    if (ownerEditLocked) {
+      Alert.alert("Editing locked", ownerEditLockReason ?? "This listing cannot be edited right now.");
+      return;
+    }
+    const screen =
+      service.type === "Offer"
+        ? "PostOffer"
+        : service.type === "Need"
+          ? "PostNeed"
+          : "PostEvent";
+    navigation.navigate("PostService", {
+      screen,
+      params: { serviceId: service.id },
+    } as never);
+  };
+
+  const handleSetCoverPhoto = async (mediaId: string) => {
+    if (!service) return;
+    try {
+      setOwnerActionLoading(`cover:${mediaId}`);
+      const next = await setPrimaryMedia(service.id, mediaId);
+      setService(next);
+      Alert.alert("Updated", "Cover photo updated.");
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Could not set cover photo.");
+    } finally {
+      setOwnerActionLoading(null);
+    }
+  };
+
+  const handleCancelEvent = () => {
+    if (!service) return;
+    Alert.alert("Cancel Event", "Participants will be notified. Continue?", [
+      { text: "Keep event", style: "cancel" },
+      {
+        text: "Cancel Event",
+        style: "destructive",
+        onPress: async () => {
+          setEventActionLoading(true);
+          try {
+            await cancelEvent(service.id);
+            const next = await loadService();
+            const handshakes = await loadHandshakes(next);
+            await loadReportState(next, handshakes);
+            Alert.alert("Cancelled", "Event cancelled.");
+          } catch (e) {
+            Alert.alert("Error", e instanceof Error ? e.message : "Could not cancel event.");
+          } finally {
+            setEventActionLoading(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleTogglePinEvent = async () => {
+    if (!service) return;
+    setEventActionLoading(true);
+    try {
+      const next = await pinEvent(service.id);
+      setService(next);
+      Alert.alert("Updated", next.is_pinned ? "Event pinned." : "Event unpinned.");
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Could not update pin state.");
+    } finally {
+      setEventActionLoading(false);
+    }
+  };
+
+  const submitListingReport = useCallback(async (request: ReportModalRequest) => {
+    if (!service || !currentUser?.id || reportedListing) return;
+    const normalizedType =
+      request.type === "no_show" ? "service_issue" : request.type;
+    await reportService(service.id, {
+      issue_type: normalizedType,
+      description: request.description,
+    });
+    await SecureStore.setItemAsync(
+      getReportKey(currentUser.id, `service:${service.id}`),
+      "1",
+    );
+    setReportedListing(true);
+  }, [currentUser?.id, reportedListing, service]);
+
+  const submitParticipantReport = useCallback(async (request: ReportModalRequest) => {
+    if (!selectedParticipantReport || !currentUser?.id) return;
+    const reportedUserId = getIdFromField(selectedParticipantReport.requester);
+    const normalizedType =
+      request.type === "inappropriate_content" || request.type === "no_show"
+        ? "other"
+        : request.type;
+    await reportHandshake(selectedParticipantReport.id, {
+      issue_type: normalizedType,
+      description: request.description,
+      reported_user_id: reportedUserId,
+    });
+    await SecureStore.setItemAsync(
+      getReportKey(currentUser.id, `handshake:${selectedParticipantReport.id}`),
+      "1",
+    );
+    setReportedParticipantIds((prev) => ({
+      ...prev,
+      [selectedParticipantReport.id]: true,
+    }));
+    setSelectedParticipantReport(null);
+  }, [currentUser?.id, selectedParticipantReport]);
 
   const onSliderMomentumEnd = (
     event: NativeSyntheticEvent<NativeScrollEvent>,
@@ -301,10 +821,14 @@ export default function ServiceDetailScreen() {
     return (
       <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <StatusBar barStyle="dark-content" />
-        <View style={styles.loadingWrap}>
-          <View style={styles.loadingCard}>
-            <ActivityIndicator size="large" color={colors.BLUE} />
-            <Text style={styles.loadingText}>Loading service details...</Text>
+        <View style={styles.skeletonWrap}>
+          <View style={styles.skeletonHero} />
+          <View style={styles.skeletonCard}>
+            <View style={styles.skeletonTitle} />
+            <View style={styles.skeletonLineShort} />
+            <View style={styles.skeletonProviderRow} />
+            <View style={styles.skeletonBlock} />
+            <View style={styles.skeletonBlockTall} />
           </View>
         </View>
       </SafeAreaView>
@@ -335,6 +859,22 @@ export default function ServiceDetailScreen() {
             />
             <Text style={styles.errorTitle}>Something went wrong</Text>
             <Text style={styles.errorText}>{error ?? "Service not found"}</Text>
+            <View style={styles.errorActions}>
+              <TouchableOpacity
+                style={styles.secondaryActionButton}
+                onPress={() => navigation.goBack()}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.secondaryActionText}>Go Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.primaryActionButton}
+                onPress={() => navigation.navigate("Home", { screen: "HomeFeed" } as never)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.primaryActionText}>Back to Browse</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </SafeAreaView>
@@ -342,8 +882,6 @@ export default function ServiceDetailScreen() {
   }
 
   const headerColor = headerColorFor(service.id);
-  const isOffer = service.type === "Offer";
-  const isEvent = service.type === "Event";
   const providerSectionLabel = isOffer
     ? "Service Provider"
     : isEvent
@@ -360,6 +898,8 @@ export default function ServiceDetailScreen() {
       .join(" ") || "Unknown";
   const initials = getInitials(service.user.first_name, service.user.last_name);
   const isRecurring = service.schedule_type === "Recurrent";
+  const createdLabel = formatScheduledDateTime(service.created_at);
+  const serviceStatusLower = service.status?.toLowerCase();
 
   const mediaItems = (service.media ?? []).filter(
     (item): item is MediaItem => Boolean(item?.file_url),
@@ -371,7 +911,7 @@ export default function ServiceDetailScreen() {
       ? {
           key: "duration",
           icon: "time-outline" as const,
-          text: service.duration,
+          text: `${Number(service.duration) || service.duration} hour${Number(service.duration) === 1 ? "" : "s"}`,
         }
       : null,
     service.location_area || service.location_type
@@ -390,12 +930,27 @@ export default function ServiceDetailScreen() {
           }`,
         }
       : null,
+    isEvent && service.scheduled_time
+      ? {
+          key: "scheduled-time",
+          icon: "calendar-clear-outline" as const,
+          text: formatScheduledDateTime(service.scheduled_time),
+        }
+      : null,
+    isEvent && service.scheduled_time
+      ? {
+          key: "time-until",
+          icon: "hourglass-outline" as const,
+          text: timeUntilLabel(service.scheduled_time),
+        }
+      : null,
     {
       key: "participants",
       icon: "people-outline" as const,
-      text: `Up to ${service.max_participants} participant${
-        service.max_participants !== 1 ? "s" : ""
-      }`,
+      text:
+        service.max_participants > 1
+          ? `${participantCount}/${service.max_participants} participants`
+          : "1 participant",
     },
     isRecurring
       ? {
@@ -411,22 +966,65 @@ export default function ServiceDetailScreen() {
     text: string;
     highlight?: boolean;
   }>;
+  const slotProgressPct = Math.max(
+    0,
+    Math.min(100, Math.round((participantCount / Math.max(1, maxParticipants)) * 100)),
+  );
+  const currentHandshakeStatus = myHandshake?.status?.toLowerCase() ?? null;
+  const currentHandshakeLabel =
+    currentHandshakeStatus
+      ? currentHandshakeStatus.charAt(0).toUpperCase() + currentHandshakeStatus.slice(1).replace(/_/g, " ")
+      : null;
+  const showOpenChat = Boolean(myHandshake) && !isEvent && !isOwner;
+  const disableNonEventCta =
+    !isEvent &&
+    (!isAuthenticated ||
+      isOwner ||
+      serviceStatusLower === "completed" ||
+      serviceStatusLower === "cancelled" ||
+      showOpenChat ||
+      isFull);
+  const listingReportOptions: ReportOption[] = [
+    { value: "inappropriate_content", label: "Inappropriate Content" },
+    { value: "spam", label: "Spam" },
+    { value: "service_issue", label: "Service Issue" },
+    { value: "harassment", label: "Harassment" },
+    { value: "scam", label: "Scam or Fraud" },
+    { value: "other", label: "Other" },
+  ];
+  const participantReportOptions: ReportOption[] = [
+    { value: "no_show", label: "No-Show" },
+    { value: "harassment", label: "Harassment" },
+    { value: "scam", label: "Scam or Fraud" },
+    { value: "service_issue", label: "Service Issue" },
+    { value: "other", label: "Other" },
+  ];
+  const evaluationTarget = isEvent ? myEventHandshake : evaluationHandshake;
+  const evaluationCounterpartName = isEvent
+    ? service.title
+    : isOwner && evaluationHandshake
+      ? getDisplayNameFromUnknown(evaluationHandshake.requester)
+      : displayName;
 
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-      bounces={false}
-    >
-      <StatusBar barStyle={hasMedia ? "light-content" : "light-content"} />
+    <SafeAreaView style={styles.container} edges={["bottom"]}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refreshAll} />
+        }
+      >
+      <StatusBar barStyle={"light-content"} />
 
       {hasMedia ? (
         <View style={styles.headerImageWrap}>
           <FlatList
             ref={sliderRef}
             data={mediaItems}
-            keyExtractor={(_, index) => `media-${index}`}
+            keyExtractor={(item) => item.id}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
@@ -435,6 +1033,18 @@ export default function ServiceDetailScreen() {
               <TouchableOpacity
                 activeOpacity={0.95}
                 onPress={() => openImageModal(index)}
+                onLongPress={() => {
+                  if (!isOwner || mediaItems[0]?.id === item.id) return;
+                  Alert.alert("Set cover photo", "Use this image as the cover photo?", [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Set Cover",
+                      onPress: () => {
+                        void handleSetCoverPhoto(item.id);
+                      },
+                    },
+                  ]);
+                }}
                 style={styles.slide}
               >
                 <Image
@@ -461,27 +1071,41 @@ export default function ServiceDetailScreen() {
           </View>
 
           <View style={styles.sliderFooter}>
-            <View
-              style={[
-                styles.typeBadge,
-                service.type === "Offer"
-                  ? styles.typeOffer
-                  : service.type === "Need"
-                    ? styles.typeWant
-                    : styles.typeEvent,
-              ]}
-            >
-              <Text
-                style={
+            <View style={styles.headerBadgeRow}>
+              <View
+                style={[
+                  styles.typeBadge,
                   service.type === "Offer"
-                    ? styles.typeOfferBadgeText
+                    ? styles.typeOffer
                     : service.type === "Need"
-                      ? styles.typeWantBadgeText
-                      : styles.typeEventBadgeText
-                }
+                      ? styles.typeWant
+                      : styles.typeEvent,
+                ]}
               >
-                {service.type}
-              </Text>
+                <Text
+                  style={
+                    service.type === "Offer"
+                      ? styles.typeOfferBadgeText
+                      : service.type === "Need"
+                        ? styles.typeWantBadgeText
+                        : styles.typeEventBadgeText
+                  }
+                >
+                  {service.type}
+                </Text>
+              </View>
+              {isRecurring ? (
+                <View style={styles.headerChip}>
+                  <Ionicons name="repeat-outline" size={12} color={colors.PURPLE} />
+                  <Text style={[styles.headerChipText, { color: colors.PURPLE }]}>Recurring</Text>
+                </View>
+              ) : null}
+              {isEvent && service.is_pinned ? (
+                <View style={styles.headerChip}>
+                  <Ionicons name="pin" size={12} color={colors.AMBER} />
+                  <Text style={[styles.headerChipText, { color: colors.AMBER }]}>Featured Event</Text>
+                </View>
+              ) : null}
             </View>
 
             {mediaItems.length > 1 ? (
@@ -515,19 +1139,37 @@ export default function ServiceDetailScreen() {
           </View>
 
           <View style={styles.headerContent}>
-            <View
-              style={[
-                styles.typeBadge,
-                isOffer ? styles.typeOffer : styles.typeWant,
-              ]}
-            >
-              <Text
-                style={
-                  isOffer ? styles.typeOfferBadgeText : styles.typeWantBadgeText
-                }
+            <View style={styles.headerBadgeRow}>
+              <View
+                style={[
+                  styles.typeBadge,
+                  isOffer ? styles.typeOffer : isEvent ? styles.typeEvent : styles.typeWant,
+                ]}
               >
-                {service.type}
-              </Text>
+                <Text
+                  style={
+                    isOffer
+                      ? styles.typeOfferBadgeText
+                      : isEvent
+                        ? styles.typeEventBadgeText
+                        : styles.typeWantBadgeText
+                  }
+                >
+                  {service.type}
+                </Text>
+              </View>
+              {isRecurring ? (
+                <View style={styles.headerChip}>
+                  <Ionicons name="repeat-outline" size={12} color={colors.PURPLE} />
+                  <Text style={[styles.headerChipText, { color: colors.PURPLE }]}>Recurring</Text>
+                </View>
+              ) : null}
+              {isEvent && service.is_pinned ? (
+                <View style={styles.headerChip}>
+                  <Ionicons name="pin" size={12} color={colors.AMBER} />
+                  <Text style={[styles.headerChipText, { color: colors.AMBER }]}>Featured Event</Text>
+                </View>
+              ) : null}
             </View>
 
             <Text style={styles.headerTitle}>{service.title}</Text>
@@ -538,6 +1180,17 @@ export default function ServiceDetailScreen() {
       <View style={styles.contentContainer}>
         <View style={styles.contentCard}>
           <Text style={styles.serviceTitle}>{service.title}</Text>
+
+          <View style={styles.metaRow}>
+            <View style={styles.metaChip}>
+              <Ionicons name="chatbubble-ellipses-outline" size={13} color={colors.GRAY600} />
+              <Text style={styles.metaChipText}>{service.comment_count ?? 0} review{(service.comment_count ?? 0) !== 1 ? "s" : ""}</Text>
+            </View>
+            <View style={styles.metaChip}>
+              <Ionicons name="calendar-outline" size={13} color={colors.GRAY600} />
+              <Text style={styles.metaChipText}>{createdLabel}</Text>
+            </View>
+          </View>
 
           <View style={styles.userSection}>
             <View style={styles.providerHeaderRow}>
@@ -564,9 +1217,13 @@ export default function ServiceDetailScreen() {
               ) : null}
             </View>
             <View style={styles.userRow}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{initials}</Text>
-              </View>
+              {service.user.avatar_url ? (
+                <Image source={{ uri: service.user.avatar_url }} style={styles.avatarImageLg} />
+              ) : (
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{initials}</Text>
+                </View>
+              )}
 
               <View style={styles.userMeta}>
                 <Text style={styles.userName}>{displayName}</Text>
@@ -580,6 +1237,21 @@ export default function ServiceDetailScreen() {
                   <Text style={styles.timeAgo}>
                     {formatTimeAgo(service.created_at)}
                   </Text>
+                </View>
+                {service.user.bio ? (
+                  <Text style={styles.userBio} numberOfLines={2}>
+                    {service.user.bio}
+                  </Text>
+                ) : null}
+                <View style={styles.providerStatsRow}>
+                  <View style={styles.providerStatCard}>
+                    <Text style={styles.providerStatValue}>{service.user.karma_score ?? 0}</Text>
+                    <Text style={styles.providerStatLabel}>Karma</Text>
+                  </View>
+                  <View style={styles.providerStatCard}>
+                    <Text style={styles.providerStatValue}>{formatJoinedDate(service.user.date_joined)}</Text>
+                    <Text style={styles.providerStatLabel}>Member since</Text>
+                  </View>
                 </View>
               </View>
             </View>
@@ -626,6 +1298,46 @@ export default function ServiceDetailScreen() {
             </View>
           </View>
 
+          {maxParticipants > 1 ? (
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionLabel}>Availability</Text>
+              <View style={[styles.progressCard, nearlyFull && styles.progressCardWarning]}>
+                {nearlyFull ? (
+                  <Text style={styles.nearlyFullText}>Nearly Full</Text>
+                ) : null}
+                <View style={styles.progressMetaRow}>
+                  <Text style={styles.progressLabel}>
+                    {participantCount} of {maxParticipants} spots taken
+                  </Text>
+                  <Text style={styles.progressLabel}>{slotProgressPct}%</Text>
+                </View>
+                <View style={styles.progressTrack}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      {
+                        width: `${slotProgressPct}%`,
+                        backgroundColor: nearlyFull ? colors.RED : isEvent ? colors.AMBER : colors.GREEN,
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            </View>
+          ) : null}
+
+          {mapPreviewUrl ? (
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionLabel}>Approximate Location</Text>
+              <View style={styles.mapCard}>
+                <Image source={{ uri: mapPreviewUrl }} style={styles.mapPreview} />
+                <Text style={styles.mapPrivacyText}>
+                  Approximate location only. Exact address is shared after acceptance.
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
           {service.tags?.length > 0 && (
             <View style={styles.sectionBlock}>
               <Text style={styles.sectionLabel}>Tags</Text>
@@ -645,6 +1357,98 @@ export default function ServiceDetailScreen() {
                 <EventEvaluationSummaryCard summary={service.event_evaluation_summary} />
               </View>
           )}
+
+          {isEvent ? (
+            <View style={styles.sectionBlock}>
+              <TouchableOpacity
+                style={styles.eventModalTrigger}
+                onPress={() => openEventDetailModal(isOwner ? "participants" : "details")}
+                activeOpacity={0.88}
+              >
+                <View style={styles.eventModalTriggerIcon}>
+                  <Ionicons name="calendar-outline" size={18} color={colors.AMBER} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.eventModalTriggerTitle}>
+                    {isOwner ? "Open Event Panel" : "View Event Details"}
+                  </Text>
+                  <Text style={styles.eventModalTriggerSubtitle}>
+                    {isOwner
+                      ? "Manage participants and review event details in one place."
+                      : "See schedule, location, and event info in a dedicated panel."}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.GRAY400} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {!isEvent && isOwner ? (
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionLabel}>Owner Actions</Text>
+              <View style={styles.ownerActionsCard}>
+                <View style={styles.ownerButtonRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.secondaryInlineButton,
+                      ownerEditLocked && styles.disabledInlineButton,
+                    ]}
+                    onPress={handleEditService}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="create-outline" size={16} color={colors.GRAY800} />
+                    <Text style={styles.secondaryInlineButtonText}>Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.secondaryInlineButton,
+                      ownerActionLoading === "delete" && styles.disabledInlineButton,
+                    ]}
+                    onPress={handleDeleteService}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="trash-outline" size={16} color={colors.RED} />
+                    <Text style={[styles.secondaryInlineButtonText, { color: colors.RED }]}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+                {ownerEditLockReason ? (
+                  <Text style={styles.lockReasonText}>{ownerEditLockReason}</Text>
+                ) : null}
+
+                {ownerIncomingHandshakes.length > 0 ? (
+                  <View style={styles.ownerList}>
+                    {ownerIncomingHandshakes.map((handshake) => (
+                      <View key={handshake.id} style={styles.ownerRequestRow}>
+                        <View style={styles.ownerRequestMeta}>
+                          <Text style={styles.ownerRequestName}>
+                            {getHandshakeRequesterName(handshake)}
+                          </Text>
+                          <Text style={styles.ownerRequestSub}>
+                            {formatScheduledDateTime(handshake.created_at)} · {handshake.status}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.chatActionButton}
+                          onPress={() =>
+                            openChatForHandshake(
+                              handshake,
+                              displayName,
+                              service.user.avatar_url,
+                            )
+                          }
+                        >
+                          <Ionicons name="chatbubble-ellipses-outline" size={15} color={colors.WHITE} />
+                          <Text style={styles.chatActionButtonText}>Chat</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.ownerEmptyText}>No incoming requests yet.</Text>
+                )}
+              </View>
+            </View>
+          ) : null}
 
           {/* ─── Event lifecycle CTA ─── */}
           {isEvent && !isOwner && (() => {
@@ -682,16 +1486,6 @@ export default function ServiceDetailScreen() {
                     <Text style={styles.attendedSubtitle}>The organizer marked you as attended.</Text>
                   </View>
                 </View>
-                {!myEventHandshake?.user_has_reviewed && (
-                  <TouchableOpacity style={styles.evaluationButton} onPress={() => setShowEvaluationModal(true)} activeOpacity={0.85}>
-                    <Ionicons name="star-outline" size={16} color={colors.WHITE} />
-                    <Text style={styles.evaluationButtonText}>Leave Evaluation</Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity style={styles.eventChatButton} onPress={openEventChat} activeOpacity={0.85}>
-                  <Ionicons name="chatbubbles-outline" size={16} color={colors.WHITE} />
-                  <Text style={styles.eventChatButtonText}>Event Chat</Text>
-                </TouchableOpacity>
               </View>
             );
 
@@ -701,10 +1495,6 @@ export default function ServiceDetailScreen() {
                   <Ionicons name="checkmark-done" size={20} color={colors.GREEN} />
                   <Text style={[styles.bannerText, { color: colors.GREEN, marginLeft: 10 }]}>Checked in</Text>
                 </View>
-                <TouchableOpacity style={styles.eventChatButton} onPress={openEventChat} activeOpacity={0.85}>
-                  <Ionicons name="chatbubbles-outline" size={16} color={colors.WHITE} />
-                  <Text style={styles.eventChatButtonText}>Event Chat</Text>
-                </TouchableOpacity>
               </View>
             );
 
@@ -714,32 +1504,6 @@ export default function ServiceDetailScreen() {
                   <Ionicons name="calendar-outline" size={20} color={colors.GREEN} />
                   <Text style={[styles.bannerText, { color: colors.GREEN, marginLeft: 10 }]}>You've joined this event</Text>
                 </View>
-                {lockdown ? (
-                  <TouchableOpacity
-                    style={styles.joinButton}
-                    onPress={handleCheckin}
-                    disabled={eventActionLoading}
-                    activeOpacity={0.85}
-                  >
-                    {eventActionLoading ? <ActivityIndicator color="#fff" size="small" /> : (
-                      <><Ionicons name="log-in-outline" size={16} color={colors.WHITE} /><Text style={styles.joinButtonText}>Check In</Text></>
-                    )}
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.leaveButton}
-                    onPress={handleLeaveEvent}
-                    disabled={eventActionLoading}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="exit-outline" size={16} color={colors.RED} />
-                    <Text style={styles.leaveButtonText}>Leave Event</Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity style={styles.eventChatButton} onPress={openEventChat} activeOpacity={0.85}>
-                  <Ionicons name="chatbubbles-outline" size={16} color={colors.WHITE} />
-                  <Text style={styles.eventChatButtonText}>Event Chat</Text>
-                </TouchableOpacity>
               </View>
             );
 
@@ -772,107 +1536,117 @@ export default function ServiceDetailScreen() {
               </View>
             );
 
-            if (service.status === "Active" && !status) return (
-              <TouchableOpacity
-                style={[styles.joinButton, eventActionLoading && styles.ctaDisabled]}
-                onPress={handleJoinEvent}
-                disabled={eventActionLoading}
-                activeOpacity={0.9}
-              >
-                {eventActionLoading ? <ActivityIndicator color="#fff" size="small" /> : (
-                  <><Ionicons name="add-circle-outline" size={18} color="#fff" /><Text style={styles.joinButtonText}>Join Event</Text></>
-                )}
-              </TouchableOpacity>
-            );
+            if (service.status === "Active" && !status) return null;
 
             return null;
           })()}
 
-          {/* ─── Organizer management ─── */}
-          {isEvent && isOwner && (
-            <View style={styles.sectionBlock}>
-              <Text style={styles.sectionLabel}>Participants</Text>
-              {allEventHandshakes
-                .filter((h) => ["accepted", "checked_in", "attended", "no_show"].includes(h.status))
-                .map((h) => {
-                  const name = (() => {
-                    const r = h.requester;
-                    if (!r || typeof r === "string") return r ?? "Unknown";
-                    const obj = r as Record<string, unknown>;
-                    return [obj.first_name, obj.last_name].filter(Boolean).join(" ") || String(obj.email ?? "Participant");
-                  })();
-                  const badgeColors: Record<string, { bg: string; fg: string }> = {
-                    accepted: { bg: "#dcfce7", fg: "#166534" },
-                    checked_in: { bg: "#d1fae5", fg: "#065f46" },
-                    attended: { bg: "#d1fae5", fg: "#065f46" },
-                    no_show: { bg: "#fee2e2", fg: "#991b1b" },
-                  };
-                  const badge = badgeColors[h.status] ?? { bg: colors.GRAY100, fg: colors.GRAY500 };
-                  return (
-                    <View key={h.id} style={styles.rosterRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.rosterName}>{name}</Text>
-                        <View style={[styles.rosterBadge, { backgroundColor: badge.bg }]}>
-                          <Text style={[styles.rosterBadgeText, { color: badge.fg }]}>
-                            {h.status === "checked_in" ? "Checked In" : h.status === "no_show" ? "No-Show" : h.status.charAt(0).toUpperCase() + h.status.slice(1)}
-                          </Text>
-                        </View>
-                      </View>
-                      {h.status === "checked_in" && (
-                        <TouchableOpacity
-                          style={styles.markAttendedBtn}
-                          onPress={() => handleMarkAttended(h.id)}
-                          disabled={markingAttendedId === h.id}
-                          activeOpacity={0.85}
-                        >
-                          {markingAttendedId === h.id
-                            ? <ActivityIndicator size="small" color={colors.WHITE} />
-                            : <Text style={styles.markAttendedText}>Mark Attended</Text>
-                          }
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  );
-                })}
-
-              {service.status === "Active" && (
-                <TouchableOpacity
-                  style={[styles.completeEventButton, eventActionLoading && styles.ctaDisabled]}
-                  onPress={handleCompleteEvent}
-                  disabled={eventActionLoading}
-                  activeOpacity={0.85}
-                >
-                  {eventActionLoading ? <ActivityIndicator color="#fff" size="small" /> : (
-                    <><Ionicons name="checkmark-done-outline" size={16} color={colors.WHITE} /><Text style={styles.completeEventText}>Complete Event</Text></>
-                  )}
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity style={styles.eventChatButton} onPress={openEventChat} activeOpacity={0.85}>
-                <Ionicons name="chatbubbles-outline" size={16} color={colors.WHITE} />
-                <Text style={styles.eventChatButtonText}>Event Chat</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
           {/* ─── Non-event: Express Interest ─── */}
-          {!isEvent && (
+          {!isEvent && !isOwner && (
+            <>
+            {showOpenChat && myHandshake ? (
+              <View style={styles.sectionBlock}>
+                <TouchableOpacity
+                  style={styles.openChatButton}
+                  onPress={() => openChatForHandshake(myHandshake, displayName, service.user.avatar_url)}
+                  activeOpacity={0.9}
+                >
+                  <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.WHITE} />
+                  <Text style={styles.ctaText}>
+                    {currentHandshakeStatus === "pending" ? "View Chat (Pending)" : "Open Chat"}
+                  </Text>
+                </TouchableOpacity>
+                {currentHandshakeLabel ? (
+                  <Text style={styles.statusHelperText}>Current status: {currentHandshakeLabel}</Text>
+                ) : null}
+              </View>
+            ) : (
             <TouchableOpacity
-              style={[styles.ctaButton, interestLoading && styles.ctaDisabled]}
+              style={[
+                styles.ctaButton,
+                disableNonEventCta && styles.disabledInlineButton,
+                isOffer ? styles.offerCtaButton : styles.needCtaButton,
+                interestLoading && styles.ctaDisabled,
+              ]}
               onPress={handleExpressInterest}
-              disabled={interestLoading}
+              disabled={disableNonEventCta || interestLoading}
               activeOpacity={0.9}
             >
               {interestLoading ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
                 <>
-                  <Ionicons name="heart-outline" size={18} color="#fff" />
-                  <Text style={styles.ctaText}>Express interest</Text>
+                  <Ionicons
+                    name={
+                      !isAuthenticated
+                        ? "log-in-outline"
+                        : serviceStatusLower === "completed" || serviceStatusLower === "cancelled"
+                          ? "lock-closed-outline"
+                          : isFull
+                            ? "people-outline"
+                            : "heart-outline"
+                    }
+                    size={18}
+                    color="#fff"
+                  />
+                  <Text style={styles.ctaText}>
+                    {!isAuthenticated
+                      ? "Log in to request"
+                      : serviceStatusLower === "completed" || serviceStatusLower === "cancelled"
+                        ? `Service ${service.status}`
+                        : isFull
+                          ? "All Slots Taken"
+                          : isOffer
+                            ? "Request this Service"
+                            : "Offer to Help"}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
+            )}
+            {evaluationTarget && currentHandshakeStatus !== "pending" && evaluationWindow.label ? (
+              <View style={styles.sectionBlock}>
+                {!evaluationTarget.user_has_reviewed && evaluationWindow.isOpen ? (
+                  <TouchableOpacity
+                    style={styles.evaluationButton}
+                    onPress={() => setShowEvaluationModal(true)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="star-outline" size={16} color={colors.WHITE} />
+                    <Text style={styles.evaluationButtonText}>Leave Evaluation</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <Text style={styles.statusHelperText}>
+                  {evaluationTarget.user_has_reviewed
+                    ? "You already reviewed this exchange."
+                    : evaluationWindow.label}
+                </Text>
+              </View>
+            ) : null}
+            </>
           )}
+
+          <View style={styles.sectionBlock}>
+            <ServiceCommentsSection
+              serviceId={service.id}
+              refreshKey={commentRefreshKey}
+            />
+          </View>
+
+          {isAuthenticated && !isOwner ? (
+            <View style={styles.sectionBlock}>
+              <TouchableOpacity
+                style={styles.reportLink}
+                onPress={() => setShowListingReportModal(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="flag-outline" size={15} color={reportedListing ? colors.GRAY400 : colors.GRAY600} />
+                <Text style={[styles.reportLinkText, reportedListing && styles.reportLinkTextDisabled]}>
+                  {reportedListing ? "Already Reported" : "Report this listing"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -883,17 +1657,80 @@ export default function ServiceDetailScreen() {
         onClose={() => setImageModalVisible(false)}
       />
 
-      {isEvent && myEventHandshake?.status === "attended" && !myEventHandshake.user_has_reviewed && (
+      {evaluationTarget && (
         <ChatEvaluationModal
           visible={showEvaluationModal}
-          handshakeId={myEventHandshake.id}
-          counterpartName={service.title}
-          isEventEvaluation
+          handshakeId={evaluationTarget.id}
+          counterpartName={evaluationCounterpartName}
+          isEventEvaluation={isEvent}
+          alreadyReviewed={evaluationTarget.user_has_reviewed}
           onClose={() => setShowEvaluationModal(false)}
           onSubmitted={handleEvaluationSubmitted}
         />
       )}
-    </ScrollView>
+
+      {service && isEvent ? (
+        <EventDetailModal
+          visible={showEventDetailModal}
+          activeTab={eventDetailModalTab}
+          onTabChange={setEventDetailModalTab}
+          onClose={() => setShowEventDetailModal(false)}
+          onOpenChat={openEventChat}
+          onOpenEvaluation={() => {
+            setShowEventDetailModal(false);
+            setShowEvaluationModal(true);
+          }}
+          onJoinEvent={handleJoinEvent}
+          onLeaveEvent={handleLeaveEvent}
+          onCheckinEvent={handleCheckin}
+          onEditEvent={handleEditService}
+          onCancelEvent={handleCancelEvent}
+          onTogglePinEvent={handleTogglePinEvent}
+          service={service}
+          handshakes={allEventHandshakes}
+          isOwner={Boolean(isOwner)}
+          isAdmin={Boolean(isAdmin)}
+          ownerEditLocked={ownerEditLocked}
+          ownerEditLockReason={ownerEditLockReason}
+          canOpenChat={Boolean(isOwner || ["accepted", "checked_in", "attended"].includes(eventParticipantStatus ?? ""))}
+          participantStatus={eventParticipantStatus}
+          participantActionLoading={eventActionLoading}
+          participantBanned={isEventBanned(currentUser?.is_organizer_banned_until)}
+          participantFull={isEventFull(service.max_participants, service.participant_count ?? 0)}
+          participantFuture={isFutureEvent(service.scheduled_time)}
+          participantPast={isPastEvent(service.scheduled_time)}
+          participantLockdown={isWithinLockdownWindow(service.scheduled_time)}
+          markingHandshakeId={markingAttendedId}
+          completing={eventActionLoading}
+          reportedParticipantIds={reportedParticipantIds}
+          eventEvaluationTarget={eventEvaluationTarget}
+          onMarkAttended={handleMarkAttended}
+          onOpenParticipantReport={setSelectedParticipantReport}
+          onCompleteEvent={handleCompleteEvent}
+        />
+      ) : null}
+
+      <ReportModal
+        visible={showListingReportModal}
+        onClose={() => setShowListingReportModal(false)}
+        onSubmit={submitListingReport}
+        targetLabel="listing"
+        title="Report this listing"
+        subtitle="Select a reason. Moderators will review your report."
+        options={listingReportOptions}
+      />
+
+      <ReportModal
+        visible={Boolean(selectedParticipantReport)}
+        onClose={() => setSelectedParticipantReport(null)}
+        onSubmit={submitParticipantReport}
+        targetLabel="participant"
+        title="Report participant"
+        subtitle="Select a reason. Moderators will review the report."
+        options={participantReportOptions}
+      />
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -914,6 +1751,61 @@ const getStyles = (topInset: number, bottomInset: number) =>
       justifyContent: "center",
       alignItems: "center",
       paddingHorizontal: 24,
+    },
+    skeletonWrap: {
+      flex: 1,
+      paddingHorizontal: 16,
+      paddingTop: 12,
+    },
+    skeletonHero: {
+      height: HEADER_HEIGHT,
+      borderRadius: 28,
+      backgroundColor: colors.GRAY200,
+      marginBottom: -12,
+    },
+    skeletonCard: {
+      backgroundColor: colors.WHITE,
+      borderRadius: 28,
+      padding: 18,
+      shadowColor: "#0f172a",
+      shadowOpacity: 0.06,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
+    },
+    skeletonTitle: {
+      width: "72%",
+      height: 28,
+      borderRadius: 12,
+      backgroundColor: colors.GRAY200,
+      marginBottom: 12,
+    },
+    skeletonLineShort: {
+      width: "36%",
+      height: 14,
+      borderRadius: 8,
+      backgroundColor: colors.GRAY200,
+      marginBottom: 14,
+    },
+    skeletonProviderRow: {
+      width: "100%",
+      height: 92,
+      borderRadius: 18,
+      backgroundColor: colors.GRAY100,
+      marginBottom: 14,
+    },
+    skeletonBlock: {
+      width: "100%",
+      height: 120,
+      borderRadius: 18,
+      backgroundColor: colors.GRAY100,
+      marginBottom: 14,
+    },
+    skeletonBlockTall: {
+      width: "100%",
+      height: 220,
+      borderRadius: 18,
+      backgroundColor: colors.GRAY100,
     },
     contentContainer: {
       marginTop: -10,
@@ -965,6 +1857,39 @@ const getStyles = (topInset: number, bottomInset: number) =>
       textAlign: "center",
       lineHeight: 22,
     },
+    errorActions: {
+      flexDirection: "row",
+      gap: 10,
+      marginTop: 18,
+    },
+    primaryActionButton: {
+      minHeight: 44,
+      borderRadius: 12,
+      backgroundColor: colors.BLUE,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 14,
+    },
+    primaryActionText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.WHITE,
+    },
+    secondaryActionButton: {
+      minHeight: 44,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 14,
+      backgroundColor: colors.WHITE,
+    },
+    secondaryActionText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.GRAY700,
+    },
     header: {
       position: "relative",
       paddingTop: topInset + 8,
@@ -1005,6 +1930,25 @@ const getStyles = (topInset: number, bottomInset: number) =>
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+    },
+    headerBadgeRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      flexWrap: "wrap",
+    },
+    headerChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: "rgba(255,255,255,0.92)",
+    },
+    headerChipText: {
+      fontSize: 11,
+      fontWeight: "800",
     },
     pagination: {
       flexDirection: "row",
@@ -1144,6 +2088,26 @@ const getStyles = (topInset: number, bottomInset: number) =>
       marginBottom: 16,
       letterSpacing: -0.3,
     },
+    metaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+      marginBottom: 16,
+    },
+    metaChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: 999,
+      backgroundColor: colors.GRAY100,
+    },
+    metaChipText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.GRAY700,
+    },
     userSection: {
       marginBottom: 10,
     },
@@ -1190,6 +2154,13 @@ const getStyles = (topInset: number, bottomInset: number) =>
       shadowOffset: { width: 0, height: 4 },
       elevation: 2,
     },
+    avatarImageLg: {
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+      marginRight: 12,
+      backgroundColor: colors.GRAY200,
+    },
     avatarText: {
       fontSize: 17,
       fontWeight: "800",
@@ -1202,6 +2173,37 @@ const getStyles = (topInset: number, bottomInset: number) =>
       fontSize: 16,
       fontWeight: "800",
       color: "#1f2937",
+    },
+    userBio: {
+      fontSize: 13,
+      color: colors.GRAY600,
+      lineHeight: 19,
+      marginTop: 8,
+    },
+    providerStatsRow: {
+      flexDirection: "row",
+      gap: 8,
+      marginTop: 12,
+    },
+    providerStatCard: {
+      flex: 1,
+      borderRadius: 14,
+      backgroundColor: colors.WHITE,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+    },
+    providerStatValue: {
+      fontSize: 13,
+      fontWeight: "800",
+      color: colors.GRAY900,
+    },
+    providerStatLabel: {
+      marginTop: 3,
+      fontSize: 11,
+      fontWeight: "700",
+      color: colors.GRAY500,
     },
     timeRow: {
       flexDirection: "row",
@@ -1280,6 +2282,63 @@ const getStyles = (topInset: number, bottomInset: number) =>
       height: 1,
       backgroundColor: "#eef2f6",
       marginLeft: 44,
+    },
+    progressCard: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      backgroundColor: colors.WHITE,
+      padding: 14,
+    },
+    progressCardWarning: {
+      borderColor: `${colors.RED}40`,
+      backgroundColor: colors.RED_LT,
+    },
+    nearlyFullText: {
+      fontSize: 11,
+      fontWeight: "800",
+      color: colors.RED,
+      marginBottom: 8,
+    },
+    progressMetaRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 8,
+    },
+    progressLabel: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: colors.GRAY700,
+    },
+    progressTrack: {
+      height: 10,
+      borderRadius: 999,
+      backgroundColor: colors.GRAY200,
+      overflow: "hidden",
+    },
+    progressFill: {
+      height: "100%",
+      borderRadius: 999,
+    },
+    mapCard: {
+      overflow: "hidden",
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      backgroundColor: colors.WHITE,
+    },
+    mapPreview: {
+      width: "100%",
+      height: 190,
+      backgroundColor: colors.GRAY200,
+    },
+    mapPrivacyText: {
+      fontSize: 12,
+      lineHeight: 18,
+      color: colors.GRAY600,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
     },
 
     tagsRow: {
@@ -1406,6 +2465,37 @@ const getStyles = (topInset: number, bottomInset: number) =>
       color: colors.RED,
     },
 
+    eventModalTrigger: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      backgroundColor: colors.WHITE,
+      paddingHorizontal: 14,
+      paddingVertical: 14,
+    },
+    eventModalTriggerIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.AMBER_LT,
+    },
+    eventModalTriggerTitle: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: colors.GRAY900,
+    },
+    eventModalTriggerSubtitle: {
+      marginTop: 3,
+      fontSize: 12,
+      lineHeight: 18,
+      color: colors.GRAY500,
+    },
+
     eventChatButton: {
       flexDirection: "row",
       alignItems: "center",
@@ -1421,6 +2511,104 @@ const getStyles = (topInset: number, bottomInset: number) =>
       fontSize: 14,
       fontWeight: "700",
       color: colors.WHITE,
+    },
+    ownerActionsCard: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      backgroundColor: colors.WHITE,
+      padding: 14,
+    },
+    ownerButtonRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+      marginBottom: 10,
+    },
+    secondaryInlineButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      backgroundColor: colors.WHITE,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    secondaryInlineButtonText: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: colors.GRAY800,
+    },
+    disabledInlineButton: {
+      opacity: 0.55,
+    },
+    ownerList: {
+      gap: 10,
+      marginTop: 4,
+    },
+    ownerRequestRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      borderRadius: 14,
+      backgroundColor: colors.GRAY50,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+    },
+    ownerRequestMeta: {
+      flex: 1,
+    },
+    ownerRequestName: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: colors.GRAY900,
+    },
+    ownerRequestSub: {
+      marginTop: 4,
+      fontSize: 12,
+      color: colors.GRAY500,
+    },
+    ownerEmptyText: {
+      fontSize: 13,
+      color: colors.GRAY500,
+    },
+    chatActionButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderRadius: 10,
+      backgroundColor: colors.BLUE,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    chatActionButtonText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.WHITE,
+    },
+    pinButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      alignSelf: "flex-start",
+      borderRadius: 999,
+      backgroundColor: colors.AMBER_LT,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      marginBottom: 10,
+    },
+    pinButtonText: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: colors.AMBER,
+    },
+    lockReasonText: {
+      fontSize: 12,
+      lineHeight: 18,
+      color: colors.GRAY500,
+      marginBottom: 10,
     },
 
     rosterRow: {
@@ -1462,6 +2650,24 @@ const getStyles = (topInset: number, bottomInset: number) =>
       fontWeight: "700",
       color: colors.WHITE,
     },
+    participantReportButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      alignSelf: "flex-start",
+      marginTop: 6,
+    },
+    participantReportText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.RED,
+    },
+    alreadyReportedText: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: colors.GRAY400,
+      marginTop: 6,
+    },
 
     completeEventButton: {
       flexDirection: "row",
@@ -1495,6 +2701,26 @@ const getStyles = (topInset: number, bottomInset: number) =>
       shadowOffset: { width: 0, height: 8 },
       elevation: 4,
     },
+    offerCtaButton: {
+      backgroundColor: colors.GREEN,
+    },
+    needCtaButton: {
+      backgroundColor: colors.BLUE,
+    },
+    openChatButton: {
+      minHeight: 56,
+      borderRadius: 16,
+      backgroundColor: colors.BLUE,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
+      gap: 8,
+      shadowColor: "#000",
+      shadowOpacity: 0.14,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
+    },
 
     ctaDisabled: {
       opacity: 0.72,
@@ -1505,5 +2731,25 @@ const getStyles = (topInset: number, bottomInset: number) =>
       fontWeight: "800",
       color: colors.WHITE,
       letterSpacing: 0.2,
+    },
+    statusHelperText: {
+      marginTop: 10,
+      fontSize: 12,
+      lineHeight: 18,
+      color: colors.GRAY500,
+    },
+    reportLink: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      alignSelf: "flex-start",
+    },
+    reportLinkText: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: colors.GRAY700,
+    },
+    reportLinkTextDisabled: {
+      color: colors.GRAY400,
     },
   });

@@ -7,6 +7,7 @@
 import { normalizeRuntimeUrl } from "../constants/env";
 import { apiRequest } from './client';
 import type { Service, PaginatedResponse } from './types';
+import type { Handshake } from "./handshakes";
 
 export interface ServiceRequest {
   title: string;
@@ -101,7 +102,19 @@ export function deleteService(id: string): Promise<void> {
   return apiRequest<void>(`/services/${id}/`, { method: 'DELETE' });
 }
 
-export function reportService(id: string, body?: { reason?: string }): Promise<unknown> {
+export function reportService(
+  id: string,
+  body?: {
+    issue_type?:
+      | "inappropriate_content"
+      | "spam"
+      | "service_issue"
+      | "scam"
+      | "harassment"
+      | "other";
+    description?: string;
+  },
+): Promise<unknown> {
   return apiRequest(`/services/${id}/report/`, { method: 'POST', body: body ?? {} });
 }
 
@@ -109,10 +122,36 @@ export function toggleServiceVisibility(id: string): Promise<Service> {
   return apiRequest<Service>(`/services/${id}/toggle-visibility/`, { method: 'POST' });
 }
 
-export function addServiceInterest(serviceId: string, body?: { message?: string }): Promise<unknown> {
-  return apiRequest(`/services/${serviceId}/interest/`, { method: 'POST', body: body ?? {} });
+export function addServiceInterest(
+  serviceId: string,
+  body?: { message?: string },
+): Promise<Handshake> {
+  return apiRequest<Handshake>(`/services/${serviceId}/interest/`, {
+    method: 'POST',
+    body: body ?? {},
+  });
 }
 
 export function completeEvent(serviceId: string): Promise<void> {
   return apiRequest<void>(`/services/${serviceId}/complete-event/`, { method: 'POST' });
+}
+
+export function cancelEvent(serviceId: string): Promise<void> {
+  return apiRequest<void>(`/services/${serviceId}/cancel-event/`, { method: 'POST' });
+}
+
+export function pinEvent(serviceId: string): Promise<Service> {
+  return apiRequest<Service>(`/services/${serviceId}/pin-event/`, { method: 'POST' }).then(
+    normalizeService,
+  );
+}
+
+export function setPrimaryMedia(
+  serviceId: string,
+  mediaId: string,
+): Promise<Service> {
+  return apiRequest<Service>(`/services/${serviceId}/set-primary-media/`, {
+    method: "PATCH",
+    body: { media_id: mediaId },
+  }).then(normalizeService);
 }

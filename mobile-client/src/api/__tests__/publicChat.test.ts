@@ -12,18 +12,18 @@ describe("publicChat", () => {
 
   it("getPublicChat GETs /public-chat/:id/", async () => {
     const messages = [{ id: "m1", content: "Hi" }];
-    mockFetchResolve(messages);
+    mockFetchResolve({ messages: { results: messages } });
     const result = await getPublicChat("chat1");
-    expect(result).toEqual(messages);
+    expect(result).toEqual({ messages: { results: messages } });
     expect(getLastFetchCall().url).toContain("/public-chat/chat1/");
   });
 
   it("postPublicChat POSTs to /public-chat/:id/ with body", async () => {
     const msg = { id: "m1", content: "Hello" };
     mockFetchResolve(msg);
-    const result = await postPublicChat("chat1", { content: "Hello" });
+    const result = await postPublicChat("chat1", { body: "Hello" });
     expect(result).toEqual(msg);
     expect(getLastFetchCall().init?.method).toBe("POST");
-    expect(getLastFetchBody()).toEqual({ content: "Hello" });
+    expect(getLastFetchBody()).toEqual({ body: "Hello" });
   });
 });

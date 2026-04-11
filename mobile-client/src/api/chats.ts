@@ -4,6 +4,7 @@
  */
 
 import { apiRequest } from "./client";
+import { normalizeRuntimeUrl } from "../constants/env";
 
 export interface Chat {
   handshake_id: string;
@@ -62,6 +63,21 @@ export interface ChatsListParams {
   page_size?: number;
 }
 
+export interface GroupChatParticipant {
+  id: string;
+  name?: string;
+  avatar_url?: string | null;
+}
+
+export interface GroupChatThread {
+  service_id: string;
+  service_title?: string;
+  participants?: GroupChatParticipant[];
+  messages?: Record<string, unknown>[];
+  session_id?: string;
+  scheduled_time?: string;
+}
+
 /**
  * Backend may return a plain array or a paginated object `{ count, results }`.
  * Always normalize to `Chat[]` so callers can safely use `.filter` / `.map`.
@@ -90,8 +106,20 @@ export function getChat(id: string): Promise<Chat> {
   return apiRequest<Chat>(`/chats/${id}/`);
 }
 
-export function getGroupChat(id: string): Promise<Chat> {
-  return apiRequest<Chat>(`/group-chat/${id}/`);
+function normalizeGroupParticipant(
+  participant: GroupChatParticipant,
+): GroupChatParticipant {
+  return {
+    ...participant,
+    avatar_url: normalizeRuntimeUrl(participant.avatar_url),
+  };
+}
+
+export function getGroupChat(id: string): Promise<GroupChatThread> {
+  return apiRequest<GroupChatThread>(`/group-chat/${id}/`).then((data) => ({
+    ...data,
+    participants: (data.participants ?? []).map(normalizeGroupParticipant),
+  }));
 }
 
 export function sendGroupChatMessage(

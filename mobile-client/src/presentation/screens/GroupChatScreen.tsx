@@ -8,18 +8,32 @@ import {
   Platform,
   ActivityIndicator,
   RefreshControl,
+  TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import type {
+  NativeStackNavigationProp,
+  NativeStackScreenProps,
+} from "@react-navigation/native-stack";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { buildGroupChatWsUrl, withAuthToken } from "../../api/websocketUrls";
 import { normalizeMessage } from "../../api/chatMessages";
-import { getGroupChat, sendGroupChatMessage } from "../../api/chats";
+import {
+  getGroupChat,
+  sendGroupChatMessage,
+  type GroupChatParticipant,
+} from "../../api/chats";
 import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import { ChatMessageBubble } from "../components/chat/ChatMessageBubble";
 import { ChatInputBar } from "../components/chat/ChatInputBar";
+import {
+  ParticipantsSheet,
+  type ChatParticipantItem,
+} from "../components/chat/ParticipantsSheet";
 import type { ChatMessageWithMeta } from "../../types/chatTypes";
+import type { MessagesStackParamList } from "../../navigation/MessagesStack";
 
 type GroupChatScreenParams = {
   groupId: string;
@@ -33,7 +47,7 @@ type NavProps = NativeStackScreenProps<
 
 export default function GroupChatScreen() {
   const { params } = useRoute<NavProps["route"]>();
-  const navigation = useNavigation<NavProps["navigation"]>();
+  const navigation = useNavigation<NativeStackNavigationProp<MessagesStackParamList>>();
   const { groupId, groupTitle = "Group chat" } = params ?? { groupId: "" };
   const { user } = useAuth();
 
@@ -44,12 +58,27 @@ export default function GroupChatScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [threadTitle, setThreadTitle] = useState(groupTitle);
+  const [participants, setParticipants] = useState<ChatParticipantItem[]>([]);
+  const [showParticipantsSheet, setShowParticipantsSheet] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const listRef = useRef<FlatList<ChatMessageWithMeta>>(null);
 
   const currentUserId = user?.id ? String(user.id) : undefined;
   const currentUserEmail = user?.email;
+
+  const toParticipantItem = useCallback(
+    (participant: GroupChatParticipant): ChatParticipantItem => {
+      const name = participant.name?.trim() || "Member";
+      return {
+        id: participant.id,
+        name,
+        avatarUrl: participant.avatar_url,
+      };
+    },
+    [],
+  );
 
   const scrollToBottom = useCallback((animated = true) => {
     requestAnimationFrame(() => {
@@ -76,14 +105,18 @@ export default function GroupChatScreen() {
         if (isRefresh) setRefreshing(true);
         else setLoading(true);
         const data = await getGroupChat(groupId);
-        // Backend may return a member count on the group thread metadata
-        const raw = data as unknown as Record<string, unknown>;
-        if (typeof raw.service_member_count === "number") {
-          setMemberCount(raw.service_member_count);
+        if (data.service_title?.trim()) {
+          setThreadTitle(data.service_title.trim());
         }
-        // Group chat endpoint may return messages inline
-        const msgs = Array.isArray(raw.messages)
-          ? (raw.messages as Record<string, unknown>[]).map(normalizeMessage)
+        if (Array.isArray(data.participants)) {
+          setParticipants(data.participants.map(toParticipantItem));
+          setMemberCount(data.participants.length);
+        } else {
+          setParticipants([]);
+          setMemberCount(null);
+        }
+        const msgs = Array.isArray(data.messages)
+          ? data.messages.map((item) => normalizeMessage(item))
           : [];
         if (msgs.length > 0) {
           setMessages(dedupeMessages(msgs));
@@ -96,7 +129,7 @@ export default function GroupChatScreen() {
         setRefreshing(false);
       }
     },
-    [groupId, dedupeMessages, scrollToBottom],
+    [groupId, dedupeMessages, scrollToBottom, toParticipantItem],
   );
 
   useEffect(() => {
@@ -171,8 +204,17 @@ export default function GroupChatScreen() {
   }, [groupId, dedupeMessages, scrollToBottom]);
 
   useEffect(() => {
-    navigation.setOptions({ headerTitle: groupTitle });
-  }, [navigation, groupTitle]);
+    navigation.setOptions({ headerTitle: threadTitle || groupTitle });
+  }, [navigation, groupTitle, threadTitle]);
+
+  const openParticipantProfile = useCallback(
+    (participant: ChatParticipantItem) => {
+      if (!participant.id) return;
+      setShowParticipantsSheet(false);
+      navigation.navigate("UserPublicProfile", { userId: participant.id });
+    },
+    [navigation],
+  );
 
   const sendMessage = useCallback(async () => {
     const text = inputText.trim();
@@ -289,7 +331,7 @@ export default function GroupChatScreen() {
           </View>
           <View style={styles.groupHeaderInfo}>
             <Text style={styles.groupHeaderTitle} numberOfLines={1}>
-              {groupTitle}
+              {threadTitle}
             </Text>
             {memberCount !== null ? (
               <Text style={styles.groupHeaderSub}>
@@ -300,6 +342,14 @@ export default function GroupChatScreen() {
             )}
           </View>
           <View style={styles.connectionIndicator}>
+            <TouchableOpacity
+              style={styles.participantsButton}
+              onPress={() => setShowParticipantsSheet(true)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="people-outline" size={16} color={colors.BLUE} />
+              <Text style={styles.participantsButtonText}>People</Text>
+            </TouchableOpacity>
             <View
               style={[
                 styles.connDot,
@@ -361,6 +411,19 @@ export default function GroupChatScreen() {
           placeholder={connected ? "Message group…" : "Connecting…"}
           editable={connected}
           sendDisabled={!connected || !inputText.trim()}
+        />
+
+        <ParticipantsSheet
+          visible={showParticipantsSheet}
+          title="Group Participants"
+          subtitle={
+            memberCount !== null
+              ? `${memberCount} member${memberCount !== 1 ? "s" : ""} in this group`
+              : "See who is currently in this group chat"
+          }
+          participants={participants}
+          onClose={() => setShowParticipantsSheet(false)}
+          onParticipantPress={openParticipantProfile}
         />
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -428,6 +491,20 @@ const styles = StyleSheet.create({
   connText: {
     fontSize: 12,
     color: colors.GRAY500,
+  },
+  participantsButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: colors.BLUE_LT,
+  },
+  participantsButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.BLUE,
   },
   errorBar: {
     paddingHorizontal: 16,
