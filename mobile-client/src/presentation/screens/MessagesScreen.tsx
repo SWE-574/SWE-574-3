@@ -44,6 +44,15 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const ACTIVE_STATUSES = new Set(["pending", "accepted"]);
+const EVENT_TAB_HANDSHAKE_STATUSES = new Set([
+  "accepted",
+  "checked_in",
+  "attended",
+  "completed",
+  "cancelled",
+  "no_show",
+]);
+const CLOSED_EVENT_LABELS = new Set(["Completed", "Cancelled"]);
 
 function getEvaluationWindowState(chat: Chat): {
   isPending: boolean;
@@ -230,6 +239,7 @@ export default function MessagesScreen() {
   const [selectedTab, setSelectedTab] = useState<ChatTab>("private");
   const [showClosedPrivate, setShowClosedPrivate] = useState(false);
   const [showClosedGroup, setShowClosedGroup] = useState(false);
+  const [showClosedEvents, setShowClosedEvents] = useState(false);
   const { user } = useAuth();
 
   const fetchChats = useCallback(
@@ -250,37 +260,15 @@ export default function MessagesScreen() {
         ]);
         setChats(data);
 
-        const joinedEventHandshakes = handshakePage.results.filter((handshake) => {
-          const serviceObj = getServiceFromHandshake(handshake.service);
-          const serviceType =
-            typeof serviceObj?.type === "string"
-              ? serviceObj.type.toLowerCase()
-              : null;
-          const status = handshake.status?.toLowerCase();
-          return (
-            serviceType === "event" &&
-            ["accepted", "checked_in", "attended"].includes(status)
-          );
-        });
-
-        const organizerEvents = (ownEvents.results ?? []).filter(
-          (service) =>
-            service.type?.toLowerCase() === "event" &&
-            String(service.user?.id ?? "") === String(user.id),
-        );
-        const ownEventIds = new Set(organizerEvents.map((service) => service.id));
-        const joinedEventIds = Array.from(
-          new Set(
-            joinedEventHandshakes
-              .map((handshake) => getIdFromField(handshake.service))
-              .filter(
-                (serviceId): serviceId is string =>
-                  typeof serviceId === "string" && !ownEventIds.has(serviceId),
-              ),
-          ),
+        const relevantEventHandshakes = handshakePage.results.filter((handshake) =>
+          EVENT_TAB_HANDSHAKE_STATUSES.has(handshake.status?.toLowerCase() ?? ""),
         );
 
-        const embeddedJoinedServices = joinedEventHandshakes
+        const ownEventList = (ownEvents.results ?? []).filter(
+          (service) => service.type?.toLowerCase() === "event",
+        );
+
+        const embeddedEventServices = relevantEventHandshakes
           .map((handshake) => getServiceFromHandshake(handshake.service))
           .filter(
             (service): service is Partial<Service> & { id: string; type: string } =>
@@ -289,12 +277,42 @@ export default function MessagesScreen() {
               service.type.toLowerCase() === "event",
           );
 
-        const missingJoinedIds = joinedEventIds.filter(
-          (serviceId) => !embeddedJoinedServices.some((service) => service.id === serviceId),
+        const handshakeEventIds = Array.from(
+          new Set(
+            relevantEventHandshakes
+              .map((handshake) => getIdFromField(handshake.service))
+              .filter((serviceId): serviceId is string => Boolean(serviceId)),
+          ),
         );
 
-        const fetchedJoinedServices = await Promise.all(
-          missingJoinedIds.map(async (serviceId) => {
+        const previewEventIds = Array.from(
+          new Set(
+            data
+              .filter(
+                (chat) =>
+                  chat.service_type?.toLowerCase() === "event" && Boolean(chat.service_id),
+              )
+              .map((chat) => chat.service_id),
+          ),
+        );
+
+        const candidateEventServices: Service[] = [
+          ...ownEventList,
+          ...embeddedEventServices.map((service) => service as Service),
+        ];
+
+        const knownEventIds = new Set(
+          candidateEventServices.map((service) => service.id).filter(Boolean),
+        );
+
+        const missingEventIds = Array.from(
+          new Set([...handshakeEventIds, ...previewEventIds]),
+        ).filter(
+          (serviceId) => !knownEventIds.has(serviceId),
+        );
+
+        const fetchedMissingEventServices = await Promise.all(
+          missingEventIds.map(async (serviceId) => {
             try {
               return await getService(serviceId);
             } catch {
@@ -303,17 +321,26 @@ export default function MessagesScreen() {
           }),
         );
 
-        const mergedJoinedServices = [
-          ...embeddedJoinedServices.map((service) => service as Service),
-          ...fetchedJoinedServices.filter((service): service is Service => Boolean(service)),
-        ];
+        const uniqueEventServices = [
+          ...candidateEventServices,
+          ...fetchedMissingEventServices.filter(
+            (service): service is Service => Boolean(service),
+          ),
+        ].filter(
+          (service, index, array) =>
+            service.type?.toLowerCase() === "event" &&
+            Boolean(service.id) &&
+            array.findIndex((candidate) => candidate.id === service.id) === index,
+        );
 
-        setEventServices(organizerEvents);
+        setEventServices(
+          uniqueEventServices.filter(
+            (service) => String(service.user?.id ?? "") === String(user.id),
+          ),
+        );
         setJoinedEventServices(
-          mergedJoinedServices.filter(
-            (service, index, array) =>
-              service.type?.toLowerCase() === "event" &&
-              array.findIndex((candidate) => candidate.id === service.id) === index,
+          uniqueEventServices.filter(
+            (service) => String(service.user?.id ?? "") !== String(user.id),
           ),
         );
       } catch (err) {
@@ -540,6 +567,12 @@ export default function MessagesScreen() {
       return tb - ta;
     });
   })();
+  const activeEventEntries = eventChatEntries.filter(
+    (entry) => !CLOSED_EVENT_LABELS.has(entry.statusLabel),
+  );
+  const closedEventEntries = eventChatEntries.filter((entry) =>
+    CLOSED_EVENT_LABELS.has(entry.statusLabel),
+  );
 
   const listData: ListItem[] = [];
   if (selectedTab === "private") {
@@ -578,15 +611,27 @@ export default function MessagesScreen() {
       }
     }
   } else if (selectedTab === "events") {
-    if (eventChatEntries.length > 0) {
+    if (activeEventEntries.length > 0) {
       listData.push({
         kind: "sectionHeader",
         id: "header-events",
-        label: "EVENT CHATS",
-        count: eventChatEntries.length,
+        label: "ACTIVE",
+        count: activeEventEntries.length,
       });
-      for (const e of eventChatEntries) {
+      for (const e of activeEventEntries) {
         listData.push({ kind: "eventChat", data: e });
+      }
+    }
+    if (closedEventEntries.length > 0) {
+      listData.push({
+        kind: "closedToggle",
+        count: closedEventEntries.length,
+        expanded: showClosedEvents,
+      });
+      if (showClosedEvents) {
+        for (const e of closedEventEntries) {
+          listData.push({ kind: "eventChat", data: e });
+        }
       }
     }
   } else {
@@ -800,6 +845,8 @@ export default function MessagesScreen() {
           onPress={() =>
             selectedTab === "private"
               ? setShowClosedPrivate((v) => !v)
+              : selectedTab === "events"
+                ? setShowClosedEvents((v) => !v)
               : setShowClosedGroup((v) => !v)
           }
           activeOpacity={0.7}
@@ -827,7 +874,7 @@ export default function MessagesScreen() {
 
   const keyExtractor = (item: ListItem) => {
     if (item.kind === "sectionHeader") return item.id;
-    if (item.kind === "closedToggle") return "closed-toggle";
+    if (item.kind === "closedToggle") return `closed-toggle-${selectedTab}`;
     if (item.kind === "groupChat") return `group-${item.data.serviceId}`;
     if (item.kind === "eventChat") return `event-${item.data.serviceId}`;
     return item.data.handshake_id;
