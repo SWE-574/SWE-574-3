@@ -38,9 +38,6 @@ export type MessagesStackParamList = {
     roomId: string;
     roomTitle?: string;
   };
-  ServiceDetail: {
-    id: string;
-  };
   UserPublicProfile: {
     userId: string;
   };
@@ -91,11 +88,6 @@ export default function MessagesStack() {
         name="UserPublicProfile"
         component={PublicProfileScreen}
         options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ServiceDetail"
-        component={ServiceDetailScreen}
-        options={{ title: "Service Detail" }}
       />
       <Stack.Screen
         name="AchievementsList"
