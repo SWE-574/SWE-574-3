@@ -89,7 +89,16 @@ export default function ServiceCard({
       )}
 
       <View style={styles.body}>
-        <View style={styles.badgeRow}>
+        <View style={styles.userRow}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials}</Text>
+          </View>
+          <View style={styles.userMeta}>
+            <Text style={styles.userName}>{displayName}</Text>
+            <Text style={styles.timeAgo}>
+              • {formatTimeAgo(service.created_at)}
+            </Text>
+          </View>
           <View
             style={[
               styles.typeBadge,
@@ -121,18 +130,6 @@ export default function ServiceCard({
               <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
             </View>
           )}
-        </View>
-
-        <View style={styles.userRow}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
-          <View style={styles.userMeta}>
-            <Text style={styles.userName}>{displayName}</Text>
-            <Text style={styles.timeAgo}>
-              • {formatTimeAgo(service.created_at)}
-            </Text>
-          </View>
         </View>
 
         <Text style={styles.description} numberOfLines={3}>
@@ -256,17 +253,11 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 14,
   },
-  badgeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-end",
-    gap: 6,
-    marginBottom: 8,
-  },
   typeBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    marginLeft: 6,
   },
   typeOffer: {
     backgroundColor: "rgb(240, 253, 244)",
@@ -278,28 +269,29 @@ const styles = StyleSheet.create({
     backgroundColor: "rgb(255, 245, 238)",
   },
   nearlyFullBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
     backgroundColor: colors.RED_LT,
+    marginLeft: 4,
   },
   nearlyFullBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
     color: colors.RED,
   },
   typeOfferBadgeText: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.GREEN,
   },
   typeWantBadgeText: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.BLUE,
   },
   typeEventBadgeText: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.AMBER,
   },

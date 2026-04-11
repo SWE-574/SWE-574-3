@@ -4,7 +4,7 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  TouchableOpacity,
+  Pressable,
   ActivityIndicator,
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -68,7 +68,9 @@ export default function FeaturedSection({
   userLocation,
   locationStatus,
 }: FeaturedSectionProps) {
-  const [featuredData, setFeaturedData] = useState<FeaturedResponse | null>(null);
+  const [featuredData, setFeaturedData] = useState<FeaturedResponse | null>(
+    null,
+  );
   const [apiFailed, setApiFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>("friends");
@@ -87,7 +89,9 @@ export default function FeaturedSection({
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const normalizeFeaturedService = (item: FeaturedService): Service => ({
@@ -153,11 +157,8 @@ export default function FeaturedSection({
       services
         .filter(isNearlyFullService)
         .sort((a, b) => {
-          const ratioDifference = getCapacityRatio(b) - getCapacityRatio(a);
-          if (ratioDifference !== 0) {
-            return ratioDifference;
-          }
-
+          const ratioDiff = getCapacityRatio(b) - getCapacityRatio(a);
+          if (ratioDiff !== 0) return ratioDiff;
           return (
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
           );
@@ -166,7 +167,7 @@ export default function FeaturedSection({
         .map((service) => ({
           service,
           contextBadge: {
-            text: `${service.participant_count ?? 0}/${service.max_participants} spots taken`,
+            text: `${service.participant_count ?? 0}/${service.max_participants} spots`,
             icon: "time" as const,
             tone: "red" as const,
           },
@@ -174,20 +175,21 @@ export default function FeaturedSection({
     [services],
   );
 
-  const itemsByTab = {
+  const itemsByTab: Record<
+    TabKey,
+    Array<{
+      service: Service;
+      contextBadge?: {
+        text: string;
+        icon: keyof typeof Ionicons.glyphMap;
+        tone: "purple" | "green" | "red";
+      };
+    }>
+  > = {
     friends: friendsItems,
     nearby: nearbyItems,
     nearly_full: nearlyFullItems,
   };
-
-  useEffect(() => {
-    const firstNonEmptyTab =
-      TABS.find((tab) => itemsByTab[tab.key].length > 0)?.key ?? "friends";
-
-    if (itemsByTab[activeTab].length === 0 && activeTab !== firstNonEmptyTab) {
-      setActiveTab(firstNonEmptyTab);
-    }
-  }, [activeTab, friendsItems.length, nearbyItems.length, nearlyFullItems.length]);
 
   const currentItems = itemsByTab[activeTab];
 
@@ -197,19 +199,13 @@ export default function FeaturedSection({
         ? "Friend activity is unavailable right now."
         : "Follow people to see their activity here.";
     }
-
     if (activeTab === "nearby") {
-      if (locationStatus === "denied") {
+      if (locationStatus === "denied")
         return "Enable location in Filters to see services nearby.";
-      }
-
-      if (locationStatus === "idle" || !userLocation) {
-        return "Turn on Nearby To You in Filters to populate this tab.";
-      }
-
+      if (locationStatus === "idle" || !userLocation)
+        return "Turn on Nearby in Filters to populate this tab.";
       return "No nearby services yet for your current area.";
     }
-
     return "No nearly full services right now.";
   };
 
@@ -230,38 +226,51 @@ export default function FeaturedSection({
         <Text style={styles.headerTitle}>Featured</Text>
       </View>
 
-      {/* Tab pills */}
-      <ScrollView
-        horizontal
-        nestedScrollEnabled
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.tabRow}
-      >
+      {/* Tab pills — plain View, no ScrollView needed for 3 items */}
+      <View style={styles.tabRow}>
         {TABS.map((tab) => {
           const isSelected = activeTab === tab.key;
-          const items = itemsByTab[tab.key];
+          const count = itemsByTab[tab.key].length;
           return (
-            <TouchableOpacity
+            <Pressable
               key={tab.key}
               style={[styles.pill, isSelected && styles.pillSelected]}
               onPress={() => setActiveTab(tab.key)}
-              activeOpacity={0.7}
             >
               <Ionicons
                 name={isSelected ? tab.iconActive : tab.icon}
                 size={14}
                 color={isSelected ? colors.WHITE : colors.GRAY500}
               />
-              <Text style={[styles.pillLabel, isSelected && styles.pillLabelSelected]}>
+              <Text
+                style={[
+                  styles.pillLabel,
+                  isSelected && styles.pillLabelSelected,
+                ]}
+              >
                 {tab.label}
               </Text>
-              {items.length === 0 && (
-                <View style={[styles.emptyDot, isSelected && styles.emptyDotSelected]} />
+              {count > 0 && (
+                <View
+                  style={[
+                    styles.countDot,
+                    isSelected && styles.countDotSelected,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.countDotText,
+                      isSelected && styles.countDotTextSelected,
+                    ]}
+                  >
+                    {count}
+                  </Text>
+                </View>
               )}
-            </TouchableOpacity>
+            </Pressable>
           );
         })}
-      </ScrollView>
+      </View>
 
       {/* Card row or empty message */}
       {currentItems.length === 0 ? (
@@ -271,7 +280,6 @@ export default function FeaturedSection({
       ) : (
         <ScrollView
           horizontal
-          nestedScrollEnabled
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.cardRow}
         >
@@ -307,21 +315,21 @@ const styles = StyleSheet.create({
     color: colors.GRAY800,
   },
   tabRow: {
+    flexDirection: "row",
     paddingHorizontal: 16,
     marginBottom: 10,
-    paddingRight: 24,
+    gap: 8,
   },
   pill: {
     flexDirection: "row",
     alignItems: "center",
-    minHeight: 36,
     borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginRight: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     backgroundColor: colors.WHITE,
     borderWidth: 1,
     borderColor: colors.GRAY200,
+    gap: 5,
   },
   pillSelected: {
     backgroundColor: colors.GREEN,
@@ -331,20 +339,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.GRAY500,
     fontWeight: "600",
-    marginLeft: 5,
   },
   pillLabelSelected: {
     color: colors.WHITE,
   },
-  emptyDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.GRAY300,
-    marginLeft: 6,
+  countDot: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.GRAY200,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
   },
-  emptyDotSelected: {
-    backgroundColor: colors.GREEN_LT,
+  countDotSelected: {
+    backgroundColor: "rgba(255,255,255,0.3)",
+  },
+  countDotText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.GRAY600,
+  },
+  countDotTextSelected: {
+    color: colors.WHITE,
   },
   cardRow: {
     paddingHorizontal: 16,

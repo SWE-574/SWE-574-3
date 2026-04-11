@@ -1,5 +1,12 @@
 import React from "react";
-import { View, TouchableOpacity, Text, Image, StyleSheet } from "react-native";
+import {
+  View,
+  TouchableOpacity,
+  Text,
+  Image,
+  StyleSheet,
+  Platform,
+} from "react-native";
 import { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { colors } from "../../constants/colors";
 
@@ -11,6 +18,7 @@ export default function MapTabButton({
   accessibilityState,
   accessibilityLabel,
   testID,
+  style,
 }: BottomTabBarButtonProps) {
   const focused = accessibilityState?.selected ?? false;
 
@@ -21,10 +29,12 @@ export default function MapTabButton({
       activeOpacity={0.9}
       onLongPress={onLongPress ?? undefined}
       onPress={onPress ?? undefined}
-      style={styles.wrapper}
+      style={[style, styles.wrapper]}
     >
-      <View style={[styles.circle, focused && styles.circleFocused]}>
-        <Image source={hiveIcon} style={styles.logo} />
+      <View style={styles.circleOuter}>
+        <View style={[styles.circle, focused && styles.circleFocused]}>
+          <Image source={hiveIcon} style={styles.logo} />
+        </View>
       </View>
       <Text style={[styles.label, focused && styles.labelFocused]}>Map</Text>
     </TouchableOpacity>
@@ -33,39 +43,45 @@ export default function MapTabButton({
 
 const styles = StyleSheet.create({
   wrapper: {
-    flex: 1,
     alignItems: "center",
     justifyContent: "flex-end",
-    paddingBottom: 6,
+    overflow: "visible" as const,
+  },
+  circleOuter: {
+    overflow: "visible" as const,
+    ...Platform.select({
+      android: { elevation: 8 },
+    }),
   },
   circle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.YELLOW,
     borderWidth: 3,
     borderColor: colors.WHITE,
-    marginTop: -28,
+    marginTop: -18,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.15,
-    shadowRadius: 6,
+    shadowRadius: 5,
     elevation: 8,
   },
   circleFocused: {
     backgroundColor: colors.GREEN,
   },
   logo: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
   },
   label: {
     fontSize: 11,
     fontWeight: "600",
     marginTop: 2,
+    marginBottom: 2,
     color: colors.GRAY500,
   },
   labelFocused: {

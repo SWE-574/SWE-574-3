@@ -155,6 +155,7 @@ export default function BottomTabNavigator() {
         component={PostStack}
         options={{
           tabBarButton: () => null,
+          tabBarItemStyle: { display: "none" },
         }}
       />
     </Tab.Navigator>
