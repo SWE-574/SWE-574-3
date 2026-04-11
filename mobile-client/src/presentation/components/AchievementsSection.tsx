@@ -18,6 +18,52 @@ function getDisplayName(id: string): string {
   return ACHIEVEMENT_DISPLAY_NAMES[id as AchievementId] ?? id;
 }
 
+function getAchievementVisual(id: string, index: number) {
+  if (id.includes("kind") || id.includes("helper")) {
+    return {
+      icon: "heart-outline" as const,
+      color: colors.GREEN,
+      bg: colors.GREEN_LT,
+    };
+  }
+
+  if (id.includes("punctual") || id.includes("perfect")) {
+    return {
+      icon: "time-outline" as const,
+      color: colors.BLUE,
+      bg: colors.BLUE_LT,
+    };
+  }
+
+  if (id.includes("rated") || id.includes("trusted") || id.includes("voice")) {
+    return {
+      icon: "ribbon-outline" as const,
+      color: colors.PURPLE,
+      bg: colors.PURPLE_LT,
+    };
+  }
+
+  if (id.includes("registered") || id.includes("seniority")) {
+    return {
+      icon: "calendar-outline" as const,
+      color: colors.AMBER,
+      bg: colors.AMBER_LT,
+    };
+  }
+
+  return index % 2 === 0
+    ? {
+        icon: "sparkles-outline" as const,
+        color: colors.GREEN,
+        bg: colors.GREEN_LT,
+      }
+    : {
+        icon: "trophy-outline" as const,
+        color: colors.PURPLE,
+        bg: colors.PURPLE_LT,
+      };
+}
+
 export default function AchievementsSection({
   completedIds,
   maxItems = 8,
@@ -30,31 +76,50 @@ export default function AchievementsSection({
   return (
     <View style={styles.sectionCard}>
       <View style={styles.header}>
-        <Text style={styles.title}>Achievements</Text>
-        <TouchableOpacity
-          onPress={onViewAll}
-          disabled={!onViewAll}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Text
-            style={[styles.viewAll, !onViewAll && styles.viewAllDisabled]}
+        <View style={styles.headerLeft}>
+          <View style={styles.headerIconWrap}>
+            <Ionicons name="ribbon-outline" size={18} color={colors.PURPLE} />
+          </View>
+          <View style={styles.headerCopy}>
+            <Text style={styles.title}>Achievements</Text>
+            <Text style={styles.subtitle}>Milestones unlocked in the community</Text>
+          </View>
+        </View>
+        <View style={styles.headerRight}>
+          <View style={styles.countPill}>
+            <Text style={styles.countPillText}>{completedIds.length}</Text>
+          </View>
+          <TouchableOpacity
+            onPress={onViewAll}
+            disabled={!onViewAll}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            View all
-          </Text>
-        </TouchableOpacity>
+            <Text
+              style={[styles.viewAll, !onViewAll && styles.viewAllDisabled]}
+            >
+              View all
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
       <View style={styles.list}>
-        {list.map((id) => {
+        {list.map((id, index) => {
           const name = getDisplayName(id);
+          const visual = getAchievementVisual(id, index);
           return (
             <View key={id} style={[styles.row, styles.rowCompleted]}>
-              <Ionicons name="star-outline" size={20} color={colors.GREEN} />
-              <Text
-                style={[styles.label, styles.labelCompleted]}
-                numberOfLines={1}
-              >
-                {name}
-              </Text>
+              <View style={[styles.badgeIconWrap, { backgroundColor: visual.bg }]}>
+                <Ionicons name={visual.icon} size={17} color={visual.color} />
+              </View>
+              <View style={styles.labelWrap}>
+                <Text
+                  style={[styles.label, styles.labelCompleted]}
+                  numberOfLines={2}
+                >
+                  {name}
+                </Text>
+                <Text style={styles.rowHint}>Unlocked</Text>
+              </View>
               <View style={styles.checkWrap}>
                 <Ionicons
                   name="checkmark-circle"
@@ -75,8 +140,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.WHITE,
     marginHorizontal: 16,
     marginTop: 16,
-    borderRadius: 24,
-    padding: 18,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    padding: 14,
     shadowColor: colors.GRAY900,
     shadowOpacity: 0.04,
     shadowRadius: 14,
@@ -85,18 +152,58 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: 14,
+    gap: 10,
+    marginBottom: 12,
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  headerIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: colors.PURPLE_LT,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerCopy: {
+    flex: 1,
+  },
+  headerRight: {
+    alignItems: "flex-end",
+    gap: 8,
   },
   title: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "700",
-    color: colors.GRAY900,
+    color: colors.GRAY800,
+    marginBottom: 1,
+  },
+  subtitle: {
+    fontSize: 12,
+    color: colors.GRAY500,
+  },
+  countPill: {
+    minWidth: 32,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: colors.PURPLE_LT,
+    alignItems: "center",
+  },
+  countPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.PURPLE,
   },
   viewAll: {
-    fontSize: 15,
-    fontWeight: "500",
+    fontSize: 13,
+    fontWeight: "600",
     color: colors.GREEN,
   },
   viewAllDisabled: {
@@ -104,26 +211,43 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   list: {
-    gap: 10,
+    gap: 8,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    gap: 12,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
   },
   rowCompleted: {
-    backgroundColor: colors.GREEN_LT,
+    backgroundColor: colors.WHITE,
+  },
+  badgeIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  labelWrap: {
+    flex: 1,
   },
   label: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "600",
   },
   labelCompleted: {
-    color: colors.GREEN,
+    color: colors.GRAY800,
+  },
+  rowHint: {
+    marginTop: 2,
+    fontSize: 11,
+    color: colors.GRAY500,
   },
   checkWrap: {
     marginLeft: 4,

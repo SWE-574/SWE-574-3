@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -23,18 +24,27 @@ import {
   followUser,
   getUser,
   getUserHistory,
+  getVerifiedReviews,
+  type ProfileReview,
   unfollowUser,
 } from "../../api/users";
 import { listServices } from "../../api/services";
-import type { PublicUserProfile, Service, UserHistoryItem } from "../../api/types";
-import { groupHistoryItems, isOwnHistoryItem } from "../../utils/historyGrouping";
+import type {
+  PublicUserProfile,
+  Service,
+  UserHistoryItem,
+} from "../../api/types";
+import {
+  groupHistoryItems,
+  isOwnHistoryItem,
+} from "../../utils/historyGrouping";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import AchievementsSection from "../components/AchievementsSection";
+import ProfileSkillsSection from "../components/ProfileSkillsSection";
 import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
-import ServiceCard from "../components/ServiceCard";
 
 const DEFAULT_BANNER_URI =
   "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80";
@@ -52,10 +62,61 @@ type LoadState =
   | { status: "success"; user: PublicUserProfile };
 
 function achievementIdsForDisplay(user: PublicUserProfile): string[] {
-  const a = user.achievements ?? [];
-  const b = user.badges ?? [];
-  if (a.length === 0 && b.length === 0) return [];
-  return [...new Set([...a, ...b])];
+  const achievements = user.achievements ?? [];
+  const badges = user.badges ?? [];
+
+  if (achievements.length === 0 && badges.length === 0) return [];
+  return [...new Set([...achievements, ...badges])];
+}
+
+type ProfileTabKey = "offers" | "needs" | "events" | "history" | "reviews";
+
+function formatShortDate(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatHours(value?: string | number | null) {
+  const amount = Number(value ?? 0);
+  return `${Number.isFinite(amount) ? amount : 0}h`;
+}
+
+function getInitials(name?: string | null) {
+  return (name || "?").trim().slice(0, 1).toUpperCase() || "?";
+}
+
+function activityCardAccent(type: Service["type"]) {
+  if (type === "Offer") {
+    return {
+      color: colors.GREEN,
+      bg: colors.GREEN_LT,
+      label: "Offer",
+      icon: "leaf-outline" as const,
+    };
+  }
+
+  if (type === "Need") {
+    return {
+      color: colors.BLUE,
+      bg: colors.BLUE_LT,
+      label: "Need",
+      icon: "layers-outline" as const,
+    };
+  }
+
+  return {
+    color: colors.AMBER,
+    bg: colors.AMBER_LT,
+    label: "Event",
+    icon: "sparkles-outline" as const,
+  };
 }
 
 export default function PublicProfileScreen() {
@@ -71,13 +132,20 @@ export default function PublicProfileScreen() {
 
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [activeServices, setActiveServices] = useState<Service[]>([]);
-  const [activeServicesOpen, setActiveServicesOpen] = useState(false);
   const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
+  const [reviews, setReviews] = useState<ProfileReview[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<ProfileTabKey>("offers");
+  const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<
+    ReturnType<typeof groupHistoryItems>[number] | null
+  >(null);
   const [followActionLoading, setFollowActionLoading] = useState(false);
+  const [isBioExpanded, setIsBioExpanded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
+
     getUser(userId)
       .then((user) => {
         if (!cancelled) setState({ status: "success", user });
@@ -89,6 +157,7 @@ export default function PublicProfileScreen() {
           setState({ status: "error", message });
         }
       });
+
     return () => {
       cancelled = true;
     };
@@ -97,33 +166,30 @@ export default function PublicProfileScreen() {
   useEffect(() => {
     let cancelled = false;
     setActiveServices([]);
-    setActiveServicesOpen(false);
+
     listServices({ user: userId, page_size: 50 })
       .then((res) => {
         if (cancelled) return;
         const rows = res.results ?? [];
-        const visible = rows.filter((s) => s.is_visible !== false);
-        setActiveServices(visible);
+        setActiveServices(rows.filter((service) => service.is_visible !== false));
       })
       .catch(() => {
         if (!cancelled) setActiveServices([]);
       });
+
     return () => {
       cancelled = true;
     };
   }, [userId]);
 
   useEffect(() => {
-    if (state.status === "loading" || state.status === "error") {
+    if (state.status !== "success" || !state.user.show_history) {
       setHistoryItems([]);
       return;
     }
-    if (state.status !== "success") return;
-    if (!state.user.show_history) {
-      setHistoryItems([]);
-      return;
-    }
+
     let cancelled = false;
+
     getUserHistory(userId)
       .then((rows) => {
         if (!cancelled) setHistoryItems(rows);
@@ -131,10 +197,42 @@ export default function PublicProfileScreen() {
       .catch(() => {
         if (!cancelled) setHistoryItems([]);
       });
+
     return () => {
       cancelled = true;
     };
   }, [state, userId]);
+
+  useEffect(() => {
+    if (state.status !== "success") {
+      setReviews([]);
+      return;
+    }
+
+    let cancelled = false;
+    setReviewsLoading(true);
+
+    getVerifiedReviews(userId, { page: 1, page_size: 20 })
+      .then((response) => {
+        if (!cancelled) {
+          setReviews(response.results ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReviews([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setReviewsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state.status, userId]);
 
   if (state.status === "loading") {
     return (
@@ -160,7 +258,8 @@ export default function PublicProfileScreen() {
     .trim();
 
   const bioText =
-    user.bio != null && String(user.bio).trim() ? String(user.bio) : null;
+    user.bio != null && String(user.bio).trim() ? String(user.bio).trim() : null;
+  const hasLongBio = (bioText?.length ?? 0) > 140;
 
   const locationText =
     user.location != null && String(user.location).trim()
@@ -170,8 +269,8 @@ export default function PublicProfileScreen() {
   const joinedDate =
     user.date_joined != null && String(user.date_joined).trim()
       ? (() => {
-          const d = new Date(user.date_joined as string);
-          return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString();
+          const date = new Date(user.date_joined as string);
+          return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
         })()
       : null;
 
@@ -187,18 +286,17 @@ export default function PublicProfileScreen() {
 
   const skills =
     user.skills?.filter(
-      (s) => s?.id && s?.name && String(s.name).trim().length > 0,
+      (skill) => skill?.id && skill?.name && String(skill.name).trim().length > 0,
     ) ?? [];
 
   const portfolioUrls =
     user.portfolio_images?.filter(
-      (u) => typeof u === "string" && u.trim().length > 0,
+      (url) => typeof url === "string" && url.trim().length > 0,
     ) ?? [];
 
   const achievementIds = achievementIdsForDisplay(user);
   const canOpenAchievementsList =
     authUser?.id != null && String(authUser.id) === String(user.id);
-
   const isOwnProfile =
     authUser?.id != null && String(authUser.id) === String(user.id);
   const showFollowButton = authUser != null && !isOwnProfile;
@@ -211,31 +309,39 @@ export default function PublicProfileScreen() {
       );
       return;
     }
+
     navigation.navigate("FollowList", { userId, kind });
   };
 
   const handleFollowToggle = () => {
-    if (state.status !== "success" || followActionLoading) return;
+    if (followActionLoading) return;
+
     const currentlyFollowing = Boolean(user.is_following);
     setFollowActionLoading(true);
-    const run = currentlyFollowing ? unfollowUser(userId) : followUser(userId);
-    run
+
+    const request = currentlyFollowing ? unfollowUser(userId) : followUser(userId);
+
+    request
       .then(() => {
         setState((prev) => {
           if (prev.status !== "success") return prev;
-          const u = prev.user;
+
           const nextFollowing = !currentlyFollowing;
           const delta = nextFollowing ? 1 : -1;
-          const prevFollowers = u.followers_count ?? 0;
+
           return {
             status: "success",
             user: {
-              ...u,
+              ...prev.user,
               is_following: nextFollowing,
-              followers_count: Math.max(0, prevFollowers + delta),
+              followers_count: Math.max(
+                0,
+                (prev.user.followers_count ?? 0) + delta,
+              ),
             },
           };
         });
+
         void refreshUser();
       })
       .catch((err: unknown) => {
@@ -246,11 +352,194 @@ export default function PublicProfileScreen() {
       .finally(() => setFollowActionLoading(false));
   };
 
-  const offersCount = activeServices.filter((s) => s.type === "Offer").length;
-  const needsCount = activeServices.filter((s) => s.type === "Need").length;
+  const offersCount = activeServices.filter((service) => service.type === "Offer").length;
+  const needsCount = activeServices.filter((service) => service.type === "Need").length;
+  const eventServices = activeServices.filter((service) => service.type === "Event");
+  const offerServices = activeServices.filter((service) => service.type === "Offer");
+  const needServices = activeServices.filter((service) => service.type === "Need");
+  const ownHistoryEntries = groupHistoryItems(
+    historyItems.filter(isOwnHistoryItem),
+  );
   const exchangesCount = groupHistoryItems(
     historyItems.filter(isOwnHistoryItem),
   ).length;
+  const tabItems: Array<{ key: ProfileTabKey; label: string; count: number }> = [
+    { key: "offers", label: "Offers", count: offerServices.length },
+    { key: "needs", label: "Needs", count: needServices.length },
+    { key: "events", label: "Events", count: eventServices.length },
+    { key: "history", label: "History", count: ownHistoryEntries.length },
+    { key: "reviews", label: "Reviews", count: reviews.length },
+  ];
+
+  const renderServiceTab = (services: Service[], emptyText: string) => {
+    if (!services.length) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Text style={styles.emptyStateTitle}>Nothing here yet</Text>
+          <Text style={styles.emptyStateText}>{emptyText}</Text>
+        </View>
+      );
+    }
+
+    return services.map((service) => (
+      <Pressable
+        key={service.id}
+        accessibilityRole="button"
+        accessibilityLabel={`Open service ${service.title}`}
+        onPress={() => navigation.navigate("ServiceDetail", { id: service.id })}
+        style={({ pressed }) => [
+          styles.serviceCardPressable,
+          pressed && styles.pressed,
+        ]}
+      >
+        <ProfileActivityServiceCard service={service} />
+      </Pressable>
+    ));
+  };
+
+  const renderHistoryTab = () => {
+    if (!user.show_history) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Text style={styles.emptyStateTitle}>History is private</Text>
+          <Text style={styles.emptyStateText}>
+            This member chose not to share their completed exchange history.
+          </Text>
+        </View>
+      );
+    }
+
+    if (!ownHistoryEntries.length) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Text style={styles.emptyStateTitle}>No completed history yet</Text>
+          <Text style={styles.emptyStateText}>
+            Finished exchanges on this member's services will show up here.
+          </Text>
+        </View>
+      );
+    }
+
+    return ownHistoryEntries.map((entry) => (
+      <Pressable
+        key={entry.key}
+        accessibilityRole="button"
+        accessibilityLabel={`Open history item ${entry.serviceTitle}`}
+        onPress={() => navigation.navigate("ServiceDetail", { id: entry.serviceId })}
+        style={({ pressed }) => [
+          styles.historyCard,
+          pressed && styles.pressed,
+        ]}
+      >
+        <View style={styles.historyCardHeader}>
+          <View style={styles.historyCardTitleWrap}>
+            <Text style={styles.historyCardTitle}>{entry.serviceTitle}</Text>
+            <Text style={styles.historyCardMeta}>
+              With {entry.partnerName} · {formatShortDate(entry.completedDate)}
+            </Text>
+          </View>
+          <View style={styles.historyHoursPill}>
+            <Text style={styles.historyHoursPillText}>{formatHours(entry.duration)}</Text>
+          </View>
+        </View>
+        <View style={styles.historyCardFooter}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View participants for ${entry.serviceTitle}`}
+            onPress={(event) => {
+              event.stopPropagation();
+              setSelectedHistoryEntry(entry);
+            }}
+            style={({ pressed }) => [
+              styles.historyFooterAction,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.historyFooterText}>
+              {entry.useCount} participant{entry.useCount !== 1 ? "s" : ""}
+            </Text>
+            <Ionicons
+              name="chevron-forward"
+              size={15}
+              color={colors.GRAY400}
+            />
+          </Pressable>
+        </View>
+      </Pressable>
+    ));
+  };
+
+  const renderReviewsTab = () => {
+    if (reviewsLoading) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Text style={styles.emptyStateText}>Reviews are loading...</Text>
+        </View>
+      );
+    }
+
+    if (!reviews.length) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Text style={styles.emptyStateTitle}>No reviews yet</Text>
+          <Text style={styles.emptyStateText}>
+            Verified reviews from completed exchanges will appear here.
+          </Text>
+        </View>
+      );
+    }
+
+    return reviews.map((review) => (
+      <View key={review.id} style={styles.reviewCard}>
+        <View style={styles.reviewHeader}>
+          {review.user_avatar_url ? (
+            <Image
+              source={{ uri: review.user_avatar_url }}
+              style={styles.reviewAvatarImage}
+            />
+          ) : (
+            <View style={styles.reviewAvatar}>
+              <Text style={styles.reviewAvatarText}>
+                {(review.user_name || "?").slice(0, 1).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <View style={styles.reviewHeaderText}>
+            <Text style={styles.reviewAuthor}>{review.user_name || "Community member"}</Text>
+            <Text style={styles.reviewMeta}>
+              {review.service_title || "Exchange review"} · {formatShortDate(review.created_at)}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.reviewBody}>{review.body}</Text>
+      </View>
+    ));
+  };
+
+  const renderActiveTab = () => {
+    if (activeTab === "offers") {
+      return renderServiceTab(
+        offerServices,
+        "This member has no active offers at the moment.",
+      );
+    }
+    if (activeTab === "needs") {
+      return renderServiceTab(
+        needServices,
+        "This member has no active needs at the moment.",
+      );
+    }
+    if (activeTab === "events") {
+      return renderServiceTab(
+        eventServices,
+        "This member has no active events at the moment.",
+      );
+    }
+    if (activeTab === "history") {
+      return renderHistoryTab();
+    }
+    return renderReviewsTab();
+  };
 
   return (
     <View style={styles.container}>
@@ -281,16 +570,14 @@ export default function PublicProfileScreen() {
                     user.is_following
                       ? styles.followButtonOutline
                       : styles.followButtonFilled,
-                    pressed && styles.followButtonPressed,
+                    pressed && styles.pressed,
                     followActionLoading && styles.followButtonDisabled,
                   ]}
                 >
                   {followActionLoading ? (
                     <ActivityIndicator
                       size="small"
-                      color={
-                        user.is_following ? colors.GRAY700 : colors.WHITE
-                      }
+                      color={user.is_following ? colors.GRAY700 : colors.WHITE}
                     />
                   ) : (
                     <Text
@@ -329,16 +616,48 @@ export default function PublicProfileScreen() {
               </Pressable>
             </View>
 
-            <Text style={styles.followMetaRow}>
-              {user.followers_count ?? 0} followers ·{" "}
-              {user.following_count ?? 0} following
-            </Text>
-
             {locationText ? (
-              <Text style={styles.location}>{locationText}</Text>
+              <View style={styles.locationRow}>
+                <Ionicons
+                  name="location-outline"
+                  size={14}
+                  color={colors.GRAY500}
+                />
+                <Text style={styles.location}>{locationText}</Text>
+              </View>
             ) : null}
 
-            {bioText ? <Text style={styles.bio}>{bioText}</Text> : null}
+            {joinedDate ? (
+              <View style={styles.memberMetaRow}>
+                <Ionicons
+                  name="calendar-outline"
+                  size={13}
+                  color={colors.GRAY500}
+                />
+                <Text style={styles.memberMetaText}>Member since {joinedDate}</Text>
+              </View>
+            ) : null}
+
+            {bioText ? (
+              <>
+                <Text
+                  style={styles.bio}
+                  numberOfLines={isBioExpanded ? undefined : 3}
+                >
+                  {bioText}
+                </Text>
+                {hasLongBio ? (
+                  <Pressable
+                    onPress={() => setIsBioExpanded((prev) => !prev)}
+                    style={({ pressed }) => pressed && styles.pressed}
+                  >
+                    <Text style={styles.bioToggle}>
+                      {isBioExpanded ? "Less" : "Read more"}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </>
+            ) : null}
           </View>
         </View>
 
@@ -349,40 +668,69 @@ export default function PublicProfileScreen() {
         />
 
         <View style={styles.statsRow}>
-          <View style={styles.statCard}>
+          <View style={[styles.statCard, styles.greenStatCard]}>
+            <View style={[styles.statAccentBar, { backgroundColor: colors.GREEN }]} />
+            <View style={styles.statCardInner}>
             <View style={styles.statIconWrap}>
               <Ionicons name="heart-outline" size={20} color={colors.GREEN} />
               <Text style={styles.statValue}>{user.karma_score ?? 0}</Text>
             </View>
-            <Text style={styles.statLabel}>karma</Text>
+            <Text style={styles.statLabel}>Karma</Text>
+          </View>
           </View>
 
-          <View style={styles.statCard}>
+          <Pressable
+            onPress={
+              canOpenAchievementsList
+                ? () =>
+                    navigation.navigate("AchievementsList", {
+                      userId: user.id,
+                    })
+                : undefined
+            }
+            disabled={!canOpenAchievementsList}
+            style={({ pressed }) => [
+              styles.statCard,
+              styles.purpleStatCard,
+              pressed && canOpenAchievementsList && styles.pressed,
+            ]}
+          >
+            <View style={[styles.statAccentBar, { backgroundColor: colors.PURPLE }]} />
+            <View style={styles.statCardInner}>
             <View style={styles.statIconWrap}>
-              <SimpleLineIcons name="badge" size={20} color={colors.GREEN} />
-              <Text style={styles.statValue}>
-                {user.badges?.length ?? 0}
-              </Text>
+              <SimpleLineIcons name="badge" size={18} color={colors.PURPLE} />
+              <Text style={styles.statValue}>{user.badges?.length ?? 0}</Text>
             </View>
-            <Text style={styles.statLabel}>Badges</Text>
-          </View>
+            <View style={styles.statLabelRow}>
+              <Text style={styles.statLabel}>Badges</Text>
+              {canOpenAchievementsList ? (
+                <Ionicons
+                  name="chevron-forward"
+                  size={14}
+                  color={colors.GRAY400}
+                />
+              ) : null}
+            </View>
+            </View>
+          </Pressable>
 
-          <View style={styles.statCard}>
+          <View style={[styles.statCard, styles.amberStatCard]}>
+            <View style={[styles.statAccentBar, { backgroundColor: colors.AMBER }]} />
+            <View style={styles.statCardInner}>
             <View style={styles.statIconWrap}>
-              <Ionicons name="star-outline" size={20} color={colors.GREEN} />
+              <Ionicons name="star-outline" size={20} color={colors.AMBER} />
               <Text style={styles.statValue}>
                 {user.achievements?.length ?? 0}
               </Text>
             </View>
             <Text style={styles.statLabel}>Achievements</Text>
           </View>
+          </View>
         </View>
 
         <View style={styles.metricsRow}>
           <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>
-              {user.helpful_count ?? 0}
-            </Text>
+            <Text style={styles.metricPillValue}>{user.helpful_count ?? 0}</Text>
             <Text style={styles.metricPillLabel}>Helpful</Text>
           </View>
           <View style={styles.metricPill}>
@@ -390,92 +738,71 @@ export default function PublicProfileScreen() {
             <Text style={styles.metricPillLabel}>Kind</Text>
           </View>
           <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>
-              {user.punctual_count ?? 0}
-            </Text>
+            <Text style={styles.metricPillValue}>{user.punctual_count ?? 0}</Text>
             <Text style={styles.metricPillLabel}>Punctual</Text>
           </View>
         </View>
 
-        {joinedDate ? (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Member since</Text>
-            <Text style={styles.joinedValue}>{joinedDate}</Text>
-          </View>
-        ) : null}
-
-        {activeServices.length > 0 ? (
-          <View style={styles.sectionCard}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Active services"
-              accessibilityHint={
-                activeServicesOpen
-                  ? "Double tap to collapse the list"
-                  : "Double tap to expand the list"
-              }
-              accessibilityState={{ expanded: activeServicesOpen }}
-              onPress={() => setActiveServicesOpen((open) => !open)}
-              style={({ pressed }) => [
-                styles.activeServicesAccordionHeader,
-                activeServicesOpen && styles.activeServicesAccordionHeaderOpen,
-                pressed && styles.activeServicesAccordionHeaderPressed,
-              ]}
-            >
-              <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
-                Active services
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
+              Activity
+            </Text>
+            <View style={styles.activeServicesCountPill}>
+              <Text style={styles.activeServicesCountText}>
+                {tabItems.find((item) => item.key === activeTab)?.count ?? 0}
               </Text>
-              <View style={styles.activeServicesHeaderTrailing}>
-                <View style={styles.activeServicesCountPill}>
-                  <Text style={styles.activeServicesCountText}>
-                    {activeServices.length}
-                  </Text>
-                </View>
-                <Ionicons
-                  name={activeServicesOpen ? "chevron-up" : "chevron-down"}
-                  size={22}
-                  color={colors.GRAY700}
-                />
-              </View>
-            </Pressable>
-            {activeServicesOpen
-              ? activeServices.map((service) => (
-                  <Pressable
-                    key={service.id}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open service ${service.title}`}
-                    onPress={() =>
-                      navigation.navigate("Home", {
-                        screen: "ServiceDetail",
-                        params: { id: service.id },
-                      })
-                    }
-                    style={({ pressed }) => [
-                      styles.serviceCardPressable,
-                      pressed && styles.serviceCardPressablePressed,
-                    ]}
-                  >
-                    <ServiceCard
-                      service={service}
-                      style={styles.serviceCardInProfile}
-                    />
-                  </Pressable>
-                ))
-              : null}
-          </View>
-        ) : null}
-
-        {skills.length > 0 ? (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Skills</Text>
-            <View style={styles.tagsWrap}>
-              {skills.map((skill) => (
-                <View key={skill.id} style={styles.tag}>
-                  <Text style={styles.tagText}>{skill.name}</Text>
-                </View>
-              ))}
             </View>
           </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.profileTabsRow}
+          >
+            {tabItems.map((tab) => {
+              const isActive = activeTab === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  onPress={() => setActiveTab(tab.key)}
+                  style={({ pressed }) => [
+                    styles.profileTab,
+                    isActive && styles.profileTabActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.profileTabText,
+                      isActive && styles.profileTabTextActive,
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                  <View
+                    style={[
+                      styles.profileTabCount,
+                      isActive && styles.profileTabCountActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.profileTabCountText,
+                        isActive && styles.profileTabCountTextActive,
+                      ]}
+                    >
+                      {tab.count}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <View style={styles.tabPanel}>{renderActiveTab()}</View>
+        </View>
+
+        {skills.length > 0 ? (
+          <ProfileSkillsSection skills={skills} />
         ) : null}
 
         {achievementIds.length > 0 ? (
@@ -511,6 +838,127 @@ export default function PublicProfileScreen() {
           </View>
         ) : null}
       </ScrollView>
+      <Modal
+        visible={selectedHistoryEntry !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedHistoryEntry(null)}
+      >
+        <Pressable
+          style={styles.sheetBackdrop}
+          onPress={() => setSelectedHistoryEntry(null)}
+        >
+          <Pressable style={styles.sheetCard} onPress={() => {}}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Participants</Text>
+            <Text style={styles.sheetSubtitle}>
+              {selectedHistoryEntry?.serviceTitle || "Completed exchange"}
+            </Text>
+            <View style={styles.sheetList}>
+              {(selectedHistoryEntry?.items ?? []).map((item, index) => (
+                <View
+                  key={`${item.partner_id}-${item.completed_date}-${index}`}
+                  style={[
+                    styles.sheetParticipantRow,
+                    index > 0 && styles.sheetParticipantRowBorder,
+                  ]}
+                >
+                  {item.partner_avatar_url ? (
+                    <Image
+                      source={{ uri: item.partner_avatar_url }}
+                      style={styles.sheetParticipantAvatarImage}
+                    />
+                  ) : (
+                    <View style={styles.sheetParticipantAvatar}>
+                      <Text style={styles.sheetParticipantAvatarText}>
+                        {getInitials(item.partner_name)}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.sheetParticipantTextWrap}>
+                    <Text style={styles.sheetParticipantName}>{item.partner_name}</Text>
+                    <Text style={styles.sheetParticipantMeta}>
+                      {formatShortDate(item.completed_date)} · {formatHours(item.duration)}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+function ProfileActivityServiceCard({ service }: { service: Service }) {
+  const accent = activityCardAccent(service.type);
+  const participantLabel =
+    service.type === "Event"
+      ? `${service.participant_count ?? 0}/${service.max_participants} joined`
+      : service.max_participants > 1
+        ? `${service.participant_count ?? 0}/${service.max_participants} spots`
+        : "1:1 exchange";
+
+  return (
+    <View style={profileActivityCardStyles.card}>
+      <View style={profileActivityCardStyles.topRow}>
+        <View
+          style={[
+            profileActivityCardStyles.typeBadge,
+            { backgroundColor: accent.bg },
+          ]}
+        >
+          <Ionicons name={accent.icon} size={12} color={accent.color} />
+          <Text
+            style={[
+              profileActivityCardStyles.typeBadgeText,
+              { color: accent.color },
+            ]}
+          >
+            {accent.label}
+          </Text>
+        </View>
+        <View style={profileActivityCardStyles.metaRow}>
+          <View style={profileActivityCardStyles.metaBadge}>
+            <Ionicons name="time-outline" size={12} color={colors.GRAY500} />
+            <Text style={profileActivityCardStyles.metaBadgeText}>
+              {formatHours(service.duration)}
+            </Text>
+          </View>
+          <View style={profileActivityCardStyles.metaBadge}>
+            <Ionicons name="people-outline" size={12} color={colors.GRAY500} />
+            <Text style={profileActivityCardStyles.metaBadgeText}>
+              {participantLabel}
+            </Text>
+          </View>
+        </View>
+      </View>
+      <Text style={profileActivityCardStyles.title} numberOfLines={2}>
+        {service.title}
+      </Text>
+      <Text style={profileActivityCardStyles.description} numberOfLines={2}>
+        {service.description || "No description yet."}
+      </Text>
+      <View style={profileActivityCardStyles.bottomRow}>
+        <View style={profileActivityCardStyles.metaBadge}>
+          <Ionicons name="location-outline" size={12} color={colors.GRAY500} />
+          <Text style={profileActivityCardStyles.metaBadgeText}>
+            {service.location_area || service.location_type || "Flexible"}
+          </Text>
+        </View>
+        {service.schedule_details ? (
+          <View style={profileActivityCardStyles.metaBadge}>
+            <Ionicons name="calendar-outline" size={12} color={colors.GRAY500} />
+            <Text
+              style={profileActivityCardStyles.metaBadgeText}
+              numberOfLines={1}
+            >
+              {service.schedule_details}
+            </Text>
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -519,10 +967,10 @@ const getStyles = (top: number, bottom: number) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: colors.GRAY100,
+      backgroundColor: colors.GRAY50,
     },
     mutedBackground: {
-      backgroundColor: colors.GRAY100,
+      backgroundColor: colors.GRAY50,
     },
     centerFill: {
       flex: 1,
@@ -545,7 +993,9 @@ const getStyles = (top: number, bottom: number) =>
       backgroundColor: colors.WHITE,
       marginHorizontal: 16,
       marginTop: 12,
-      borderRadius: 28,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
       overflow: "hidden",
       shadowColor: colors.GRAY900,
       shadowOpacity: 0.06,
@@ -555,36 +1005,37 @@ const getStyles = (top: number, bottom: number) =>
     },
     banner: {
       width: "100%",
-      height: 150,
+      height: 120,
       backgroundColor: colors.GRAY200,
     },
     avatarWrapper: {
       position: "absolute",
-      top: 98,
-      left: 20,
-      width: 104,
-      height: 104,
-      borderRadius: 52,
+      top: 74,
+      left: 16,
+      width: 80,
+      height: 80,
+      borderRadius: 40,
       backgroundColor: colors.WHITE,
       alignItems: "center",
       justifyContent: "center",
-      padding: 4,
+      padding: 3,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
     },
     avatar: {
-      width: 96,
-      height: 96,
-      borderRadius: 48,
+      width: 72,
+      height: 72,
+      borderRadius: 36,
       backgroundColor: colors.GRAY200,
     },
     profileHeaderContent: {
-      paddingHorizontal: 20,
-      paddingTop: 62,
-      paddingBottom: 20,
+      paddingHorizontal: 16,
+      paddingTop: 44,
+      paddingBottom: 14,
     },
     nameRow: {
       flexDirection: "row",
       alignItems: "center",
-      flexWrap: "wrap",
       gap: 8,
       marginBottom: 6,
       justifyContent: "space-between",
@@ -592,7 +1043,7 @@ const getStyles = (top: number, bottom: number) =>
     name: {
       fontSize: 24,
       fontWeight: "700",
-      color: colors.GRAY900,
+      color: colors.GRAY800,
       flex: 1,
       minWidth: 0,
     },
@@ -604,6 +1055,8 @@ const getStyles = (top: number, bottom: number) =>
       minWidth: 96,
       alignItems: "center",
       justifyContent: "center",
+      borderWidth: 1,
+      borderColor: colors.GREEN,
     },
     followButtonOutline: {
       paddingHorizontal: 16,
@@ -626,9 +1079,6 @@ const getStyles = (top: number, bottom: number) =>
       fontSize: 14,
       fontWeight: "600",
     },
-    followButtonPressed: {
-      opacity: 0.85,
-    },
     followButtonDisabled: {
       opacity: 0.7,
     },
@@ -636,7 +1086,7 @@ const getStyles = (top: number, bottom: number) =>
       flexDirection: "row",
       flexWrap: "wrap",
       alignItems: "center",
-      marginBottom: 8,
+      marginBottom: 6,
     },
     followMetaLink: {
       fontSize: 13,
@@ -648,31 +1098,76 @@ const getStyles = (top: number, bottom: number) =>
       fontSize: 13,
       color: colors.GRAY500,
     },
+    locationRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginBottom: 6,
+    },
+    memberMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginBottom: 6,
+    },
+    memberMetaText: {
+      fontSize: 12,
+      color: colors.GRAY500,
+    },
     location: {
       fontSize: 14,
       color: colors.GRAY500,
-      marginBottom: 10,
     },
     bio: {
-      fontSize: 15,
-      lineHeight: 22,
-      color: colors.GRAY700,
-      marginBottom: 4,
+      fontSize: 14,
+      lineHeight: 20,
+      color: colors.GRAY600,
+    },
+    bioToggle: {
+      marginTop: 6,
+      fontSize: 12,
+      fontWeight: "600",
+      color: colors.GREEN,
     },
     statsRow: {
       flexDirection: "row",
-      gap: 12,
+      gap: 8,
       paddingHorizontal: 16,
-      marginTop: 16,
+      marginTop: 14,
     },
     statCard: {
       flex: 1,
       backgroundColor: colors.WHITE,
-      borderRadius: 20,
-      paddingVertical: 18,
+      borderRadius: 12,
+      overflow: "hidden",
+      paddingVertical: 12,
       alignItems: "center",
       borderWidth: 1,
-      borderColor: colors.GREEN,
+      borderColor: colors.GRAY200,
+      shadowColor: colors.GRAY900,
+      shadowOpacity: 0.05,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 2,
+    },
+    greenStatCard: {
+      backgroundColor: colors.GREEN_LT,
+    },
+    purpleStatCard: {
+      backgroundColor: colors.PURPLE_LT,
+    },
+    amberStatCard: {
+      backgroundColor: colors.AMBER_LT,
+    },
+    statAccentBar: {
+      height: 3,
+      width: "100%",
+    },
+    statCardInner: {
+      width: "100%",
+      alignItems: "center",
+      paddingVertical: 10,
+      paddingHorizontal: 6,
     },
     statIconWrap: {
       flexDirection: "row",
@@ -681,45 +1176,54 @@ const getStyles = (top: number, bottom: number) =>
       gap: 4,
     },
     statValue: {
-      color: colors.GREEN,
-      fontSize: 22,
+      color: colors.GRAY800,
+      fontSize: 18,
       fontWeight: "700",
-      marginBottom: 4,
+      marginBottom: 2,
     },
     statLabel: {
       color: colors.GRAY500,
-      fontSize: 13,
-      fontWeight: "400",
+      fontSize: 11,
+      fontWeight: "500",
+    },
+    statLabelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
     },
     metricsRow: {
       flexDirection: "row",
-      gap: 10,
+      gap: 8,
       paddingHorizontal: 16,
-      marginTop: 12,
+      marginTop: 10,
     },
     metricPill: {
       flex: 1,
       backgroundColor: colors.WHITE,
-      borderRadius: 16,
-      paddingVertical: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      paddingVertical: 10,
       alignItems: "center",
     },
     metricPillValue: {
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: "700",
-      color: colors.GRAY900,
+      color: colors.GRAY800,
     },
     metricPillLabel: {
-      fontSize: 12,
+      fontSize: 11,
       color: colors.GRAY500,
-      marginTop: 2,
+      marginTop: 1,
     },
     sectionCard: {
       backgroundColor: colors.WHITE,
       marginHorizontal: 16,
-      marginTop: 16,
-      borderRadius: 24,
-      padding: 18,
+      marginTop: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      padding: 14,
       shadowColor: colors.GRAY900,
       shadowOpacity: 0.04,
       shadowRadius: 14,
@@ -727,28 +1231,79 @@ const getStyles = (top: number, bottom: number) =>
       elevation: 2,
     },
     sectionTitle: {
-      fontSize: 18,
-      fontWeight: "700",
-      color: colors.GRAY900,
-      marginBottom: 10,
+      fontSize: 16,
+      fontWeight: "600",
+      color: colors.GRAY700,
+      marginBottom: 8,
     },
     sectionTitleInline: {
       marginBottom: 0,
+    },
+    sectionHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 10,
+      gap: 10,
+    },
+    profileTabsRow: {
+      paddingBottom: 4,
+      gap: 8,
+    },
+    profileTab: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      borderRadius: 999,
+      backgroundColor: colors.GRAY100,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+    },
+    profileTabActive: {
+      backgroundColor: colors.GREEN_LT,
+      borderColor: colors.GREEN,
+    },
+    profileTabText: {
+      fontSize: 13,
+      fontWeight: "600",
+      color: colors.GRAY600,
+    },
+    profileTabTextActive: {
+      color: colors.GREEN,
+    },
+    profileTabCount: {
+      minWidth: 24,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 999,
+      backgroundColor: colors.WHITE,
+      alignItems: "center",
+    },
+    profileTabCountActive: {
+      backgroundColor: colors.GREEN,
+    },
+    profileTabCountText: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: colors.GRAY600,
+    },
+    profileTabCountTextActive: {
+      color: colors.WHITE,
+    },
+    tabPanel: {
+      marginTop: 12,
     },
     activeServicesAccordionHeader: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
       paddingVertical: 4,
-      marginHorizontal: -4,
-      paddingHorizontal: 4,
-      borderRadius: 12,
+      gap: 10,
     },
     activeServicesAccordionHeaderOpen: {
       marginBottom: 12,
-    },
-    activeServicesAccordionHeaderPressed: {
-      opacity: 0.75,
     },
     activeServicesHeaderTrailing: {
       flexDirection: "row",
@@ -769,20 +1324,222 @@ const getStyles = (top: number, bottom: number) =>
       color: colors.GREEN,
     },
     serviceCardPressable: {
-      borderRadius: 14,
+      borderRadius: 12,
       marginBottom: 12,
-    },
-    serviceCardPressablePressed: {
-      opacity: 0.92,
     },
     serviceCardInProfile: {
       marginHorizontal: 0,
       marginBottom: 0,
     },
-    joinedValue: {
-      fontSize: 15,
+    emptyStateCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      backgroundColor: colors.GRAY50,
+      paddingHorizontal: 14,
+      paddingVertical: 16,
+    },
+    emptyStateTitle: {
+      fontSize: 14,
+      fontWeight: "700",
       color: colors.GRAY700,
+      marginBottom: 4,
+    },
+    emptyStateText: {
+      fontSize: 13,
+      lineHeight: 19,
+      color: colors.GRAY500,
+    },
+    historyCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      backgroundColor: colors.GRAY50,
+      padding: 12,
+      marginBottom: 10,
+    },
+    historyCardHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+    },
+    historyCardTitleWrap: {
+      flex: 1,
+    },
+    historyCardTitle: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.GRAY800,
+      marginBottom: 4,
+    },
+    historyCardMeta: {
+      fontSize: 12,
+      color: colors.GRAY500,
+      lineHeight: 17,
+    },
+    historyHoursPill: {
+      backgroundColor: colors.GREEN_LT,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    historyHoursPillText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.GREEN,
+    },
+    historyCardFooter: {
+      marginTop: 10,
+      paddingTop: 10,
+      borderTopWidth: 1,
+      borderTopColor: colors.GRAY200,
+    },
+    historyFooterAction: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    historyFooterText: {
+      fontSize: 12,
+      color: colors.GRAY500,
       fontWeight: "600",
+    },
+    sheetBackdrop: {
+      flex: 1,
+      backgroundColor: "rgba(17,24,39,0.18)",
+      justifyContent: "flex-end",
+      padding: 16,
+    },
+    sheetCard: {
+      backgroundColor: colors.WHITE,
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingTop: 10,
+      paddingBottom: 18,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+    },
+    sheetHandle: {
+      width: 42,
+      height: 4,
+      borderRadius: 999,
+      backgroundColor: colors.GRAY300,
+      alignSelf: "center",
+      marginBottom: 12,
+    },
+    sheetTitle: {
+      fontSize: 18,
+      fontWeight: "700",
+      color: colors.GRAY800,
+      marginBottom: 4,
+    },
+    sheetSubtitle: {
+      fontSize: 13,
+      color: colors.GRAY500,
+      marginBottom: 14,
+    },
+    sheetList: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      overflow: "hidden",
+      backgroundColor: colors.GRAY50,
+    },
+    sheetParticipantRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      backgroundColor: colors.WHITE,
+    },
+    sheetParticipantRowBorder: {
+      borderTopWidth: 1,
+      borderTopColor: colors.GRAY200,
+    },
+    sheetParticipantAvatar: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.GREEN_LT,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sheetParticipantAvatarImage: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.GRAY200,
+    },
+    sheetParticipantAvatarText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.GREEN,
+    },
+    sheetParticipantTextWrap: {
+      flex: 1,
+    },
+    sheetParticipantName: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.GRAY800,
+      marginBottom: 2,
+    },
+    sheetParticipantMeta: {
+      fontSize: 12,
+      color: colors.GRAY500,
+    },
+    reviewCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      backgroundColor: colors.WHITE,
+      padding: 12,
+      marginBottom: 10,
+    },
+    reviewHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 10,
+    },
+    reviewAvatar: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.GREEN_LT,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    reviewAvatarImage: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.GRAY200,
+    },
+    reviewAvatarText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.GREEN,
+    },
+    reviewHeaderText: {
+      flex: 1,
+    },
+    reviewAuthor: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.GRAY800,
+      marginBottom: 2,
+    },
+    reviewMeta: {
+      fontSize: 12,
+      color: colors.GRAY500,
+    },
+    reviewBody: {
+      fontSize: 13,
+      lineHeight: 20,
+      color: colors.GRAY700,
     },
     tagsWrap: {
       flexDirection: "row",
@@ -802,9 +1559,80 @@ const getStyles = (top: number, bottom: number) =>
     },
     portfolioImage: {
       width: 170,
-      height: 110,
-      borderRadius: 16,
+      height: 100,
+      borderRadius: 12,
       marginRight: 12,
       backgroundColor: colors.GRAY200,
     },
+    pressed: {
+      opacity: 0.88,
+    },
   });
+
+const profileActivityCardStyles = StyleSheet.create({
+  card: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    backgroundColor: colors.WHITE,
+    padding: 12,
+  },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 10,
+  },
+  typeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  typeBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  metaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    justifyContent: "flex-end",
+    flex: 1,
+  },
+  metaBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.GRAY100,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  metaBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.GRAY600,
+    flexShrink: 1,
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.GRAY800,
+    marginBottom: 6,
+  },
+  description: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.GRAY600,
+    marginBottom: 10,
+  },
+  bottomRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+});

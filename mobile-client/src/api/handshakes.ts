@@ -9,7 +9,23 @@ import type { PaginatedResponse } from './types';
 export interface Handshake {
   id: string;
   service: string | object;
+  service_id?: string;
+  service_title?: string;
+  service_type?: "Offer" | "Need" | "Event" | string | null;
+  schedule_type?: "One-Time" | "Recurrent" | string | null;
+  max_participants?: number | null;
   initiator?: string | object;
+  counterpart?: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    email: string;
+    avatar_url?: string | null;
+  } | null;
+  is_current_user_provider?: boolean;
+  provider_name?: string;
+  requester_name?: string;
+  provisioned_hours?: number | string | null;
   status: string;
   created_at: string;
   updated_at?: string;
