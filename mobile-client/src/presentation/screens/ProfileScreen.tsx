@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,15 +14,33 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
+import {
+  useNavigation,
+  type CompositeNavigationProp,
+} from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
+import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
+import { listServices } from "../../api/services";
+import { getUserHistory } from "../../api/users";
+import type { Service, UserHistoryItem } from "../../api/types";
+import { groupHistoryItems, isOwnHistoryItem } from "../../utils/historyGrouping";
 import AchievementsSection from "../components/AchievementsSection";
+
+import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
+import ServiceCard from "../components/ServiceCard";
 import NotificationBadge from "../components/NotificationBadge";
 import { useNotificationStore } from "../../store/useNotificationStore";
+
+type ProfileHomeNavigation = CompositeNavigationProp<
+  NativeStackNavigationProp<ProfileStackParamList, "ProfileHome">,
+  BottomTabNavigationProp<BottomTabParamList>
+>;
+
 
 type EditableProfile = {
   first_name: string;
@@ -35,10 +54,7 @@ type EditableProfile = {
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
-  const navigation =
-    useNavigation<
-      NativeStackNavigationProp<ProfileStackParamList, "ProfileHome">
-    >();
+  const navigation = useNavigation<ProfileHomeNavigation>();
   const insets = useSafeAreaInsets();
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const styles = useMemo(
@@ -47,6 +63,9 @@ export default function ProfileScreen() {
   );
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [activeServices, setActiveServices] = useState<Service[]>([]);
+  const [activeServicesOpen, setActiveServicesOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
 
   const initialForm = useMemo<EditableProfile>(
     () => ({
@@ -64,6 +83,45 @@ export default function ProfileScreen() {
   );
 
   const [form, setForm] = useState<EditableProfile>(initialForm);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const ownerId = String(user.id);
+    let cancelled = false;
+    setActiveServices([]);
+    setActiveServicesOpen(false);
+    listServices({ user: ownerId, page_size: 50 })
+      .then((res) => {
+        if (cancelled) return;
+        const rows = res.results ?? [];
+        setActiveServices(rows.filter((s) => s.is_visible !== false));
+      })
+      .catch(() => {
+        if (!cancelled) setActiveServices([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setHistoryItems([]);
+      return;
+    }
+    const uid = String(user.id);
+    let cancelled = false;
+    getUserHistory(uid)
+      .then((rows) => {
+        if (!cancelled) setHistoryItems(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setHistoryItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const handleChange = (key: keyof EditableProfile, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -147,12 +205,17 @@ export default function ProfileScreen() {
     achievements?: string[];
   };
 
-  const completedAchievementsCount = typedUser.achievements?.length ?? 0;
-
   const fullName = `${form.first_name} ${form.last_name}`.trim();
   const joinedDate = typedUser.date_joined
     ? new Date(typedUser.date_joined).toLocaleDateString()
     : null;
+
+  const activeListingServices = activeServices.filter((s) => s.status === "Active");
+  const offersCount = activeListingServices.filter((s) => s.type === "Offer").length;
+  const needsCount = activeListingServices.filter((s) => s.type === "Need").length;
+  const exchangesCount = groupHistoryItems(
+    historyItems.filter(isOwnHistoryItem),
+  ).length;
 
   return (
     <View style={styles.container}>
@@ -296,6 +359,12 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        <ProfileListingStatsRow
+          offersCount={offersCount}
+          needsCount={needsCount}
+          exchangesCount={exchangesCount}
+        />
+
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <View style={styles.statIconWrap}>
@@ -368,6 +437,67 @@ export default function ProfileScreen() {
           </View>
         </View> */}
 
+        {activeServices.length > 0 ? (
+          <View style={styles.sectionCard}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Active services"
+              accessibilityHint={
+                activeServicesOpen
+                  ? "Double tap to collapse the list"
+                  : "Double tap to expand the list"
+              }
+              accessibilityState={{ expanded: activeServicesOpen }}
+              onPress={() => setActiveServicesOpen((open) => !open)}
+              style={({ pressed }) => [
+                styles.activeServicesAccordionHeader,
+                activeServicesOpen && styles.activeServicesAccordionHeaderOpen,
+                pressed && styles.activeServicesAccordionHeaderPressed,
+              ]}
+            >
+              <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
+                Active services
+              </Text>
+              <View style={styles.activeServicesHeaderTrailing}>
+                <View style={styles.activeServicesCountPill}>
+                  <Text style={styles.activeServicesCountText}>
+                    {activeServices.length}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={activeServicesOpen ? "chevron-up" : "chevron-down"}
+                  size={22}
+                  color={colors.GRAY700}
+                />
+              </View>
+            </Pressable>
+            {activeServicesOpen
+              ? activeServices.map((service) => (
+                  <Pressable
+                    key={service.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open service ${service.title}`}
+                    onPress={() =>
+                      navigation.navigate("Home", {
+                        screen: "ServiceDetail",
+                        params: { id: service.id },
+                      })
+                    }
+                    style={({ pressed }) => [
+                      styles.serviceCardPressable,
+                      pressed && styles.serviceCardPressablePressed,
+                    ]}
+                  >
+                    <ServiceCard
+                      service={service}
+                      style={styles.serviceCardInProfile}
+                    />
+                  </Pressable>
+                ))
+              : null}
+          </View>
+        ) : null}
+
         {!!typedUser.skills?.length && (
           <View style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>Skills</Text>
@@ -381,7 +511,19 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        <AchievementsSection completedIds={typedUser.achievements ?? []} />
+        <AchievementsSection
+          completedIds={
+            [...new Set([...(typedUser.achievements ?? []), ...(typedUser.badges ?? [])])]
+          }
+          onViewAll={
+            user?.id
+              ? () =>
+                  navigation.navigate("AchievementsList", {
+                    userId: user.id,
+                  })
+              : undefined
+          }
+        />
 
         {!!typedUser.portfolio_images?.length && (
           <View style={styles.sectionCard}>
@@ -652,6 +794,53 @@ const getStyles = (top: number, bottom: number) =>
       fontWeight: "700",
       color: colors.GRAY900,
       marginBottom: 14,
+    },
+    sectionTitleInline: {
+      marginBottom: 0,
+    },
+    activeServicesAccordionHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 4,
+      marginHorizontal: -4,
+      paddingHorizontal: 4,
+      borderRadius: 12,
+    },
+    activeServicesAccordionHeaderOpen: {
+      marginBottom: 12,
+    },
+    activeServicesAccordionHeaderPressed: {
+      opacity: 0.75,
+    },
+    activeServicesHeaderTrailing: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    activeServicesCountPill: {
+      backgroundColor: colors.GREEN_LT,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      minWidth: 32,
+      alignItems: "center",
+    },
+    activeServicesCountText: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: colors.GREEN,
+    },
+    serviceCardPressable: {
+      borderRadius: 14,
+      marginBottom: 12,
+    },
+    serviceCardPressablePressed: {
+      opacity: 0.92,
+    },
+    serviceCardInProfile: {
+      marginHorizontal: 0,
+      marginBottom: 0,
     },
     inputGroup: {
       marginBottom: 14,

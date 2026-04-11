@@ -72,6 +72,7 @@ export default function MessagesScreen() {
       handshakeId: item.handshake_id,
       otherUserName: item.other_user?.name ?? "Unknown",
       serviceTitle: item.service_title,
+      otherUserId: item.other_user?.id,
     });
   };
 

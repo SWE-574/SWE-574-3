@@ -5,7 +5,7 @@
  */
 
 import { apiRequest } from "./client";
-import type { UserSummary } from "./types";
+import type { PublicUserProfile, UserHistoryItem, UserSummary } from "./types";
 
 export interface UserProfileRequest {
   first_name?: string;
@@ -31,8 +31,8 @@ export function patchMe(
   return apiRequest<UserSummary>("/users/me/", { method: "PATCH", body });
 }
 
-export function getUser(id: string): Promise<UserSummary> {
-  return apiRequest<UserSummary>(`/users/${id}/`);
+export function getUser(id: string): Promise<PublicUserProfile> {
+  return apiRequest<PublicUserProfile>(`/users/${id}/`);
 }
 
 export function updateUser(
@@ -53,13 +53,23 @@ export function getBadgeProgress(userId: string): Promise<unknown> {
   return apiRequest(`/users/${userId}/badge-progress/`);
 }
 
+function normalizeUserHistoryList(
+  data: UserHistoryItem[] | { results?: UserHistoryItem[] },
+): UserHistoryItem[] {
+  if (Array.isArray(data)) return data;
+  return data?.results ?? [];
+}
+
 export function getUserHistory(
   userId: string,
   params?: { page?: number; page_size?: number },
-): Promise<unknown> {
-  return apiRequest(`/users/${userId}/history/`, {
-    params: params as Record<string, string | number | undefined>,
-  });
+): Promise<UserHistoryItem[]> {
+  return apiRequest<UserHistoryItem[] | { results: UserHistoryItem[] }>(
+    `/users/${userId}/history/`,
+    {
+      params: params as Record<string, string | number | undefined>,
+    },
+  ).then(normalizeUserHistoryList);
 }
 
 export function getVerifiedReviews(

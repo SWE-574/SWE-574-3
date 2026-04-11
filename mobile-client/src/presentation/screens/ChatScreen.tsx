@@ -17,7 +17,15 @@ import {
   StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRoute, useNavigation } from "@react-navigation/native";
+import {
+  useRoute,
+  useNavigation,
+  type CompositeNavigationProp,
+} from "@react-navigation/native";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { MessagesStackParamList } from "../../navigation/MessagesStack";
+import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 import {
@@ -35,6 +43,11 @@ import type {
   ChatMessageWithMeta,
   NavProps,
 } from "../../types/chatTypes";
+
+type ChatScreenNavigation = CompositeNavigationProp<
+  NativeStackNavigationProp<MessagesStackParamList, "Chat">,
+  BottomTabNavigationProp<BottomTabParamList>
+>;
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
 import { useHandshake } from "../../hooks/useHandshake";
 import { ChatMessageBubble } from "../components/chat/ChatMessageBubble";
@@ -44,13 +57,14 @@ import { ChatTopMeta } from "../components/chat/ChatTopMeta";
 
 export default function ChatScreen() {
   const { params } = useRoute<NavProps["route"]>();
-  const navigation = useNavigation<NavProps["navigation"]>();
+  const navigation = useNavigation<ChatScreenNavigation>();
   const { user } = useAuth();
 
-  const { handshakeId, otherUserName, serviceTitle } = params ?? {
+  const { handshakeId, otherUserName, serviceTitle, otherUserId } = params ?? {
     handshakeId: "",
     otherUserName: "Chat",
     serviceTitle: undefined,
+    otherUserId: undefined,
   };
 
   const [messages, setMessages] = useState<ChatMessageWithMeta[]>([]);
@@ -69,6 +83,14 @@ export default function ChatScreen() {
 
   const title = useMemo(() => otherUserName || "Messages", [otherUserName]);
   const subtitle = useMemo(() => serviceTitle ?? undefined, [serviceTitle]);
+
+  const openOtherUserPublicProfile = useCallback(() => {
+    if (!otherUserId) return;
+    navigation.navigate("Profile", {
+      screen: "PublicProfile",
+      params: { userId: otherUserId },
+    });
+  }, [navigation, otherUserId]);
 
   const scrollToBottom = useCallback((animated = true) => {
     requestAnimationFrame(() => {
@@ -323,6 +345,9 @@ export default function ChatScreen() {
           formatStatusLabel={formatStatusLabel}
           connected={connected}
           reconnectAttempts={reconnectAttempts}
+          onViewProfile={
+            otherUserId ? openOtherUserPublicProfile : undefined
+          }
         />
 
         <ChatHandshakeBanner

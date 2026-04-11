@@ -134,6 +134,12 @@ export default function BottomTabNavigator() {
             />
           ),
         }}
+        listeners={({ navigation }) => ({
+          tabPress: (e) => {
+            e.preventDefault();
+            navigation.navigate("Profile", { screen: "ProfileHome" });
+          },
+        })}
       />
     </Tab.Navigator>
   );
