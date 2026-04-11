@@ -52,9 +52,6 @@
     "testMatch": [
       "**/__tests__/**/*.test.ts"
     ],
-    "globals": {
-      "__DEV__": true
-    },
     "moduleNameMapper": {
       "^expo-secure-store$": "<rootDir>/src/api/__tests__/__mocks__/expo-secure-store.ts"
     }

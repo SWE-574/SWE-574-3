@@ -1,23 +1,13 @@
 /**
- * API client: BASE_URL is the API root; paths are relative (e.g. /services/, /chats/).
- *
- * - `EXPO_PUBLIC_API_URL` overrides everything when set (e.g. Android emulator:
- *   http://10.0.2.2:8000/api — physical device: http://<your-lan-ip>:8000/api).
- * - In __DEV__, default is local `make dev` backend; release builds default to production.
+ * API client for The Hive API (apiary.selmangunes.com).
+ * BASE_URL matches API root; paths are relative to /api (e.g. /services/, /chats/).
+ * Docs: https://apiary.selmangunes.com/api/docs/
  */
 
 import { clearStoredTokens } from "./storage";
 
-const PROD_API = "https://apiary.selmangunes.com/api";
-const DEV_LOCAL_API = "http://localhost:8000/api";
-
-const envUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
 const BASE_URL =
-  envUrl && envUrl.length > 0
-    ? envUrl
-    : __DEV__
-      ? DEV_LOCAL_API
-      : PROD_API;
+  process.env.EXPO_PUBLIC_API_URL ?? "https://apiary.selmangunes.com/api";
 
 let authToken: string | null = null;
 let refreshToken: string | null = null;
