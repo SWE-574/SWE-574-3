@@ -21,6 +21,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 import logging
+import os
 import bleach
 from typing import List
 
@@ -44,7 +45,7 @@ from .models import (
     AdminAuditLog, PlatformSetting,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
     EmailVerificationToken, PasswordResetToken,
-    UserFollow, UserFollowEvent,
+    UserFollow, UserFollowEvent, CommentMedia,
 )
 from .serializers import (
     UserRegistrationSerializer, 
@@ -447,6 +448,11 @@ def _apply_blind_review_visibility(queryset):
             )
         ),
     ).exclude(
+        # Blind-review suppression applies only to non-Event (1-to-1) handshakes.
+        # For Events, the organizer never submits a reciprocal evaluation, so both
+        # eval flags are always False — applying this would hide event reviews for
+        # the entire 48-hour window.
+        related_handshake__service__type__in=['Offer', 'Need'],
         related_handshake__evaluation_window_ends_at__gt=now,
         blind_target_positive_eval=False,
         blind_target_negative_eval=False,
@@ -3902,19 +3908,70 @@ class ReputationViewSet(viewsets.ModelViewSet):
             )
 
         cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000]
-        if not cleaned_comment:
+        images = request.FILES.getlist('images')
+
+        # Validate images
+        _ALLOWED_IMG_EXT = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+        _MAX_IMG_SIZE = 10 * 1024 * 1024  # 10 MB
+        if images:
+            if len(images) > 3:
+                return create_error_response(
+                    'Maximum 3 images allowed per review.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            for img in images:
+                ext = os.path.splitext(img.name)[1].lower()
+                if ext not in _ALLOWED_IMG_EXT:
+                    return create_error_response(
+                        f'Unsupported image format: {ext}. Allowed: JPG, PNG, GIF, WebP.',
+                        code=ErrorCodes.VALIDATION_ERROR,
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                    )
+                if img.size > _MAX_IMG_SIZE:
+                    return create_error_response(
+                        'Each image must be under 10 MB.',
+                        code=ErrorCodes.VALIDATION_ERROR,
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        if not cleaned_comment and not images:
             return Response(
-                {'status': 'success', 'message': 'Evaluation already recorded. No review text provided.'},
+                {'status': 'success', 'message': 'Evaluation already recorded. No review text or images provided.'},
                 status=status.HTTP_200_OK,
             )
 
-        comment = Comment.objects.create(
-            service=handshake.service,
-            user=user,
-            body=cleaned_comment,
-            is_verified_review=True,
-            related_handshake=handshake,
-        )
+        comment = None
+        if cleaned_comment:
+            comment = Comment.objects.create(
+                service=handshake.service,
+                user=user,
+                body=cleaned_comment,
+                is_verified_review=True,
+                related_handshake=handshake,
+            )
+        else:
+            # Images only — attach to existing Comment if present, or create a placeholder
+            comment = Comment.objects.filter(
+                related_handshake=handshake,
+                user=user,
+                is_verified_review=True,
+                is_deleted=False,
+            ).first()
+            if not comment:
+                comment = Comment.objects.create(
+                    service=handshake.service,
+                    user=user,
+                    body='',
+                    is_verified_review=True,
+                    related_handshake=handshake,
+                )
+
+        for img in images:
+            media_obj = CommentMedia(comment=comment)
+            media_obj.file.save(img.name, img, save=True)
+            media_obj.file_url = media_obj.file.url
+            media_obj.save(update_fields=['file_url'])
 
         return Response(CommentSerializer(comment).data, status=status.HTTP_201_CREATED)
 
@@ -5641,7 +5698,8 @@ class CommentViewSet(viewsets.ViewSet):
                     'user', 'related_handshake'
                 ).prefetch_related(user_badges_prefetch),
                 to_attr='active_replies'
-            )
+            ),
+            'media',
         ).order_by('-created_at')
         comments = _apply_blind_review_visibility(comments)
 
