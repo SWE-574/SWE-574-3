@@ -35,6 +35,8 @@ export interface PublicChatResponse {
   };
 }
 
+type PublicChatApiResponse = PublicChatResponse | PublicChatMessage[];
+
 function normalizeMessage(message: PublicChatMessage): PublicChatMessage {
   return {
     ...message,
@@ -42,7 +44,15 @@ function normalizeMessage(message: PublicChatMessage): PublicChatMessage {
   };
 }
 
-function normalizeResponse(response: PublicChatResponse): PublicChatResponse {
+function normalizeResponse(response: PublicChatApiResponse): PublicChatResponse {
+  if (Array.isArray(response)) {
+    return {
+      messages: {
+        results: response.map(normalizeMessage),
+      },
+    };
+  }
+
   return {
     ...response,
     messages: response.messages
@@ -55,7 +65,7 @@ function normalizeResponse(response: PublicChatResponse): PublicChatResponse {
 }
 
 export function getPublicChat(id: string): Promise<PublicChatResponse> {
-  return apiRequest<PublicChatResponse>(`/public-chat/${id}/`).then(normalizeResponse);
+  return apiRequest<PublicChatApiResponse>(`/public-chat/${id}/`).then(normalizeResponse);
 }
 
 export function postPublicChat(

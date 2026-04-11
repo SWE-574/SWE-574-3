@@ -12,9 +12,9 @@ describe("publicChat", () => {
 
   it("getPublicChat GETs /public-chat/:id/", async () => {
     const messages = [{ id: "m1", content: "Hi" }];
-    mockFetchResolve(messages);
+    mockFetchResolve({ messages: { results: messages } });
     const result = await getPublicChat("chat1");
-    expect(result).toEqual(messages);
+    expect(result).toEqual({ messages: { results: messages } });
     expect(getLastFetchCall().url).toContain("/public-chat/chat1/");
   });
 
