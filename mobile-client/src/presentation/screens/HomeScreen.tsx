@@ -4,7 +4,6 @@ import {
   Text,
   FlatList,
   StyleSheet,
-  Image,
   TextInput,
   Pressable,
   TouchableOpacity,
@@ -12,16 +11,22 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { HomeStackParamList } from "../../navigation/HomeStack";
+import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { listServices } from "../../api/services";
 import { Service } from "../../api/types";
 import ServiceCard from "../components/ServiceCard";
 import QuickFilters, { type QuickFilterId } from "../components/QuickFilters";
+import FeaturedSection from "../components/FeaturedSection";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
+
 export default function HomeScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<HomeStackParamList, "HomeFeed">>();
+  const tabNavigation =
+    useNavigation<BottomTabNavigationProp<BottomTabParamList>>();
   const [services, setServices] = useState<Service[]>([]);
   const [search, setSearch] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilterId>("all");
@@ -79,23 +84,38 @@ export default function HomeScreen() {
     return list;
   }, [services, search, quickFilter]);
 
+  const listHeader = (
+    <>
+      <FeaturedSection
+        onServicePress={(id) => navigation.navigate("ServiceDetail", { id })}
+        onProviderPress={(id) => navigation.navigate("ServiceDetail", { id })}
+      />
+      <QuickFilters selectedId={quickFilter} onSelect={setQuickFilter} />
+    </>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Image
-            source={require("../../assets/icon.png")}
-            style={styles.logo}
+      {/* Compact top bar: Post button + Notifications */}
+      <View style={styles.topBar}>
+        <TouchableOpacity
+          onPress={() => tabNavigation.navigate("PostService")}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="add-circle-outline" size={28} color={colors.GREEN} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => navigation.navigate("Notifications")}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons
+            name="notifications-outline"
+            size={24}
+            color={colors.GRAY600}
           />
-          <Text style={styles.title}>The Hive</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <Text>Map</Text>
-          <TouchableOpacity onPress={() => navigation.navigate("Map")}>
-            <Ionicons name="map" size={24} color={colors.GREEN} />
-          </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
       </View>
+
       <View style={styles.searchContainer}>
         <TextInput
           placeholder="Search services, skills, tags..."
@@ -104,7 +124,7 @@ export default function HomeScreen() {
           onChangeText={setSearch}
         />
       </View>
-      <QuickFilters selectedId={quickFilter} onSelect={setQuickFilter} />
+
       <FlatList
         data={filteredServices}
         keyExtractor={(item) => item.id}
@@ -117,6 +137,7 @@ export default function HomeScreen() {
             <ServiceCard service={item} index={index} />
           </Pressable>
         )}
+        ListHeaderComponent={listHeader}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <Text style={styles.empty}>No services yet. Check back later.</Text>
@@ -131,34 +152,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.WHITE,
   },
-  header: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.WHITE,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.GRAY200,
+  topBar: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
     justifyContent: "space-between",
-  },
-  headerLeft: {
-    flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-  },
-  headerRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#1a1a1a",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   listContent: {
-    paddingVertical: 16,
     paddingBottom: 32,
   },
   empty: {
@@ -167,13 +168,9 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
     fontSize: 15,
   },
-  logo: {
-    width: 32,
-    height: 32,
-  },
   searchContainer: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 8,
     backgroundColor: colors.WHITE,
   },
   searchInput: {

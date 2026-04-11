@@ -10,29 +10,29 @@ import ForumStack from "./ForumStack";
 import type { ForumStackParamList } from "./ForumStack";
 import PostStack from "./PostStack";
 import type { PostStackParamList } from "./PostStack";
+import MapStack from "./MapStack";
+import type { MapStackParamList } from "./MapStack";
 import MessagesStack from "./MessagesStack";
 import type { MessagesStackParamList } from "./MessagesStack";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../constants/colors";
-import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import PostServiceTabButton from "../presentation/components/PostServiceTabButton";
+import MapTabButton from "../presentation/components/MapTabButton";
 import ProfileStack, { ProfileStackParamList } from "./ProfileStack";
 import { useNotificationStore } from "../store/useNotificationStore";
 
 export type BottomTabParamList = {
   Home: NavigatorScreenParams<HomeStackParamList>;
   Forum: NavigatorScreenParams<ForumStackParamList>;
+  MapTab: NavigatorScreenParams<MapStackParamList>;
+  Messages: NavigatorScreenParams<MessagesStackParamList>;
   Profile: NavigatorScreenParams<ProfileStackParamList>;
   PostService: NavigatorScreenParams<PostStackParamList>;
-  Messages: NavigatorScreenParams<MessagesStackParamList>;
 };
 
 const Tab = createBottomTabNavigator<BottomTabParamList>();
 
 export default function BottomTabNavigator() {
-  const navigation =
-    useNavigation<BottomTabNavigationProp<BottomTabParamList, "PostService">>();
   const insets = useSafeAreaInsets();
   const notifications = useNotificationStore((s) => s.notifications);
 
@@ -88,11 +88,11 @@ export default function BottomTabNavigator() {
       />
 
       <Tab.Screen
-        name="PostService"
-        component={PostStack}
+        name="MapTab"
+        component={MapStack}
         options={{
-          title: "Post Service",
-          tabBarButton: (props) => <PostServiceTabButton {...props} />,
+          title: "Map",
+          tabBarButton: (props) => <MapTabButton {...props} />,
         }}
       />
       <Tab.Screen
@@ -140,6 +140,14 @@ export default function BottomTabNavigator() {
             navigation.navigate("Profile", { screen: "ProfileHome" });
           },
         })}
+      />
+      {/* Hidden tab — navigated to programmatically from HomeScreen post button */}
+      <Tab.Screen
+        name="PostService"
+        component={PostStack}
+        options={{
+          tabBarButton: () => null,
+        }}
       />
     </Tab.Navigator>
   );
