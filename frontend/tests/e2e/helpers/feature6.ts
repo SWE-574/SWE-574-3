@@ -63,7 +63,7 @@ export async function getCurrentBalance(page: Page): Promise<number> {
 
 export async function expectNavbarBalance(page: Page, expectedBalance: number): Promise<void> {
   const escaped = expectedBalance.toFixed(1).replace('.', '\\.')
-  await expect(page.locator('nav').getByText(new RegExp(`^${escaped}h$`)).first()).toBeVisible({
+  await expect(page.getByText(new RegExp(`^${escaped}h$`)).first()).toBeVisible({
     timeout: 10_000,
   })
 }

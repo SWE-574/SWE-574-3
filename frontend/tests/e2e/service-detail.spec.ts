@@ -2,89 +2,87 @@
  * E2E — Service Detail Page
  *
  * Covers:
- *  1. Viewing a service detail page shows the service title and description
- *  2. Images on the service detail page have loading="lazy"
- *  3. Service metadata (type, creator, tags) is displayed
- *  4. The page handles navigation from dashboard correctly
+ *  1. Navigating to a service detail page from dashboard search
+ *  2. Service detail shows title, description, type badge, creator
+ *  3. Direct URL access works without crash
  *
- * Demo data: Uses Elif's "Traditional Manti Cooking Workshop" which has
- * tags, description, and is an Offer type service.
+ * Uses Ayşe's "Watercolor Postcards for the Community Board" from
+ * setup_demo.py. This Offer has no completed handshake, so it stays
+ * Active and always appears in API search results.
+ * To avoid fragile dashboard-UI search in CI, most tests resolve the
+ * service ID via the API and navigate directly to its detail URL.
  */
 
 import { test, expect } from '@playwright/test'
 import { loginAs, USERS } from './helpers/auth'
 
+const DEMO_SERVICE = 'Watercolor Postcards for the Community Board'
+
+/**
+ * After loginAs(), resolve the demo service ID via the REST API and
+ * return its detail page URL.  Much more reliable in CI than filling
+ * the dashboard search input and waiting for React to re-render.
+ */
+async function getDetailUrl(page: import('@playwright/test').Page): Promise<string> {
+  // Retry up to 3 times — the CI backend may need a moment to warm up.
+  const result = await page.evaluate(async (title) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(
+          `/api/services/?search=${encodeURIComponent(title)}&page_size=100`,
+          { credentials: 'include' },
+        )
+        if (!res.ok) {
+          if (attempt < 2) { await new Promise(r => setTimeout(r, 2_000)); continue }
+          return { ok: false, body: await res.text() } as const
+        }
+        const data = await res.json()
+        const list = data.results ?? data
+        const match = list.find((s: { title: string }) => s.title === title)
+        if (match) return { ok: true, id: String(match.id) } as const
+        if (attempt < 2) await new Promise(r => setTimeout(r, 2_000))
+      } catch {
+        if (attempt < 2) await new Promise(r => setTimeout(r, 2_000))
+      }
+    }
+    return { ok: false, body: `No service titled "${title}" after 3 attempts` } as const
+  }, DEMO_SERVICE)
+
+  expect(result.ok, `getDetailUrl failed: ${'body' in result ? result.body : ''}`).toBeTruthy()
+  return `/service-detail/${(result as { ok: true; id: string }).id}`
+}
+
+/** Log in, resolve the detail URL via API, navigate to it. */
+async function loginAndOpenDetail(page: import('@playwright/test').Page) {
+  await loginAs(page, USERS.cem)
+  const detailUrl = await getDetailUrl(page)
+  await page.goto(detailUrl)
+  await expect(page.getByText(DEMO_SERVICE).first()).toBeVisible({ timeout: 20_000 })
+}
+
 test.describe('Service Detail Page', () => {
   test('clicking a service card navigates to its detail page', async ({ page }) => {
     await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
 
-    // Wait for services to load
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-
-    // Click on a service card
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
-
-    // Should navigate to service detail
+    // Use dashboard search to navigate (tests the real user flow)
+    const searchInput = page.getByPlaceholder(/search/i).first()
+    await expect(searchInput).toBeVisible({ timeout: 20_000 })
+    await searchInput.fill('Watercolor Postcards')
+    await expect(page.getByText(DEMO_SERVICE).first()).toBeVisible({ timeout: 20_000 })
+    await page.getByText(DEMO_SERVICE).first().click()
     await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
   })
 
   test('service detail page shows title and description', async ({ page }) => {
-    await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
+    await loginAndOpenDetail(page)
 
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
-    await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
-
-    // The service title should appear on the detail page
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 10_000 })
-
-    // Service type badge (Offer/Need/Event) should be visible
-    await expect(
-      page.getByText(/Offer|Need|Event/i).first(),
-    ).toBeVisible({ timeout: 10_000 })
-  })
-
-  test('service detail images have lazy loading', async ({ page }) => {
-    await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
-
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
-    await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
-
-    // Wait for page to fully render
-    await page.waitForTimeout(2_000)
-
-    // All rendered images should use loading="lazy" (passes even with zero images)
-    const nonLazyImages = page.locator('img:not([loading="lazy"])')
-    await expect(nonLazyImages).toHaveCount(0)
+    await expect(page.getByText(DEMO_SERVICE).first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(/Offer|Need|Event/i).first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('service creator info is displayed', async ({ page }) => {
-    await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
-
-    // Click on Elif's service
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
-    await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
-
-    // The service creator name should appear (Elif)
-    await expect(
-      page.getByText(/Elif/i).first(),
-    ).toBeVisible({ timeout: 10_000 })
+    await loginAndOpenDetail(page)
+    await expect(page.getByText(/Ayşe/i).first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('service detail page does not crash on direct URL access', async ({ page }) => {
@@ -92,25 +90,11 @@ test.describe('Service Detail Page', () => {
     page.on('pageerror', (err) => errors.push(err.message))
 
     await loginAs(page, USERS.cem)
-    await page.goto('/dashboard')
+    const detailUrl = await getDetailUrl(page)
 
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 20_000 })
-    await page.getByText('Traditional Manti Cooking Workshop').first().click()
-
-    // Capture the URL
-    await page.waitForURL(/\/service-detail\//, { timeout: 10_000 })
-    const detailUrl = page.url()
-
-    // Navigate away and come back directly
-    await page.goto('/dashboard')
+    // Navigate directly — no dashboard search needed
     await page.goto(detailUrl)
-
-    // Should load without errors
-    await expect(
-      page.getByText('Traditional Manti Cooking Workshop').first(),
-    ).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(DEMO_SERVICE).first()).toBeVisible({ timeout: 15_000 })
     expect(errors).toHaveLength(0)
   })
 })

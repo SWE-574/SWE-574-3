@@ -16,9 +16,9 @@ test.describe('FR-01a: Login with email and password', () => {
     await page.locator('#password').fill(USERS.cem.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
 
-    await expect(page).not.toHaveURL(/\/login/, { timeout: 20_000 })
+    await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 })
     // Nav is visible — proves a session was created
-    await expect(page.locator('nav')).toBeVisible()
+    await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 30_000 })
   })
 
   test('wrong password shows an error and keeps user on login page', async ({ page }) => {
