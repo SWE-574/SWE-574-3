@@ -35,7 +35,15 @@ export default function ProfileStack() {
       <Stack.Screen name="ProfileHome" component={ProfileScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
-      <Stack.Screen name="PublicProfile" component={PublicProfileScreen} />
+      <Stack.Screen
+        name="PublicProfile"
+        component={PublicProfileScreen}
+        options={{
+          headerShown: false,
+          gestureEnabled: true,
+          animation: "slide_from_right",
+        }}
+      />
       <Stack.Screen
         name="AchievementsList"
         component={AchievementsListScreen}

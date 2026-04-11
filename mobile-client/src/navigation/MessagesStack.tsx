@@ -75,7 +75,7 @@ export default function MessagesStack() {
       <Stack.Screen
         name="UserPublicProfile"
         component={PublicProfileScreen}
-        options={{ title: "Profile", headerBackTitle: "Back" }}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );

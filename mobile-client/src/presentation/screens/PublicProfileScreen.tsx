@@ -69,8 +69,6 @@ function achievementIdsForDisplay(user: PublicUserProfile): string[] {
   return [...new Set([...achievements, ...badges])];
 }
 
-type ProfileTabKey = "offers" | "needs" | "events" | "history" | "reviews";
-
 function formatShortDate(value?: string | null) {
   if (!value) return "";
   const date = new Date(value);
@@ -135,7 +133,6 @@ export default function PublicProfileScreen() {
   const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
   const [reviews, setReviews] = useState<ProfileReview[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<ProfileTabKey>("offers");
   const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<
     ReturnType<typeof groupHistoryItems>[number] | null
   >(null);
@@ -354,34 +351,26 @@ export default function PublicProfileScreen() {
 
   const offersCount = activeServices.filter((service) => service.type === "Offer").length;
   const needsCount = activeServices.filter((service) => service.type === "Need").length;
-  const eventServices = activeServices.filter((service) => service.type === "Event");
-  const offerServices = activeServices.filter((service) => service.type === "Offer");
-  const needServices = activeServices.filter((service) => service.type === "Need");
   const ownHistoryEntries = groupHistoryItems(
     historyItems.filter(isOwnHistoryItem),
   );
   const exchangesCount = groupHistoryItems(
     historyItems.filter(isOwnHistoryItem),
   ).length;
-  const tabItems: Array<{ key: ProfileTabKey; label: string; count: number }> = [
-    { key: "offers", label: "Offers", count: offerServices.length },
-    { key: "needs", label: "Needs", count: needServices.length },
-    { key: "events", label: "Events", count: eventServices.length },
-    { key: "history", label: "History", count: ownHistoryEntries.length },
-    { key: "reviews", label: "Reviews", count: reviews.length },
-  ];
 
-  const renderServiceTab = (services: Service[], emptyText: string) => {
-    if (!services.length) {
+  const renderServicesSection = () => {
+    if (!activeServices.length) {
       return (
         <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>Nothing here yet</Text>
-          <Text style={styles.emptyStateText}>{emptyText}</Text>
+          <Text style={styles.emptyStateTitle}>No active services</Text>
+          <Text style={styles.emptyStateText}>
+            This member does not have any visible active services right now.
+          </Text>
         </View>
       );
     }
 
-    return services.map((service) => (
+    return activeServices.map((service) => (
       <Pressable
         key={service.id}
         accessibilityRole="button"
@@ -397,13 +386,13 @@ export default function PublicProfileScreen() {
     ));
   };
 
-  const renderHistoryTab = () => {
+  const renderTimeActivitySection = () => {
     if (!user.show_history) {
       return (
         <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>History is private</Text>
+          <Text style={styles.emptyStateTitle}>Time activity is private</Text>
           <Text style={styles.emptyStateText}>
-            This member chose not to share their completed exchange history.
+            This member chose not to share their completed exchange activity.
           </Text>
         </View>
       );
@@ -412,9 +401,9 @@ export default function PublicProfileScreen() {
     if (!ownHistoryEntries.length) {
       return (
         <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>No completed history yet</Text>
+          <Text style={styles.emptyStateTitle}>No time activity yet</Text>
           <Text style={styles.emptyStateText}>
-            Finished exchanges on this member's services will show up here.
+            Completed exchanges on this member&apos;s services will appear here.
           </Text>
         </View>
       );
@@ -424,7 +413,7 @@ export default function PublicProfileScreen() {
       <Pressable
         key={entry.key}
         accessibilityRole="button"
-        accessibilityLabel={`Open history item ${entry.serviceTitle}`}
+        accessibilityLabel={`Open time activity item ${entry.serviceTitle}`}
         onPress={() => navigation.navigate("ServiceDetail", { id: entry.serviceId })}
         style={({ pressed }) => [
           styles.historyCard,
@@ -469,7 +458,7 @@ export default function PublicProfileScreen() {
     ));
   };
 
-  const renderReviewsTab = () => {
+  const renderReviewsSection = () => {
     if (reviewsLoading) {
       return (
         <View style={styles.emptyStateCard}>
@@ -516,33 +505,45 @@ export default function PublicProfileScreen() {
     ));
   };
 
-  const renderActiveTab = () => {
-    if (activeTab === "offers") {
-      return renderServiceTab(
-        offerServices,
-        "This member has no active offers at the moment.",
+  const renderServiceTab = (services: Service[], emptyText: string) => {
+    if (!services.length) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Text style={styles.emptyStateTitle}>Nothing here yet</Text>
+          <Text style={styles.emptyStateText}>{emptyText}</Text>
+        </View>
       );
     }
-    if (activeTab === "needs") {
-      return renderServiceTab(
-        needServices,
-        "This member has no active needs at the moment.",
-      );
-    }
-    if (activeTab === "events") {
-      return renderServiceTab(
-        eventServices,
-        "This member has no active events at the moment.",
-      );
-    }
-    if (activeTab === "history") {
-      return renderHistoryTab();
-    }
-    return renderReviewsTab();
+
+    return services.map((service) => (
+      <Pressable
+        key={service.id}
+        accessibilityRole="button"
+        accessibilityLabel={`Open service ${service.title}`}
+        onPress={() => navigation.navigate("ServiceDetail", { id: service.id })}
+        style={({ pressed }) => [
+          styles.serviceCardPressable,
+          pressed && styles.pressed,
+        ]}
+      >
+        <ProfileActivityServiceCard service={service} />
+      </Pressable>
+    ));
   };
 
   return (
     <View style={styles.container}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+        onPress={() => navigation.goBack()}
+        style={({ pressed }) => [
+          styles.backButton,
+          pressed && styles.pressed,
+        ]}
+      >
+        <Ionicons name="arrow-back" size={22} color={colors.GRAY700} />
+      </Pressable>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -667,138 +668,121 @@ export default function PublicProfileScreen() {
           exchangesCount={exchangesCount}
         />
 
-        <View style={styles.statsRow}>
-          <View style={[styles.statCard, styles.greenStatCard]}>
-            <View style={[styles.statAccentBar, { backgroundColor: colors.GREEN }]} />
-            <View style={styles.statCardInner}>
-            <View style={styles.statIconWrap}>
-              <Ionicons name="heart-outline" size={20} color={colors.GREEN} />
-              <Text style={styles.statValue}>{user.karma_score ?? 0}</Text>
+        <View style={styles.snapshotCard}>
+          <View style={styles.snapshotHeader}>
+            <View style={styles.snapshotHeaderLeft}>
+              <View style={styles.snapshotIconWrap}>
+                <Ionicons name="sparkles-outline" size={18} color={colors.GREEN} />
+              </View>
+              <View>
+                <Text style={styles.snapshotTitle}>Community snapshot</Text>
+                <Text style={styles.snapshotSubtitle}>Quick profile highlights</Text>
+              </View>
             </View>
-            <Text style={styles.statLabel}>Karma</Text>
-          </View>
           </View>
 
-          <Pressable
-            onPress={
-              canOpenAchievementsList
-                ? () =>
-                    navigation.navigate("AchievementsList", {
-                      userId: user.id,
-                    })
-                : undefined
-            }
-            disabled={!canOpenAchievementsList}
-            style={({ pressed }) => [
-              styles.statCard,
-              styles.purpleStatCard,
-              pressed && canOpenAchievementsList && styles.pressed,
-            ]}
-          >
-            <View style={[styles.statAccentBar, { backgroundColor: colors.PURPLE }]} />
-            <View style={styles.statCardInner}>
-            <View style={styles.statIconWrap}>
-              <SimpleLineIcons name="badge" size={18} color={colors.PURPLE} />
-              <Text style={styles.statValue}>{user.badges?.length ?? 0}</Text>
+          <View style={styles.snapshotStatsRow}>
+            <View style={[styles.snapshotStatCard, styles.snapshotStatCardGreen]}>
+              <Ionicons name="heart-outline" size={18} color={colors.GREEN} />
+              <Text style={styles.snapshotStatValue}>{user.karma_score ?? 0}</Text>
+              <Text style={styles.snapshotStatLabel}>Karma</Text>
             </View>
-            <View style={styles.statLabelRow}>
-              <Text style={styles.statLabel}>Badges</Text>
-              {canOpenAchievementsList ? (
-                <Ionicons
-                  name="chevron-forward"
-                  size={14}
-                  color={colors.GRAY400}
-                />
-              ) : null}
-            </View>
-            </View>
-          </Pressable>
 
-          <View style={[styles.statCard, styles.amberStatCard]}>
-            <View style={[styles.statAccentBar, { backgroundColor: colors.AMBER }]} />
-            <View style={styles.statCardInner}>
-            <View style={styles.statIconWrap}>
-              <Ionicons name="star-outline" size={20} color={colors.AMBER} />
-              <Text style={styles.statValue}>
+            <Pressable
+              onPress={
+                canOpenAchievementsList
+                  ? () =>
+                      navigation.navigate("AchievementsList", {
+                        userId: user.id,
+                      })
+                  : undefined
+              }
+              disabled={!canOpenAchievementsList}
+              style={({ pressed }) => [
+                styles.snapshotStatCard,
+                styles.snapshotStatCardPurple,
+                pressed && canOpenAchievementsList && styles.pressed,
+              ]}
+            >
+              <SimpleLineIcons name="badge" size={16} color={colors.PURPLE} />
+              <Text style={styles.snapshotStatValue}>{user.badges?.length ?? 0}</Text>
+              <View style={styles.snapshotLabelRow}>
+                <Text style={styles.snapshotStatLabel}>Badges</Text>
+                {canOpenAchievementsList ? (
+                  <Ionicons
+                    name="chevron-forward"
+                    size={13}
+                    color={colors.GRAY400}
+                  />
+                ) : null}
+              </View>
+            </Pressable>
+
+            <View style={[styles.snapshotStatCard, styles.snapshotStatCardAmber]}>
+              <Ionicons name="star-outline" size={18} color={colors.AMBER} />
+              <Text style={styles.snapshotStatValue}>
                 {user.achievements?.length ?? 0}
               </Text>
+              <Text style={styles.snapshotStatLabel}>Achievements</Text>
             </View>
-            <Text style={styles.statLabel}>Achievements</Text>
           </View>
-          </View>
-        </View>
 
-        <View style={styles.metricsRow}>
-          <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>{user.helpful_count ?? 0}</Text>
-            <Text style={styles.metricPillLabel}>Helpful</Text>
-          </View>
-          <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>{user.kind_count ?? 0}</Text>
-            <Text style={styles.metricPillLabel}>Kind</Text>
-          </View>
-          <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>{user.punctual_count ?? 0}</Text>
-            <Text style={styles.metricPillLabel}>Punctual</Text>
+          <View style={styles.traitsWrap}>
+            <View style={styles.traitChip}>
+              <Text style={styles.traitValue}>{user.helpful_count ?? 0}</Text>
+              <Text style={styles.traitLabel}>Helpful</Text>
+            </View>
+            <View style={styles.traitChip}>
+              <Text style={styles.traitValue}>{user.kind_count ?? 0}</Text>
+              <Text style={styles.traitLabel}>Kind</Text>
+            </View>
+            <View style={styles.traitChip}>
+              <Text style={styles.traitValue}>{user.punctual_count ?? 0}</Text>
+              <Text style={styles.traitLabel}>Punctual</Text>
+            </View>
           </View>
         </View>
 
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>
             <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
-              Activity
+              Active services
             </Text>
             <View style={styles.activeServicesCountPill}>
               <Text style={styles.activeServicesCountText}>
-                {tabItems.find((item) => item.key === activeTab)?.count ?? 0}
+                {activeServices.length}
               </Text>
             </View>
           </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.profileTabsRow}
-          >
-            {tabItems.map((tab) => {
-              const isActive = activeTab === tab.key;
-              return (
-                <Pressable
-                  key={tab.key}
-                  onPress={() => setActiveTab(tab.key)}
-                  style={({ pressed }) => [
-                    styles.profileTab,
-                    isActive && styles.profileTabActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.profileTabText,
-                      isActive && styles.profileTabTextActive,
-                    ]}
-                  >
-                    {tab.label}
-                  </Text>
-                  <View
-                    style={[
-                      styles.profileTabCount,
-                      isActive && styles.profileTabCountActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.profileTabCountText,
-                        isActive && styles.profileTabCountTextActive,
-                      ]}
-                    >
-                      {tab.count}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          <View style={styles.tabPanel}>{renderActiveTab()}</View>
+          <View style={styles.tabPanel}>{renderServicesSection()}</View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
+              Time activity
+            </Text>
+            <View style={styles.activeServicesCountPill}>
+              <Text style={styles.activeServicesCountText}>
+                {ownHistoryEntries.length}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.tabPanel}>{renderTimeActivitySection()}</View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
+              Reviews
+            </Text>
+            <View style={styles.activeServicesCountPill}>
+              <Text style={styles.activeServicesCountText}>
+                {reviews.length}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.tabPanel}>{renderReviewsSection()}</View>
         </View>
 
         {skills.length > 0 ? (
@@ -969,6 +953,25 @@ const getStyles = (top: number, bottom: number) =>
       flex: 1,
       backgroundColor: colors.GRAY50,
     },
+    backButton: {
+      position: "absolute",
+      top: top + 12,
+      left: 16,
+      zIndex: 10,
+      backgroundColor: "rgba(255,255,255,0.94)",
+      borderRadius: 20,
+      width: 40,
+      height: 40,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      shadowColor: colors.GRAY900,
+      shadowOpacity: 0.08,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 3,
+    },
     mutedBackground: {
       backgroundColor: colors.GRAY50,
     },
@@ -1129,92 +1132,114 @@ const getStyles = (top: number, bottom: number) =>
       fontWeight: "600",
       color: colors.GREEN,
     },
-    statsRow: {
-      flexDirection: "row",
-      gap: 8,
-      paddingHorizontal: 16,
-      marginTop: 14,
-    },
-    statCard: {
-      flex: 1,
+    snapshotCard: {
       backgroundColor: colors.WHITE,
-      borderRadius: 12,
-      overflow: "hidden",
-      paddingVertical: 12,
-      alignItems: "center",
+      marginHorizontal: 16,
+      marginTop: 14,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.GRAY200,
+      padding: 14,
       shadowColor: colors.GRAY900,
-      shadowOpacity: 0.05,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.04,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
       elevation: 2,
     },
-    greenStatCard: {
-      backgroundColor: colors.GREEN_LT,
-    },
-    purpleStatCard: {
-      backgroundColor: colors.PURPLE_LT,
-    },
-    amberStatCard: {
-      backgroundColor: colors.AMBER_LT,
-    },
-    statAccentBar: {
-      height: 3,
-      width: "100%",
-    },
-    statCardInner: {
-      width: "100%",
-      alignItems: "center",
-      paddingVertical: 10,
-      paddingHorizontal: 6,
-    },
-    statIconWrap: {
+    snapshotHeader: {
       flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 12,
+    },
+    snapshotHeaderLeft: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    snapshotIconWrap: {
+      width: 34,
+      height: 34,
+      borderRadius: 12,
+      backgroundColor: colors.GREEN_LT,
       alignItems: "center",
       justifyContent: "center",
-      gap: 4,
     },
-    statValue: {
-      color: colors.GRAY800,
-      fontSize: 18,
-      fontWeight: "700",
-      marginBottom: 2,
-    },
-    statLabel: {
-      color: colors.GRAY500,
-      fontSize: 11,
-      fontWeight: "500",
-    },
-    statLabelRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-    },
-    metricsRow: {
-      flexDirection: "row",
-      gap: 8,
-      paddingHorizontal: 16,
-      marginTop: 10,
-    },
-    metricPill: {
-      flex: 1,
-      backgroundColor: colors.WHITE,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.GRAY200,
-      paddingVertical: 10,
-      alignItems: "center",
-    },
-    metricPillValue: {
+    snapshotTitle: {
       fontSize: 16,
       fontWeight: "700",
       color: colors.GRAY800,
+      marginBottom: 1,
     },
-    metricPillLabel: {
+    snapshotSubtitle: {
+      fontSize: 12,
+      color: colors.GRAY500,
+    },
+    snapshotStatsRow: {
+      flexDirection: "row",
+      gap: 8,
+      marginBottom: 10,
+    },
+    snapshotStatCard: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+      alignItems: "center",
+      gap: 4,
+      backgroundColor: colors.WHITE,
+    },
+    snapshotStatCardGreen: {
+      backgroundColor: colors.GREEN_LT,
+    },
+    snapshotStatCardPurple: {
+      backgroundColor: colors.PURPLE_LT,
+    },
+    snapshotStatCardAmber: {
+      backgroundColor: colors.AMBER_LT,
+    },
+    snapshotStatValue: {
+      color: colors.GRAY800,
+      fontSize: 18,
+      fontWeight: "700",
+      lineHeight: 22,
+    },
+    snapshotStatLabel: {
+      color: colors.GRAY600,
+      fontSize: 11,
+      fontWeight: "600",
+      textAlign: "center",
+    },
+    snapshotLabelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+    },
+    traitsWrap: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    traitChip: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      backgroundColor: colors.GRAY50,
+      paddingVertical: 10,
+      alignItems: "center",
+    },
+    traitValue: {
+      fontSize: 16,
+      fontWeight: "700",
+      color: colors.GRAY800,
+      marginBottom: 2,
+    },
+    traitLabel: {
       fontSize: 11,
       color: colors.GRAY500,
-      marginTop: 1,
+      fontWeight: "600",
     },
     sectionCard: {
       backgroundColor: colors.WHITE,
