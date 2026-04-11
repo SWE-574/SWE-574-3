@@ -38,7 +38,9 @@ test.describe('Dashboard', () => {
     await searchInput.fill('Chess')
     await expect(page.getByText(/Chess/i).first()).toBeVisible({ timeout: 20_000 })
 
-    const nonLazyImages = page.locator('img:not([loading="lazy"])')
+    // Navbar avatar images (alt="avatar") are above-the-fold and
+    // intentionally not lazy-loaded. Only check content images.
+    const nonLazyImages = page.locator('img:not([loading="lazy"]):not([alt="avatar"])')
     await expect(nonLazyImages).toHaveCount(0)
   })
 

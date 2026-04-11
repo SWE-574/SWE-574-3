@@ -7,9 +7,9 @@
  *  3. Images have loading="lazy"
  *  4. Direct URL access works without crash
  *
- * Uses Cem's "Chess Strategy Hour for New Players" from setup_demo.py.
- * Note: "Manti" is excluded from listing by a past-one-time-group-offer
- * filter, so we use a service that is always present in search results.
+ * Uses Ayşe's "Watercolor Postcards for the Community Board" from
+ * setup_demo.py. This Offer has no completed handshake, so it stays
+ * Active and always appears in API search results.
  * To avoid fragile dashboard-UI search in CI, most tests resolve the
  * service ID via the API and navigate directly to its detail URL.
  */
@@ -17,7 +17,7 @@
 import { test, expect } from '@playwright/test'
 import { loginAs, USERS } from './helpers/auth'
 
-const DEMO_SERVICE = 'Chess Strategy Hour for New Players'
+const DEMO_SERVICE = 'Watercolor Postcards for the Community Board'
 
 /**
  * After loginAs(), resolve the demo service ID via the REST API and
@@ -68,7 +68,7 @@ test.describe('Service Detail Page', () => {
     // Use dashboard search to navigate (tests the real user flow)
     const searchInput = page.getByPlaceholder(/search/i).first()
     await expect(searchInput).toBeVisible({ timeout: 20_000 })
-    await searchInput.fill('Chess Strategy')
+    await searchInput.fill('Watercolor Postcards')
     await expect(page.getByText(DEMO_SERVICE).first()).toBeVisible({ timeout: 20_000 })
     await page.getByText(DEMO_SERVICE).first().click()
     await expect(page).toHaveURL(/\/service-detail\//, { timeout: 10_000 })
@@ -85,13 +85,15 @@ test.describe('Service Detail Page', () => {
     await loginAndOpenDetail(page)
     await page.waitForTimeout(2_000)
 
-    const nonLazyImages = page.locator('img:not([loading="lazy"])')
+    // Navbar avatar images (alt="avatar") are above-the-fold and
+    // intentionally not lazy-loaded. Only check content images.
+    const nonLazyImages = page.locator('img:not([loading="lazy"]):not([alt="avatar"])')
     await expect(nonLazyImages).toHaveCount(0)
   })
 
   test('service creator info is displayed', async ({ page }) => {
     await loginAndOpenDetail(page)
-    await expect(page.getByText(/Cem/i).first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(/Ayşe/i).first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('service detail page does not crash on direct URL access', async ({ page }) => {
