@@ -1424,18 +1424,33 @@ class UserVerifiedReviewsView(APIView):
         # - Reviews about the requester: handshake.requester == target_user AND comment.user == service.owner
         from django.db.models import F, Q
         from .models import Comment
-        base_filter = (
-            Q(service__user=target_user, related_handshake__requester=F('user'))
-            | Q(related_handshake__requester=target_user, service__user=F('user'))
-        )
         role_param = (request.query_params.get('role') or '').strip().lower()
-        if role_param in ('provider', 'receiver'):
-            base_filter = base_filter & get_verified_reviews_role_filter(target_user, role_param)
+
+        if role_param == 'organizer':
+            # Event reviews written by attendees about this user as the event organizer.
+            # Filter through comment.service (not handshake.service) to avoid double-JOIN ambiguity.
+            event_filter = Q(
+                service__type='Event',
+                service__user=target_user,
+                related_handshake__requester=F('user'),
+            )
+        else:
+            # Restrict to Offer/Need only — Event reviews belong in the organizer section.
+            base_filter = (
+                Q(service__user=target_user, related_handshake__requester=F('user'),
+                  related_handshake__service__type__in=['Offer', 'Need'])
+                | Q(related_handshake__requester=target_user, service__user=F('user'),
+                    related_handshake__service__type__in=['Offer', 'Need'])
+            )
+            if role_param in ('provider', 'receiver'):
+                base_filter = base_filter & get_verified_reviews_role_filter(target_user, role_param)
+            event_filter = base_filter
+
         comments = Comment.objects.filter(
             is_verified_review=True,
             is_deleted=False,
             related_handshake__isnull=False,
-        ).filter(base_filter).select_related(
+        ).filter(event_filter).select_related(
             'user', 'service', 'related_handshake', 'related_handshake__service'
         ).prefetch_related(
             Prefetch(

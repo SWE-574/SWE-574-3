@@ -5,6 +5,7 @@ import {
   FiEdit2, FiCamera, FiSave, FiX, FiAward, FiClock, FiMapPin,
   FiCalendar, FiArrowUpRight, FiPlus, FiCheckCircle, FiStar,
   FiZap, FiLayers, FiRepeat, FiLock, FiSettings, FiMail, FiShield, FiEye, FiEyeOff, FiTag, FiMessageSquare,
+  FiChevronDown, FiChevronUp,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -300,9 +301,11 @@ const UserProfile = () => {
   const [services, setServices]           = useState<Service[]>([])
   const [history, setHistory]             = useState<UserHistoryItem[]>([])
   const [badges, setBadges]               = useState<BadgeProgress[]>([])
-  const [reviewsAsProvider, setReviewsAsProvider] = useState<ProfileReview[]>([])
-  const [reviewsAsTaker, setReviewsAsTaker]       = useState<ProfileReview[]>([])
-  const [reviewsLoading, setReviewsLoading]       = useState(false)
+  const [reviewsAsProvider, setReviewsAsProvider]   = useState<ProfileReview[]>([])
+  const [reviewsAsTaker, setReviewsAsTaker]         = useState<ProfileReview[]>([])
+  const [reviewsAsOrganizer, setReviewsAsOrganizer] = useState<ProfileReview[]>([])
+  const [expandedEventIds, setExpandedEventIds]     = useState<Set<string>>(new Set())
+  const [reviewsLoading, setReviewsLoading]         = useState(false)
   const [eventHandshakes, setEventHandshakes] = useState<EventHandshake[]>([])
   const [joinedEventServicesById, setJoinedEventServicesById] = useState<Record<string, Service>>({})
   const [servicesLoading, setServicesLoading] = useState(true)
@@ -350,9 +353,11 @@ const UserProfile = () => {
     Promise.all([
       userAPI.getVerifiedReviews(user.id, { role: 'provider', signal: ac.signal }),
       userAPI.getVerifiedReviews(user.id, { role: 'receiver', signal: ac.signal }),
-    ]).then(([rProvider, rTaker]) => {
+      userAPI.getVerifiedReviews(user.id, { role: 'organizer', signal: ac.signal }),
+    ]).then(([rProvider, rTaker, rOrganizer]) => {
       setReviewsAsProvider(rProvider.results)
       setReviewsAsTaker(rTaker.results)
+      setReviewsAsOrganizer(rOrganizer.results)
     }).catch(() => {}).finally(() => setReviewsLoading(false))
     setEventsLoading(true)
     handshakeAPI.list(ac.signal)
@@ -826,7 +831,7 @@ const UserProfile = () => {
                   <TabBtn active={activeTab === 'needs'}    label={`Needs (${needsTab.length})`}    onClick={() => setActiveTab('needs')} />
                   <TabBtn active={activeTab === 'events'}   label={`Events (${eventServices.length+joinedUpcoming.length})`} onClick={() => setActiveTab('events')} />
                   <TabBtn active={activeTab === 'history'}  label={`History (${groupedOwnHistory.length})`}   onClick={() => setActiveTab('history')} />
-                  <TabBtn active={activeTab === 'reviews'}  label={`Reviews (${reviewsAsProvider.length + reviewsAsTaker.length})`} onClick={() => setActiveTab('reviews')} icon={<FiMessageSquare size={12} />} />
+                  <TabBtn active={activeTab === 'reviews'}  label={`Reviews (${reviewsAsProvider.length + reviewsAsTaker.length + reviewsAsOrganizer.length})`} onClick={() => setActiveTab('reviews')} icon={<FiMessageSquare size={12} />} />
                   <TabBtn active={activeTab === 'settings'} label="Settings"                        onClick={() => setActiveTab('settings')} icon={<FiSettings size={12} />} />
                 </Flex>
 
@@ -948,6 +953,62 @@ const UserProfile = () => {
                             {reviewsAsTaker.map((r) => <ProfileReviewRow key={r.id} review={r} />)}
                           </Box>
                         )}
+
+                        <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb={2} mt={4}>As an Organizer</Text>
+                        {reviewsAsOrganizer.length === 0 ? (
+                          <Text fontSize="12px" color={GRAY400} py={3}>No event reviews yet.</Text>
+                        ) : (() => {
+                          // Group reviews by event (service id)
+                          const grouped = new Map<string, { title: string; reviews: ProfileReview[] }>()
+                          reviewsAsOrganizer.forEach((r) => {
+                            const key = r.service
+                            if (!grouped.has(key)) grouped.set(key, { title: r.service_title ?? 'Event', reviews: [] })
+                            grouped.get(key)!.reviews.push(r)
+                          })
+                          return (
+                            <Box>
+                              {Array.from(grouped.entries()).map(([eventId, { title, reviews }]) => {
+                                const isExpanded = expandedEventIds.has(eventId)
+                                const toggle = () => setExpandedEventIds((prev) => {
+                                  const next = new Set(prev)
+                                  if (isExpanded) { next.delete(eventId) } else { next.add(eventId) }
+                                  return next
+                                })
+                                return (
+                                  <Box key={eventId} mb={2} borderRadius="12px" border={`1px solid ${GRAY100}`} overflow="hidden">
+                                    <Flex
+                                      as="button"
+                                      w="100%"
+                                      align="center"
+                                      justify="space-between"
+                                      px={3}
+                                      py="10px"
+                                      bg={GRAY50}
+                                      onClick={toggle}
+                                      style={{ cursor: 'pointer', border: 'none', textAlign: 'left' }}
+                                    >
+                                      <Flex align="center" gap={2} minW={0}>
+                                        <FiCalendar size={13} color={GREEN} />
+                                        <Text fontSize="13px" fontWeight={600} color={GRAY800} overflow="hidden" style={{ textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          {title}
+                                        </Text>
+                                        <Box px="6px" py="1px" borderRadius="full" fontSize="10px" fontWeight={700} bg={GREEN_LT} color={GREEN} flexShrink={0}>
+                                          {reviews.length} {reviews.length === 1 ? 'review' : 'reviews'}
+                                        </Box>
+                                      </Flex>
+                                      {isExpanded ? <FiChevronUp size={14} color={GRAY400} /> : <FiChevronDown size={14} color={GRAY400} />}
+                                    </Flex>
+                                    {isExpanded && (
+                                      <Box px={3}>
+                                        {reviews.map((r) => <ProfileReviewRow key={r.id} review={r} />)}
+                                      </Box>
+                                    )}
+                                  </Box>
+                                )
+                              })}
+                            </Box>
+                          )
+                        })()}
                       </>
                     )}
                   </Box>

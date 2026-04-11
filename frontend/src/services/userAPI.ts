@@ -200,7 +200,7 @@ export const userAPI = {
    */
   getVerifiedReviews: async (
     userId: string,
-    options?: { role?: 'provider' | 'receiver'; signal?: AbortSignal },
+    options?: { role?: 'provider' | 'receiver' | 'organizer'; signal?: AbortSignal },
   ): Promise<ProfileReviewsResponse> => {
     const params = options?.role ? { role: options.role } : {}
     const res = await apiClient.get<ProfileReviewsResponse>(
