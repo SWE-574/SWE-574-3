@@ -23,8 +23,9 @@ set -euo pipefail
 TEST_DIR="tests/e2e"
 
 # ── Smoke tests (always run) ────────────────────────────────────────────────
+# auth.spec.ts is intentionally excluded — every test it contains is
+# duplicated by the feature-1 files below, which are more thorough.
 SMOKE_TESTS=(
-  "${TEST_DIR}/auth.spec.ts"
   "${TEST_DIR}/dashboard.spec.ts"
   "${TEST_DIR}/service-detail.spec.ts"
   "${TEST_DIR}/feature-1/01-fr-01a.spec.ts"

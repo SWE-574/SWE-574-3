@@ -14,11 +14,12 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/e2e',
 
-  /* Single worker — the backend container in CI cannot handle concurrent
-     browser sessions (API timeouts, empty responses under load).
-     Locally you can bump this to speed up runs if your machine can handle it. */
+  /* Two workers gives a good balance — cuts test time roughly in half
+     without overloading the CI backend container.  Each test authenticates
+     via a fast API call (loginAs), so concurrent sessions are lightweight.
+     Locally you can bump this further if your machine can handle it. */
   fullyParallel: false,
-  workers: 1,
+  workers: process.env.CI ? 2 : 1,
 
   /* Fail CI fast if someone left `.only` in a test file */
   forbidOnly: !!process.env.CI,

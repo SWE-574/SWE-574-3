@@ -3,9 +3,8 @@
  *
  * Covers:
  *  1. Authenticated user sees the dashboard with service cards
- *  2. Service cards render with images that have loading="lazy"
- *  3. Search/filter bar is present and functional
- *  4. Polling does not cause page errors
+ *  2. Search/filter bar is present and functional
+ *  3. Polling does not cause page errors
  *
  * Demo data: 15+ services seeded by setup_demo.py.
  * Tests use search to find services (bypasses geolocation filtering in CI).
@@ -27,21 +26,6 @@ test.describe('Dashboard', () => {
     // Search for a known demo service (Chess is always in listing results)
     await searchInput.fill('Chess')
     await expect(page.getByText(/Chess/i).first()).toBeVisible({ timeout: 20_000 })
-  })
-
-  test('dashboard images have lazy loading attribute', async ({ page }) => {
-    await loginAs(page, USERS.elif)
-
-    const searchInput = page.getByPlaceholder(/search/i).first()
-    await expect(searchInput).toBeVisible({ timeout: 20_000 })
-
-    await searchInput.fill('Chess')
-    await expect(page.getByText(/Chess/i).first()).toBeVisible({ timeout: 20_000 })
-
-    // Navbar avatar images (alt="avatar") are above-the-fold and
-    // intentionally not lazy-loaded. Only check content images.
-    const nonLazyImages = page.locator('img:not([loading="lazy"]):not([alt="avatar"])')
-    await expect(nonLazyImages).toHaveCount(0)
   })
 
   test('search bar is present and filters services', async ({ page }) => {

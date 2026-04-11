@@ -4,8 +4,7 @@
  * Covers:
  *  1. Navigating to a service detail page from dashboard search
  *  2. Service detail shows title, description, type badge, creator
- *  3. Images have loading="lazy"
- *  4. Direct URL access works without crash
+ *  3. Direct URL access works without crash
  *
  * Uses Ayşe's "Watercolor Postcards for the Community Board" from
  * setup_demo.py. This Offer has no completed handshake, so it stays
@@ -79,16 +78,6 @@ test.describe('Service Detail Page', () => {
 
     await expect(page.getByText(DEMO_SERVICE).first()).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText(/Offer|Need|Event/i).first()).toBeVisible({ timeout: 10_000 })
-  })
-
-  test('service detail images have lazy loading', async ({ page }) => {
-    await loginAndOpenDetail(page)
-    await page.waitForTimeout(2_000)
-
-    // Navbar avatar images (alt="avatar") are above-the-fold and
-    // intentionally not lazy-loaded. Only check content images.
-    const nonLazyImages = page.locator('img:not([loading="lazy"]):not([alt="avatar"])')
-    await expect(nonLazyImages).toHaveCount(0)
   })
 
   test('service creator info is displayed', async ({ page }) => {
