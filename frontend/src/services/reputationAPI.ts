@@ -62,7 +62,7 @@ export const reputationAPI = {
     const fd = new FormData()
     fd.append('handshake_id', handshakeId)
     images.forEach((img) => fd.append('images', img))
-    await apiClient.post('/handshakes/add-review/', fd, {
+    await apiClient.post('/reputation/add-review/', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },

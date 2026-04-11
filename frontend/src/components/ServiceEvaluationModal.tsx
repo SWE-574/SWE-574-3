@@ -163,10 +163,15 @@ export default function ServiceEvaluationModal({
         })
       }
 
-      if (images.length > 0) {
-        await reputationAPI.attachReviewImages(handshakeId, images)
-      }
       toast.success('Evaluation submitted. Thank you for your feedback!')
+      // Attach images after the main evaluation — a failure here should not block the flow.
+      if (images.length > 0) {
+        try {
+          await reputationAPI.attachReviewImages(handshakeId, images)
+        } catch {
+          toast.warning('Evaluation saved, but photo upload failed. You can re-upload photos later.')
+        }
+      }
       await onSubmitted?.()
       reset()
       onClose()

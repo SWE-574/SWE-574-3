@@ -2774,6 +2774,7 @@ class UserHistorySerializer(serializers.Serializer):
     partner_avatar_url = serializers.CharField(allow_null=True)
     completed_date = serializers.DateTimeField()
     was_provider = serializers.BooleanField()
+    evaluation_pending = serializers.BooleanField(default=False)
 
 
 # Forum Serializers

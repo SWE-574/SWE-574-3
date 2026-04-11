@@ -77,6 +77,17 @@ function ProfileReviewRow({ review }: { review: ProfileReview }) {
         </Flex>
         {review.service_title && <Text fontSize="11px" color={GRAY500} mb="4px">{review.service_title}</Text>}
         <Text fontSize="13px" color={GRAY700} lineHeight={1.55}>{review.body}</Text>
+        {review.media && review.media.length > 0 && (
+          <Flex gap={2} mt={2} flexWrap="wrap">
+            {review.media.map((m) => (
+              <Box key={m.id} w="72px" h="72px" borderRadius="8px" overflow="hidden" flexShrink={0}
+                style={{ cursor: 'pointer' }} onClick={() => window.open(m.file_url, '_blank')}>
+                <img src={m.file_url} alt="Review photo"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              </Box>
+            ))}
+          </Flex>
+        )}
       </Box>
     </Flex>
   )
@@ -195,7 +206,8 @@ function HistoryRow({
   const displayPartner = item.isMultiUse ? `${item.useCount} members` : item.partnerName
   const col = AVATAR_PALETTE[displayPartner.charCodeAt(0) % AVATAR_PALETTE.length]
   const ini = displayPartner.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?'
-  const handleClick = item.isMultiUse ? onOpenDetails : onNavigate
+  // Events always navigate to event detail page; non-events open details modal for group sessions
+  const handleClick = item.serviceType === 'Event' ? onNavigate : (item.isMultiUse ? onOpenDetails : onNavigate)
 
   return (
     <Flex align="center" gap={3} py="10px" borderBottom={`1px solid ${GRAY100}`} style={{ cursor: 'pointer' }}
@@ -218,11 +230,27 @@ function HistoryRow({
       <Box flex={1} minW={0}>
         <Text fontSize="13px" fontWeight={600} color={GRAY800} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.serviceTitle}</Text>
         <Text fontSize="11px" color={GRAY500}>
-          {item.isMultiUse ? `${item.useCount} participants in this one-time session` : `${contextLabel} ${item.partnerName}`}
+          {item.serviceType === 'Event'
+            ? contextLabel
+            : item.isMultiUse
+              ? `${item.useCount} participants in this one-time session`
+              : `${contextLabel} ${item.partnerName}`}
         </Text>
       </Box>
       <Box textAlign="right" flexShrink={0}>
-        <Text fontSize="12px" fontWeight={600} color={GREEN}>{fmtDur(item.duration)}</Text>
+        {item.serviceType === 'Event' ? (
+          <>
+            <Box px="6px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700}
+              style={{ background: BLUE_LT, color: BLUE, display: 'inline-block', marginBottom: 2 }}>
+              Event
+            </Box>
+            {item.evaluationPending && (
+              <Text fontSize="10px" color={AMBER} fontWeight={600}>Evaluation Pending</Text>
+            )}
+          </>
+        ) : (
+          <Text fontSize="12px" fontWeight={600} color={GREEN}>{fmtDur(item.duration)}</Text>
+        )}
         <Text fontSize="10px" color={GRAY400}>{fmtDate(item.completedDate)}</Text>
       </Box>
     </Flex>
@@ -914,7 +942,7 @@ const UserProfile = () => {
                 ) : groupedOwnHistory.length === 0 ? (
                   <Flex py={10} direction="column" align="center" gap={2}>
                     <FiRepeat size={22} color={GRAY300} />
-                    <Text fontSize="13px" color={GRAY400}>No time activity on your own services yet</Text>
+                    <Text fontSize="13px" color={GRAY400}>No activity yet</Text>
                   </Flex>
                 ) : (
                   <Box px={4}>
@@ -922,8 +950,8 @@ const UserProfile = () => {
                       <HistoryRow
                         key={item.key}
                         item={item}
-                        contextLabel="Own service with"
-                        onNavigate={() => navigate(`/public-profile/${item.partnerId}`)}
+                        contextLabel={item.serviceType === 'Event' ? 'Attended' : 'Own service with'}
+                        onNavigate={() => navigate(item.serviceType === 'Event' ? `/service-detail/${item.serviceId}` : `/public-profile/${item.partnerId}`)}
                         onOpenDetails={() => setSelectedHistoryGroup(item)}
                       />
                     ))}

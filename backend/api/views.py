@@ -1285,7 +1285,9 @@ class UserHistoryView(APIView):
                 'partner_id': partner.id,
                 'partner_avatar_url': partner.avatar_url,
                 'completed_date': handshake.updated_at,
-                'was_provider': was_provider
+                'was_provider': was_provider,
+                # For events: True when the attendee's evaluation window is still open.
+                'evaluation_pending': handshake.service.type == 'Event' and handshake.status == 'attended',
             })
 
         # Include owner-completed events that currently have no qualifying
@@ -1315,6 +1317,7 @@ class UserHistoryView(APIView):
                 'partner_avatar_url': target_user.avatar_url,
                 'completed_date': event.event_completed_at or event.updated_at,
                 'was_provider': True,
+                'evaluation_pending': False,
             })
 
         history.sort(key=lambda item: item['completed_date'], reverse=True)
@@ -1456,7 +1459,8 @@ class UserVerifiedReviewsView(APIView):
             Prefetch(
                 'user__badges',
                 queryset=UserBadge.objects.select_related('badge')
-            )
+            ),
+            'media',
         ).order_by('-created_at')
         comments = _apply_blind_review_visibility(comments)
         
@@ -3909,20 +3913,7 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
-        existing_review = Comment.objects.filter(
-            related_handshake=handshake,
-            user=user,
-            is_verified_review=True,
-            is_deleted=False,
-        ).exists()
-        if existing_review:
-            return create_error_response(
-                'Review already submitted',
-                code=ErrorCodes.ALREADY_EXISTS,
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
-
-        cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000]
+        cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000] if raw_comment else ''
         images = request.FILES.getlist('images')
 
         # Validate images
@@ -3956,8 +3947,17 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        comment = None
-        if cleaned_comment:
+        # Resolve or create the Comment for this handshake+user pair.
+        # The Comment may already exist if the reputation submission included a comment text —
+        # in that case we attach images to the existing record rather than rejecting.
+        comment = Comment.objects.filter(
+            related_handshake=handshake,
+            user=user,
+            is_verified_review=True,
+            is_deleted=False,
+        ).first()
+
+        if comment is None:
             comment = Comment.objects.create(
                 service=handshake.service,
                 user=user,
@@ -3965,22 +3965,10 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 is_verified_review=True,
                 related_handshake=handshake,
             )
-        else:
-            # Images only — attach to existing Comment if present, or create a placeholder
-            comment = Comment.objects.filter(
-                related_handshake=handshake,
-                user=user,
-                is_verified_review=True,
-                is_deleted=False,
-            ).first()
-            if not comment:
-                comment = Comment.objects.create(
-                    service=handshake.service,
-                    user=user,
-                    body='',
-                    is_verified_review=True,
-                    related_handshake=handshake,
-                )
+        elif cleaned_comment and not comment.body:
+            # Fill in body if it was previously empty (images-first path)
+            comment.body = cleaned_comment
+            comment.save(update_fields=['body'])
 
         for img in images:
             media_obj = CommentMedia(comment=comment)
