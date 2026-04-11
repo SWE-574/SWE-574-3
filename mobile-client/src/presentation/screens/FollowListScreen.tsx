@@ -17,7 +17,6 @@ import { getFollowers, getFollowing } from "../../api/users";
 import type { UserSummary } from "../../api/types";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import { colors } from "../../constants/colors";
-import { useAuth } from "../../context/AuthContext";
 
 type Nav = NativeStackNavigationProp<ProfileStackParamList, "FollowList">;
 type FollowRoute = RouteProp<ProfileStackParamList, "FollowList">;
@@ -47,7 +46,6 @@ export default function FollowListScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<FollowRoute>();
   const { userId, kind } = route.params;
-  const { user: authUser } = useAuth();
   const insets = useSafeAreaInsets();
 
   const [state, setState] = useState<
@@ -82,17 +80,9 @@ export default function FollowListScreen() {
     };
   }, [userId, kind]);
 
-  const onPressUser = useCallback(
-    (target: UserSummary) => {
-      const targetId = String(target.id);
-      if (authUser?.id != null && targetId === String(authUser.id)) {
-        navigation.popToTop();
-        return;
-      }
-      navigation.navigate("PublicProfile", { userId: targetId });
-    },
-    [authUser?.id, navigation],
-  );
+  const onPressUser = useCallback((target: UserSummary) => {
+    navigation.navigate("PublicProfile", { userId: String(target.id) });
+  }, [navigation]);
 
   const styles = useMemo(
     () => getStyles(insets.bottom),
