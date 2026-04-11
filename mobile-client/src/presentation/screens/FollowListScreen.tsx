@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   FlatList,
   Image,
   Pressable,
@@ -9,17 +10,40 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import {
+  useFocusEffect,
+  useNavigation,
+  useRoute,
+} from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { getFollowers, getFollowing } from "../../api/users";
+import { getFollowers, getFollowing, getUser } from "../../api/users";
 import type { UserSummary } from "../../api/types";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import { colors } from "../../constants/colors";
+import { useAuth } from "../../context/AuthContext";
 
 type Nav = NativeStackNavigationProp<ProfileStackParamList, "FollowList">;
 type FollowRoute = RouteProp<ProfileStackParamList, "FollowList">;
+
+const headerBackStyles = StyleSheet.create({
+  wrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 6,
+    paddingVertical: 8,
+    paddingRight: 8,
+    maxWidth: 260,
+  },
+  pressed: { opacity: 0.65 },
+  label: {
+    fontSize: 17,
+    fontWeight: "600",
+    color: colors.GRAY900,
+    flexShrink: 1,
+  },
+});
 
 function rowDisplayName(u: UserSummary): string {
   const n = [u.first_name, u.last_name]
@@ -42,12 +66,26 @@ function initials(u: UserSummary): string {
   return (u.email || "U").charAt(0).toUpperCase();
 }
 
+function profileOwnerLabelFromApiUser(u: {
+  first_name?: string;
+  last_name?: string;
+}): string {
+  const n = [u.first_name, u.last_name]
+    .map((p) => (p == null ? "" : String(p).trim()))
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  return n || "User";
+}
+
 export default function FollowListScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<FollowRoute>();
   const { userId, kind } = route.params;
+  const { user: authUser } = useAuth();
   const insets = useSafeAreaInsets();
 
+  const [ownerLabel, setOwnerLabel] = useState("");
   const [state, setState] = useState<
     | { status: "loading" }
     | { status: "error"; message: string }
@@ -56,9 +94,74 @@ export default function FollowListScreen() {
 
   const title = kind === "followers" ? "Followers" : "Following";
 
+  useEffect(() => {
+    let cancelled = false;
+    setOwnerLabel("");
+    getUser(userId)
+      .then((u) => {
+        if (!cancelled) setOwnerLabel(profileOwnerLabelFromApiUser(u));
+      })
+      .catch(() => {
+        if (!cancelled) setOwnerLabel("User");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  const goBackToOwnerProfile = useCallback(() => {
+    if (authUser?.id != null && String(userId) === String(authUser.id)) {
+      navigation.navigate("ProfileHome");
+      return;
+    }
+    navigation.navigate("PublicProfile", { userId });
+  }, [authUser?.id, navigation, userId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        goBackToOwnerProfile();
+        return true;
+      });
+      return () => sub.remove();
+    }, [goBackToOwnerProfile]),
+  );
+
   useLayoutEffect(() => {
-    navigation.setOptions({ title });
-  }, [navigation, title]);
+    const backTitle = ownerLabel || "…";
+    navigation.setOptions({
+      title,
+      headerBackVisible: false,
+      headerLeft: () => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            authUser?.id != null && String(userId) === String(authUser.id)
+              ? "Back to my profile"
+              : `Back to ${backTitle} profile`
+          }
+          onPress={goBackToOwnerProfile}
+          style={({ pressed }) => [
+            headerBackStyles.wrap,
+            pressed && headerBackStyles.pressed,
+          ]}
+          hitSlop={10}
+        >
+          <Ionicons name="chevron-back" size={24} color={colors.GREEN} />
+          <Text style={headerBackStyles.label} numberOfLines={1}>
+            {backTitle}
+          </Text>
+        </Pressable>
+      ),
+    });
+  }, [
+    authUser?.id,
+    goBackToOwnerProfile,
+    navigation,
+    ownerLabel,
+    title,
+    userId,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
