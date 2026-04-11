@@ -14,7 +14,7 @@ import { useRoute, useNavigation } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { buildGroupChatWsUrl, withAuthToken } from "../../api/websocketUrls";
 import { normalizeMessage } from "../../api/chatMessages";
-import { getGroupChat } from "../../api/chats";
+import { getGroupChat, sendGroupChatMessage } from "../../api/chats";
 import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import { ChatMessageBubble } from "../components/chat/ChatMessageBubble";
@@ -174,10 +174,10 @@ export default function GroupChatScreen() {
     navigation.setOptions({ headerTitle: groupTitle });
   }, [navigation, groupTitle]);
 
-  const sendMessage = useCallback(() => {
+  const sendMessage = useCallback(async () => {
     const text = inputText.trim();
     if (!text) return;
-    if (!connected || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    if (!connected) {
       setError("Not connected — please wait.");
       return;
     }
@@ -206,7 +206,13 @@ export default function GroupChatScreen() {
     scrollToBottom();
 
     try {
-      wsRef.current.send(JSON.stringify({ type: "message", content: text }));
+      const response = await sendGroupChatMessage(groupId, text);
+      const confirmed = normalizeMessage(response);
+      setMessages((prev) => {
+        const next = prev.filter((m) => m.id !== pendingId);
+        return dedupeMessages([...next, confirmed]);
+      });
+      scrollToBottom(false);
     } catch (e) {
       setError("Failed to send message.");
       setMessages((prev) => prev.filter((m) => m.id !== pendingId));
@@ -214,6 +220,7 @@ export default function GroupChatScreen() {
   }, [
     inputText,
     connected,
+    groupId,
     user,
     currentUserId,
     currentUserEmail,

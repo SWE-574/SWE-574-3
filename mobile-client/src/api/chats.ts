@@ -93,3 +93,13 @@ export function getChat(id: string): Promise<Chat> {
 export function getGroupChat(id: string): Promise<Chat> {
   return apiRequest<Chat>(`/group-chat/${id}/`);
 }
+
+export function sendGroupChatMessage(
+  id: string,
+  body: string,
+): Promise<Record<string, unknown>> {
+  return apiRequest<Record<string, unknown>>(`/group-chat/${id}/`, {
+    method: "POST",
+    body: { body },
+  });
+}
