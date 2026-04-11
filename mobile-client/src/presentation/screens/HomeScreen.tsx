@@ -104,7 +104,7 @@ export default function HomeScreen() {
       {/* Compact top bar: Post button + Notifications */}
       <View style={styles.topBar}>
         <TouchableOpacity
-          onPress={() => tabNavigation.navigate("PostService")}
+          onPress={() => tabNavigation.navigate("PostService", { screen: "PostService" })}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Ionicons name="add-circle-outline" size={28} color={colors.GREEN} />
