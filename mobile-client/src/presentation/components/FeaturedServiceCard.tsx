@@ -5,7 +5,8 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from "react-native";
-import type { FeaturedService } from "../../api/featured";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import type { Service } from "../../api/types";
 import { colors } from "../../constants/colors";
 
 function getInitials(first: string, last: string): string {
@@ -26,14 +27,18 @@ function getTypeColor(type: "Offer" | "Need" | "Event"): string {
 }
 
 interface FeaturedServiceCardProps {
-  service: FeaturedService;
-  showFriendInfo?: boolean;
+  service: Service;
+  contextBadge?: {
+    text: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    tone: "purple" | "green" | "red";
+  };
   onPress: () => void;
 }
 
 export default function FeaturedServiceCard({
   service,
-  showFriendInfo,
+  contextBadge,
   onPress,
 }: FeaturedServiceCardProps) {
   const typeColor = getTypeColor(service.type);
@@ -52,7 +57,7 @@ export default function FeaturedServiceCard({
       <View style={[styles.headerStrip, { backgroundColor: typeColor }]}>
         <View style={styles.typeBadge}>
           <Text style={[styles.typeBadgeText, { color: typeColor }]}>
-            {service.type.toUpperCase()}
+            {service.type === "Need" ? "WANT" : service.type.toUpperCase()}
           </Text>
         </View>
       </View>
@@ -61,6 +66,23 @@ export default function FeaturedServiceCard({
         <Text style={styles.title} numberOfLines={2}>
           {service.title}
         </Text>
+
+        <View style={styles.metaRow}>
+          {service.duration ? (
+            <View style={styles.metaItem}>
+              <Ionicons name="time-outline" size={12} color={colors.GRAY500} />
+              <Text style={styles.metaText}>{service.duration}</Text>
+            </View>
+          ) : null}
+          {(service.location_area || service.location_type) && (
+            <View style={styles.metaItem}>
+              <Ionicons name="location-outline" size={12} color={colors.GRAY500} />
+              <Text style={styles.metaText} numberOfLines={1}>
+                {service.location_area || service.location_type}
+              </Text>
+            </View>
+          )}
+        </View>
 
         <View style={styles.userRow}>
           <View style={[styles.avatar, { backgroundColor: typeColor }]}>
@@ -71,20 +93,37 @@ export default function FeaturedServiceCard({
           </Text>
         </View>
 
-        {service.tags?.length > 0 && (
-          <View style={styles.tagPill}>
-            <Text style={styles.tagText}>#{service.tags[0].name}</Text>
-          </View>
-        )}
-
-        {showFriendInfo &&
-          service.friend_count != null &&
-          service.friend_count > 0 && (
-            <Text style={styles.friendText}>
-              {service.friend_count} friend{service.friend_count > 1 ? "s" : ""}{" "}
-              joined
+        {contextBadge ? (
+          <View
+            style={[
+              styles.contextBadge,
+              contextBadge.tone === "green" && styles.contextBadgeGreen,
+              contextBadge.tone === "red" && styles.contextBadgeRed,
+            ]}
+          >
+            <Ionicons
+              name={contextBadge.icon}
+              size={10}
+              color={
+                contextBadge.tone === "green"
+                  ? colors.GREEN
+                  : contextBadge.tone === "red"
+                    ? colors.RED
+                    : colors.PURPLE
+              }
+            />
+            <Text
+              style={[
+                styles.contextBadgeText,
+                contextBadge.tone === "green" && styles.contextBadgeTextGreen,
+                contextBadge.tone === "red" && styles.contextBadgeTextRed,
+              ]}
+              numberOfLines={1}
+            >
+              {contextBadge.text}
             </Text>
-          )}
+          </View>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -92,7 +131,7 @@ export default function FeaturedServiceCard({
 
 const styles = StyleSheet.create({
   card: {
-    width: 200,
+    width: 214,
     borderRadius: 12,
     backgroundColor: colors.WHITE,
     shadowColor: colors.GRAY900,
@@ -123,16 +162,33 @@ const styles = StyleSheet.create({
   },
   body: {
     padding: 10,
+    minHeight: 120,
   },
   title: {
     fontSize: 13,
     fontWeight: "600",
     color: colors.GRAY800,
   },
+  metaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 6,
+    gap: 8,
+  },
+  metaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  metaText: {
+    fontSize: 11,
+    color: colors.GRAY500,
+    maxWidth: 92,
+  },
   userRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 6,
+    marginTop: 8,
   },
   avatar: {
     width: 22,
@@ -152,22 +208,34 @@ const styles = StyleSheet.create({
     color: colors.GRAY500,
     flex: 1,
   },
-  tagPill: {
+  contextBadge: {
+    flexDirection: "row",
+    alignItems: "center",
     alignSelf: "flex-start",
-    backgroundColor: colors.GRAY100,
+    backgroundColor: colors.PURPLE_LT,
     borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 2,
     marginTop: 6,
+    gap: 3,
+    maxWidth: "100%",
   },
-  tagText: {
-    fontSize: 10,
-    color: colors.GRAY600,
+  contextBadgeGreen: {
+    backgroundColor: colors.GREEN_LT,
   },
-  friendText: {
+  contextBadgeRed: {
+    backgroundColor: colors.RED_LT,
+  },
+  contextBadgeText: {
     fontSize: 10,
     color: colors.PURPLE,
-    fontStyle: "italic",
-    marginTop: 4,
+    fontWeight: "500",
+    flexShrink: 1,
+  },
+  contextBadgeTextGreen: {
+    color: colors.GREEN,
+  },
+  contextBadgeTextRed: {
+    color: colors.RED,
   },
 });

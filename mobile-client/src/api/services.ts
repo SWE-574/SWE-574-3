@@ -25,14 +25,23 @@ export interface ServicesListParams {
   page_size?: number;
   type?: 'Offer' | 'Need' | 'Event';
   search?: string;
-  tags?: string;
+  tags?: string | string[];
   location_type?: string;
   /** Owner filter; matches web `serviceAPI.list` (`?user=`). */
   user?: string;
+  sort?: "latest" | "hot";
+  lat?: number;
+  lng?: number;
+  distance?: number;
 }
 
 export function listServices(params?: ServicesListParams): Promise<PaginatedResponse<Service>> {
-  return apiRequest<PaginatedResponse<Service>>('/services/', { params: params as Record<string, string | number | undefined> });
+  return apiRequest<PaginatedResponse<Service>>('/services/', {
+    params: params as Record<
+      string,
+      string | number | boolean | Array<string | number | boolean> | undefined
+    >,
+  });
 }
 
 export function getService(id: string): Promise<Service> {

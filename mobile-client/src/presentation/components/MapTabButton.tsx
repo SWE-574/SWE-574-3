@@ -1,59 +1,85 @@
 import React from "react";
-import { TouchableOpacity, Text, StyleSheet } from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import { View, TouchableOpacity, Text, Image, StyleSheet } from "react-native";
 import { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
-import { useNavigationState } from "@react-navigation/native";
 import { colors } from "../../constants/colors";
 
-export default function MapTabButton({ onPress }: BottomTabBarButtonProps) {
-  const focused = useNavigationState(
-    (s) => s.routes[s.index]?.name === "MapTab"
-  );
+const hiveIcon = require("../../assets/icon.png");
+
+export default function MapTabButton({
+  onPress,
+  onLongPress,
+  accessibilityState,
+  accessibilityLabel,
+  testID,
+  style,
+}: BottomTabBarButtonProps) {
+  const focused = accessibilityState?.selected ?? false;
 
   return (
     <TouchableOpacity
-      style={styles.wrapper}
-      onPress={onPress}
+      accessibilityLabel={accessibilityLabel}
+      testID={testID}
       activeOpacity={0.9}
+      onLongPress={onLongPress ?? undefined}
+      onPress={onPress ?? undefined}
+      style={[style, styles.wrapper]}
     >
-      <Ionicons
-        name="map"
-        color={colors.WHITE}
-        size={30}
-        style={[
-          styles.icon,
-          { backgroundColor: focused ? colors.GREEN : colors.YELLOW },
-        ]}
-      />
-      <Text
-        style={[
-          styles.label,
-          { color: focused ? colors.GREEN : colors.GRAY500 },
-        ]}
-      >
-        Map
-      </Text>
+      <View style={styles.floatingContainer}>
+        <View style={[styles.circle, focused && styles.circleFocused]}>
+          <Image source={hiveIcon} style={styles.logo} />
+        </View>
+        <Text style={[styles.label, focused && styles.labelFocused]}>Map</Text>
+      </View>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   wrapper: {
+    flex: 1,
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    position: "absolute",
-    bottom: -10,
-    left: 0,
-    right: 0,
   },
-  icon: {
-    borderRadius: 30,
-    padding: 10,
-    marginBottom: 4,
+  floatingContainer: {
+    alignItems: "center",
+    transform: [{ translateY: -16 }],
+  },
+  circle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.YELLOW,
+    borderWidth: 4,
+    borderColor: colors.WHITE,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  circleFocused: {
+    backgroundColor: colors.GREEN,
+  },
+  logo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   label: {
-    fontSize: 10,
-    marginTop: 2,
-    fontWeight: "500",
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 4,
+    color: colors.GRAY500,
+    textAlign: "center",
+    minWidth: 72,
+  },
+  labelFocused: {
+    color: colors.GREEN,
   },
 });

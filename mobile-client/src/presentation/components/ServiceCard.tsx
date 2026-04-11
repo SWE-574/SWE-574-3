@@ -89,37 +89,39 @@ export default function ServiceCard({
       )}
 
       <View style={styles.body}>
-        <View
-          style={[
-            styles.typeBadge,
-            isOffer || service.type === "Offer"
-              ? styles.typeOffer
-              : service.type === "Need"
-                ? styles.typeWant
-                : styles.typeEvent,
-          ]}
-        >
-          <Text
-            style={
-              isOffer
-                ? styles.typeOfferBadgeText
+        <View style={styles.badgeStack}>
+          <View
+            style={[
+              styles.typeBadge,
+              isOffer || service.type === "Offer"
+                ? styles.typeOffer
                 : service.type === "Need"
-                  ? styles.typeWantBadgeText
-                  : styles.typeEventBadgeText
-            }
+                  ? styles.typeWant
+                  : styles.typeEvent,
+            ]}
           >
-            {service.type === "Offer"
-              ? "Offer"
-              : service.type === "Need"
-                ? "Want"
-                : "Event"}
-          </Text>
-        </View>
-        {isNearlyFull && (
-          <View style={styles.nearlyFullBadge}>
-            <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
+            <Text
+              style={
+                isOffer
+                  ? styles.typeOfferBadgeText
+                  : service.type === "Need"
+                    ? styles.typeWantBadgeText
+                    : styles.typeEventBadgeText
+              }
+            >
+              {service.type === "Offer"
+                ? "Offer"
+                : service.type === "Need"
+                  ? "Want"
+                  : "Event"}
+            </Text>
           </View>
-        )}
+          {isNearlyFull && (
+            <View style={styles.nearlyFullBadge}>
+              <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
+            </View>
+          )}
+        </View>
 
         <View style={styles.userRow}>
           <View style={styles.avatar}>
@@ -254,10 +256,15 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 14,
   },
-  typeBadge: {
+  badgeStack: {
     position: "absolute",
-    right: 12,
     top: 12,
+    right: 12,
+    alignItems: "flex-end",
+    gap: 6,
+    maxWidth: "48%",
+  },
+  typeBadge: {
     paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: 8,
@@ -272,16 +279,14 @@ const styles = StyleSheet.create({
     backgroundColor: "rgb(255, 245, 238)",
   },
   nearlyFullBadge: {
-    position: "absolute",
-    right: 12,
-    top: 44,
     paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: 8,
     backgroundColor: colors.RED_LT,
+    alignSelf: "flex-end",
   },
   nearlyFullBadgeText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.RED,
   },

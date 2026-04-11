@@ -37,13 +37,19 @@ export async function clearAuth(): Promise<void> {
 }
 
 export interface RequestConfig extends Omit<RequestInit, "body"> {
-  params?: Record<string, string | number | boolean | undefined>;
+  params?: Record<
+    string,
+    string | number | boolean | Array<string | number | boolean> | undefined
+  >;
   body?: object | string;
 }
 
 function buildUrl(
   path: string,
-  params?: Record<string, string | number | boolean | undefined>,
+  params?: Record<
+    string,
+    string | number | boolean | Array<string | number | boolean> | undefined
+  >,
 ): string {
   const url = path.startsWith("http")
     ? path
@@ -51,6 +57,15 @@ function buildUrl(
   if (!params) return url;
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== undefined && item !== null && item !== "") {
+          search.append(key, String(item));
+        }
+      }
+      continue;
+    }
+
     if (value !== undefined && value !== null && value !== "") {
       search.set(key, String(value));
     }

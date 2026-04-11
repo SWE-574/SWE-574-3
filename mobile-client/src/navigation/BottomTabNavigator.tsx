@@ -1,8 +1,5 @@
 import React from "react";
-import {
-  BottomTabNavigationProp,
-  createBottomTabNavigator,
-} from "@react-navigation/bottom-tabs";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import HomeStack from "./HomeStack";
 import type { HomeStackParamList } from "./HomeStack";
@@ -17,9 +14,9 @@ import type { MessagesStackParamList } from "./MessagesStack";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../constants/colors";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import MapTabButton from "../presentation/components/MapTabButton";
 import ProfileStack, { ProfileStackParamList } from "./ProfileStack";
 import { useNotificationStore } from "../store/useNotificationStore";
+import MapTabButton from "../presentation/components/MapTabButton";
 
 export type BottomTabParamList = {
   Home: NavigatorScreenParams<HomeStackParamList>;
@@ -51,8 +48,19 @@ export default function BottomTabNavigator() {
         headerShown: false,
         tabBarActiveTintColor: colors.GREEN,
         tabBarInactiveTintColor: colors.GRAY500,
+        tabBarHideOnKeyboard: true,
+        tabBarItemStyle: {
+          paddingTop: 4,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: "600",
+          marginBottom: 4,
+        },
         tabBarStyle: {
-          paddingBottom: insets.bottom + 10,
+          height: 70 + insets.bottom,
+          paddingTop: 6,
+          paddingBottom: Math.max(insets.bottom, 6),
         },
       }}
     >
@@ -92,6 +100,7 @@ export default function BottomTabNavigator() {
         component={MapStack}
         options={{
           title: "Map",
+          tabBarLabel: "Map",
           tabBarButton: (props) => <MapTabButton {...props} />,
         }}
       />
