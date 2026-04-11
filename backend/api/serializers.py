@@ -2228,6 +2228,11 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at']
 
+    def _context_service(self, obj):
+        if obj.handshake and obj.handshake.service:
+            return obj.handshake.service
+        return obj.service
+
     @extend_schema_field(OpenApiTypes.UUID)
     def get_handshake_id(self, obj):
         if obj.handshake_id:
@@ -2236,41 +2241,49 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.UUID)
     def get_service_id(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return str(obj.handshake.service.id)
+        service = self._context_service(obj)
+        if service:
+            return str(service.id)
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_service_title(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.title
+        service = self._context_service(obj)
+        if service:
+            return service.title
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_service_type(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.type
+        service = self._context_service(obj)
+        if service:
+            return service.type
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_schedule_type(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.schedule_type
+        service = self._context_service(obj)
+        if service:
+            return service.schedule_type
         return None
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_max_participants(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.max_participants
+        service = self._context_service(obj)
+        if service:
+            return service.max_participants
         return None
 
     @extend_schema_field(serializers.BooleanField())
     def get_is_current_user_provider(self, obj):
         handshake = obj.handshake
-        if not handshake or not handshake.service:
+        service = self._context_service(obj)
+        if not service:
             return False
 
-        service = handshake.service
+        if handshake is None:
+            return service.type == 'Offer' and str(service.user_id) == str(obj.user_id)
+
         if service.type == 'Offer':
             provider = service.user
         else:

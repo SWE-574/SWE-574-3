@@ -48,6 +48,7 @@ export async function getCurrentBalance(page: Page): Promise<number> {
   const balance = await page.evaluate(async () => {
     const response = await fetch('/api/users/me/', {
       credentials: 'include',
+      cache: 'no-store',
     })
 
     if (!response.ok) {
@@ -63,7 +64,7 @@ export async function getCurrentBalance(page: Page): Promise<number> {
 
 export async function expectNavbarBalance(page: Page, expectedBalance: number): Promise<void> {
   const escaped = expectedBalance.toFixed(1).replace('.', '\\.')
-  await expect(page.locator('nav').getByText(new RegExp(`^${escaped}h$`)).first()).toBeVisible({
+  await expect(page.locator('nav').getByRole('button', { name: new RegExp(`${escaped}h`) }).first()).toBeVisible({
     timeout: 10_000,
   })
 }

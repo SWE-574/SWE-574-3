@@ -350,6 +350,7 @@ export default function ServiceDetailPage() {
   const { id }     = useParams<{ id: string }>()
   const navigate   = useNavigate()
   const { isAuthenticated, user } = useAuthStore()
+  const refreshUser = useAuthStore((state) => state.refreshUser)
 
   const [service, setService]           = useState<Service | null>(null)
   const [loading, setLoading]           = useState(true)
@@ -789,6 +790,7 @@ export default function ServiceDetailPage() {
     setRemoveLoading(true)
     try {
       await serviceAPI.delete(service.id)
+      if (service.type === 'Need') await refreshUser()
       toast.success('Listing removed.')
       navigate('/dashboard')
     } catch (e: unknown) {

@@ -264,6 +264,12 @@ class Service(models.Model):
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
     is_visible = models.BooleanField(default=True, help_text='Admin can hide inappropriate services')
     is_pinned = models.BooleanField(default=False, help_text='Admin can pin events to the top of the feed')
+    reserved_timebank_hours = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text='Hours reserved up front for active Need services before completion or cancellation.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -571,6 +577,7 @@ class TransactionHistory(models.Model):
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
     amount = models.DecimalField(max_digits=10, decimal_places=2, help_text='Positive for credits, negative for debits')
     balance_after = models.DecimalField(max_digits=10, decimal_places=2, help_text='User balance after this transaction')
+    service = models.ForeignKey(Service, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
     handshake = models.ForeignKey(Handshake, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
     description = models.TextField(help_text='Human-readable description of the transaction')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -581,6 +588,7 @@ class TransactionHistory(models.Model):
             models.Index(fields=['transaction_type', 'created_at']),
             models.Index(fields=['user', 'transaction_type', 'created_at']),
             models.Index(fields=['handshake']),
+            models.Index(fields=['service']),
         ]
         ordering = ['-created_at']
 
