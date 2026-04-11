@@ -92,9 +92,9 @@ describe("services", () => {
 
   it("reportService POSTs to /services/:id/report/", async () => {
     mockFetchResolve({});
-    await reportService("s1", { reason: "spam" });
+    await reportService("s1", { issue_type: "spam", description: "Looks like spam" });
     expect(getLastFetchCall().url).toContain("/services/s1/report/");
-    expect(getLastFetchBody()).toEqual({ reason: "spam" });
+    expect(getLastFetchBody()).toEqual({ issue_type: "spam", description: "Looks like spam" });
   });
 
   it("toggleServiceVisibility POSTs to /services/:id/toggle-visibility/", async () => {
