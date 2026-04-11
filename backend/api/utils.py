@@ -290,13 +290,24 @@ def create_notification(
     return notification
 
 
+def _notification_payload_for_channels(notification: Notification) -> dict:
+    """
+    Channel layer (Redis/msgpack) cannot serialize UUID/datetime objects.
+    Round-trip through JSON with default=str so all values are msgpack-safe.
+    """
+    import json
+    from .serializers import NotificationSerializer
+
+    raw = NotificationSerializer(notification).data
+    return json.loads(json.dumps(raw, default=str))
+
+
 def _broadcast_notification(notification: Notification) -> None:
     """Push a notification to the user's WebSocket group and send push notifications."""
     # WebSocket broadcast
     try:
         from channels.layers import get_channel_layer
         from asgiref.sync import async_to_sync
-        from .serializers import NotificationSerializer
 
         channel_layer = get_channel_layer()
         if channel_layer is None:
@@ -305,7 +316,7 @@ def _broadcast_notification(notification: Notification) -> None:
             f'notifications_{notification.user_id}',
             {
                 'type': 'send_notification',
-                'notification': NotificationSerializer(notification).data,
+                'notification': _notification_payload_for_channels(notification),
             },
         )
     except Exception:
