@@ -61,7 +61,7 @@ function achievementIdsForDisplay(user: PublicUserProfile): string[] {
 export default function PublicProfileScreen() {
   const route = useRoute<RouteProp<ProfileStackParamList, "PublicProfile">>();
   const navigation = useNavigation<PublicProfileNavigation>();
-  const { user: authUser } = useAuth();
+  const { user: authUser, refreshUser } = useAuth();
   const { userId } = route.params;
   const insets = useSafeAreaInsets();
   const styles = useMemo(
@@ -236,6 +236,7 @@ export default function PublicProfileScreen() {
             },
           };
         });
+        void refreshUser();
       })
       .catch((err: unknown) => {
         const message =

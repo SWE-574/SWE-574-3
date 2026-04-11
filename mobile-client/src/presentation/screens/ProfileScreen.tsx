@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
@@ -15,6 +15,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import {
+  useFocusEffect,
   useNavigation,
   type CompositeNavigationProp,
 } from "@react-navigation/native";
@@ -49,7 +50,7 @@ type EditableProfile = {
 };
 
 export default function ProfileScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const navigation = useNavigation<ProfileHomeNavigation>();
   const insets = useSafeAreaInsets();
   const styles = useMemo(
@@ -78,6 +79,14 @@ export default function ProfileScreen() {
   );
 
   const [form, setForm] = useState<EditableProfile>(initialForm);
+
+  const profileUserId = user?.id;
+  useFocusEffect(
+    useCallback(() => {
+      if (!profileUserId) return;
+      void refreshUser();
+    }, [profileUserId, refreshUser]),
+  );
 
   useEffect(() => {
     if (!user?.id) return;
