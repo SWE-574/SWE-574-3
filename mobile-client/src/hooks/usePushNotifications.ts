@@ -31,6 +31,30 @@ export function usePushNotifications(
   const notificationListenerRef = useRef<Notifications.Subscription | null>(null);
   const responseListenerRef = useRef<Notifications.Subscription | null>(null);
 
+  const handleNotificationResponse = useCallback(
+    (response: Notifications.NotificationResponse) => {
+      const data = response.notification.request.content.data;
+      if (!data?.type || !navigationRef) return;
+
+      useNotificationStore.getState().fetchUnreadCount();
+
+      navigateToNotificationTarget(
+        {
+          id: data.notification_id as string,
+          type: data.type as any,
+          title: '',
+          message: '',
+          is_read: false,
+          related_handshake: (data.related_handshake as string) ?? null,
+          related_service: (data.related_service as string) ?? null,
+          created_at: '',
+        },
+        navigationRef,
+      );
+    },
+    [navigationRef],
+  );
+
   const registerForPushNotifications = useCallback(async () => {
     if (!Device.isDevice) {
       // Push notifications only work on physical devices
@@ -111,37 +135,36 @@ export function usePushNotifications(
     };
   }, [isAuthenticated]);
 
-  // Listen for notification taps (user interacted with a notification)
+  // Listen for notification taps (user interacted with a notification — app in foreground or background)
   useEffect(() => {
     if (!isAuthenticated) return;
 
     responseListenerRef.current =
       Notifications.addNotificationResponseReceivedListener((response) => {
-        const data = response.notification.request.content.data;
-        if (!data?.type || !navigationRef) return;
-
-        useNotificationStore.getState().fetchUnreadCount();
-
-        // Navigate to the relevant screen
-        navigateToNotificationTarget(
-          {
-            id: data.notification_id as string,
-            type: data.type as any,
-            title: '',
-            message: '',
-            is_read: false,
-            related_handshake: (data.related_handshake as string) ?? null,
-            related_service: (data.related_service as string) ?? null,
-            created_at: '',
-          },
-          navigationRef,
-        );
+        handleNotificationResponse(response);
       });
 
     return () => {
       responseListenerRef.current?.remove();
     };
   }, [isAuthenticated, navigationRef]);
+
+  // Handle cold-start: app was killed and user tapped a notification to open it.
+  // addNotificationResponseReceivedListener fires too late in this case, so we
+  // check getLastNotificationResponseAsync once the user is authenticated and
+  // navigation is ready.
+  useEffect(() => {
+    if (!isAuthenticated || !navigationRef) return;
+
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (!response) return;
+      handleNotificationResponse(response);
+      // Clear so navigating back to the app normally doesn't re-trigger this.
+      Notifications.dismissAllNotificationsAsync().catch(() => {});
+    });
+    // Only run once per authenticated session
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   /** Call this on logout to deregister the token from the backend. */
   const deregister = useCallback(async () => {

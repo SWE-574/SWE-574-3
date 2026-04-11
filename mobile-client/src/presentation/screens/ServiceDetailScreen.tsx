@@ -30,6 +30,7 @@ import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as SecureStore from "expo-secure-store";
 import type { HomeStackParamList } from "../../navigation/HomeStack";
+import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import {
   addServiceInterest,
@@ -232,8 +233,11 @@ type MediaItem = {
   file_url: string;
 };
 
+type ServiceDetailRouteParams = { ServiceDetail: { id: string } };
+
 type ServiceDetailNavigation = CompositeNavigationProp<
-  NativeStackNavigationProp<HomeStackParamList, "ServiceDetail">,
+  | NativeStackNavigationProp<HomeStackParamList, "ServiceDetail">
+  | NativeStackNavigationProp<ProfileStackParamList, "ServiceDetail">,
   BottomTabNavigationProp<BottomTabParamList>
 >;
 
@@ -246,7 +250,7 @@ function getIdFromField(value: string | object | undefined): string | undefined 
 
 export default function ServiceDetailScreen() {
   const insets = useSafeAreaInsets();
-  const route = useRoute<RouteProp<HomeStackParamList, "ServiceDetail">>();
+  const route = useRoute<RouteProp<ServiceDetailRouteParams, "ServiceDetail">>();
   const navigation = useNavigation<ServiceDetailNavigation>();
   const { user: currentUser, isAuthenticated } = useAuth();
 

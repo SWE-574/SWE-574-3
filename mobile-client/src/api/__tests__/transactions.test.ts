@@ -19,9 +19,25 @@ describe("transactions", () => {
   });
 
   it("getTransaction GETs /transactions/:id/", async () => {
-    const t = { id: "tx1", amount: "10", type: "credit" };
+    const t = { id: "tx1", amount: "10", transaction_type: "transfer" };
     mockFetchResolve(t);
-    expect(await getTransaction("tx1")).toEqual(t);
+    expect(await getTransaction("tx1")).toEqual({
+      id: "tx1",
+      handshake_id: null,
+      service_id: null,
+      transaction_type: "transfer",
+      transaction_type_display: undefined,
+      service_type: null,
+      schedule_type: null,
+      max_participants: null,
+      is_current_user_provider: false,
+      counterpart: null,
+      amount: 10,
+      balance_after: 0,
+      description: "",
+      service_title: null,
+      created_at: "",
+    });
     expect(getLastFetchCall().url).toContain("/transactions/tx1/");
   });
 });

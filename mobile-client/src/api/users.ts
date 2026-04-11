@@ -12,6 +12,31 @@ import type {
   UserSummary,
 } from "./types";
 
+export interface ProfileReview {
+  id: string;
+  service: string;
+  service_title?: string;
+  user_id: string;
+  user_name: string;
+  user_avatar_url?: string;
+  body: string;
+  is_verified_review: boolean;
+  handshake_hours?: number;
+  handshake_completed_at?: string;
+  reviewed_user_role?: "provider" | "receiver" | "organizer" | null;
+  reply_count: number;
+  replies: unknown[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProfileReviewsResponse {
+  count: number;
+  next?: string | null;
+  previous?: string | null;
+  results: ProfileReview[];
+}
+
 export interface UserProfileRequest {
   first_name?: string;
   last_name?: string;
@@ -109,9 +134,13 @@ export function getUserHistory(
 
 export function getVerifiedReviews(
   userId: string,
-  params?: { page?: number; page_size?: number },
-): Promise<unknown> {
-  return apiRequest(`/users/${userId}/verified-reviews/`, {
+  params?: {
+    page?: number;
+    page_size?: number;
+    role?: "provider" | "receiver" | "organizer";
+  },
+): Promise<ProfileReviewsResponse> {
+  return apiRequest<ProfileReviewsResponse>(`/users/${userId}/verified-reviews/`, {
     params: params as Record<string, string | number | undefined>,
   });
 }
