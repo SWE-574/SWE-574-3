@@ -30,13 +30,17 @@ import { getUserHistory } from "../../api/users";
 import type { Service, UserHistoryItem } from "../../api/types";
 import { groupHistoryItems, isOwnHistoryItem } from "../../utils/historyGrouping";
 import AchievementsSection from "../components/AchievementsSection";
+
 import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
 import ServiceCard from "../components/ServiceCard";
+import NotificationBadge from "../components/NotificationBadge";
+import { useNotificationStore } from "../../store/useNotificationStore";
 
 type ProfileHomeNavigation = CompositeNavigationProp<
   NativeStackNavigationProp<ProfileStackParamList, "ProfileHome">,
   BottomTabNavigationProp<BottomTabParamList>
 >;
+
 
 type EditableProfile = {
   first_name: string;
@@ -52,6 +56,7 @@ export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const navigation = useNavigation<ProfileHomeNavigation>();
   const insets = useSafeAreaInsets();
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
   const styles = useMemo(
     () => getStyles(insets.top, insets.bottom),
     [insets.top, insets.bottom],
@@ -214,6 +219,29 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
+      <TouchableOpacity
+        onPress={() => (navigation as any).navigate("Notifications")}
+        style={{
+          position: "absolute",
+          top: insets.top + 12,
+          right: 16,
+          zIndex: 10,
+          backgroundColor: "rgba(255,255,255,0.9)",
+          borderRadius: 20,
+          width: 40,
+          height: 40,
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: "#000",
+          shadowOpacity: 0.1,
+          shadowRadius: 4,
+          shadowOffset: { width: 0, height: 2 },
+          elevation: 4,
+        }}
+      >
+        <Ionicons name="notifications-outline" size={22} color={colors.GREEN} />
+        <NotificationBadge count={unreadCount} />
+      </TouchableOpacity>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}

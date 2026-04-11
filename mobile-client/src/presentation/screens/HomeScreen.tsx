@@ -19,7 +19,6 @@ import ServiceCard from "../components/ServiceCard";
 import QuickFilters, { type QuickFilterId } from "../components/QuickFilters";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
-
 export default function HomeScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<HomeStackParamList, "HomeFeed">>();
