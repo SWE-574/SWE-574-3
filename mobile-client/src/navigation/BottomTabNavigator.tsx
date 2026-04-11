@@ -102,12 +102,6 @@ export default function BottomTabNavigator() {
           tabBarLabel: "Map",
           tabBarButton: (props) => <MapTabButton {...props} />,
         }}
-        listeners={({ navigation }) => ({
-          tabPress: (e) => {
-            e.preventDefault();
-            navigation.navigate("PostService", { screen: "PostServiceHome" });
-          },
-        })}
       />
       <Tab.Screen
         name="Messages"
