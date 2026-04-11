@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -29,11 +29,15 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { HomeStackParamList } from "../../navigation/HomeStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { getService, addServiceInterest } from "../../api/services";
+import { listHandshakes, type Handshake } from "../../api/handshakes";
 import type { Service } from "../../api/types";
+import { useAuth } from "../../context/AuthContext";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../constants/colors";
 import ImagePreviewModal from "../components/ImagePreviewModal";
+import { ChatEvaluationModal } from "../components/chat/ChatEvaluationModal";
+import { EventEvaluationSummaryCard } from "../components/service/EventEvaluationSummaryCard";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SLIDER_WIDTH = SCREEN_WIDTH;
@@ -65,10 +69,18 @@ type ServiceDetailNavigation = CompositeNavigationProp<
   BottomTabNavigationProp<BottomTabParamList>
 >;
 
+function getIdFromField(value: string | object | undefined): string | undefined {
+  if (!value) return undefined;
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && "id" in value) return String((value as { id: unknown }).id);
+  return undefined;
+}
+
 export default function ServiceDetailScreen() {
   const insets = useSafeAreaInsets();
   const route = useRoute<RouteProp<HomeStackParamList, "ServiceDetail">>();
   const navigation = useNavigation<ServiceDetailNavigation>();
+  const { user: currentUser } = useAuth();
 
   const styles = useMemo(
     () => getStyles(insets.top, insets.bottom),
@@ -85,14 +97,45 @@ export default function ServiceDetailScreen() {
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [modalInitialIndex, setModalInitialIndex] = useState(0);
 
+  const [myEventHandshake, setMyEventHandshake] = useState<Handshake | null>(null);
+  const [showEvaluationModal, setShowEvaluationModal] = useState(false);
+
   const sliderRef = useRef<FlatList<MediaItem>>(null);
 
-  useEffect(() => {
-    getService(id)
+  const loadService = useCallback(() => {
+    return getService(id)
       .then(setService)
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"))
-      .finally(() => setLoading(false));
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"));
   }, [id]);
+
+  useEffect(() => {
+    loadService().finally(() => setLoading(false));
+  }, [loadService]);
+
+  useEffect(() => {
+    if (!service || service.type !== "Event" || !currentUser?.id) return;
+    listHandshakes()
+      .then((res) => {
+        const match = res.results.find((h) => {
+          const serviceId = getIdFromField(h.service);
+          const requesterId = getIdFromField(h.requester);
+          return (
+            serviceId === service.id &&
+            requesterId === currentUser.id &&
+            ["accepted", "checked_in", "attended", "no_show", "reported"].includes(h.status)
+          );
+        });
+        setMyEventHandshake(match ?? null);
+      })
+      .catch(() => {});
+  }, [service, currentUser?.id]);
+
+  const handleEvaluationSubmitted = useCallback(async () => {
+    await loadService();
+    if (myEventHandshake) {
+      setMyEventHandshake((prev) => prev ? { ...prev, user_has_reviewed: true } : null);
+    }
+  }, [loadService, myEventHandshake]);
 
   const handleExpressInterest = () => {
     setInterestLoading(true);
@@ -474,6 +517,35 @@ export default function ServiceDetailScreen() {
             </View>
           )}
 
+          {isEvent && myEventHandshake?.status === "attended" && (
+            <View style={styles.sectionBlock}>
+              <View style={styles.attendedBanner}>
+                <Ionicons name="checkmark-circle" size={20} color={colors.GREEN} />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.attendedTitle}>Attendance confirmed!</Text>
+                  <Text style={styles.attendedSubtitle}>The organizer marked you as attended.</Text>
+                </View>
+              </View>
+              {!myEventHandshake.user_has_reviewed && (
+                <TouchableOpacity
+                  style={styles.evaluationButton}
+                  onPress={() => setShowEvaluationModal(true)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="star-outline" size={16} color={colors.WHITE} />
+                  <Text style={styles.evaluationButtonText}>Leave Evaluation</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {isEvent && service.event_evaluation_summary &&
+            service.event_evaluation_summary.feedback_submission_count > 0 && (
+              <View style={styles.sectionBlock}>
+                <EventEvaluationSummaryCard summary={service.event_evaluation_summary} />
+              </View>
+          )}
+
           <TouchableOpacity
             style={[styles.ctaButton, interestLoading && styles.ctaDisabled]}
             onPress={handleExpressInterest}
@@ -498,6 +570,17 @@ export default function ServiceDetailScreen() {
         initialIndex={modalInitialIndex}
         onClose={() => setImageModalVisible(false)}
       />
+
+      {isEvent && myEventHandshake?.status === "attended" && !myEventHandshake.user_has_reviewed && (
+        <ChatEvaluationModal
+          visible={showEvaluationModal}
+          handshakeId={myEventHandshake.id}
+          counterpartName={service.title}
+          isEventEvaluation
+          onClose={() => setShowEvaluationModal(false)}
+          onSubmitted={handleEvaluationSubmitted}
+        />
+      )}
     </ScrollView>
   );
 }
@@ -906,6 +989,45 @@ const getStyles = (topInset: number, bottomInset: number) =>
       fontSize: 13,
       color: "#475467",
       fontWeight: "600",
+    },
+
+    attendedBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: "#f0fdf4",
+      borderRadius: 14,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: "rgba(34,197,94,0.25)",
+    },
+
+    attendedTitle: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: colors.GREEN,
+    },
+
+    attendedSubtitle: {
+      fontSize: 12,
+      color: "#166534",
+      marginTop: 2,
+    },
+
+    evaluationButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      minHeight: 44,
+      borderRadius: 10,
+      backgroundColor: colors.AMBER,
+      marginTop: 10,
+    },
+
+    evaluationButtonText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.WHITE,
     },
 
     ctaButton: {

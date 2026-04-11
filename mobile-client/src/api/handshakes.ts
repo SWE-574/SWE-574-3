@@ -10,9 +10,14 @@ export interface Handshake {
   id: string;
   service: string | object;
   initiator?: string | object;
+  requester?: string | object;
   status: string;
   created_at: string;
   updated_at?: string;
+  evaluation_window_starts_at?: string | null;
+  evaluation_window_ends_at?: string | null;
+  evaluation_window_closed_at?: string | null;
+  user_has_reviewed?: boolean;
   [key: string]: unknown;
 }
 

@@ -92,6 +92,19 @@ export function createNegativeReputation(body: ReputationRequest): Promise<Reput
   return apiRequest<ReputationEntry>('/reputation/negative/', { method: 'POST', body });
 }
 
+export function attachReviewImages(
+  handshakeId: string,
+  imageUris: string[],
+): Promise<unknown> {
+  const formData = new FormData();
+  formData.append('handshake_id', handshakeId);
+  imageUris.forEach((uri, i) => {
+    const name = uri.split('/').pop() || `review_${i}.jpg`;
+    formData.append('images', { uri, name, type: 'image/jpeg' } as unknown as Blob);
+  });
+  return apiRequest('/reputation/add-review/', { method: 'POST', body: formData });
+}
+
 export async function submitCombinedEvaluation(
   payload: SubmitCombinedEvaluationPayload,
 ): Promise<{ positive?: ReputationEntry; negative?: ReputationEntry }> {
