@@ -1,5 +1,5 @@
 import { apiClient } from './api'
-import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, PaginatedResponse } from '@/types'
+import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminSettings, AdminTransaction, AdminUserDetail, AdminUserSummary, PaginatedResponse } from '@/types'
 
 export type ReportStatusFilter = 'pending' | 'resolved' | 'dismissed'
 export type CommentStatusFilter = 'active' | 'removed' | 'all'
@@ -25,6 +25,16 @@ function toPaginated<T>(data: PaginatedResponse<T> | T[]): PaginatedResponse<T> 
 }
 
 export const adminAPI = {
+  getSettings: async (signal?: AbortSignal): Promise<AdminSettings> => {
+    const res = await apiClient.get<AdminSettings>('/admin/settings/', { signal })
+    return res.data
+  },
+
+  updateSettings: async (payload: Partial<AdminSettings>, signal?: AbortSignal): Promise<AdminSettings> => {
+    const res = await apiClient.patch<AdminSettings>('/admin/settings/', payload, { signal })
+    return res.data
+  },
+
   getMetrics: async (signal?: AbortSignal): Promise<AdminMetrics> => {
     const res = await apiClient.get<AdminMetrics>('/metrics/', { signal })
     return res.data
@@ -95,6 +105,24 @@ export const adminAPI = {
     return toPaginated(res.data)
   },
 
+  getUserDetail: async (userId: string, signal?: AbortSignal): Promise<AdminUserDetail> => {
+    const res = await apiClient.get<AdminUserDetail>(`/admin/users/${userId}/`, { signal })
+    return res.data
+  },
+
+  getUserTransactions: async (
+    userId: string,
+    page = 1,
+    pageSize = 20,
+    signal?: AbortSignal,
+  ): Promise<{ count: number; page: number; page_size: number; results: AdminTransaction[] }> => {
+    const res = await apiClient.get(`/admin/users/${userId}/transactions/`, {
+      params: { page, page_size: pageSize },
+      signal,
+    })
+    return res.data
+  },
+
   warnUser: async (
     userId: string,
     message: string,
@@ -142,6 +170,20 @@ export const adminAPI = {
       { adjustment },
       { signal },
     )
+    return res.data
+  },
+
+  assignUserRole: async (
+    userId: string,
+    newRole: string,
+    signal?: AbortSignal,
+  ): Promise<{ status: string; message: string; previous_role: string; new_role: string }> => {
+    const res = await apiClient.post<{
+      status: string
+      message: string
+      previous_role: string
+      new_role: string
+    }>(`/admin/users/${userId}/assign-role/`, { role: newRole }, { signal })
     return res.data
   },
 

@@ -2,17 +2,19 @@
 
 from rest_framework import serializers
 from .models import (
-    User, Service, Tag, Handshake, ChatMessage, 
+    User, Service, Tag, Handshake, ChatMessage,
     Notification, ReputationRep, Badge, UserBadge, Report, TransactionHistory,
-    ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog,
-    ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow,
+    ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog, PlatformSetting,
+    ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow
 )
+from django.db.models import Q
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from decimal import Decimal
 import bleach
+import html
 import re
 import logging
 import math
@@ -91,12 +93,179 @@ class AdminUserListSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'first_name', 'last_name', 
-            'timebank_balance', 'karma_score', 'role', 
+            'id', 'email', 'first_name', 'last_name',
+            'avatar_url', 'timebank_balance', 'karma_score', 'role',
             'is_active', 'date_joined'
         ]
         read_only_fields = fields
 
+
+class AdminUserDetailSerializer(serializers.ModelSerializer):
+    """Comprehensive serializer for admin user detail view"""
+    offers_count = serializers.SerializerMethodField()
+    requests_count = serializers.SerializerMethodField()
+    events_count = serializers.SerializerMethodField()
+    handshakes_as_requester_count = serializers.SerializerMethodField()
+    handshakes_as_provider_count = serializers.SerializerMethodField()
+    forum_topics_count = serializers.SerializerMethodField()
+    recent_admin_actions = serializers.SerializerMethodField()
+    recent_offers = serializers.SerializerMethodField()
+    recent_requests = serializers.SerializerMethodField()
+    recent_events = serializers.SerializerMethodField()
+    recent_forum_topics = serializers.SerializerMethodField()
+    recent_handshakes_as_requester = serializers.SerializerMethodField()
+    recent_handshakes_as_provider = serializers.SerializerMethodField()
+    karma_adjustments = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'email', 'first_name', 'last_name', 'bio', 'avatar_url',
+            'location', 'role', 'is_active', 'is_verified', 'is_onboarded',
+            'date_joined', 'last_login',
+            'timebank_balance', 'karma_score', 'no_show_count',
+            'is_event_banned_until', 'is_organizer_banned_until', 'locked_until',
+            'offers_count', 'requests_count', 'events_count',
+            'handshakes_as_requester_count', 'handshakes_as_provider_count',
+            'forum_topics_count', 'recent_admin_actions',
+            'recent_offers', 'recent_requests', 'recent_events', 'recent_forum_topics',
+            'recent_handshakes_as_requester', 'recent_handshakes_as_provider',
+            'karma_adjustments',
+        ]
+        read_only_fields = fields
+
+    def get_offers_count(self, obj):
+        return obj.services.filter(type='Offer').count()
+
+    def get_requests_count(self, obj):
+        return obj.services.filter(type='Need').count()
+
+    def get_events_count(self, obj):
+        return obj.services.filter(type='Event').count()
+
+    def get_handshakes_as_requester_count(self, obj):
+        # Requester = consuming a service
+        # On Offers: the person who requested the offer (Handshake.requester)
+        # On Wants:  the person who created the Want (service__user) — they are seeking help
+        return Handshake.objects.filter(
+            Q(service__type='Offer', requester=obj) |
+            Q(service__type='Need', service__user=obj)
+        ).count()
+
+    def get_handshakes_as_provider_count(self, obj):
+        # Provider = delivering a service
+        # On Offers: the person who created the Offer (service__user)
+        # On Wants:  the person who responded to the Want (Handshake.requester)
+        return Handshake.objects.filter(
+            Q(service__type='Offer', service__user=obj) |
+            Q(service__type='Need', requester=obj)
+        ).count()
+
+    def get_forum_topics_count(self, obj):
+        return obj.forum_topics.count()
+
+    def _service_preview(self, qs):
+        return [{'id': str(s.id), 'title': s.title} for s in qs.only('id', 'title').order_by('-created_at')[:5]]
+
+    def get_recent_offers(self, obj):
+        return self._service_preview(obj.services.filter(type='Offer'))
+
+    def get_recent_requests(self, obj):
+        return self._service_preview(obj.services.filter(type='Need'))
+
+    def get_recent_events(self, obj):
+        return self._service_preview(obj.services.filter(type='Event'))
+
+    def get_recent_forum_topics(self, obj):
+        qs = obj.forum_topics.only('id', 'title').order_by('-created_at')[:5]
+        return [{'id': str(t.id), 'title': t.title} for t in qs]
+
+    def get_recent_handshakes_as_requester(self, obj):
+        qs = (
+            Handshake.objects.filter(
+                Q(service__type='Offer', requester=obj) |
+                Q(service__type='Need', service__user=obj)
+            )
+            .select_related('service')
+            .order_by('-created_at')[:5]
+        )
+        return [{'id': str(h.id), 'title': h.service.title, 'service_id': str(h.service_id)} for h in qs]
+
+    def get_recent_handshakes_as_provider(self, obj):
+        qs = (
+            Handshake.objects.filter(
+                Q(service__type='Offer', service__user=obj) |
+                Q(service__type='Need', requester=obj)
+            )
+            .select_related('service')
+            .order_by('-created_at')[:5]
+        )
+        return [{'id': str(h.id), 'title': h.service.title, 'service_id': str(h.service_id)} for h in qs]
+
+    def get_karma_adjustments(self, obj):
+        """Return up to 20 karma change events oldest-first with reconstructed cumulative value.
+
+        Sources:
+        - ReputationRep (service evaluations): +1 per True trait (is_punctual, is_helpful, is_kind)
+        - NegativeRep (service evaluations): -2 per True trait (is_late, is_unhelpful, is_rude)
+        - AdminAuditLog adjust_karma: admin manual adjustments
+        """
+        events = []
+
+        # Positive evaluations
+        for rep in ReputationRep.objects.filter(receiver=obj).only('is_punctual', 'is_helpful', 'is_kind', 'created_at'):
+            delta = sum([rep.is_punctual, rep.is_helpful, rep.is_kind])
+            if delta != 0:
+                events.append({'delta': delta, 'created_at': rep.created_at, 'label': 'evaluation'})
+
+        # Negative evaluations
+        for rep in NegativeRep.objects.filter(receiver=obj).only('is_late', 'is_unhelpful', 'is_rude', 'created_at'):
+            delta = -2 * sum([rep.is_late, rep.is_unhelpful, rep.is_rude])
+            if delta != 0:
+                events.append({'delta': delta, 'created_at': rep.created_at, 'label': 'evaluation'})
+
+        # Admin manual adjustments
+        for log in AdminAuditLog.objects.filter(target_entity='user', target_id=obj.id, action_type='adjust_karma'):
+            try:
+                delta = float(log.reason.replace('Adjustment:', '').strip())
+            except (ValueError, AttributeError):
+                delta = 0
+            if delta != 0:
+                events.append({'delta': delta, 'created_at': log.created_at, 'label': 'admin'})
+
+        if not events:
+            return []
+
+        # Sort newest-first, take last 20, reconstruct karma backwards from current value
+        events.sort(key=lambda e: e['created_at'], reverse=True)
+        events = events[:20]
+
+        running = obj.karma_score
+        points = []
+        for e in events:
+            points.append({
+                'delta': e['delta'],
+                'karma': running,
+                'created_at': e['created_at'].isoformat(),
+                'label': e['label'],
+            })
+            running -= e['delta']
+        points.reverse()  # oldest-first for the chart
+        return points
+
+    def get_recent_admin_actions(self, obj):
+        from .models import AdminAuditLog
+        logs = AdminAuditLog.objects.filter(
+            target_entity='user', target_id=obj.id
+        ).order_by('-created_at')[:5]
+        return [
+            {
+                'action_type': log.action_type,
+                'reason': log.reason,
+                'created_at': log.created_at.isoformat(),
+            }
+            for log in logs
+        ]
 
 class UserFollowRelationshipSerializer(serializers.ModelSerializer):
     """Serialized UserFollow row for follow/unfollow API responses."""
@@ -166,7 +335,8 @@ class TagSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Tag
-        fields = ['id', 'name', 'wikidata_info']
+        fields = ['id', 'name', 'parent_qid', 'entity_type', 'depth', 'wikidata_info']
+        read_only_fields = ['parent_qid', 'entity_type', 'depth']
     
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_wikidata_info(self, obj):
@@ -627,12 +797,18 @@ class ServiceSerializer(serializers.ModelSerializer):
         """Replace exact coordinates with a ~1 km privacy-fuzzed version before sending."""
         data = super().to_representation(instance)
         request = self.context.get('request')
-        if request is None or not getattr(request, 'user', None) or request.user != instance.user:
+        request_user = getattr(request, 'user', None) if request is not None else None
+        is_owner = bool(
+            request_user
+            and getattr(request_user, 'is_authenticated', False)
+            and str(getattr(request_user, 'id', '')) == str(instance.user_id)
+        )
+        if not is_owner:
             data.pop('session_exact_location', None)
             data.pop('session_exact_location_lat', None)
             data.pop('session_exact_location_lng', None)
             data.pop('session_location_guide', None)
-        if instance.location_type == 'In-Person':
+        if instance.location_type == 'In-Person' and not is_owner:
             lat, lng = self._real_coords(instance)
             if lat is not None:
                 fuzzy_lat, fuzzy_lng = _fuzzy_coords(str(instance.id), lat, lng)
@@ -802,7 +978,7 @@ class ServiceSerializer(serializers.ModelSerializer):
                     if tid not in existing_tags and wikidata_qid_pattern.match(tid)
                 ]
                 if missing_qids:
-                    from .wikidata import fetch_wikidata_item
+                    from .wikidata import fetch_wikidata_item, fetch_wikidata_claims, resolve_entity_type
                     for qid in missing_qids:
                         normalized_qid = qid.upper()
                         if normalized_qid in existing_tags:
@@ -824,6 +1000,18 @@ class ServiceSerializer(serializers.ModelSerializer):
                             tags_to_add.append(tag)
                         if created:
                             logger.info(f"Auto-created Wikidata tag: {normalized_qid} ({tag_name})")
+                            # Enrich with hierarchy data
+                            try:
+                                claims = fetch_wikidata_claims(normalized_qid)
+                                if claims:
+                                    parents = claims.get('instance_of', []) + claims.get('subclass_of', [])
+                                    if parents:
+                                        tag.parent_qid = parents[0]
+                                        tag.depth = 1
+                                    tag.entity_type = resolve_entity_type(normalized_qid)
+                                    tag.save(update_fields=['parent_qid', 'entity_type', 'depth'])
+                            except Exception:
+                                logger.warning(f"Could not enrich tag {normalized_qid} with hierarchy data")
 
             if tag_names:
                 for tag_name in tag_names:
@@ -2130,6 +2318,12 @@ class AdminAuditLogSerializer(serializers.ModelSerializer):
         return full or obj.admin.email
 
 
+class PlatformSettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PlatformSetting
+        fields = ['ranking_debug_enabled', 'updated_at']
+
+
 # Public Chat Serializers
 @extend_schema_serializer(
     examples=[
@@ -2685,7 +2879,7 @@ class ForumCategorySerializer(serializers.ModelSerializer):
     ]
 )
 class ForumTopicSerializer(serializers.ModelSerializer):
-    author_id = serializers.UUIDField(source='author.id', read_only=True)
+    author_id = serializers.SerializerMethodField()
     author_name = serializers.SerializerMethodField()
     author_avatar_url = serializers.SerializerMethodField()
     category_name = serializers.CharField(source='category.name', read_only=True)
@@ -2707,11 +2901,19 @@ class ForumTopicSerializer(serializers.ModelSerializer):
         ]
 
     @extend_schema_field(OpenApiTypes.STR)
+    def get_author_id(self, obj):
+        return str(obj.author_id) if obj.author_id is not None else None
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_author_name(self, obj):
+        if obj.author_id is None:
+            return '[Deleted User]'
         return f"{obj.author.first_name} {obj.author.last_name}".strip()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_author_avatar_url(self, obj):
+        if obj.author_id is None:
+            return None
         return obj.author.avatar_url
 
     @extend_schema_field(OpenApiTypes.INT)
@@ -2734,14 +2936,14 @@ class ForumTopicSerializer(serializers.ModelSerializer):
 
     def validate_title(self, value):
         """Sanitize and validate title"""
-        cleaned = bleach.clean(value, tags=[], strip=True).strip()
+        cleaned = html.unescape(bleach.clean(value, tags=[], strip=True)).strip()
         if len(cleaned) < 5:
             raise serializers.ValidationError('Title must be at least 5 characters long')
         return cleaned
 
     def validate_body(self, value):
         """Sanitize body text"""
-        return bleach.clean(value, tags=[], strip=True)
+        return html.unescape(bleach.clean(value, tags=[], strip=True))
 
 
 @extend_schema_serializer(
@@ -2771,7 +2973,7 @@ class ForumTopicSerializer(serializers.ModelSerializer):
     ]
 )
 class ForumPostSerializer(serializers.ModelSerializer):
-    author_id = serializers.UUIDField(source='author.id', read_only=True)
+    author_id = serializers.SerializerMethodField()
     author_name = serializers.SerializerMethodField()
     author_avatar_url = serializers.SerializerMethodField()
 
@@ -2784,11 +2986,19 @@ class ForumPostSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'topic', 'author_id', 'is_deleted', 'created_at', 'updated_at']
 
     @extend_schema_field(OpenApiTypes.STR)
+    def get_author_id(self, obj):
+        return str(obj.author_id) if obj.author_id is not None else None
+
+    @extend_schema_field(OpenApiTypes.STR)
     def get_author_name(self, obj):
+        if obj.author_id is None:
+            return '[Deleted User]'
         return f"{obj.author.first_name} {obj.author.last_name}".strip()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_author_avatar_url(self, obj):
+        if obj.author_id is None:
+            return None
         return obj.author.avatar_url
 
     def validate_body(self, value):
@@ -2808,6 +3018,24 @@ class ForumRecentPostSerializer(ForumPostSerializer):
 
     class Meta(ForumPostSerializer.Meta):
         fields = ForumPostSerializer.Meta.fields + ['topic_title', 'category_slug', 'category_name']
+
+
+class UserFollowSerializer(serializers.ModelSerializer):
+    follower_id = serializers.UUIDField(source='follower.id', read_only=True)
+    following_id = serializers.UUIDField(source='following.id', read_only=True)
+    follower_name = serializers.SerializerMethodField()
+    following_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserFollow
+        fields = ['id', 'follower_id', 'follower_name', 'following_id', 'following_name', 'created_at']
+        read_only_fields = fields
+
+    def get_follower_name(self, obj):
+        return f"{obj.follower.first_name} {obj.follower.last_name}".strip()
+
+    def get_following_name(self, obj):
+        return f"{obj.following.first_name} {obj.following.last_name}".strip()
 
 
 class ForumTopicDetailSerializer(ForumTopicSerializer):

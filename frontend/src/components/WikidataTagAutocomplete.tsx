@@ -148,7 +148,29 @@ export default function WikidataTagAutocomplete({
               _hover={{ bg: GRAY50 }}
               onMouseDown={() => addSuggestion(tag)}
             >
-              {tag.name}
+              <Flex align="center" gap={2}>
+                <Text fontWeight="500">{tag.name}</Text>
+                {tag.entity_type && (
+                  <Text
+                    fontSize="10px"
+                    px="6px"
+                    py="1px"
+                    borderRadius="4px"
+                    bg={accent + '18'}
+                    color={accent}
+                    fontWeight="600"
+                    textTransform="capitalize"
+                    flexShrink={0}
+                  >
+                    {tag.entity_type}
+                  </Text>
+                )}
+              </Flex>
+              {tag.description && (
+                <Text fontSize="11px" color={GRAY400} mt="2px" lineClamp={1}>
+                  {tag.description}
+                </Text>
+              )}
             </Box>
           ))}
 

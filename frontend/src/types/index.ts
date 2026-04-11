@@ -206,10 +206,75 @@ export interface ServiceMedia {
   order?: number
 }
 
+export interface RecommendationDebugNode {
+  id: string
+  label: string
+  tone: 'positive' | 'negative' | 'neutral'
+}
+
+export interface RecommendationDebugLink {
+  source: string
+  target: string
+  value: number
+  tone: 'positive' | 'negative' | 'neutral'
+}
+
+export interface RecommendationDebugBreakdown {
+  positive_count: number
+  negative_count: number
+  comment_count: number
+  numerator: number
+  age_hours: number
+  denominator: number
+  raw_hot_score: number
+  capacity_ratio: number | null
+  capacity_boost_applied: boolean
+  social_reason: string
+}
+
+export interface RecommendationDebugSelectedService {
+  id: string
+  title: string
+  type: 'Offer' | 'Need' | 'Event'
+  owner_name: string
+  location_type: 'In-Person' | 'Online'
+  location_area?: string
+  current_position?: number
+  is_pinned: boolean
+  stored_hot_score: number
+  recomputed_hot_score: number
+  search_score: number
+  social_boost: number
+  weighted_social_boost: number
+  distance_km: number | null
+  participant_count: number
+  max_participants: number
+  breakdown: RecommendationDebugBreakdown
+  formula_lines: string[]
+  notes: string[]
+  sankey: {
+    nodes: RecommendationDebugNode[]
+    links: RecommendationDebugLink[]
+  }
+}
+
+export interface RecommendationDebugResponse {
+  active_filter: string
+  total_services: number
+  selected_service: RecommendationDebugSelectedService | null
+}
+
+export interface RecommendationDebugAvailabilityResponse {
+  enabled: boolean
+}
+
 export interface Tag {
   id: string
   name: string
   wikidata_id?: string
+  parent_qid?: string
+  entity_type?: string
+  description?: string
 }
 
 // ─── Handshake Types ──────────────────────────────────────────────────────────
@@ -352,6 +417,10 @@ export interface ReputationData {
   punctual?: boolean
   helpful?: boolean
   kindness?: boolean
+  // Event-specific positive traits
+  well_organized?: boolean
+  engaging?: boolean
+  welcoming?: boolean
   handshake_id: string
   comment?: string
 }
@@ -361,6 +430,10 @@ export interface NegativeReputationData {
   is_late?: boolean
   is_unhelpful?: boolean
   is_rude?: boolean
+  // Event-specific negative traits
+  disorganized?: boolean
+  boring?: boolean
+  unwelcoming?: boolean
   comment?: string
 }
 
@@ -434,11 +507,106 @@ export interface AdminUserSummary {
   email: string
   first_name: string
   last_name: string
+  avatar_url: string | null
   timebank_balance: number
   karma_score: number
   role: string
   is_active: boolean
   date_joined: string
+}
+
+export interface AdminTransaction {
+  id: string
+  transaction_type: 'provision' | 'transfer' | 'refund' | 'adjustment'
+  amount: string
+  balance_after: string
+  description: string
+  service_title: string | null
+  service_id: string | null
+  created_at: string
+}
+
+export interface AdminUserDetailAction {
+  action_type: string
+  reason: string | null
+  created_at: string
+}
+
+export interface AdminUserDetail {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  bio: string | null
+  avatar_url: string | null
+  location: string | null
+  role: string
+  is_active: boolean
+  is_verified: boolean
+  is_onboarded: boolean
+  date_joined: string
+  last_login: string | null
+  timebank_balance: number
+  karma_score: number
+  no_show_count: number
+  is_event_banned_until: string | null
+  is_organizer_banned_until: string | null
+  locked_until: string | null
+  offers_count: number
+  requests_count: number
+  events_count: number
+  handshakes_as_requester_count: number
+  handshakes_as_provider_count: number
+  forum_topics_count: number
+  recent_admin_actions: AdminUserDetailAction[]
+  recent_offers?: { id: string; title: string }[]
+  recent_requests?: { id: string; title: string }[]
+  recent_events?: { id: string; title: string }[]
+  recent_forum_topics?: { id: string; title: string }[]
+  recent_handshakes_as_requester?: { id: string; title: string; service_id: string }[]
+  recent_handshakes_as_provider?: { id: string; title: string; service_id: string }[]
+  karma_adjustments?: { delta: number; karma: number; created_at: string; label: string }[]
+}
+
+export interface AdminUserDetailAction {
+  action_type: string
+  reason: string | null
+  created_at: string
+}
+
+export interface AdminUserDetail {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  bio: string | null
+  avatar_url: string | null
+  location: string | null
+  role: string
+  is_active: boolean
+  is_verified: boolean
+  is_onboarded: boolean
+  date_joined: string
+  last_login: string | null
+  timebank_balance: number
+  karma_score: number
+  no_show_count: number
+  is_event_banned_until: string | null
+  is_organizer_banned_until: string | null
+  locked_until: string | null
+  offers_count: number
+  requests_count: number
+  events_count: number
+  handshakes_as_requester_count: number
+  handshakes_as_provider_count: number
+  forum_topics_count: number
+  recent_admin_actions: AdminUserDetailAction[]
+  recent_offers?: { id: string; title: string }[]
+  recent_requests?: { id: string; title: string }[]
+  recent_events?: { id: string; title: string }[]
+  recent_forum_topics?: { id: string; title: string }[]
+  recent_handshakes_as_requester?: { id: string; title: string; service_id: string }[]
+  recent_handshakes_as_provider?: { id: string; title: string; service_id: string }[]
 }
 
 export interface AdminMetrics {
@@ -464,6 +632,11 @@ export interface AdminMetrics {
     total: number
     last_24h: number
   }
+}
+
+export interface AdminSettings {
+  ranking_debug_enabled: boolean
+  updated_at: string
 }
 
 export type AdminCommentStatus = 'active' | 'removed'
@@ -499,6 +672,10 @@ export interface AdminAuditLog {
     | 'restore_comment'
     | 'lock_topic'
     | 'pin_topic'
+    | 'assign_role'
+  previous_role?: string | null
+  new_role?: string | null
+  ip_address?: string | null
   target_entity: 'user' | 'report' | 'handshake' | 'comment' | 'forum_topic'
   target_id: string
   reason?: string | null

@@ -30,6 +30,7 @@ from .views import (
     AdminUserViewSet,
     AdminCommentViewSet,
     AdminAuditLogViewSet,
+    AdminSettingsView,
     ExpressInterestView,
     TransactionHistoryViewSet,
     WikidataSearchView,
@@ -150,10 +151,7 @@ def metrics_endpoint(request):
     from api.models import User, Service, Handshake, TransactionHistory
     from django.db.models import Count, Q
     
-    is_admin = (
-        getattr(request.user, 'role', None) == 'admin'
-        or bool(getattr(request.user, 'is_staff', False))
-    )
+    is_admin = getattr(request.user, 'role', None) in ('admin', 'super_admin', 'moderator')
 
     if not request.user.is_authenticated or not is_admin:
         return JsonResponse(
@@ -271,6 +269,10 @@ forum_post_report = ForumPostViewSet.as_view({
     'post': 'report'
 })
 
+forum_post_restore = ForumPostViewSet.as_view({
+    'post': 'restore'
+})
+
 forum_post_recent = ForumPostViewSet.as_view({
     'get': 'recent'
 })
@@ -278,6 +280,7 @@ forum_post_recent = ForumPostViewSet.as_view({
 urlpatterns = [
     path('health/', health_check, name='health_check'),
     path('metrics/', metrics_endpoint, name='metrics'),
+    path('admin/settings/', AdminSettingsView.as_view(), name='admin-settings'),
     path('auth/register/', UserRegistrationView.as_view(), name='register'),
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
@@ -329,6 +332,7 @@ urlpatterns = [
     path('forum/topics/<uuid:topic_id>/posts/', forum_post_list_create, name='forum-post-list'),
     path('forum/posts/<uuid:pk>/', forum_post_detail, name='forum-post-detail'),
     path('forum/posts/<uuid:pk>/report/', forum_post_report, name='forum-post-report'),
+    path('forum/posts/<uuid:pk>/restore/', forum_post_restore, name='forum-post-restore'),
     path('forum/posts/recent/', forum_post_recent, name='forum-post-recent'),
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
