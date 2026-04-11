@@ -8,6 +8,7 @@ import {
   TextInput,
   Pressable,
   TouchableOpacity,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -23,17 +24,30 @@ export default function HomeScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<HomeStackParamList, "HomeFeed">>();
   const [services, setServices] = useState<Service[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilterId>("all");
 
-  useEffect(() => {
-    listServices().then(({ results }) => {
+  const loadServices = async (showRefreshSpinner = false) => {
+    if (showRefreshSpinner) {
+      setRefreshing(true);
+    }
+    try {
+      const { results } = await listServices();
       if (results) {
         setServices(results);
       } else {
         setServices([]);
       }
-    });
+    } finally {
+      if (showRefreshSpinner) {
+        setRefreshing(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    void loadServices();
   }, []);
 
   const filteredServices = useMemo(() => {
@@ -108,6 +122,14 @@ export default function HomeScreen() {
       <FlatList
         data={filteredServices}
         keyExtractor={(item) => item.id}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void loadServices(true)}
+            tintColor={colors.GREEN}
+            colors={[colors.GREEN]}
+          />
+        }
         renderItem={({ item, index }) => (
           <Pressable
             onPress={() =>

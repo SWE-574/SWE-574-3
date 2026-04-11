@@ -58,6 +58,15 @@ describe("services", () => {
     expect(getLastFetchBody()).toEqual(body);
   });
 
+  it("createService accepts FormData payloads", async () => {
+    const body = new FormData();
+    body.append("title", "Wizard form");
+    mockFetchResolve({ id: "s1" });
+    await createService(body);
+    expect(getLastFetchCall().init?.method).toBe("POST");
+    expect(getLastFetchCall().init?.body).toBe(body);
+  });
+
   it("updateService PUTs to /services/:id/", async () => {
     mockFetchResolve({ id: "s1" });
     await updateService("s1", { title: "Updated" });
