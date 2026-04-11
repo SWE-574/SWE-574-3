@@ -335,7 +335,7 @@ export default function ServiceEvaluationModal({
               {/* Photo attachment */}
               <Box mt={3}>
                 <Text fontSize="12px" fontWeight={700} color={GRAY700} mb={2}>
-                  Photos (optional · max 3 · JPG/PNG/WebP/GIF · 10 MB each)
+                  Photos (optional · max 3 )
                 </Text>
                 <Flex gap={2} flexWrap="wrap">
                   {imagePreviews.map((src, i) => (

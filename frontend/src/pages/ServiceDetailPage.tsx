@@ -20,7 +20,7 @@ import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
   spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
 } from '@/utils/eventUtils'
-import type { Service, EventEvaluationSummary } from '@/types'
+import type { Service } from '@/types'
 import type { Comment } from '@/services/commentAPI'
 import type { Handshake } from '@/services/handshakeAPI'
 
@@ -245,67 +245,9 @@ function LoadingSkeleton() {
   )
 }
 
-// ─── Event Evaluation Summary Card ────────────────────────────────────────────
-
-const TRAIT_ROWS = [
-  { key: 'well_organized', label: 'Well Organized', positive: true },
-  { key: 'engaging',       label: 'Engaging',       positive: true },
-  { key: 'welcoming',      label: 'Welcoming',      positive: true },
-  { key: 'disorganized',   label: 'Disorganized',   positive: false },
-  { key: 'boring',         label: 'Boring',         positive: false },
-  { key: 'unwelcoming',    label: 'Unwelcoming',    positive: false },
-] as const
-
-function EventEvaluationSummaryCard({ summary }: { summary: EventEvaluationSummary }) {
-  return (
-    <Box bg={WHITE} borderRadius="20px" border={`1px solid ${GRAY200}`} overflow="hidden"
-      boxShadow="0 2px 8px rgba(0,0,0,0.04)"
-    >
-      <Box px={6} py={5} borderBottom={`1px solid ${GRAY100}`}>
-        <Flex align="center" gap={2}>
-          <FiStar size={16} color={AMBER} />
-          <Text fontWeight={700} fontSize="16px" color={GRAY800}>
-            Event Ratings
-          </Text>
-          <Box px="6px" py="2px" borderRadius="full" fontSize="11px" fontWeight={700}
-            bg={GRAY100} color={GRAY600}
-          >
-            {summary.unique_evaluator_count} {summary.unique_evaluator_count === 1 ? 'review' : 'reviews'}
-          </Box>
-        </Flex>
-      </Box>
-      <Box px={6} py={5}>
-        <Stack gap={2}>
-          {TRAIT_ROWS.map(({ key, label, positive }) => {
-            const avg = summary[`${key}_average` as keyof EventEvaluationSummary] as number
-            const pct = Math.round(avg * 100)
-            const barColor = positive ? GREEN : RED
-            const barBg = positive ? GREEN_LT : RED_LT
-            return (
-              <Flex key={key} align="center" gap={3}>
-                <Text fontSize="12px" color={GRAY700} fontWeight={600} w="110px" flexShrink={0}>
-                  {label}
-                </Text>
-                <Box flex={1} h="6px" borderRadius="full" bg={GRAY100} overflow="hidden">
-                  <Box h="100%" w={`${pct}%`} bg={pct > 0 ? barColor : GRAY200} borderRadius="full"
-                    style={{ transition: 'width 0.3s ease' }}
-                  />
-                </Box>
-                <Text fontSize="11px" color={pct > 0 ? barColor : GRAY400} fontWeight={700} w="32px" textAlign="right">
-                  {pct}%
-                </Text>
-              </Flex>
-            )
-          })}
-        </Stack>
-      </Box>
-    </Box>
-  )
-}
-
 // ─── Comment Section ──────────────────────────────────────────────────────────
 
-function CommentSection({ serviceId }: { serviceId: string }) {
+function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshKey?: number }) {
   const [comments, setComments]   = useState<Comment[]>([])
   const [loading, setLoading]     = useState(true)
 
@@ -315,7 +257,7 @@ function CommentSection({ serviceId }: { serviceId: string }) {
     finally { setLoading(false) }
   }, [serviceId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, refreshKey])
 
   return (
     <Box bg={WHITE} borderRadius="20px" border={`1px solid ${GRAY200}`} overflow="hidden"
@@ -445,6 +387,7 @@ export default function ServiceDetailPage() {
   const [checkinLoading, setCheckinLoading] = useState(false)
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [removeLoading, setRemoveLoading]   = useState(false)
+  const [commentRefreshKey, setCommentRefreshKey] = useState(0)
   const [isEventDetailModalOpen, setIsEventDetailModalOpen] = useState(false)
   const [eventDetailModalTab, setEventDetailModalTab] = useState<EventDetailModalTab>('details')
   const [completing, setCompleting]         = useState(false)
@@ -833,6 +776,8 @@ export default function ServiceDetailPage() {
     } catch {
       // Keep current UI state; submission success is already acknowledged in modal.
     }
+    // Increment key to trigger CommentSection refetch.
+    setCommentRefreshKey((k) => k + 1)
   }
 
   const handleCancelEvent = async () => {
@@ -1234,13 +1179,8 @@ export default function ServiceDetailPage() {
               </Box>
             </Box>
 
-            {/* Event Evaluation Summary */}
-            {isEvent && service.event_evaluation_summary && service.event_evaluation_summary.feedback_submission_count > 0 && (
-              <EventEvaluationSummaryCard summary={service.event_evaluation_summary} />
-            )}
-
             {/* Comments */}
-            <CommentSection serviceId={service.id} />
+            <CommentSection serviceId={service.id} refreshKey={commentRefreshKey} />
           </Stack>
 
           {/* ── RIGHT SIDEBAR ─────────────────────────────────────────────── */}
