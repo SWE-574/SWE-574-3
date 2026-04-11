@@ -54,7 +54,7 @@ export default function ServiceCard({
     <View style={[styles.card, style]}>
       {service.media && service.media.length > 0 ? (
         <ImageBackground
-          source={{ uri: (service.media[0] as { image: string }).image }}
+          source={{ uri: service.media[0]?.file_url }}
           style={styles.headerImage}
         >
           <Text

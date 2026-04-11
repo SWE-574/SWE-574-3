@@ -6,6 +6,7 @@
     "start": "expo start --clear",
     "start:local:android": "EXPO_PUBLIC_API_URL=http://10.0.2.2:8000/api expo start --clear --android",
     "start:local:ios": "EXPO_PUBLIC_API_URL=http://localhost/api expo start --clear --ios --localhost",
+    "start:local:device": "expo start --clear --host lan",
     "prebuild": "expo prebuild",
     "android": "expo run:android",
     "ios": "expo run:ios",
@@ -16,6 +17,7 @@
   "dependencies": {
     "@expo/vector-icons": "^15.0.0",
     "@getlimelight/sdk": "^0.7.10",
+    "@react-native-community/datetimepicker": "8.4.4",
     "@react-native-community/slider": "^5.2.0",
     "@react-navigation/bottom-tabs": "^7.15.3",
     "@react-navigation/native": "^7.1.31",
@@ -25,6 +27,7 @@
     "expo-constants": "~18.0.13",
     "expo-device": "~8.0.10",
     "expo-file-system": "~19.0.21",
+    "expo-image-picker": "~17.0.10",
     "expo-location": "~19.0.8",
     "expo-notifications": "~0.32.16",
     "expo-secure-store": "~15.0.8",

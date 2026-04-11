@@ -73,9 +73,9 @@ export default function HomeScreen() {
   const tabNavigation =
     useNavigation<BottomTabNavigationProp<BottomTabParamList>>();
   const [services, setServices] = useState<Service[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [chipsVisible, setChipsVisible] = useState(false);
   const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_FILTERS);
@@ -96,7 +96,6 @@ export default function HomeScreen() {
     return () => clearTimeout(timeout);
   }, [search]);
 
-  // Silently check if location is already granted on mount
   useEffect(() => {
     if (locationCheckedRef.current) return;
     locationCheckedRef.current = true;

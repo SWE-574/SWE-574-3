@@ -33,6 +33,12 @@
       "expo-secure-store",
       "expo-asset",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Konum secimi icin mevcut konumuna erismemize izin ver."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./src/assets/icon.png",

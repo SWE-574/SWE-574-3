@@ -56,7 +56,8 @@ function getInitials(firstName: string, lastName: string): string {
 }
 
 type MediaItem = {
-  image: string;
+  id: string;
+  file_url: string;
 };
 
 type ServiceDetailNavigation = CompositeNavigationProp<
@@ -195,7 +196,9 @@ export default function ServiceDetailScreen() {
   const initials = getInitials(service.user.first_name, service.user.last_name);
   const isRecurring = service.schedule_type === "Recurrent";
 
-  const mediaItems = (service.media ?? []) as MediaItem[];
+  const mediaItems = (service.media ?? []).filter(
+    (item): item is MediaItem => Boolean(item?.file_url),
+  );
   const hasMedia = mediaItems.length > 0;
 
   const detailItems = [
@@ -270,7 +273,7 @@ export default function ServiceDetailScreen() {
                 style={styles.slide}
               >
                 <Image
-                  source={{ uri: item.image }}
+                  source={{ uri: item.file_url }}
                   style={styles.headerImage}
                 />
               </TouchableOpacity>
@@ -491,7 +494,7 @@ export default function ServiceDetailScreen() {
 
       <ImagePreviewModal
         visible={imageModalVisible}
-        images={mediaItems.map((item) => item.image)}
+        images={mediaItems.map((item) => item.file_url)}
         initialIndex={modalInitialIndex}
         onClose={() => setImageModalVisible(false)}
       />

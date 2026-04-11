@@ -5,9 +5,9 @@
  */
 
 import { clearStoredTokens } from "./storage";
+import { getApiUrl } from "../constants/env";
 
-const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? "https://apiary.selmangunes.com/api";
+const BASE_URL = getApiUrl();
 
 let authToken: string | null = null;
 let refreshToken: string | null = null;
@@ -41,7 +41,7 @@ export interface RequestConfig extends Omit<RequestInit, "body"> {
     string,
     string | number | boolean | Array<string | number | boolean> | undefined
   >;
-  body?: object | string;
+  body?: object | string | FormData;
 }
 
 function buildUrl(
@@ -80,8 +80,9 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const { params, body, headers: customHeaders, ...init } = config;
   const url = buildUrl(path, params);
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(customHeaders as Record<string, string>),
   };
   if (authToken) {
@@ -94,6 +95,8 @@ export async function apiRequest<T>(
       body !== undefined
         ? typeof body === "string"
           ? body
+          : isFormData
+            ? body
           : JSON.stringify(body)
         : undefined,
   });
