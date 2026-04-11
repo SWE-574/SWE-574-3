@@ -1845,6 +1845,15 @@ class NotificationSerializer(serializers.ModelSerializer):
             'related_handshake', 'related_service', 'created_at'
         ]
 
+class DevicePushTokenSerializer(serializers.Serializer):
+    token = serializers.CharField(max_length=255)
+
+    def validate_token(self, value):
+        if not value.startswith('ExponentPushToken['):
+            raise serializers.ValidationError('Invalid Expo push token format.')
+        return value
+
+
 # Reputation Serializer
 @extend_schema_serializer(
     examples=[

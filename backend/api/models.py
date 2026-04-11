@@ -516,6 +516,23 @@ class Notification(models.Model):
         ]
         ordering = ['-created_at']
 
+class DevicePushToken(models.Model):
+    """Stores Expo push tokens for sending push notifications to mobile devices."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='push_tokens')
+    token = models.CharField(max_length=255, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"PushToken({self.user_id}, active={self.is_active})"
+
+
 class ReputationRep(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     handshake = models.ForeignKey(Handshake, on_delete=models.CASCADE, related_name='reps')

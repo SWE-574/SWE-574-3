@@ -23,14 +23,22 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.diclenaz.thehive"
+      "package": "com.diclenaz.thehive",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./src/assets/icon.png"
     },
     "plugins": [
       "expo-secure-store",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-notifications",
+        {
+          "icon": "./src/assets/icon.png",
+          "color": "#2D5C4E"
+        }
+      ]
     ],
     "extra": {
       "eas": {
