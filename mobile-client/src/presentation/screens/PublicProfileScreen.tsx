@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -18,7 +19,12 @@ import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
-import { getUser, getUserHistory } from "../../api/users";
+import {
+  followUser,
+  getUser,
+  getUserHistory,
+  unfollowUser,
+} from "../../api/users";
 import { listServices } from "../../api/services";
 import type { PublicUserProfile, Service, UserHistoryItem } from "../../api/types";
 import { groupHistoryItems, isOwnHistoryItem } from "../../utils/historyGrouping";
@@ -55,7 +61,7 @@ function achievementIdsForDisplay(user: PublicUserProfile): string[] {
 export default function PublicProfileScreen() {
   const route = useRoute<RouteProp<ProfileStackParamList, "PublicProfile">>();
   const navigation = useNavigation<PublicProfileNavigation>();
-  const { user: authUser } = useAuth();
+  const { user: authUser, isAuthenticated, refreshUser } = useAuth();
   const { userId } = route.params;
   const insets = useSafeAreaInsets();
   const styles = useMemo(
@@ -67,6 +73,7 @@ export default function PublicProfileScreen() {
   const [activeServices, setActiveServices] = useState<Service[]>([]);
   const [activeServicesOpen, setActiveServicesOpen] = useState(false);
   const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
+  const [followBusy, setFollowBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +135,20 @@ export default function PublicProfileScreen() {
       cancelled = true;
     };
   }, [state, userId]);
+
+  const openFollowList = useCallback(
+    (kind: "followers" | "following") => {
+      if (!isAuthenticated) {
+        navigation.navigate("Login");
+        return;
+      }
+      navigation.navigate("FollowList", {
+        userId: String(userId),
+        kind,
+      });
+    },
+    [isAuthenticated, navigation, userId],
+  );
 
   if (state.status === "loading") {
     return (
@@ -191,6 +212,29 @@ export default function PublicProfileScreen() {
   const achievementIds = achievementIdsForDisplay(user);
   const canOpenAchievementsList =
     authUser?.id != null && String(authUser.id) === String(user.id);
+  const isOwnProfile =
+    authUser?.id != null && String(authUser.id) === String(user.id);
+
+  const handleFollowToggle = async () => {
+    if (!isAuthenticated || followBusy || isOwnProfile) return;
+    setFollowBusy(true);
+    try {
+      if (user.is_following) {
+        await unfollowUser(String(user.id));
+      } else {
+        await followUser(String(user.id));
+      }
+      const fresh = await getUser(userId);
+      setState({ status: "success", user: fresh });
+      void refreshUser();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong. Try again.";
+      Alert.alert("Could not update follow", message);
+    } finally {
+      setFollowBusy(false);
+    }
+  };
 
   const offersCount = activeServices.filter((s) => s.type === "Offer").length;
   const needsCount = activeServices.filter((s) => s.type === "Need").length;
@@ -212,8 +256,89 @@ export default function PublicProfileScreen() {
           </View>
 
           <View style={styles.profileHeaderContent}>
-            <View style={styles.nameRow}>
-              <Text style={styles.name}>{fullName || "Unnamed User"}</Text>
+            <View style={styles.nameAndActionRow}>
+              <View style={styles.nameBlock}>
+                <Text style={styles.name} numberOfLines={2}>
+                  {fullName || "Unnamed User"}
+                </Text>
+              </View>
+              {!isOwnProfile ? (
+                <View style={styles.followButtonColumn}>
+                  {isAuthenticated ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        user.is_following
+                          ? "Unfollow this user"
+                          : "Follow this user"
+                      }
+                      disabled={followBusy}
+                      onPress={() => void handleFollowToggle()}
+                      style={({ pressed }) => [
+                        user.is_following
+                          ? styles.followOutlineButton
+                          : styles.followFilledButton,
+                        (pressed || followBusy) && styles.followButtonPressed,
+                        followBusy && styles.followButtonDisabled,
+                      ]}
+                    >
+                      {followBusy ? (
+                        <ActivityIndicator
+                          color={
+                            user.is_following ? colors.GRAY700 : colors.WHITE
+                          }
+                          size="small"
+                        />
+                      ) : (
+                        <Text
+                          style={
+                            user.is_following
+                              ? styles.followOutlineButtonText
+                              : styles.followFilledButtonText
+                          }
+                        >
+                          {user.is_following ? "Unfollow" : "Follow"}
+                        </Text>
+                      )}
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Sign in to follow this user"
+                      accessibilityHint="Opens the sign in screen"
+                      onPress={() => navigation.navigate("Login")}
+                      style={({ pressed }) => [
+                        styles.followFilledButton,
+                        pressed && styles.followButtonPressed,
+                      ]}
+                    >
+                      <Text style={styles.followFilledButtonText}>Sign in</Text>
+                    </Pressable>
+                  )}
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.followMetaRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="View followers"
+                onPress={() => openFollowList("followers")}
+              >
+                <Text style={styles.followMetaLink}>
+                  {user.followers_count ?? 0} followers
+                </Text>
+              </Pressable>
+              <Text style={styles.followMetaDot}> · </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="View following"
+                onPress={() => openFollowList("following")}
+              >
+                <Text style={styles.followMetaLink}>
+                  {user.following_count ?? 0} following
+                </Text>
+              </Pressable>
             </View>
 
             {locationText ? (
@@ -463,12 +588,75 @@ const getStyles = (top: number, bottom: number) =>
       paddingTop: 62,
       paddingBottom: 20,
     },
-    nameRow: {
+    nameAndActionRow: {
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 12,
+      marginBottom: 8,
+    },
+    nameBlock: {
+      flex: 1,
+      minWidth: 0,
+      paddingTop: 2,
+    },
+    followButtonColumn: {
+      flexShrink: 0,
+      maxWidth: "42%",
+    },
+    followMetaRow: {
+      flexDirection: "row",
       flexWrap: "wrap",
-      gap: 8,
-      marginBottom: 6,
+      alignItems: "center",
+      marginBottom: 8,
+    },
+    followMetaLink: {
+      fontSize: 13,
+      fontWeight: "600",
+      color: colors.GREEN,
+      textDecorationLine: "underline",
+    },
+    followMetaDot: {
+      fontSize: 13,
+      color: colors.GRAY500,
+    },
+    followFilledButton: {
+      alignSelf: "flex-end",
+      backgroundColor: colors.GREEN,
+      paddingHorizontal: 16,
+      paddingVertical: 9,
+      borderRadius: 999,
+      minWidth: 88,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    followOutlineButton: {
+      alignSelf: "flex-end",
+      backgroundColor: colors.WHITE,
+      paddingHorizontal: 16,
+      paddingVertical: 9,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.GRAY400,
+      minWidth: 88,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    followButtonPressed: {
+      opacity: 0.85,
+    },
+    followButtonDisabled: {
+      opacity: 0.7,
+    },
+    followFilledButtonText: {
+      color: colors.WHITE,
+      fontSize: 14,
+      fontWeight: "700",
+    },
+    followOutlineButtonText: {
+      color: colors.GRAY700,
+      fontSize: 14,
+      fontWeight: "700",
     },
     name: {
       fontSize: 24,
