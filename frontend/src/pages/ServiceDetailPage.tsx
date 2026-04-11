@@ -250,6 +250,8 @@ function LoadingSkeleton() {
 function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshKey?: number }) {
   const [comments, setComments]   = useState<Comment[]>([])
   const [loading, setLoading]     = useState(true)
+  const [lightboxUrls, setLightboxUrls] = useState<string[]>([])
+  const [lightboxIdx, setLightboxIdx]   = useState(0)
 
   const load = useCallback(async () => {
     try { const r = await commentAPI.list(serviceId); setComments(r.results) }
@@ -258,6 +260,9 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
   }, [serviceId])
 
   useEffect(() => { load() }, [load, refreshKey])
+
+  const openLightbox = (urls: string[], idx: number) => { setLightboxUrls(urls); setLightboxIdx(idx) }
+  const closeLightbox = () => setLightboxUrls([])
 
   return (
     <Box bg={WHITE} borderRadius="20px" border={`1px solid ${GRAY200}`} overflow="hidden"
@@ -317,13 +322,13 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
                     </Text>
                     {!c.is_deleted && c.media && c.media.length > 0 && (
                       <Flex gap={2} mt={2} flexWrap="wrap">
-                        {c.media.map((m) => (
+                        {c.media.map((m, mi) => (
                           <img
                             key={m.id}
                             src={m.file_url}
                             alt="Review photo"
                             style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, cursor: 'pointer' }}
-                            onClick={() => window.open(m.file_url, '_blank')}
+                            onClick={() => openLightbox(c.media!.map((x) => x.file_url), mi)}
                           />
                         ))}
                       </Flex>
@@ -353,6 +358,69 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
           </Stack>
         )}
       </Box>
+
+      {/* Review image lightbox */}
+      {lightboxUrls.length > 0 && (
+        <Box position="fixed" inset={0} bg="rgba(15,20,30,0.82)" zIndex={1500}
+          display="flex" alignItems="center" justifyContent="center" p={4}
+          onClick={closeLightbox}
+        >
+          <Box position="relative" maxW="900px" w="100%" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+            <Box borderRadius="16px" overflow="hidden" bg={WHITE} boxShadow="0 24px 72px rgba(0,0,0,0.24)">
+              {/* Header */}
+              <Flex align="center" justify="space-between" px={5} py={3} borderBottom={`1px solid ${GRAY200}`}>
+                <Text fontSize="13px" fontWeight={600} color={GRAY600}>
+                  Photo {lightboxIdx + 1} of {lightboxUrls.length}
+                </Text>
+                <Box as="button" w="32px" h="32px" borderRadius="full" bg={GRAY50}
+                  border={`1px solid ${GRAY200}`} display="flex" alignItems="center" justifyContent="center"
+                  style={{ cursor: 'pointer' }} onClick={closeLightbox}
+                >
+                  <FiX size={15} />
+                </Box>
+              </Flex>
+              {/* Image */}
+              <Box bg={GRAY50} display="flex" alignItems="center" justifyContent="center"
+                style={{ minHeight: 320, maxHeight: '70vh', position: 'relative' }}
+              >
+                <img src={lightboxUrls[lightboxIdx]} alt={`Photo ${lightboxIdx + 1}`}
+                  style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', display: 'block' }}
+                />
+                {lightboxUrls.length > 1 && (
+                  <>
+                    <Box as="button" position="absolute" left={3} top="50%" transform="translateY(-50%)"
+                      w="36px" h="36px" borderRadius="full" bg={WHITE} border={`1px solid ${GRAY200}`}
+                      display="flex" alignItems="center" justifyContent="center"
+                      boxShadow="0 2px 8px rgba(0,0,0,0.12)" style={{ cursor: 'pointer' }}
+                      onClick={() => setLightboxIdx((lightboxIdx - 1 + lightboxUrls.length) % lightboxUrls.length)}
+                    ><FiChevronLeft size={18} /></Box>
+                    <Box as="button" position="absolute" right={3} top="50%" transform="translateY(-50%)"
+                      w="36px" h="36px" borderRadius="full" bg={WHITE} border={`1px solid ${GRAY200}`}
+                      display="flex" alignItems="center" justifyContent="center"
+                      boxShadow="0 2px 8px rgba(0,0,0,0.12)" style={{ cursor: 'pointer' }}
+                      onClick={() => setLightboxIdx((lightboxIdx + 1) % lightboxUrls.length)}
+                    ><FiChevronRight size={18} /></Box>
+                  </>
+                )}
+              </Box>
+              {/* Thumbnails */}
+              {lightboxUrls.length > 1 && (
+                <Flex gap={2} p={3} justify="center" borderTop={`1px solid ${GRAY100}`}>
+                  {lightboxUrls.map((url, i) => (
+                    <Box key={i} w="48px" h="48px" borderRadius="6px" overflow="hidden" flexShrink={0}
+                      border={i === lightboxIdx ? `2px solid ${GREEN}` : `1px solid ${GRAY200}`}
+                      style={{ cursor: 'pointer' }} onClick={() => setLightboxIdx(i)}
+                    >
+                      <img src={url} alt={`Thumb ${i + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    </Box>
+                  ))}
+                </Flex>
+              )}
+            </Box>
+          </Box>
+        </Box>
+      )}
     </Box>
   )
 }
