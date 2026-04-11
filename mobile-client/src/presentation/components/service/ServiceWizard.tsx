@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -19,7 +20,11 @@ import * as ExpoLocation from "expo-location";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { createService } from "../../../api/services";
+import {
+  createService,
+  getService,
+  patchService,
+} from "../../../api/services";
 import { createTag, listTags } from "../../../api/tags";
 import { searchWikidata } from "../../../api/wikidata";
 import type { Tag } from "../../../api/types";
@@ -43,6 +48,7 @@ type WizardImage = {
 
 type ServiceWizardProps = {
   type: ServiceType;
+  serviceId?: string;
   organizerBanned?: boolean;
   organizerBanText?: string | null;
 };
@@ -92,6 +98,7 @@ function formatStepperValue(value: number, options?: { suffix?: string; trimZero
 
 export default function ServiceWizard({
   type,
+  serviceId,
   organizerBanned = false,
   organizerBanText,
 }: ServiceWizardProps) {
@@ -101,9 +108,11 @@ export default function ServiceWizard({
   const accentLight =
     type === "Event" ? colors.AMBER_LT : type === "Offer" ? colors.GREEN_LT : colors.BLUE_LT;
   const tokenAvailable = !!getMapboxToken();
+  const isEditing = Boolean(serviceId);
 
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [prefillLoading, setPrefillLoading] = useState(isEditing);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [title, setTitle] = useState("");
@@ -129,6 +138,9 @@ export default function ServiceWizard({
   const [tagSuggestions, setTagSuggestions] = useState<Tag[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
   const [images, setImages] = useState<WizardImage[]>([]);
+  const [existingMedia, setExistingMedia] = useState<
+    Array<{ id: string; file_url: string }>
+  >([]);
   const [showMapPicker, setShowMapPicker] = useState(false);
 
   const isFixedGroupOffer =
@@ -138,23 +150,143 @@ export default function ServiceWizard({
 
   const heroTitle =
     type === "Event"
-      ? "Create an event"
+      ? isEditing
+        ? "Edit event"
+        : "Create an event"
       : type === "Offer"
-        ? "Create an offer"
-        : "Create a need";
+        ? isEditing
+          ? "Edit offer"
+          : "Create an offer"
+        : isEditing
+          ? "Edit need"
+          : "Create a need";
 
   const heroDescription =
     type === "Event"
-      ? "Plan a community event with a guided step-by-step flow."
+      ? isEditing
+        ? "Update the event details shown to participants."
+        : "Plan a community event with a guided step-by-step flow."
       : type === "Offer"
-        ? "Share a skill, service, or time with the community."
-        : "Describe what you need so the right people can find you.";
+        ? isEditing
+          ? "Refine your offer details and keep the listing up to date."
+          : "Share a skill, service, or time with the community."
+        : isEditing
+          ? "Update your need so the right helpers can still find you."
+          : "Describe what you need so the right people can find you.";
 
   useEffect(() => {
     if (type === "Need") {
       setMaxParticipants("1");
     }
   }, [type]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadExistingService() {
+      if (!serviceId) {
+        setPrefillLoading(false);
+        return;
+      }
+
+      try {
+        setPrefillLoading(true);
+        const service = await getService(serviceId);
+        if (!active) return;
+
+        setTitle(service.title ?? "");
+        setDescription(service.description ?? "");
+        setDuration(String(Number(service.duration) || (type === "Event" ? 1.5 : 1)));
+        setMaxParticipants(
+          type === "Need"
+            ? "1"
+            : String(service.max_participants ?? 1),
+        );
+        setLocationType(
+          service.location_type === "Online" ? "Online" : "In-Person",
+        );
+        setScheduleType(
+          service.schedule_type === "Recurrent" ? "Recurrent" : "One-Time",
+        );
+        setScheduleDetails(service.schedule_details ?? "");
+        setScheduledAt(
+          service.scheduled_time ? new Date(service.scheduled_time) : null,
+        );
+        setSelectedTags(service.tags ?? []);
+        setExistingMedia(
+          (service.media ?? []).map((item) => ({
+            id: item.id,
+            file_url: item.file_url,
+          })),
+        );
+
+        const onlineValue =
+          service.location_type === "Online"
+            ? service.location_area ?? ""
+            : "";
+        setOnlineLocation(onlineValue);
+
+        const exactLat = Number(service.session_exact_location_lat ?? service.location_lat);
+        const exactLng = Number(service.session_exact_location_lng ?? service.location_lng);
+        const publicLat = Number(service.location_lat);
+        const publicLng = Number(service.location_lng);
+
+        const publicLabel = service.location_area ?? "";
+        if (
+          publicLabel &&
+          Number.isFinite(publicLat) &&
+          Number.isFinite(publicLng)
+        ) {
+          setPublicLocation({
+            label: publicLabel,
+            fullAddress: publicLabel,
+            district: publicLabel,
+            lat: publicLat,
+            lng: publicLng,
+          });
+        }
+
+        const exactLabel =
+          service.session_exact_location ??
+          service.location_area ??
+          "";
+        if (
+          exactLabel &&
+          Number.isFinite(exactLat) &&
+          Number.isFinite(exactLng)
+        ) {
+          const nextExact = {
+            label: exactLabel,
+            fullAddress: exactLabel,
+            district: service.location_area ?? exactLabel,
+            lat: exactLat,
+            lng: exactLng,
+          };
+          setExactLocation(nextExact);
+          setLocationQuery(exactLabel);
+        } else if (publicLabel) {
+          setLocationQuery(publicLabel);
+        }
+
+        setLocationGuide(service.session_location_guide ?? "");
+      } catch (error) {
+        if (!active) return;
+        Alert.alert(
+          "Could not load service",
+          error instanceof Error ? error.message : "Please try again.",
+          [{ text: "Back", onPress: () => navigation.goBack() }],
+        );
+      } finally {
+        if (active) setPrefillLoading(false);
+      }
+    }
+
+    void loadExistingService();
+
+    return () => {
+      active = false;
+    };
+  }, [navigation, serviceId, type]);
 
   useEffect(() => {
     let active = true;
@@ -556,14 +688,22 @@ export default function ServiceWizard({
 
     setSubmitting(true);
     try {
-      const created = await createService(buildFormData());
+      const saved = serviceId
+        ? await patchService(serviceId, buildFormData())
+        : await createService(buildFormData());
       Alert.alert(
         "Success",
-        type === "Event"
-          ? "Event created."
-          : type === "Offer"
-            ? "Offer created."
-            : "Need created.",
+        serviceId
+          ? type === "Event"
+            ? "Event updated."
+            : type === "Offer"
+              ? "Offer updated."
+              : "Need updated."
+          : type === "Event"
+            ? "Event created."
+            : type === "Offer"
+              ? "Offer created."
+              : "Need created.",
       );
 
       const parentNavigation = navigation.getParent();
@@ -572,7 +712,7 @@ export default function ServiceWizard({
           navigate: (name: string, params?: unknown) => void;
         }).navigate("Home", {
           screen: "ServiceDetail",
-          params: { id: created.id },
+          params: { id: saved.id },
         });
       } else {
         navigation.goBack();
@@ -976,6 +1116,28 @@ export default function ServiceWizard({
           </Pressable>
         </View>
 
+        {existingMedia.length > 0 ? (
+          <>
+            <Text style={styles.helperText}>
+              Current photos stay attached unless you change the cover or remove the listing from the detail page.
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.imageRow}
+            >
+              {existingMedia.map((image, index) => (
+                <View key={image.id} style={styles.imageTile}>
+                  <Image source={{ uri: image.file_url }} style={styles.imagePreview} />
+                  <View style={styles.imageOverlay}>
+                    <Text style={styles.imageIndex}>{index === 0 ? "Current cover" : "Current"}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </>
+        ) : null}
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -1041,7 +1203,10 @@ export default function ServiceWizard({
           value={selectedTags.map((tag) => `#${tag.name}`).join(", ")}
         />
       ) : null}
-      <ReviewRow label="Photos" value={`${images.length} selected`} />
+      <ReviewRow
+        label="Photos"
+        value={`${existingMedia.length + images.length} total (${existingMedia.length} current, ${images.length} new)`}
+      />
     </View>
   );
 
@@ -1059,6 +1224,15 @@ export default function ServiceWizard({
         return renderReview();
     }
   };
+
+  if (prefillLoading) {
+    return (
+      <View style={styles.prefillWrap}>
+        <ActivityIndicator size="large" color={accent} />
+        <Text style={styles.prefillText}>Loading service...</Text>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -1305,6 +1479,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.GRAY50,
+  },
+  prefillWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: colors.GRAY50,
+  },
+  prefillText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.GRAY600,
   },
   heroCard: {
     marginHorizontal: 16,

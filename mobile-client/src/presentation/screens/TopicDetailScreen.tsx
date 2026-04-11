@@ -616,13 +616,17 @@ export default function TopicDetailScreen() {
   }, []);
 
   const handleReportSubmit = useCallback(
-    async (req: import("../../api/forum").ReportRequest) => {
+    async (req: import("../components/ReportModal").ReportModalRequest) => {
       if (!reportTarget) return;
       try {
+        const payload = {
+          type: req.type === "service_issue" || req.type === "no_show" ? "other" : req.type,
+          description: req.description,
+        } satisfies import("../../api/forum").ReportRequest;
         if (reportTarget.kind === "topic") {
-          await reportTopic(id, req);
+          await reportTopic(id, payload);
         } else {
-          await reportPost(reportTarget.post.id, req);
+          await reportPost(reportTarget.post.id, payload);
         }
         setReportTarget(null);
         Alert.alert("Report Submitted", "Thank you. Our moderators will review this report.");

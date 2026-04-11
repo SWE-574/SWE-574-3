@@ -5,21 +5,25 @@ import { colors } from "../../../constants/colors";
 export type ChatTopMetaProps = {
   otherUserName: string;
   otherUserAvatarUrl?: string | null;
+  serviceTitle?: string;
   handshakeStatus?: string;
   formatStatusLabel: (status: string) => string;
   connected: boolean;
   reconnectAttempts: number;
   onViewProfile?: () => void;
+  onOpenService?: () => void;
 };
 
 export function ChatTopMeta({
   otherUserName,
   otherUserAvatarUrl,
+  serviceTitle,
   handshakeStatus,
   formatStatusLabel,
   connected,
   reconnectAttempts,
   onViewProfile,
+  onOpenService,
 }: ChatTopMetaProps) {
   return (
     <View style={styles.topMeta}>
@@ -68,6 +72,24 @@ export function ChatTopMeta({
             </View>
           )}
         </View>
+        {serviceTitle ? (
+          <TouchableOpacity
+            onPress={onOpenService}
+            disabled={!onOpenService}
+            activeOpacity={onOpenService ? 0.7 : 1}
+            style={styles.serviceLinkWrap}
+          >
+            <Text
+              style={[
+                styles.serviceLinkText,
+                onOpenService && styles.serviceLinkTextActive,
+              ]}
+              numberOfLines={1}
+            >
+              {serviceTitle}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <View style={styles.statusWrap}>
@@ -144,6 +166,19 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
+  },
+  serviceLinkWrap: {
+    marginTop: 6,
+    alignSelf: "flex-start",
+  },
+  serviceLinkText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.GRAY500,
+  },
+  serviceLinkTextActive: {
+    color: colors.BLUE,
+    textDecorationLine: "underline",
   },
   metaBadge: {
     minHeight: 22,

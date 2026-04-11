@@ -69,6 +69,7 @@ export default function ChatScreen() {
 
   const {
     handshakeId,
+    serviceId,
     otherUserName,
     serviceTitle,
     otherUserId,
@@ -85,6 +86,7 @@ export default function ChatScreen() {
     provisionedHours,
   } = params ?? {
     handshakeId: "",
+    serviceId: undefined,
     otherUserName: "Chat",
     serviceTitle: undefined,
     otherUserId: undefined,
@@ -146,6 +148,11 @@ export default function ChatScreen() {
     // Navigate within the Messages stack so a proper back button is rendered
     navigation.navigate("UserPublicProfile", { userId: otherUserId });
   }, [navigation, otherUserId]);
+
+  const openServiceDetail = useCallback(() => {
+    if (!serviceId) return;
+    navigation.navigate("ServiceDetail", { id: serviceId });
+  }, [navigation, serviceId]);
 
   const scrollToBottom = useCallback((animated = true) => {
     requestAnimationFrame(() => {
@@ -624,6 +631,7 @@ export default function ChatScreen() {
         <ChatTopMeta
           otherUserName={otherUserName}
           otherUserAvatarUrl={otherUserAvatarUrl}
+          serviceTitle={serviceTitle}
           handshakeStatus={handshakeStatus}
           formatStatusLabel={formatStatusLabel}
           connected={connected}
@@ -631,6 +639,7 @@ export default function ChatScreen() {
           onViewProfile={
             otherUserId ? openOtherUserPublicProfile : undefined
           }
+          onOpenService={serviceId ? openServiceDetail : undefined}
         />
 
         <ChatStepBar
