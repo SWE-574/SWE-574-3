@@ -1,10 +1,10 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
 import { colors } from "../../../constants/colors";
 
 export type ChatTopMetaProps = {
   otherUserName: string;
-  subtitle?: string;
+  otherUserAvatarUrl?: string | null;
   handshakeStatus?: string;
   formatStatusLabel: (status: string) => string;
   connected: boolean;
@@ -14,7 +14,7 @@ export type ChatTopMetaProps = {
 
 export function ChatTopMeta({
   otherUserName,
-  subtitle,
+  otherUserAvatarUrl,
   handshakeStatus,
   formatStatusLabel,
   connected,
@@ -23,47 +23,63 @@ export function ChatTopMeta({
 }: ChatTopMetaProps) {
   return (
     <View style={styles.topMeta}>
+      {/* Avatar — tappable to view profile */}
+      <TouchableOpacity
+        onPress={onViewProfile}
+        disabled={!onViewProfile}
+        style={styles.avatarWrap}
+        activeOpacity={onViewProfile ? 0.7 : 1}
+      >
+        {otherUserAvatarUrl ? (
+          <Image source={{ uri: otherUserAvatarUrl }} style={styles.avatar} />
+        ) : (
+          <View style={styles.avatarFallback}>
+            <Text style={styles.avatarFallbackText}>
+              {otherUserName.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
       <View style={styles.topMetaTextWrap}>
         <View style={styles.titleRow}>
-          <Text
-            style={[styles.topMetaTitle, styles.titleRowName]}
-            numberOfLines={1}
+          <TouchableOpacity
+            onPress={onViewProfile}
+            disabled={!onViewProfile}
+            hitSlop={{ top: 6, bottom: 6, left: 0, right: 6 }}
           >
-            {otherUserName}
-          </Text>
-          {onViewProfile ? (
-            <TouchableOpacity
-              onPress={onViewProfile}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityRole="link"
-              accessibilityLabel="View profile"
+            <Text
+              style={[
+                styles.topMetaTitle,
+                onViewProfile && styles.titleTappable,
+              ]}
+              numberOfLines={1}
             >
-              <Text style={styles.viewProfileLink}>View profile</Text>
-            </TouchableOpacity>
-          ) : null}
+              {otherUserName}
+            </Text>
+          </TouchableOpacity>
         </View>
-        {!!subtitle ? (
-          <Text style={styles.topMetaSubtitle} numberOfLines={1}>
-            {subtitle}
-          </Text>
-        ) : null}
-        {!!handshakeStatus ? (
-          <Text style={styles.topMetaMeta}>
-            Status: {formatStatusLabel(handshakeStatus)}
-          </Text>
-        ) : null}
+        <View style={styles.badgesRow}>
+          {!!handshakeStatus && (
+            <View style={[styles.metaBadge, styles.statusBadge]}>
+              <Text style={[styles.metaBadgeText, styles.statusBadgeText]}>
+                {formatStatusLabel(handshakeStatus)}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
 
       <View style={styles.statusWrap}>
         <View
           style={[
             styles.statusDot,
-            { backgroundColor: connected ? colors.GREEN : colors.GRAY400 },
+            { backgroundColor: connected ? "#10B981" : colors.GRAY400 },
           ]}
         />
         <Text style={styles.statusText}>
           {connected
-            ? "Connected"
+            ? "Live"
             : reconnectAttempts > 0
               ? "Reconnecting"
               : "Connecting"}
@@ -75,61 +91,92 @@ export function ChatTopMeta({
 
 export const styles = StyleSheet.create({
   topMeta: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: colors.GRAY200,
     backgroundColor: colors.WHITE,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 10,
+  },
+  avatarWrap: {
+    flexShrink: 0,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.GRAY200,
+  },
+  avatarFallback: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.GREEN_MD,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarFallbackText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.GREEN,
   },
   topMetaTextWrap: {
     flex: 1,
-    marginRight: 12,
+    minWidth: 0,
   },
   titleRow: {
     flexDirection: "row",
     alignItems: "center",
-    flexWrap: "nowrap",
-    gap: 10,
-  },
-  titleRowName: {
-    flexShrink: 1,
-    minWidth: 0,
   },
   topMetaTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700",
     color: colors.GRAY900 ?? "#111827",
   },
-  viewProfileLink: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: colors.BLUE,
+  titleTappable: {
+    color: colors.GREEN,
+    textDecorationLine: "underline",
   },
-  topMetaSubtitle: {
-    marginTop: 2,
-    fontSize: 13,
-    color: colors.GRAY500,
+  badgesRow: {
+    marginTop: 5,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
   },
-  topMetaMeta: {
-    marginTop: 4,
-    fontSize: 12,
-    color: colors.GRAY500,
+  metaBadge: {
+    minHeight: 22,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  metaBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  statusBadge: {
+    backgroundColor: colors.AMBER_LT,
+    borderColor: "#FDE68A",
+  },
+  statusBadgeText: {
+    color: colors.AMBER,
   },
   statusWrap: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
+    flexShrink: 0,
   },
   statusDot: {
     width: 8,
     height: 8,
-    borderRadius: 999,
+    borderRadius: 4,
   },
   statusText: {
-    fontSize: 12,
+    fontSize: 11,
     color: colors.GRAY500,
   },
 });

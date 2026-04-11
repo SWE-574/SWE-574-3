@@ -4,6 +4,7 @@ import MessagesScreen from "../presentation/screens/MessagesScreen";
 import ChatScreen from "../presentation/screens/ChatScreen";
 import GroupChatScreen from "../presentation/screens/GroupChatScreen";
 import PublicChatScreen from "../presentation/screens/PublicChatScreen";
+import PublicProfileScreen from "../presentation/screens/PublicProfileScreen";
 
 export type MessagesStackParamList = {
   MessagesList: undefined;
@@ -12,6 +13,18 @@ export type MessagesStackParamList = {
     otherUserName: string;
     serviceTitle?: string;
     otherUserId?: string;
+    otherUserAvatarUrl?: string;
+  isProvider?: boolean;
+    serviceType?: string;
+    scheduleType?: string;
+    maxParticipants?: number;
+    serviceLocationType?: string;
+    serviceLocationArea?: string | null;
+    serviceExactLocation?: string | null;
+    serviceExactLocationMapsUrl?: string | null;
+    serviceLocationGuide?: string | null;
+    serviceScheduledTime?: string | null;
+    provisionedHours?: number;
   };
   GroupChat: {
     groupId: string;
@@ -20,6 +33,9 @@ export type MessagesStackParamList = {
   PublicChat: {
     roomId: string;
     roomTitle?: string;
+  };
+  UserPublicProfile: {
+    userId: string;
   };
 };
 
@@ -55,6 +71,11 @@ export default function MessagesStack() {
         name="PublicChat"
         component={PublicChatScreen}
         options={{ title: "Event chat" }}
+      />
+      <Stack.Screen
+        name="UserPublicProfile"
+        component={PublicProfileScreen}
+        options={{ title: "Profile", headerBackTitle: "Back" }}
       />
     </Stack.Navigator>
   );

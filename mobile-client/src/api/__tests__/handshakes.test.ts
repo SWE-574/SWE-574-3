@@ -18,6 +18,9 @@ import {
   initiateHandshake,
   reportHandshake,
   requestHandshakeChanges,
+  requestCancellationHandshake,
+  approveCancellationHandshake,
+  rejectCancellationHandshake,
   handshakeServiceInterest,
 } from "../handshakes";
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
@@ -96,17 +99,32 @@ describe("handshakes", () => {
     expect(getLastFetchBody()).toEqual({ note: "Hi" });
   });
 
-  it("reportHandshake POSTs with reason", async () => {
+  it("reportHandshake POSTs with issue type", async () => {
     mockFetchResolve({});
-    await reportHandshake("h1", { reason: "spam" });
+    await reportHandshake("h1", { issue_type: "no_show", description: "missing" });
     expect(getLastFetchCall().url).toContain("/handshakes/h1/report/");
-    expect(getLastFetchBody()).toEqual({ reason: "spam" });
+    expect(getLastFetchBody()).toEqual({
+      issue_type: "no_show",
+      description: "missing",
+    });
   });
 
   it("requestHandshakeChanges POSTs to request-changes/", async () => {
     mockFetchResolve({});
     await requestHandshakeChanges("h1");
     expect(getLastFetchCall().url).toContain("/handshakes/h1/request-changes/");
+  });
+
+  it("cancellation request actions POST to cancel-request endpoints", async () => {
+    mockFetchResolve({});
+    await requestCancellationHandshake("h1");
+    expect(getLastFetchCall().url).toContain("/handshakes/h1/cancel-request/");
+    mockFetchResolve({});
+    await approveCancellationHandshake("h1");
+    expect(getLastFetchCall().url).toContain("/handshakes/h1/cancel-request/approve/");
+    mockFetchResolve({});
+    await rejectCancellationHandshake("h1");
+    expect(getLastFetchCall().url).toContain("/handshakes/h1/cancel-request/reject/");
   });
 
   it("handshakeServiceInterest POSTs to /handshakes/services/:id/interest/", async () => {
