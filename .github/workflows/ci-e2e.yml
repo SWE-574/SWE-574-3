@@ -70,12 +70,51 @@ jobs:
           DISABLE_THROTTLING=1
           EOF
 
-      # ── 4. Build & start the full dev stack in E2E mode ───────────────────
+      # ── 4. Set up Node.js ────────────────────────────────────────────────
+      #    Install host-side JS deps BEFORE starting Docker so that npm ci
+      #    file churn does not disrupt the Vite dev server's file watcher
+      #    (the frontend/ directory is bind-mounted into the container).
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # ── 5. Remove Docker-owned node_modules (created as root) ────────────
+      - name: Remove Docker-owned node_modules
+        run: sudo rm -rf frontend/node_modules
+
+      # ── 6. Cache npm packages ─────────────────────────────────────────────
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-e2e-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: npm-e2e-
+
+      # ── 7. Install JS dependencies (includes @playwright/test) ───────────
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # ── 8. Cache Playwright browsers ──────────────────────────────────────
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: playwright-
+
+      # ── 9. Install Playwright browsers ────────────────────────────────────
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # ── 10. Build & start the full dev stack in E2E mode ──────────────────
       - name: Build & start stack (E2E mode)
         run: |
           DJANGO_E2E=1 VITE_E2E=1 docker compose up -d --build
 
-      # ── 5. Wait until every container reports "healthy" ───────────────────
+      # ── 11. Wait until every container reports "healthy" ──────────────────
       - name: Wait for containers to be healthy
         run: |
           READY=0
@@ -137,7 +176,7 @@ jobs:
             exit 1
           fi
 
-      # ── 6. Smoke-test — ensure nginx is reachable ─────────────────────────
+      # ── 12. Smoke-test — ensure nginx is reachable ────────────────────────
       - name: Smoke-test API health
         run: |
           curl --fail --retry 10 --retry-delay 3 --retry-connrefused \
@@ -153,20 +192,20 @@ jobs:
           curl --fail --retry 20 --retry-delay 3 --retry-connrefused \
             http://localhost/login > /dev/null
 
-      # ── 7. Seed demo data ─────────────────────────────────────────────────
+      # ── 13. Seed demo data ────────────────────────────────────────────────
       - name: Seed demo data
         run: |
           set -euo pipefail
           DJANGO_E2E=1 docker compose exec -T backend \
             bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python setup_demo.py"
 
-      # ── 8. Verify seeded users exist and passwords are valid ──────────────
+      # ── 14. Verify seeded users exist and passwords are valid ─────────────
       - name: Verify seeded demo users
         run: |
           DJANGO_E2E=1 docker compose exec -T backend \
             bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python manage.py shell -c \"from api.models import User; emails=['elif@demo.com','cem@demo.com','ayse@demo.com','mehmet@demo.com','zeynep@demo.com','can@demo.com','deniz@demo.com','burak@demo.com']; missing=[e for e in emails if not User.objects.filter(email=e).exists()]; bad_pw=[e for e in emails if User.objects.filter(email=e).exists() and not User.objects.get(email=e).check_password('demo123')]; assert not missing, f'Missing demo users: {missing}'; assert not bad_pw, f'Invalid demo passwords: {bad_pw}'; print(f'Validated {len(emails)} demo users')\""
 
-      # ── 9. Verify auth/login endpoint works with demo credentials ─────────
+      # ── 15. Verify auth/login endpoint works with demo credentials ────────
       - name: Verify demo login API
         run: |
           RESPONSE=$(curl --silent --show-error --fail --retry 5 --retry-delay 2 --retry-connrefused \
@@ -176,7 +215,7 @@ jobs:
 
           echo "$RESPONSE" | python3 -c "import json,sys; payload=json.load(sys.stdin); assert ('access' in payload or 'token' in payload), payload; assert 'refresh' in payload, payload"
 
-      # ── 9b. Verify services API returns seeded data ───────────────────────
+      # ── 15b. Verify services API returns seeded data ──────────────────────
       - name: Verify services API returns data
         run: |
           # Log in to get a token
@@ -204,10 +243,11 @@ jobs:
             exit 1
           fi
 
-          # Also test search
+          # Also test search — use "Chess" because the Manti service is a past
+          # one-time group offer and is correctly excluded from listing results
           SEARCH=$(curl --silent --fail \
             -H "Authorization: Bearer $TOKEN" \
-            "http://localhost/api/services/?search=Manti")
+            "http://localhost/api/services/?search=Chess")
 
           SEARCH_COUNT=$(echo "$SEARCH" | python3 -c "
           import json,sys
@@ -216,43 +256,11 @@ jobs:
           print(len(results))
           ")
 
-          echo "Search for 'Manti' returned $SEARCH_COUNT results"
-
-      # ── 10. Set up Node.js ────────────────────────────────────────────────
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      # ── 11. Remove Docker-owned node_modules (created as root) ────────────
-      - name: Remove Docker-owned node_modules
-        run: sudo rm -rf frontend/node_modules
-
-      # ── 12. Cache npm packages ────────────────────────────────────────────
-      - name: Cache npm packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: npm-e2e-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: npm-e2e-
-
-      # ── 13. Install JS dependencies (includes @playwright/test) ──────────
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      # ── 14. Cache Playwright browsers ─────────────────────────────────────
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: playwright-
-
-      # ── 15. Install Playwright browsers ───────────────────────────────────
-      - name: Install Playwright browsers
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
+          echo "Search for 'Chess' returned $SEARCH_COUNT results"
+          if [ "$SEARCH_COUNT" -lt 1 ]; then
+            echo "::error::Search returned no results — seeded services may not be queryable"
+            exit 1
+          fi
 
       # ── 16. Run smoke tests (always, blocks PR) ──────────────────────────
       - name: Run smoke tests

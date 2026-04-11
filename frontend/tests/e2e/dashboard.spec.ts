@@ -9,6 +9,8 @@
  *
  * Demo data: 15+ services seeded by setup_demo.py.
  * Tests use search to find services (bypasses geolocation filtering in CI).
+ * Note: "Manti" is excluded from listing by a past-one-time-group-offer filter,
+ * so all search tests use "Chess" which always appears in results.
  */
 
 import { test, expect } from '@playwright/test'
@@ -22,9 +24,9 @@ test.describe('Dashboard', () => {
     const searchInput = page.getByPlaceholder(/search/i).first()
     await expect(searchInput).toBeVisible({ timeout: 20_000 })
 
-    // Search for a known demo service
-    await searchInput.fill('Manti')
-    await expect(page.getByText(/Manti/i).first()).toBeVisible({ timeout: 20_000 })
+    // Search for a known demo service (Chess is always in listing results)
+    await searchInput.fill('Chess')
+    await expect(page.getByText(/Chess/i).first()).toBeVisible({ timeout: 20_000 })
   })
 
   test('dashboard images have lazy loading attribute', async ({ page }) => {
@@ -33,8 +35,8 @@ test.describe('Dashboard', () => {
     const searchInput = page.getByPlaceholder(/search/i).first()
     await expect(searchInput).toBeVisible({ timeout: 20_000 })
 
-    await searchInput.fill('Manti')
-    await expect(page.getByText(/Manti/i).first()).toBeVisible({ timeout: 20_000 })
+    await searchInput.fill('Chess')
+    await expect(page.getByText(/Chess/i).first()).toBeVisible({ timeout: 20_000 })
 
     const nonLazyImages = page.locator('img:not([loading="lazy"])')
     await expect(nonLazyImages).toHaveCount(0)
