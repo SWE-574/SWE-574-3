@@ -22,6 +22,10 @@ import {
   approveCancellationHandshake,
   rejectCancellationHandshake,
   handshakeServiceInterest,
+  joinEvent,
+  leaveEvent,
+  checkinEvent,
+  markAttended,
 } from "../handshakes";
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
 
@@ -131,5 +135,34 @@ describe("handshakes", () => {
     mockFetchResolve({});
     await handshakeServiceInterest("s1");
     expect(getLastFetchCall().url).toContain("/handshakes/services/s1/interest/");
+  });
+
+  it("joinEvent POSTs to /handshakes/services/:id/join-event/", async () => {
+    mockFetchResolve({ id: "h1", status: "accepted" });
+    const result = await joinEvent("svc-1");
+    expect(getLastFetchCall().url).toContain("/handshakes/services/svc-1/join-event/");
+    expect(getLastFetchCall().init?.method).toBe("POST");
+    expect(result.status).toBe("accepted");
+  });
+
+  it("leaveEvent POSTs to /handshakes/:id/leave-event/", async () => {
+    mockFetchResolve({ id: "h1", status: "cancelled" });
+    await leaveEvent("h1");
+    expect(getLastFetchCall().url).toContain("/handshakes/h1/leave-event/");
+    expect(getLastFetchCall().init?.method).toBe("POST");
+  });
+
+  it("checkinEvent POSTs to /handshakes/:id/checkin/", async () => {
+    mockFetchResolve({ id: "h1", status: "checked_in" });
+    const result = await checkinEvent("h1");
+    expect(getLastFetchCall().url).toContain("/handshakes/h1/checkin/");
+    expect(result.status).toBe("checked_in");
+  });
+
+  it("markAttended POSTs to /handshakes/:id/mark-attended/", async () => {
+    mockFetchResolve({ id: "h1", status: "attended" });
+    const result = await markAttended("h1");
+    expect(getLastFetchCall().url).toContain("/handshakes/h1/mark-attended/");
+    expect(result.status).toBe("attended");
   });
 });

@@ -29,36 +29,49 @@ type NavProps = NativeStackScreenProps<
 
 export default function PublicChatScreen() {
   const { params } = useRoute<NavProps["route"]>();
-  const { roomId, roomTitle = "Event chat" } = params ?? { roomId: "" };
+  const { roomId: serviceId, roomTitle = "Event chat" } = params ?? { roomId: "" };
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [wsRoomId, setWsRoomId] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const listRef = useRef<FlatList>(null);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!serviceId) return;
     (async () => {
       try {
-        const data = await getPublicChat(roomId);
-        const list = Array.isArray(data) ? data : (data as { messages: unknown[] }).messages ?? [];
-        setMessages(
-          (list as Record<string, unknown>[]).map((m) => normalizeMessage(m))
-        );
+        const data = await getPublicChat(serviceId);
+        if (data && typeof data === "object" && !Array.isArray(data)) {
+          const obj = data as Record<string, unknown>;
+          if (obj.room && typeof obj.room === "object") {
+            const room = obj.room as Record<string, unknown>;
+            if (typeof room.id === "string") setWsRoomId(room.id);
+          }
+          const msgs = obj.messages;
+          if (msgs && typeof msgs === "object") {
+            const results = Array.isArray(msgs) ? msgs : (msgs as Record<string, unknown>).results;
+            if (Array.isArray(results)) {
+              setMessages(results.map((m: Record<string, unknown>) => normalizeMessage(m)));
+            }
+          }
+        } else if (Array.isArray(data)) {
+          setMessages(data.map((m: Record<string, unknown>) => normalizeMessage(m as Record<string, unknown>)));
+        }
       } catch {
-        // proceed without initial messages
+        setError("Could not load chat history");
       } finally {
         setLoading(false);
       }
     })();
-  }, [roomId]);
+  }, [serviceId]);
 
   useEffect(() => {
-    if (!roomId) return;
-    const url = withAuthToken(buildEventChatWsUrl(roomId));
+    if (!wsRoomId) return;
+    const url = withAuthToken(buildEventChatWsUrl(wsRoomId));
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
@@ -102,12 +115,12 @@ export default function PublicChatScreen() {
       ws.close();
       wsRef.current = null;
     };
-  }, [roomId]);
+  }, [wsRoomId]);
 
   const sendMessage = useCallback(() => {
     const text = inputText.trim();
     if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: "message", content: text }));
+    wsRef.current.send(JSON.stringify({ type: "chat_message", body: text }));
     setInputText("");
   }, [inputText]);
 

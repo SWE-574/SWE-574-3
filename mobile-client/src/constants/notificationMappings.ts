@@ -53,7 +53,16 @@ export function navigateToNotificationTarget(
     return;
   }
 
-  // Reputation → Profile tab
+  // Reputation with a linked service → ServiceDetail (e.g. "Leave Feedback" for events)
+  if (type === 'positive_rep' && related_service) {
+    navigation.navigate('Home', {
+      screen: 'ServiceDetail',
+      params: { id: related_service },
+    });
+    return;
+  }
+
+  // Reputation without a service link → Profile tab
   if (type === 'positive_rep') {
     navigation.navigate('Profile');
     return;

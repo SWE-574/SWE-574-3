@@ -89,6 +89,30 @@ export type ServiceStatus = "Active" | "Completed" | "Cancelled" | string;
 export type LocationType = "In-Person" | "Online" | "remote" | string;
 export type ScheduleType = "One-Time" | "Recurrent" | string;
 
+export interface EventEvaluationSummary {
+  total_attended: number;
+  positive_feedback_count: number;
+  negative_feedback_count: number;
+  unique_evaluator_count: number;
+  positive_score_total: number;
+  negative_score_total: number;
+  well_organized_count: number;
+  engaging_count: number;
+  welcoming_count: number;
+  disorganized_count: number;
+  boring_count: number;
+  unwelcoming_count: number;
+  well_organized_average: number;
+  engaging_average: number;
+  welcoming_average: number;
+  disorganized_average: number;
+  boring_average: number;
+  unwelcoming_average: number;
+  organizer_event_hot_score: number;
+  feedback_submission_count: number;
+  updated_at: string;
+}
+
 export interface Service {
   id: string;
   user: UserSummary;
@@ -115,6 +139,8 @@ export interface Service {
   session_exact_location_lat?: string | null;
   session_exact_location_lng?: string | null;
   session_location_guide?: string | null;
+  event_completed_at?: string | null;
+  event_evaluation_summary?: EventEvaluationSummary | null;
   media?: Array<{
     id: string;
     file_url: string;
