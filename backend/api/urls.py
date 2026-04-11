@@ -41,6 +41,7 @@ from .views import (
     ForumCategoryViewSet,
     ForumTopicViewSet,
     ForumPostViewSet,
+    ForumActivityView,
     LogoutView,
     WsTokenView,
     ChangePasswordView,
@@ -322,6 +323,7 @@ urlpatterns = [
     # Forum endpoints
     path('forum/categories/', forum_category_list, name='forum-category-list'),
     path('forum/categories/<slug:slug>/', forum_category_detail, name='forum-category-detail'),
+    path('forum/my-activity/', ForumActivityView.as_view(), name='forum-my-activity'),
     path('forum/topics/', forum_topic_list, name='forum-topic-list'),
     path('forum/topics/<uuid:pk>/', forum_topic_detail, name='forum-topic-detail'),
     path('forum/topics/<uuid:pk>/pin/', forum_topic_pin, name='forum-topic-pin'),

@@ -7147,7 +7147,6 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
-    
     @track_performance
     def retrieve(self, request, pk=None):
         """Get a specific topic with its posts"""
@@ -7335,6 +7334,56 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
             )
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
+
+class ForumActivityView(APIView):
+    """
+    Authenticated forum activity summary for the current user.
+
+    Returns stable user-scoped counts so clients do not need to infer
+    activity metrics from paginated public topic lists.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        tags=['Forum'],
+        responses={
+            200: inline_serializer(
+                'ForumActivityResponse',
+                {
+                    'my_topics': drf_serializers.IntegerField(),
+                    'my_replies': drf_serializers.IntegerField(),
+                    'open_topics': drf_serializers.IntegerField(),
+                },
+            ),
+        },
+    )
+    @track_performance
+    def get(self, request):
+        topic_queryset = ForumTopic.objects.filter(
+            author=request.user,
+            category__is_active=True,
+        )
+        open_topic_queryset = (
+            topic_queryset
+            .filter(is_locked=False)
+            .select_related('author', 'category')
+            .annotate(reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False)))
+            .order_by('-is_pinned', '-created_at')
+        )
+        return Response(
+            {
+                'my_topics': topic_queryset.count(),
+                'my_replies': ForumPost.objects.filter(
+                    topic__author=request.user,
+                    topic__category__is_active=True,
+                    is_deleted=False,
+                ).count(),
+                'open_topics': topic_queryset.filter(is_locked=False).count(),
+                'open_topic_items': ForumTopicSerializer(open_topic_queryset, many=True).data,
+            }
+        )
 
 
 class ForumPostViewSet(viewsets.ViewSet):

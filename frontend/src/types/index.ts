@@ -735,6 +735,12 @@ export interface ForumPost {
   updated_at: string
 }
 
+export interface ForumActivity {
+  my_topics: number
+  my_replies: number
+  open_topics: number
+}
+
 // ─── Achievement / Badge Types ────────────────────────────────────────────────
 
 export interface Achievement {
