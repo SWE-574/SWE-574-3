@@ -36,10 +36,14 @@ export interface ServicesListParams {
   page_size?: number;
   type?: 'Offer' | 'Need' | 'Event';
   search?: string;
-  tags?: string;
+  tags?: string | string[];
   location_type?: string;
   /** Owner filter; matches web `serviceAPI.list` (`?user=`). */
   user?: string;
+  sort?: "latest" | "hot";
+  lat?: number;
+  lng?: number;
+  distance?: number;
 }
 
 function normalizeService(service: Service): Service {
@@ -67,7 +71,10 @@ function normalizeService(service: Service): Service {
 
 export function listServices(params?: ServicesListParams): Promise<PaginatedResponse<Service>> {
   return apiRequest<PaginatedResponse<Service>>('/services/', {
-    params: params as Record<string, string | number | undefined>,
+    params: params as Record<
+      string,
+      string | number | boolean | Array<string | number | boolean> | undefined
+    >,
   }).then((response) => ({
     ...response,
     results: (response.results ?? []).map(normalizeService),

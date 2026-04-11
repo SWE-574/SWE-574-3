@@ -1,0 +1,52 @@
+/**
+ * Featured API – fetch trending services, friend activity, and top providers
+ * GET /api/featured/
+ */
+
+import { apiRequest } from './client';
+
+export interface FeaturedServiceUser {
+  id: string;
+  first_name: string;
+  last_name: string;
+  avatar_url: string | null;
+}
+
+export interface FeaturedServiceTag {
+  id: string;
+  name: string;
+}
+
+export interface FeaturedService {
+  id: string;
+  title: string;
+  type: 'Offer' | 'Need' | 'Event';
+  user: FeaturedServiceUser;
+  tags: FeaturedServiceTag[];
+  participant_count: number;
+  max_participants: number;
+  location_area: string | null;
+  created_at: string;
+  // Only on friends category
+  friend_count?: number;
+  friend_names?: string[];
+}
+
+export interface FeaturedProvider {
+  id: string;
+  first_name: string;
+  last_name: string;
+  avatar_url: string | null;
+  completed_count: number;
+  positive_rep_count: number;
+}
+
+export interface FeaturedResponse {
+  trending: FeaturedService[];
+  friends: FeaturedService[];
+  top_providers: FeaturedProvider[];
+}
+
+export function getFeatured(): Promise<FeaturedResponse> {
+  return apiRequest<FeaturedResponse>('/featured/');
+}

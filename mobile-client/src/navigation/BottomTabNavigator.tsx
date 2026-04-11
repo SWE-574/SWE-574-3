@@ -1,8 +1,5 @@
 import React from "react";
-import {
-  BottomTabNavigationProp,
-  createBottomTabNavigator,
-} from "@react-navigation/bottom-tabs";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import HomeStack from "./HomeStack";
 import type { HomeStackParamList } from "./HomeStack";
@@ -10,29 +7,29 @@ import ForumStack from "./ForumStack";
 import type { ForumStackParamList } from "./ForumStack";
 import PostStack from "./PostStack";
 import type { PostStackParamList } from "./PostStack";
+import MapStack from "./MapStack";
+import type { MapStackParamList } from "./MapStack";
 import MessagesStack from "./MessagesStack";
 import type { MessagesStackParamList } from "./MessagesStack";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../constants/colors";
-import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import PostServiceTabButton from "../presentation/components/PostServiceTabButton";
 import ProfileStack, { ProfileStackParamList } from "./ProfileStack";
 import { useNotificationStore } from "../store/useNotificationStore";
+import MapTabButton from "../presentation/components/MapTabButton";
 
 export type BottomTabParamList = {
   Home: NavigatorScreenParams<HomeStackParamList>;
   Forum: NavigatorScreenParams<ForumStackParamList>;
+  MapTab: NavigatorScreenParams<MapStackParamList>;
+  Messages: NavigatorScreenParams<MessagesStackParamList>;
   Profile: NavigatorScreenParams<ProfileStackParamList>;
   PostService: NavigatorScreenParams<PostStackParamList>;
-  Messages: NavigatorScreenParams<MessagesStackParamList>;
 };
 
 const Tab = createBottomTabNavigator<BottomTabParamList>();
 
 export default function BottomTabNavigator() {
-  const navigation =
-    useNavigation<BottomTabNavigationProp<BottomTabParamList, "PostService">>();
   const insets = useSafeAreaInsets();
   const notifications = useNotificationStore((s) => s.notifications);
 
@@ -51,8 +48,18 @@ export default function BottomTabNavigator() {
         headerShown: false,
         tabBarActiveTintColor: colors.GREEN,
         tabBarInactiveTintColor: colors.GRAY500,
+        tabBarHideOnKeyboard: true,
+        tabBarItemStyle: {
+          paddingTop: 6,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: "600",
+          marginBottom: 2,
+        },
         tabBarStyle: {
-          paddingBottom: insets.bottom + 10,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
         },
       }}
     >
@@ -88,11 +95,12 @@ export default function BottomTabNavigator() {
       />
 
       <Tab.Screen
-        name="PostService"
-        component={PostStack}
+        name="MapTab"
+        component={MapStack}
         options={{
-          title: "Post Service",
-          tabBarButton: (props) => <PostServiceTabButton {...props} />,
+          title: "Map",
+          tabBarLabel: "Map",
+          tabBarButton: (props) => <MapTabButton {...props} />,
         }}
         listeners={({ navigation }) => ({
           tabPress: (e) => {
@@ -146,6 +154,15 @@ export default function BottomTabNavigator() {
             navigation.navigate("Profile", { screen: "ProfileHome" });
           },
         })}
+      />
+      {/* Hidden tab — navigated to programmatically from HomeScreen post button */}
+      <Tab.Screen
+        name="PostService"
+        component={PostStack}
+        options={{
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: "none" },
+        }}
       />
     </Tab.Navigator>
   );

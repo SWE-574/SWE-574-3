@@ -241,3 +241,9 @@ tests/reports/
 frontend/test-results/
 
 .DS_Store
+
+# IDE metadata
+mobile-client/.idea/
+
+# Coverage artifacts
+frontend/coverage/
