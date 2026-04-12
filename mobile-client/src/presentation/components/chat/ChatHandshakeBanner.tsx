@@ -1,11 +1,5 @@
 import React, { useMemo } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ActivityIndicator,
-  StyleSheet,
-} from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../../constants/colors";
 import type { ActionType } from "../../../types/chatTypes";
@@ -16,32 +10,52 @@ export type HandshakeBannerData = {
   description: string;
 };
 
+export type SessionDetails = {
+  exact_location?: string | null;
+  scheduled_time?: string | null;
+  exact_duration?: number | null;
+  provisioned_hours?: number | null;
+  exact_location_maps_url?: string | null;
+  exact_location_guide?: string | null;
+  is_online?: boolean;
+};
+
 export type ChatHandshakeBannerProps = {
   banner: HandshakeBannerData;
+  canInitiatePending: boolean;
   canApprovePending: boolean;
-  canDeclinePending: boolean;
   canCancelPending: boolean;
   canConfirmCompletion: boolean;
   isAwaitingSecondConfirmationLike: boolean;
+  myConfirmed?: boolean;
+  otherConfirmed?: boolean;
+  counterpartName?: string;
+  hasSessionDetails?: boolean;
+  canRequestCancellation?: boolean;
+  canRespondToCancellation?: boolean;
+  hasCancellationRequest?: boolean;
+  cancellationRequestedByName?: string | null;
+  canReportNoShow?: boolean;
+  canLeaveEvaluation?: boolean;
+  evaluationLabel?: string | null;
   actionLoading: ActionType | null;
-  onApprove: () => void;
-  onDecline: () => void;
+  sessionDetails?: SessionDetails | null;
+  onInitiate: () => void;
+  onReviewApprove: () => void;
+  onOpenSessionDetails: () => void;
   onCancel: () => void;
   onConfirm: () => void;
+  onRequestCancellation: () => void;
+  onApproveCancellation: () => void;
+  onRejectCancellation: () => void;
+  onReportNoShow: () => void;
+  onOpenEvaluation: () => void;
 };
 
 export function ChatHandshakeBanner({
   banner,
-  canApprovePending,
-  canDeclinePending,
-  canCancelPending,
-  canConfirmCompletion,
-  isAwaitingSecondConfirmationLike,
   actionLoading,
-  onApprove,
-  onDecline,
-  onCancel,
-  onConfirm,
+  onOpenSessionDetails,
 }: ChatHandshakeBannerProps) {
   const bannerStyle = useMemo(() => {
     switch (banner.tone) {
@@ -79,114 +93,46 @@ export function ChatHandshakeBanner({
   }, [banner.tone]);
 
   return (
-    <View style={[styles.bannerBase, bannerStyle.container]}>
+    <TouchableOpacity
+      style={[styles.bannerBase, bannerStyle.container]}
+      onPress={onOpenSessionDetails}
+      activeOpacity={0.86}
+      disabled={actionLoading !== null}
+    >
       <View style={styles.bannerHeader}>
         <Ionicons
           name={bannerStyle.icon}
-          size={18}
+          size={15}
           color={bannerStyle.iconColor}
         />
-        <Text style={styles.bannerTitle}>{banner.title}</Text>
+        <View style={styles.bannerTextWrap}>
+          <Text style={styles.bannerTitle}>{banner.title}</Text>
+          {!!banner.description ? (
+            <Text style={styles.bannerDescription} numberOfLines={1}>
+              {banner.description}
+            </Text>
+          ) : null}
+        </View>
+        <View style={styles.bannerPill}>
+          <Text style={styles.bannerPillText}>Details</Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.GRAY500} />
+        </View>
       </View>
-      <Text style={styles.bannerDescription}>{banner.description}</Text>
-
-      <View style={styles.bannerActions}>
-        {canApprovePending ? (
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.primaryActionBtn]}
-            onPress={onApprove}
-            disabled={actionLoading !== null}
-          >
-            {actionLoading === "approve" ? (
-              <ActivityIndicator size="small" color={colors.WHITE} />
-            ) : (
-              <>
-                <Ionicons name="checkmark" size={16} color={colors.WHITE} />
-                <Text style={styles.primaryActionBtnText}>Approve</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        ) : null}
-
-        {canDeclinePending ? (
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.secondaryDangerBtn]}
-            onPress={onDecline}
-            disabled={actionLoading !== null}
-          >
-            {actionLoading === "decline" ? (
-              <ActivityIndicator size="small" color="#B91C1C" />
-            ) : (
-              <>
-                <Ionicons name="close" size={16} color="#B91C1C" />
-                <Text style={styles.secondaryDangerBtnText}>Decline</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        ) : null}
-
-        {canCancelPending ? (
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.secondaryBtn]}
-            onPress={onCancel}
-            disabled={actionLoading !== null}
-          >
-            {actionLoading === "cancel" ? (
-              <ActivityIndicator
-                size="small"
-                color={colors.GRAY700 ?? "#374151"}
-              />
-            ) : (
-              <>
-                <Ionicons
-                  name="ban-outline"
-                  size={16}
-                  color={colors.GRAY700 ?? "#374151"}
-                />
-                <Text style={styles.secondaryBtnText}>Cancel</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        ) : null}
-
-        {canConfirmCompletion ? (
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.primaryActionBtn]}
-            onPress={onConfirm}
-            disabled={actionLoading !== null}
-          >
-            {actionLoading === "confirm" ? (
-              <ActivityIndicator size="small" color={colors.WHITE} />
-            ) : (
-              <>
-                <Ionicons
-                  name="checkmark-done"
-                  size={16}
-                  color={colors.WHITE}
-                />
-                <Text style={styles.primaryActionBtnText}>
-                  {isAwaitingSecondConfirmationLike
-                    ? "Confirm final completion"
-                    : "Mark as complete"}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-        ) : null}
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
 export const styles = StyleSheet.create({
   bannerBase: {
     marginHorizontal: 12,
-    marginTop: 12,
-    marginBottom: 8,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    marginTop: 8,
+    marginBottom: 6,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderWidth: 1,
+    minHeight: 56,
+    justifyContent: "center",
   },
   bannerNeutral: {
     backgroundColor: "#F8FAFC",
@@ -213,59 +159,35 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  bannerTitle: {
+  bannerTextWrap: {
     flex: 1,
-    fontSize: 14,
+    minWidth: 0,
+  },
+  bannerTitle: {
+    fontSize: 13,
     fontWeight: "700",
-    color: colors.GRAY900 ?? "#111827",
+    color: colors.GRAY900,
   },
   bannerDescription: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.GRAY700 ?? "#374151",
+    marginTop: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.GRAY600,
   },
-  bannerActions: {
-    marginTop: 12,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  actionBtn: {
-    minHeight: 38,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+  bannerPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.82)",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
   },
-  primaryActionBtn: {
-    backgroundColor: colors.BLUE,
-  },
-  primaryActionBtnText: {
-    color: colors.WHITE,
-    fontSize: 13,
+  bannerPillText: {
+    fontSize: 12,
     fontWeight: "700",
-  },
-  secondaryBtn: {
-    backgroundColor: colors.WHITE,
-    borderWidth: 1,
-    borderColor: colors.GRAY300 ?? "#D1D5DB",
-  },
-  secondaryBtnText: {
-    color: colors.GRAY700 ?? "#374151",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  secondaryDangerBtn: {
-    backgroundColor: colors.WHITE,
-    borderWidth: 1,
-    borderColor: "#FCA5A5",
-  },
-  secondaryDangerBtnText: {
-    color: colors.RED,
-    fontSize: 13,
-    fontWeight: "600",
+    color: colors.GRAY600,
   },
 });

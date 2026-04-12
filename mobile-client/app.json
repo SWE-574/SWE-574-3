@@ -14,7 +14,14 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.diclenaz.thehive"
+      "bundleIdentifier": "com.apiary.thehive",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "entitlements": {
+        "aps-environment": "production"
+      },
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,13 +30,30 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.diclenaz.thehive"
+      "package": "com.apiary.thehive",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./src/assets/icon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-asset",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Konum secimi icin mevcut konumuna erismemize izin ver."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./src/assets/icon.png",
+          "color": "#2D5C4E"
+        }
+      ],
+      "@react-native-firebase/app",
+      "./plugins/withModularHeaders"
     ],
     "extra": {
       "eas": {

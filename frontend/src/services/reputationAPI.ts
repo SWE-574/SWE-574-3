@@ -21,6 +21,21 @@ export interface SubmitCombinedEvaluationPayload {
   comment?: string
 }
 
+export interface SubmitCombinedEventEvaluationPayload {
+  handshake_id: string
+  positive: {
+    well_organized: boolean
+    engaging: boolean
+    welcoming: boolean
+  }
+  negative: {
+    disorganized: boolean
+    boring: boolean
+    unwelcoming: boolean
+  }
+  comment?: string
+}
+
 export interface SubmitCombinedEvaluationResult {
   positive?: PositiveReputationResponse
   negative?: NegativeReputationResponse
@@ -34,7 +49,24 @@ function hasNegativeTraits(data: NegativeReputationData): boolean {
   return Boolean(data.is_late || data.is_unhelpful || data.is_rude)
 }
 
+function hasPositiveEventTraits(p: SubmitCombinedEventEvaluationPayload['positive']): boolean {
+  return Boolean(p.well_organized || p.engaging || p.welcoming)
+}
+
+function hasNegativeEventTraits(n: SubmitCombinedEventEvaluationPayload['negative']): boolean {
+  return Boolean(n.disorganized || n.boring || n.unwelcoming)
+}
+
 export const reputationAPI = {
+  attachReviewImages: async (handshakeId: string, images: File[]): Promise<void> => {
+    const fd = new FormData()
+    fd.append('handshake_id', handshakeId)
+    images.forEach((img) => fd.append('images', img))
+    await apiClient.post('/reputation/add-review/', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
   submitPositive: async (payload: ReputationData): Promise<PositiveReputationResponse> => {
     const res = await apiClient.post<PositiveReputationResponse>('/reputation/', payload)
     return res.data
@@ -78,6 +110,44 @@ export const reputationAPI = {
       }
       if (hasNegative) {
         result.negative = await reputationAPI.submitNegative(negativePayload)
+      }
+    } catch (error) {
+      throw new Error(getErrorMessage(error, 'Failed to submit evaluation.'))
+    }
+
+    return result
+  },
+
+  submitCombinedEvent: async (
+    payload: SubmitCombinedEventEvaluationPayload,
+  ): Promise<SubmitCombinedEvaluationResult> => {
+    const hasPositive = hasPositiveEventTraits(payload.positive)
+    const hasNegative = hasNegativeEventTraits(payload.negative)
+
+    if (!hasPositive && !hasNegative) {
+      throw new Error('Select at least one trait before submitting.')
+    }
+
+    const result: SubmitCombinedEvaluationResult = {}
+
+    try {
+      if (hasPositive) {
+        result.positive = await reputationAPI.submitPositive({
+          handshake_id: payload.handshake_id,
+          well_organized: payload.positive.well_organized,
+          engaging: payload.positive.engaging,
+          welcoming: payload.positive.welcoming,
+          comment: payload.comment?.trim() || undefined,
+        })
+      }
+      if (hasNegative) {
+        result.negative = await reputationAPI.submitNegative({
+          handshake_id: payload.handshake_id,
+          disorganized: payload.negative.disorganized,
+          boring: payload.negative.boring,
+          unwelcoming: payload.negative.unwelcoming,
+          comment: payload.comment?.trim() || undefined,
+        })
       }
     } catch (error) {
       throw new Error(getErrorMessage(error, 'Failed to submit evaluation.'))

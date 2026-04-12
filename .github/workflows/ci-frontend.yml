@@ -8,9 +8,13 @@ on:
     branches: [dev]
     paths: ["frontend/**", ".github/workflows/ci-frontend.yml"]
 
+permissions:
+  contents: read
+
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -43,9 +47,17 @@ jobs:
         working-directory: frontend
         run: npx tsc --noEmit -p tsconfig.app.json
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         working-directory: frontend
-        run: npm run test -- --run
+        run: npm run test -- --run --coverage
+
+      - name: Upload test coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          retention-days: 14
 
       - name: Type-check & build
         working-directory: frontend

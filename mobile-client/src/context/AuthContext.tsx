@@ -5,6 +5,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { UserSummary } from "../api/types";
 import * as authApi from "../api/auth";
+import { useNotificationStore } from "../store/useNotificationStore";
 import type { LoginRequest, RegisterRequest } from "../api/auth";
 import { getMe } from "../api/users";
 import { getStoredTokens } from "../api/storage";
@@ -34,7 +35,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const u = await getMe();
       setUser(u);
     } catch {
-      setUser(null);
+      const refresh = getRefreshToken();
+      if (refresh) {
+        try {
+          await authApi.refresh({ refresh });
+          const u = await getMe();
+          setUser(u);
+        } catch {
+          await authApi.logout();
+          setUser(null);
+        }
+      } else {
+        await authApi.logout();
+        setUser(null);
+      }
     }
   }, []);
 
@@ -50,6 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     await authApi.logout();
+    useNotificationStore.getState().reset();
     setUser(null);
   }, []);
 
@@ -75,7 +90,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (!cancelled) setUser(u);
           } catch {
             await authApi.logout();
+            if (!cancelled) setUser(null);
           }
+        } else if (!cancelled) {
+          await authApi.logout();
+          setUser(null);
         }
       }
       if (!cancelled) setIsLoading(false);

@@ -2,6 +2,21 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def seed_badges(db):
+    """Pre-create all badge rows so that check_and_assign_badges() never hits
+    Badge.objects.get_or_create with non-model fields from BADGE_DEFAULTS."""
+    from api.badge_utils import BADGE_DEFAULTS
+    from api.models import Badge
+
+    MODEL_FIELDS = {'name', 'description', 'icon_url'}
+    for badge_id, meta in BADGE_DEFAULTS.items():
+        Badge.objects.get_or_create(
+            id=badge_id,
+            defaults={k: v for k, v in meta.items() if k in MODEL_FIELDS},
+        )
+
+
+@pytest.fixture(autouse=True)
 def clear_django_cache():
     from django.core.cache import cache
     cache.clear()

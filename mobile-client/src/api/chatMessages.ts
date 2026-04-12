@@ -27,6 +27,7 @@ export interface ChatMessagesResponse {
 
 export interface ChatMessage {
   id: string;
+  sender?: string;
   sender_id?: string;
   sender_name?: string;
   body?: string;
@@ -52,6 +53,18 @@ export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
   const created_at =
     typeof raw.created_at === "string" ? raw.created_at : new Date().toISOString();
   const author = raw.author;
+  const sender =
+    typeof raw.sender === "string"
+      ? raw.sender
+      : typeof raw.sender === "number"
+        ? String(raw.sender)
+        : undefined;
+  const sender_id =
+    typeof raw.sender_id === "string"
+      ? raw.sender_id
+      : typeof raw.sender_id === "number"
+        ? String(raw.sender_id)
+        : undefined;
   const sender_name =
     typeof raw.sender_name === "string"
       ? raw.sender_name
@@ -62,7 +75,8 @@ export function normalizeMessage(raw: Record<string, unknown>): ChatMessage {
           : undefined;
   return {
     id,
-    sender_id: raw.sender_id as string | undefined,
+    sender,
+    sender_id,
     sender_name,
     body,
     content: body,

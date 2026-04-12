@@ -4,13 +4,31 @@ import MessagesScreen from "../presentation/screens/MessagesScreen";
 import ChatScreen from "../presentation/screens/ChatScreen";
 import GroupChatScreen from "../presentation/screens/GroupChatScreen";
 import PublicChatScreen from "../presentation/screens/PublicChatScreen";
+import PublicProfileScreen from "../presentation/screens/PublicProfileScreen";
+import ServiceDetailScreen from "../presentation/screens/ServiceDetailScreen";
+import AchievementsListScreen from "../presentation/screens/AchievementsListScreen";
+import FollowListScreen from "../presentation/screens/FollowListScreen";
 
 export type MessagesStackParamList = {
   MessagesList: undefined;
   Chat: {
     handshakeId: string;
+    serviceId?: string;
     otherUserName: string;
     serviceTitle?: string;
+    otherUserId?: string;
+    otherUserAvatarUrl?: string;
+    isProvider?: boolean;
+    serviceType?: string;
+    scheduleType?: string;
+    maxParticipants?: number;
+    serviceLocationType?: string;
+    serviceLocationArea?: string | null;
+    serviceExactLocation?: string | null;
+    serviceExactLocationMapsUrl?: string | null;
+    serviceLocationGuide?: string | null;
+    serviceScheduledTime?: string | null;
+    provisionedHours?: number;
   };
   GroupChat: {
     groupId: string;
@@ -20,6 +38,12 @@ export type MessagesStackParamList = {
     roomId: string;
     roomTitle?: string;
   };
+  UserPublicProfile: {
+    userId: string;
+  };
+  ServiceDetail: { id: string };
+  AchievementsList: { userId: string };
+  FollowList: { userId: string; kind: "followers" | "following" };
 };
 
 const Stack = createNativeStackNavigator<MessagesStackParamList>();
@@ -55,6 +79,22 @@ export default function MessagesStack() {
         component={PublicChatScreen}
         options={{ title: "Event chat" }}
       />
+      <Stack.Screen
+        name="ServiceDetail"
+        component={ServiceDetailScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="UserPublicProfile"
+        component={PublicProfileScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="AchievementsList"
+        component={AchievementsListScreen}
+        options={{ title: "Achievements" }}
+      />
+      <Stack.Screen name="FollowList" component={FollowListScreen} />
     </Stack.Navigator>
   );
 }

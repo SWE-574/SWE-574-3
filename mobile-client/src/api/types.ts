@@ -25,6 +25,57 @@ export interface UserSummary {
   badges?: string[];
   featured_badge?: string | null;
   featured_achievement_id?: string | null;
+  /** When false, other users should not see exchange history (web parity). */
+  show_history?: boolean;
+  is_verified?: boolean;
+  is_onboarded?: boolean;
+  is_organizer_banned_until?: string | null;
+  followers_count?: number;
+  following_count?: number;
+}
+
+/**
+ * Fields from GET /users/{id}/ for another user (`PublicUserProfileSerializer`)
+ * that the mobile public profile screen consumes. The API may return more keys.
+ */
+export interface PublicUserProfile {
+  id: string;
+  first_name?: string;
+  last_name?: string;
+  bio?: string | null;
+  avatar_url?: string | null;
+  banner_url?: string | null;
+  location?: string | null;
+  karma_score?: number;
+  date_joined?: string;
+  helpful_count?: number;
+  kind_count?: number;
+  punctual_count?: number;
+  badges?: string[];
+  achievements?: string[];
+  skills?: Array<{ id: string; name: string }>;
+  portfolio_images?: string[];
+  /** Public exchange history visibility; when false, do not fetch history for viewers. */
+  show_history?: boolean;
+  /** Present for authenticated viewers; whether the current user follows this profile. */
+  is_following?: boolean;
+  followers_count?: number;
+  following_count?: number;
+}
+
+/** GET /users/{id}/history/ row shape (web `UserHistoryItem`). */
+export interface UserHistoryItem {
+  service_id: string;
+  service_title: string;
+  service_type: "Offer" | "Need" | "Event";
+  schedule_type: "One-Time" | "Recurrent";
+  max_participants: number;
+  duration: number | string;
+  partner_name: string;
+  partner_id: string;
+  partner_avatar_url?: string | null;
+  completed_date: string;
+  was_provider: boolean;
 }
 
 export interface Tag {
@@ -37,6 +88,30 @@ export type ServiceType = "Offer" | "Need" | "Event";
 export type ServiceStatus = "Active" | "Completed" | "Cancelled" | string;
 export type LocationType = "In-Person" | "Online" | "remote" | string;
 export type ScheduleType = "One-Time" | "Recurrent" | string;
+
+export interface EventEvaluationSummary {
+  total_attended: number;
+  positive_feedback_count: number;
+  negative_feedback_count: number;
+  unique_evaluator_count: number;
+  positive_score_total: number;
+  negative_score_total: number;
+  well_organized_count: number;
+  engaging_count: number;
+  welcoming_count: number;
+  disorganized_count: number;
+  boring_count: number;
+  unwelcoming_count: number;
+  well_organized_average: number;
+  engaging_average: number;
+  welcoming_average: number;
+  disorganized_average: number;
+  boring_average: number;
+  unwelcoming_average: number;
+  organizer_event_hot_score: number;
+  feedback_submission_count: number;
+  updated_at: string;
+}
 
 export interface Service {
   id: string;
@@ -53,13 +128,26 @@ export interface Service {
   max_participants: number;
   schedule_type?: ScheduleType;
   schedule_details?: string | null;
+  scheduled_time?: string | null;
   participant_count?: number;
   created_at: string;
   tags: Tag[];
   comment_count?: number;
   hot_score?: number;
   is_visible?: boolean;
-  media?: unknown[];
+  is_pinned?: boolean;
+  session_exact_location?: string | null;
+  session_exact_location_lat?: string | null;
+  session_exact_location_lng?: string | null;
+  session_location_guide?: string | null;
+  event_completed_at?: string | null;
+  event_evaluation_summary?: EventEvaluationSummary | null;
+  media?: Array<{
+    id: string;
+    file_url: string;
+    media_type?: string;
+    display_order?: number;
+  }>;
 }
 
 export interface TokenPair {

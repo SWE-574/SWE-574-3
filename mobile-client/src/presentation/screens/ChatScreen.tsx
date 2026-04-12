@@ -17,7 +17,15 @@ import {
   StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRoute, useNavigation } from "@react-navigation/native";
+import {
+  useRoute,
+  useNavigation,
+  type CompositeNavigationProp,
+} from "@react-navigation/native";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { MessagesStackParamList } from "../../navigation/MessagesStack";
+import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 import {
@@ -26,6 +34,7 @@ import {
   type ChatMessagesResponse,
 } from "../../api/chatMessages";
 import { getChat } from "../../api/chats";
+import { initiateHandshake, reportHandshake } from "../../api/handshakes";
 import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import { formatStatusLabel } from "../../utils/chatUtils";
@@ -35,22 +44,63 @@ import type {
   ChatMessageWithMeta,
   NavProps,
 } from "../../types/chatTypes";
+
+type ChatScreenNavigation = CompositeNavigationProp<
+  NativeStackNavigationProp<MessagesStackParamList, "Chat">,
+  BottomTabNavigationProp<BottomTabParamList>
+>;
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
 import { useHandshake } from "../../hooks/useHandshake";
 import { ChatMessageBubble } from "../components/chat/ChatMessageBubble";
 import { ChatHandshakeBanner } from "../components/chat/ChatHandshakeBanner";
+import type { SessionDetails } from "../components/chat/ChatHandshakeBanner";
+import { ChatApproveDetailsModal } from "../components/chat/ChatApproveDetailsModal";
+import { ChatSessionDetailsModal } from "../components/chat/ChatSessionDetailsModal";
+import { ChatEvaluationModal } from "../components/chat/ChatEvaluationModal";
+import { ChatInitiateHandshakeModal } from "../components/chat/ChatInitiateHandshakeModal";
 import { ChatInputBar } from "../components/chat/ChatInputBar";
 import { ChatTopMeta } from "../components/chat/ChatTopMeta";
+import { ChatStepBar } from "../components/chat/ChatStepBar";
 
 export default function ChatScreen() {
   const { params } = useRoute<NavProps["route"]>();
-  const navigation = useNavigation<NavProps["navigation"]>();
+  const navigation = useNavigation<ChatScreenNavigation>();
   const { user } = useAuth();
 
-  const { handshakeId, otherUserName, serviceTitle } = params ?? {
+  const {
+    handshakeId,
+    serviceId,
+    otherUserName,
+    serviceTitle,
+    otherUserId,
+    otherUserAvatarUrl,
+    isProvider,
+    serviceType,
+    scheduleType,
+    maxParticipants,
+    serviceLocationType,
+    serviceLocationArea,
+    serviceExactLocation,
+    serviceLocationGuide,
+    serviceScheduledTime,
+    provisionedHours,
+  } = params ?? {
     handshakeId: "",
+    serviceId: undefined,
     otherUserName: "Chat",
     serviceTitle: undefined,
+    otherUserId: undefined,
+    otherUserAvatarUrl: undefined,
+    isProvider: undefined,
+    serviceType: undefined,
+    scheduleType: undefined,
+    maxParticipants: undefined,
+    serviceLocationType: undefined,
+    serviceLocationArea: undefined,
+    serviceExactLocation: undefined,
+    serviceLocationGuide: undefined,
+    serviceScheduledTime: undefined,
+    provisionedHours: undefined,
   };
 
   const [messages, setMessages] = useState<ChatMessageWithMeta[]>([]);
@@ -61,14 +111,48 @@ export default function ChatScreen() {
   const [handshakeLoading, setHandshakeLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<ActionType | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [showInitiateModal, setShowInitiateModal] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [showSessionDetailsModal, setShowSessionDetailsModal] = useState(false);
+  const [showEvaluationModal, setShowEvaluationModal] = useState(false);
 
   const listRef = useRef<FlatList<ChatMessageWithMeta>>(null);
 
   const currentUserId = user?.id ? String(user.id) : undefined;
   const currentUserEmail = user?.email;
+  const handshakeRecord = handshake as Record<string, unknown> | null;
 
-  const title = useMemo(() => otherUserName || "Messages", [otherUserName]);
-  const subtitle = useMemo(() => serviceTitle ?? undefined, [serviceTitle]);
+  const title = useMemo(
+    () => serviceTitle || otherUserName || "Messages",
+    [otherUserName, serviceTitle],
+  );
+  const isCurrentUserServiceOwner = useMemo(() => {
+    const liveServiceType =
+      typeof handshakeRecord?.service_type === "string"
+        ? handshakeRecord.service_type
+        : serviceType;
+    const liveIsCurrentUserProvider =
+      typeof handshakeRecord?.is_current_user_provider === "boolean"
+        ? (handshakeRecord.is_current_user_provider as boolean)
+        : isProvider;
+
+    if (typeof liveIsCurrentUserProvider !== "boolean") return false;
+    const isOffer =
+      liveServiceType?.toLowerCase() !== "need" &&
+      liveServiceType?.toLowerCase() !== "want";
+    return isOffer ? liveIsCurrentUserProvider : !liveIsCurrentUserProvider;
+  }, [handshakeRecord, isProvider, serviceType]);
+
+  const openOtherUserPublicProfile = useCallback(() => {
+    if (!otherUserId) return;
+    // Navigate within the Messages stack so a proper back button is rendered
+    navigation.navigate("UserPublicProfile", { userId: otherUserId });
+  }, [navigation, otherUserId]);
+
+  const openServiceDetail = useCallback(() => {
+    if (!serviceId) return;
+    navigation.navigate("ServiceDetail", { id: serviceId });
+  }, [navigation, serviceId]);
 
   const scrollToBottom = useCallback((animated = true) => {
     requestAnimationFrame(() => {
@@ -148,17 +232,27 @@ export default function ChatScreen() {
   const {
     handshakeStatus,
     canSendMessages,
+    canInitiatePending,
     canApprovePending,
-    canDeclinePending,
     canCancelPending,
     canConfirmCompletion,
+    canRequestCancellation,
+    canRespondToCancellation,
+    cancellationRequestedByName,
+    hasCancellationRequest,
     isAwaitingSecondConfirmationLike,
+    isPendingLike,
+    isAcceptedLike,
+    isCompletedLike,
+    isClosedLike,
+    providerInitiated,
     loadHandshake,
     runHandshakeAction,
     handshakeBanner,
   } = useHandshake({
     handshakeId,
     handshake,
+    isCurrentUserServiceOwner,
     setHandshake,
     handshakeLoading,
     setHandshakeLoading,
@@ -193,10 +287,176 @@ export default function ChatScreen() {
 
   useEffect(() => {
     navigation.setOptions({
-      headerTitle: title,
+      headerTitle: () => (
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerTitleText} numberOfLines={1}>
+            {title}
+          </Text>
+          {!!serviceType ? (
+            <View style={styles.headerTypeBadge}>
+              <Text style={styles.headerTypeBadgeText}>{serviceType}</Text>
+            </View>
+          ) : null}
+        </View>
+      ),
       headerBackTitle: "Back",
     });
-  }, [navigation, title]);
+  }, [navigation, serviceType, title]);
+
+  const sessionDetails = useMemo<SessionDetails | null>(() => {
+    if (!handshake) return null;
+    const shouldShowDetails = isAcceptedLike || (isPendingLike && providerInitiated);
+    if (!shouldShowDetails) return null;
+    const h = handshake as Record<string, unknown>;
+    return {
+      exact_location: (h.exact_location as string | null) ?? null,
+      scheduled_time: (h.scheduled_time as string | null) ?? null,
+      exact_duration: (h.exact_duration as number | null) ?? null,
+      provisioned_hours: (h.provisioned_hours as number | null) ?? null,
+      exact_location_maps_url:
+        (h.exact_location_maps_url as string | null) ?? null,
+      exact_location_guide:
+        (h.exact_location_guide as string | null) ?? null,
+      is_online: (h.service_location_type as string | null) === "Online",
+    };
+  }, [handshake, isAcceptedLike, isPendingLike, providerInitiated]);
+
+  const completionState = useMemo(() => {
+    if (!handshake) {
+      return {
+        myConfirmed: false,
+        otherConfirmed: false,
+        counterpartName: otherUserName,
+      };
+    }
+
+    const h = handshake as Record<string, unknown>;
+    const isCurrentUserProvider =
+      typeof h.is_current_user_provider === "boolean"
+        ? (h.is_current_user_provider as boolean)
+        : typeof isProvider === "boolean"
+          ? isProvider
+          : false;
+    const providerConfirmed = !!h.provider_confirmed_complete;
+    const receiverConfirmed = !!h.receiver_confirmed_complete;
+    const counterpart = h.counterpart as
+      | { first_name?: string; last_name?: string; email?: string }
+      | undefined;
+    const counterpartName =
+      [counterpart?.first_name, counterpart?.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim() ||
+      counterpart?.email ||
+      otherUserName;
+
+    return {
+      myConfirmed: isCurrentUserProvider ? providerConfirmed : receiverConfirmed,
+      otherConfirmed: isCurrentUserProvider ? receiverConfirmed : providerConfirmed,
+      counterpartName,
+    };
+  }, [handshake, isProvider, otherUserName]);
+
+  const displayHandshakeBanner = useMemo(() => {
+    if (hasCancellationRequest) {
+      return {
+        tone: "danger" as const,
+        title: "Cancellation requested",
+        description: cancellationRequestedByName
+          ? `${cancellationRequestedByName} requested cancellation for this exchange.`
+          : "There is an active cancellation request for this exchange.",
+      };
+    }
+
+    if (completionState.myConfirmed || completionState.otherConfirmed) {
+      return {
+        tone: "success" as const,
+        title: "Exchange completed",
+        description:
+          completionState.myConfirmed && completionState.otherConfirmed
+            ? "Both sides confirmed completion."
+            : "The exchange has entered the completion stage. Open details to review the final actions.",
+      };
+    }
+
+    return handshakeBanner;
+  }, [
+    cancellationRequestedByName,
+    completionState.myConfirmed,
+    completionState.otherConfirmed,
+    handshakeBanner,
+    hasCancellationRequest,
+  ]);
+
+  const evaluationWindow = useMemo(() => {
+    const h = handshake as Record<string, unknown> | null;
+    const userHasReviewed = Boolean(h?.user_has_reviewed);
+    const liveServiceType =
+      typeof h?.service_type === "string" ? h.service_type : serviceType;
+    const isEventEvaluation = String(liveServiceType ?? "").toLowerCase() === "event";
+    const statusValue = typeof h?.status === "string" ? h.status.toLowerCase() : "";
+    const eligibleStatus = statusValue === "completed";
+
+    if (!eligibleStatus || userHasReviewed) {
+      return {
+        isOpen: false,
+        label: userHasReviewed ? "Already reviewed" : null,
+        isEventEvaluation,
+        userHasReviewed,
+      };
+    }
+
+    let deadlineMs: number | null = null;
+    if (typeof h?.evaluation_window_ends_at === "string" && h.evaluation_window_ends_at) {
+      const parsed = new Date(h.evaluation_window_ends_at).getTime();
+      if (!Number.isNaN(parsed)) deadlineMs = parsed;
+    } else if (
+      typeof h?.evaluation_window_starts_at === "string" &&
+      h.evaluation_window_starts_at
+    ) {
+      const start = new Date(h.evaluation_window_starts_at).getTime();
+      if (!Number.isNaN(start)) deadlineMs = start + 48 * 60 * 60 * 1000;
+    }
+
+    if (typeof h?.evaluation_window_closed_at === "string" && h.evaluation_window_closed_at) {
+      return {
+        isOpen: false,
+        label: "Evaluation window closed",
+        isEventEvaluation,
+        userHasReviewed,
+      };
+    }
+
+    if (deadlineMs == null) {
+      return {
+        isOpen: true,
+        label: "48h window active",
+        isEventEvaluation,
+        userHasReviewed,
+      };
+    }
+
+    const remainingMs = deadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      return {
+        isOpen: false,
+        label: "Evaluation window closed",
+        isEventEvaluation,
+        userHasReviewed,
+      };
+    }
+
+    const totalMinutes = Math.ceil(remainingMs / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    return {
+      isOpen: true,
+      label: `${hours}h ${minutes}m left`,
+      isEventEvaluation,
+      userHasReviewed,
+    };
+  }, [handshake, serviceType]);
 
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
@@ -206,6 +466,52 @@ export default function ChatScreen() {
       setRefreshing(false);
     }
   }, [loadHandshake, loadMessages]);
+
+  const handleInitiateHandshake = useCallback(
+    async (payload: {
+      exact_location: string;
+      exact_duration: number;
+      scheduled_time: string;
+      exact_location_lat?: number;
+      exact_location_lng?: number;
+    }) => {
+      setActionError(null);
+      setActionLoading("initiate");
+      try {
+        const updated = await initiateHandshake(handshakeId, payload);
+        setHandshake(updated);
+        await Promise.all([loadHandshake(), loadMessages()]);
+      } catch (e) {
+        console.error("Failed to initiate handshake:", e);
+        const message =
+          e instanceof Error ? e.message : "Failed to initiate handshake.";
+        setActionError(message);
+        throw e;
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [handshakeId, loadHandshake, loadMessages],
+  );
+
+  const handleReportParticipant = useCallback(async () => {
+    if (!handshakeId || actionLoading) return;
+    setActionError(null);
+    setActionLoading("reportParticipant");
+    try {
+      await reportHandshake(handshakeId, {
+        issue_type: "other",
+        description: "",
+      });
+      await Promise.all([loadHandshake(), loadMessages()]);
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Failed to report participant.";
+      setActionError(message);
+    } finally {
+      setActionLoading(null);
+    }
+  }, [actionLoading, handshakeId, loadHandshake, loadMessages]);
 
   const sendMessage = useCallback(() => {
     const text = inputText.trim();
@@ -235,7 +541,7 @@ export default function ChatScreen() {
       content: text,
       created_at: now,
       sender_id: currentUserId,
-      sender: currentUserEmail,
+      sender: currentUserId,
       sender_name: displayName,
       handshake_id: handshakeId,
       pending: true,
@@ -276,7 +582,10 @@ export default function ChatScreen() {
   const isOwnMessage = useCallback(
     (item: ChatMessageWithMeta) => {
       if (currentUserId && item.sender_id) {
-        return currentUserId === item.sender_id;
+        return String(currentUserId) === String(item.sender_id);
+      }
+      if (currentUserId && item.sender) {
+        return String(currentUserId) === String(item.sender);
       }
       if (currentUserEmail && item.sender) {
         return currentUserEmail === item.sender;
@@ -290,8 +599,11 @@ export default function ChatScreen() {
     ({ item, index }: { item: ChatMessageWithMeta; index: number }) => {
       const own = isOwnMessage(item);
       const previous = messages[index - 1];
+      const previousOwn = previous ? isOwnMessage(previous) : false;
+      const previousSenderKey = String(previous?.sender_id ?? previous?.sender ?? "");
+      const currentSenderKey = String(item.sender_id ?? item.sender ?? "");
       const showAvatar =
-        !own && (!previous || previous.sender_id !== item.sender_id);
+        !own && (!previous || previousOwn || previousSenderKey !== currentSenderKey);
       const senderName = item.sender_name ?? otherUserName;
       const avatarUrl = item.sender_avatar_url;
 
@@ -318,25 +630,56 @@ export default function ChatScreen() {
       >
         <ChatTopMeta
           otherUserName={otherUserName}
-          subtitle={subtitle}
+          otherUserAvatarUrl={otherUserAvatarUrl}
+          serviceTitle={serviceTitle}
           handshakeStatus={handshakeStatus}
           formatStatusLabel={formatStatusLabel}
           connected={connected}
           reconnectAttempts={reconnectAttempts}
+          onViewProfile={
+            otherUserId ? openOtherUserPublicProfile : undefined
+          }
+          onOpenService={serviceId ? openServiceDetail : undefined}
+        />
+
+        <ChatStepBar
+          isPending={isPendingLike}
+          isAccepted={isAcceptedLike}
+          isCompleted={isCompletedLike}
+          isClosed={isClosedLike}
+          providerInitiated={providerInitiated}
         />
 
         <ChatHandshakeBanner
-          banner={handshakeBanner}
+          banner={displayHandshakeBanner}
+          canInitiatePending={canInitiatePending}
           canApprovePending={canApprovePending}
-          canDeclinePending={canDeclinePending}
           canCancelPending={canCancelPending}
           canConfirmCompletion={canConfirmCompletion}
+          canRequestCancellation={canRequestCancellation}
+          canRespondToCancellation={canRespondToCancellation}
+          hasCancellationRequest={hasCancellationRequest}
+          cancellationRequestedByName={cancellationRequestedByName}
+          canReportNoShow={isAcceptedLike || isAwaitingSecondConfirmationLike}
+          hasSessionDetails={!!sessionDetails}
+          canLeaveEvaluation={evaluationWindow.isOpen}
+          evaluationLabel={evaluationWindow.label}
           isAwaitingSecondConfirmationLike={isAwaitingSecondConfirmationLike}
+          myConfirmed={completionState.myConfirmed}
+          otherConfirmed={completionState.otherConfirmed}
+          counterpartName={completionState.counterpartName}
           actionLoading={actionLoading}
-          onApprove={() => runHandshakeAction("approve")}
-          onDecline={() => runHandshakeAction("decline")}
+          sessionDetails={sessionDetails}
+          onInitiate={() => setShowInitiateModal(true)}
+          onReviewApprove={() => setShowApproveModal(true)}
+          onOpenSessionDetails={() => setShowSessionDetailsModal(true)}
           onCancel={() => runHandshakeAction("cancel")}
           onConfirm={() => runHandshakeAction("confirm")}
+          onRequestCancellation={() => runHandshakeAction("requestCancellation")}
+          onApproveCancellation={() => runHandshakeAction("approveCancellation")}
+          onRejectCancellation={() => runHandshakeAction("rejectCancellation")}
+          onReportNoShow={handleReportParticipant}
+          onOpenEvaluation={() => setShowEvaluationModal(true)}
         />
 
         {error ? (
@@ -410,12 +753,153 @@ export default function ChatScreen() {
           editable={connected && canSendMessages}
           sendDisabled={!connected || !canSendMessages || !inputText.trim()}
         />
+
+        <ChatInitiateHandshakeModal
+          visible={showInitiateModal}
+          onClose={() => setShowInitiateModal(false)}
+          onSubmit={handleInitiateHandshake}
+          serviceType={serviceType}
+          scheduleType={scheduleType}
+          maxParticipants={maxParticipants}
+          serviceLocationType={
+            serviceLocationType ??
+            ((handshake as Record<string, unknown> | null)?.service_location_type as
+              | string
+              | undefined)
+          }
+          serviceLocationArea={serviceLocationArea}
+          serviceExactLocation={serviceExactLocation}
+          serviceLocationGuide={serviceLocationGuide}
+          serviceScheduledTime={serviceScheduledTime}
+          provisionedHours={
+            provisionedHours ??
+            ((handshake as Record<string, unknown> | null)?.provisioned_hours as
+              | number
+              | undefined)
+          }
+        />
+
+        <ChatApproveDetailsModal
+          visible={showApproveModal}
+          sessionDetails={sessionDetails}
+          actionLoading={
+            actionLoading === "approve" || actionLoading === "decline"
+              ? actionLoading
+              : null
+          }
+          onClose={() => setShowApproveModal(false)}
+          onApprove={() => {
+            setShowApproveModal(false);
+            runHandshakeAction("approve");
+          }}
+          onDecline={() => {
+            setShowApproveModal(false);
+            runHandshakeAction("decline");
+          }}
+        />
+
+        <ChatSessionDetailsModal
+          visible={showSessionDetailsModal}
+          sessionDetails={sessionDetails}
+          bannerTitle={handshakeBanner.title}
+          bannerDescription={handshakeBanner.description}
+          canInitiatePending={canInitiatePending}
+          canApprovePending={canApprovePending}
+          canCancelPending={canCancelPending}
+          canConfirmCompletion={canConfirmCompletion}
+          isAwaitingSecondConfirmationLike={isAwaitingSecondConfirmationLike}
+          myConfirmed={completionState.myConfirmed}
+          otherConfirmed={completionState.otherConfirmed}
+          counterpartName={completionState.counterpartName}
+          hasCancellationRequest={hasCancellationRequest}
+          cancellationRequestedByName={cancellationRequestedByName}
+          canRequestCancellation={canRequestCancellation}
+          canRespondToCancellation={canRespondToCancellation}
+          canReportParticipant={isAcceptedLike || isAwaitingSecondConfirmationLike}
+          canLeaveEvaluation={evaluationWindow.isOpen}
+          evaluationLabel={evaluationWindow.label}
+          actionLoading={actionLoading}
+          onClose={() => setShowSessionDetailsModal(false)}
+          onInitiate={() => {
+            setShowSessionDetailsModal(false);
+            setShowInitiateModal(true);
+          }}
+          onReviewApprove={() => {
+            setShowSessionDetailsModal(false);
+            runHandshakeAction("approve");
+          }}
+          onCancel={() => {
+            setShowSessionDetailsModal(false);
+            runHandshakeAction("cancel");
+          }}
+          onConfirm={() => {
+            setShowSessionDetailsModal(false);
+            runHandshakeAction("confirm");
+          }}
+          onRequestCancellation={() => {
+            setShowSessionDetailsModal(false);
+            runHandshakeAction("requestCancellation");
+          }}
+          onApproveCancellation={() => {
+            setShowSessionDetailsModal(false);
+            runHandshakeAction("approveCancellation");
+          }}
+          onRejectCancellation={() => {
+            setShowSessionDetailsModal(false);
+            runHandshakeAction("rejectCancellation");
+          }}
+          onReportParticipant={() => {
+            setShowSessionDetailsModal(false);
+            void handleReportParticipant();
+          }}
+          onOpenEvaluation={() => {
+            setShowSessionDetailsModal(false);
+            setShowEvaluationModal(true);
+          }}
+        />
+
+        <ChatEvaluationModal
+          visible={showEvaluationModal}
+          handshakeId={handshakeId}
+          counterpartName={completionState.counterpartName}
+          isEventEvaluation={evaluationWindow.isEventEvaluation}
+          alreadyReviewed={evaluationWindow.userHasReviewed}
+          onClose={() => setShowEvaluationModal(false)}
+          onSubmitted={refreshAll}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  headerTitleWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    maxWidth: 240,
+  },
+  headerTitleText: {
+    flexShrink: 1,
+    fontSize: 17,
+    fontWeight: "700",
+    color: colors.GRAY900,
+  },
+  headerTypeBadge: {
+    minHeight: 22,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    backgroundColor: colors.BLUE_LT,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTypeBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.BLUE,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.WHITE,

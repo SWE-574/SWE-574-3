@@ -17,6 +17,9 @@ from .views import (
     UserHistoryView,
     UserBadgeProgressView,
     UserVerifiedReviewsView,
+    UserFollowView,
+    UserFollowersListView,
+    UserFollowingListView,
     ServiceViewSet,
     TagViewSet,
     HandshakeViewSet,
@@ -27,6 +30,7 @@ from .views import (
     AdminUserViewSet,
     AdminCommentViewSet,
     AdminAuditLogViewSet,
+    AdminSettingsView,
     ExpressInterestView,
     TransactionHistoryViewSet,
     WikidataSearchView,
@@ -37,6 +41,7 @@ from .views import (
     ForumCategoryViewSet,
     ForumTopicViewSet,
     ForumPostViewSet,
+    ForumActivityView,
     LogoutView,
     WsTokenView,
     ChangePasswordView,
@@ -45,11 +50,13 @@ from .views import (
     VerifyEmailView,
     SendVerificationEmailView,
     ResendVerificationView,
+    E2ESetBalanceView,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .views import CustomTokenObtainPairView
 from .views import CustomTokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+from .views_featured import FeaturedView
 
 router = DefaultRouter()
 router.register(r'services', ServiceViewSet, basename='service')
@@ -146,10 +153,7 @@ def metrics_endpoint(request):
     from api.models import User, Service, Handshake, TransactionHistory
     from django.db.models import Count, Q
     
-    is_admin = (
-        getattr(request.user, 'role', None) == 'admin'
-        or bool(getattr(request.user, 'is_staff', False))
-    )
+    is_admin = getattr(request.user, 'role', None) in ('admin', 'super_admin', 'moderator')
 
     if not request.user.is_authenticated or not is_admin:
         return JsonResponse(
@@ -267,6 +271,10 @@ forum_post_report = ForumPostViewSet.as_view({
     'post': 'report'
 })
 
+forum_post_restore = ForumPostViewSet.as_view({
+    'post': 'restore'
+})
+
 forum_post_recent = ForumPostViewSet.as_view({
     'get': 'recent'
 })
@@ -274,6 +282,7 @@ forum_post_recent = ForumPostViewSet.as_view({
 urlpatterns = [
     path('health/', health_check, name='health_check'),
     path('metrics/', metrics_endpoint, name='metrics'),
+    path('admin/settings/', AdminSettingsView.as_view(), name='admin-settings'),
     path('auth/register/', UserRegistrationView.as_view(), name='register'),
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
@@ -286,10 +295,15 @@ urlpatterns = [
     path('auth/send-verification/', SendVerificationEmailView.as_view(), name='send-verification'),
     path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
-    path('users/<uuid:id>/', UserProfileView.as_view(), name='user-detail'),
+    # Nested /users/<id>/… routes must be registered before the generic user-detail path
+    # so paths like …/follow/ are never mistaken for detail (defensive ordering).
+    path('users/<uuid:id>/follow/', UserFollowView.as_view(), name='user-follow'),
+    path('users/<uuid:id>/followers/', UserFollowersListView.as_view(), name='user-followers'),
+    path('users/<uuid:id>/following/', UserFollowingListView.as_view(), name='user-following'),
     path('users/<uuid:id>/history/', UserHistoryView.as_view(), name='user-history'),
     path('users/<uuid:id>/badge-progress/', UserBadgeProgressView.as_view(), name='user-badge-progress'),
     path('users/<uuid:id>/verified-reviews/', UserVerifiedReviewsView.as_view(), name='user-verified-reviews'),
+    path('users/<uuid:id>/', UserProfileView.as_view(), name='user-detail'),
     path('services/<uuid:service_id>/interest/', 
          ExpressInterestView.as_view(),
          name='express-interest'),
@@ -311,6 +325,7 @@ urlpatterns = [
     # Forum endpoints
     path('forum/categories/', forum_category_list, name='forum-category-list'),
     path('forum/categories/<slug:slug>/', forum_category_detail, name='forum-category-detail'),
+    path('forum/my-activity/', ForumActivityView.as_view(), name='forum-my-activity'),
     path('forum/topics/', forum_topic_list, name='forum-topic-list'),
     path('forum/topics/<uuid:pk>/', forum_topic_detail, name='forum-topic-detail'),
     path('forum/topics/<uuid:pk>/pin/', forum_topic_pin, name='forum-topic-pin'),
@@ -319,9 +334,14 @@ urlpatterns = [
     path('forum/topics/<uuid:topic_id>/posts/', forum_post_list_create, name='forum-post-list'),
     path('forum/posts/<uuid:pk>/', forum_post_detail, name='forum-post-detail'),
     path('forum/posts/<uuid:pk>/report/', forum_post_report, name='forum-post-report'),
+    path('forum/posts/<uuid:pk>/restore/', forum_post_restore, name='forum-post-restore'),
     path('forum/posts/recent/', forum_post_recent, name='forum-post-recent'),
+    # E2E test utilities (only active when DJANGO_E2E=1)
+    path('e2e/set-balance/', E2ESetBalanceView.as_view(), name='e2e-set-balance'),
+
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    path('featured/', FeaturedView.as_view(), name='featured'),
     path('', include(router.urls)),
 ]

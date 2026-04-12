@@ -14,15 +14,20 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/e2e',
 
-  /* No test-level parallelism — shared DB means ordering matters */
+  /* Three workers for CI — balances speed vs backend container load.
+     Each test authenticates via a fast API call (loginAs), so concurrent
+     sessions are lightweight.  Locally keep it at 1 for simplicity. */
   fullyParallel: false,
-  workers: 1,
+  workers: process.env.CI ? 3 : 1,
 
   /* Fail CI fast if someone left `.only` in a test file */
   forbidOnly: !!process.env.CI,
 
   /* Retry flaky tests only on CI */
   retries: process.env.CI ? 2 : 0,
+
+  /* CI Docker can be slow — give each test enough headroom */
+  timeout: process.env.CI ? 60_000 : 30_000,
 
   /* Reporters */
   reporter: [

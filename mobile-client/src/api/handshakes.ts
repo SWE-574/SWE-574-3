@@ -9,10 +9,31 @@ import type { PaginatedResponse } from './types';
 export interface Handshake {
   id: string;
   service: string | object;
+  service_id?: string;
+  service_title?: string;
+  service_type?: "Offer" | "Need" | "Event" | string | null;
+  schedule_type?: "One-Time" | "Recurrent" | string | null;
+  max_participants?: number | null;
   initiator?: string | object;
+  counterpart?: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    email: string;
+    avatar_url?: string | null;
+  } | null;
+  is_current_user_provider?: boolean;
+  provider_name?: string;
+  requester_name?: string;
+  provisioned_hours?: number | string | null;
+  requester?: string | object;
   status: string;
   created_at: string;
   updated_at?: string;
+  evaluation_window_starts_at?: string | null;
+  evaluation_window_ends_at?: string | null;
+  evaluation_window_closed_at?: string | null;
+  user_has_reviewed?: boolean;
   [key: string]: unknown;
 }
 
@@ -20,6 +41,8 @@ export interface HandshakeRequest {
   service: string;
   [key: string]: unknown;
 }
+
+export type HandshakeIssueType = 'no_show' | 'service_issue' | 'harassment' | 'spam' | 'scam' | 'other'
 
 export interface HandshakesListParams {
   page?: number;
@@ -79,7 +102,31 @@ export function initiateHandshake(id: string, body?: object): Promise<Handshake>
   return apiRequest<Handshake>(`/handshakes/${id}/initiate/`, { method: 'POST', body: body ?? {} });
 }
 
-export function reportHandshake(id: string, body?: { reason?: string }): Promise<unknown> {
+export function requestCancellationHandshake(id: string, body?: { reason?: string }): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/cancel-request/`, {
+    method: 'POST',
+    body: body ?? {},
+  });
+}
+
+export function approveCancellationHandshake(id: string, body?: object): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/cancel-request/approve/`, {
+    method: 'POST',
+    body: body ?? {},
+  });
+}
+
+export function rejectCancellationHandshake(id: string, body?: object): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/cancel-request/reject/`, {
+    method: 'POST',
+    body: body ?? {},
+  });
+}
+
+export function reportHandshake(
+  id: string,
+  body?: { issue_type?: HandshakeIssueType; description?: string; reported_user_id?: string },
+): Promise<unknown> {
   return apiRequest(`/handshakes/${id}/report/`, { method: 'POST', body: body ?? {} });
 }
 
@@ -89,4 +136,22 @@ export function requestHandshakeChanges(id: string, body?: object): Promise<Hand
 
 export function handshakeServiceInterest(serviceId: string, body?: object): Promise<unknown> {
   return apiRequest(`/handshakes/services/${serviceId}/interest/`, { method: 'POST', body: body ?? {} });
+}
+
+// ─── Event actions ────────────────────────────────────────────────────────
+
+export function joinEvent(serviceId: string): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/services/${serviceId}/join-event/`, { method: 'POST', body: {} });
+}
+
+export function leaveEvent(id: string): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/leave-event/`, { method: 'POST', body: {} });
+}
+
+export function checkinEvent(id: string): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/checkin/`, { method: 'POST', body: {} });
+}
+
+export function markAttended(id: string): Promise<Handshake> {
+  return apiRequest<Handshake>(`/handshakes/${id}/mark-attended/`, { method: 'POST', body: {} });
 }

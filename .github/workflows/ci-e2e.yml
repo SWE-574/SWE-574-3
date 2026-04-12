@@ -11,28 +11,50 @@ on:
       - ".github/workflows/ci-e2e.yml"
   pull_request:
     branches: [dev]
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - "docker-compose.yml"
+      - "nginx/**"
+      - ".github/workflows/ci-e2e.yml"
+  workflow_dispatch:
+    inputs:
+      run_all:
+        description: "Run all E2E tests (ignore path filtering)"
+        type: boolean
+        default: true
 
 # Cancel in-progress E2E runs for the same branch to save minutes
 concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   e2e:
     name: Playwright E2E
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # E2E tests are informational: the job always reports "success" so it never
-    # blocks PRs or branch protection rules. Test results and HTML report are
-    # still uploaded as artifacts for inspection.
-    # Remove continue-on-error once the E2E suite is stable and fully reliable.
-    continue-on-error: true
 
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────────────
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed for git diff in test selection
 
-      # ── 2. Write environment file ──────────────────────────────────────────
+      # ── 2. Select which E2E tests to run ──────────────────────────────────
+      - name: Select E2E tests based on changed files
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+          RUN_ALL_INPUT: ${{ github.event.inputs.run_all }}
+        run: bash .github/scripts/select-e2e-tests.sh
+
+      # ── 3. Write environment file ──────────────────────────────────────────
       - name: Write .env
         run: |
           cp .env.example .env
@@ -48,12 +70,76 @@ jobs:
           DISABLE_THROTTLING=1
           EOF
 
-      # ── 3. Build & start the full dev stack in E2E mode ───────────────────
-      - name: Build & start stack (E2E mode)
+      # ── 4. Start Docker image build in background ───────────────────────
+      #    Building images (pip install, apt-get, npm ci inside container)
+      #    is the slowest step (~2 min). Kick it off early so it runs in
+      #    parallel with the host-side npm ci + Playwright install below.
+      #    We only BUILD here — containers start AFTER host npm ci finishes
+      #    to avoid bind-mount churn from disrupting the Vite file watcher.
+      #    Uses nohup so the process survives the step's shell exit, and
+      #    writes its exit code to a sentinel file for the wait step.
+      - name: Build Docker images (background)
         run: |
-          DJANGO_E2E=1 VITE_E2E=1 docker compose up -d --build
+          nohup bash -c 'DJANGO_E2E=1 VITE_E2E=1 docker compose build > /tmp/docker-build.log 2>&1; echo $? > /tmp/docker-build.exit' &
+          echo $! > /tmp/docker-build.pid
 
-      # ── 4. Wait until every container reports "healthy" ───────────────────
+      # ── 5. Set up Node.js ────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # ── 6. Remove Docker-owned node_modules (created as root) ────────────
+      - name: Remove Docker-owned node_modules
+        run: sudo rm -rf frontend/node_modules
+
+      # ── 7. Cache npm packages ─────────────────────────────────────────────
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-e2e-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: npm-e2e-
+
+      # ── 8. Install JS dependencies (includes @playwright/test) ───────────
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # ── 9. Cache Playwright browsers ──────────────────────────────────────
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: playwright-
+
+      # ── 10. Install Playwright browsers ───────────────────────────────────
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # ── 11. Wait for Docker build then start stack ────────────────────────
+      #    npm ci is done, so bind-mounted frontend/ is stable. Now wait for
+      #    the background Docker build to finish, then start containers.
+      #    Each GHA step runs in a new shell so we poll the sentinel file
+      #    written by the nohup wrapper in step 4.
+      - name: Wait for Docker build & start stack
+        run: |
+          echo "Waiting for Docker image build to finish..."
+          while [ ! -f /tmp/docker-build.exit ]; do
+            sleep 5
+          done
+          EXIT_CODE=$(cat /tmp/docker-build.exit)
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "::error::Docker build failed (exit $EXIT_CODE)"
+            cat /tmp/docker-build.log
+            exit 1
+          fi
+          echo "Docker build complete — starting containers..."
+          DJANGO_E2E=1 VITE_E2E=1 docker compose up -d
+
+      # ── 12. Wait until every container reports "healthy" ──────────────────
       - name: Wait for containers to be healthy
         run: |
           READY=0
@@ -115,95 +201,73 @@ jobs:
             exit 1
           fi
 
-      # ── 5. Smoke-test — ensure nginx is reachable ─────────────────────────
-      - name: Smoke-test API health
+      # ── 12. Smoke-test — ensure nginx proxies all backends ────────────────
+      - name: Smoke-test stack endpoints
         run: |
-          curl --fail --retry 10 --retry-delay 3 --retry-connrefused \
-            http://localhost/api/health/
+          curl --fail --retry 10 --retry-delay 3 --retry-connrefused http://localhost/api/health/
+          curl --fail --retry 10 --retry-delay 3 --retry-connrefused http://localhost/hive-media/
+          curl --fail --retry 20 --retry-delay 3 --retry-connrefused http://localhost/login > /dev/null
 
-      - name: Smoke-test MinIO media proxy
-        run: |
-          curl --fail --retry 10 --retry-delay 3 --retry-connrefused \
-            http://localhost/hive-media/
-
-      - name: Smoke-test frontend login route
-        run: |
-          curl --fail --retry 20 --retry-delay 3 --retry-connrefused \
-            http://localhost/login > /dev/null
-
-      # ── 6. Seed demo data ─────────────────────────────────────────────────
+      # ── 13. Seed demo data ────────────────────────────────────────────────
       - name: Seed demo data
         run: |
           set -euo pipefail
           DJANGO_E2E=1 docker compose exec -T backend \
             bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python setup_demo.py"
 
-      # ── 7. Verify seeded users exist and passwords are valid ──────────────
-      - name: Verify seeded demo users
+      # ── 14. Verify seeded data, auth, and search ──────────────────────────
+      - name: Verify demo seed and login API
         run: |
+          set -euo pipefail
+
+          # Check users exist with correct passwords
           DJANGO_E2E=1 docker compose exec -T backend \
             bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python manage.py shell -c \"from api.models import User; emails=['elif@demo.com','cem@demo.com','ayse@demo.com','mehmet@demo.com','zeynep@demo.com','can@demo.com','deniz@demo.com','burak@demo.com']; missing=[e for e in emails if not User.objects.filter(email=e).exists()]; bad_pw=[e for e in emails if User.objects.filter(email=e).exists() and not User.objects.get(email=e).check_password('demo123')]; assert not missing, f'Missing demo users: {missing}'; assert not bad_pw, f'Invalid demo passwords: {bad_pw}'; print(f'Validated {len(emails)} demo users')\""
 
-      # ── 8. Verify auth/login endpoint works with demo credentials ─────────
-      - name: Verify demo login API
-        run: |
-          RESPONSE=$(curl --silent --show-error --fail --retry 5 --retry-delay 2 --retry-connrefused \
+          # Verify login API returns tokens
+          TOKEN=$(curl --silent --show-error --fail --retry 5 --retry-delay 2 --retry-connrefused \
             -H "Content-Type: application/json" \
             -d '{"email":"elif@demo.com","password":"demo123"}' \
-            http://localhost/api/auth/login/)
+            http://localhost/api/auth/login/ | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'refresh' in d; print(d['access'])")
 
-          echo "$RESPONSE" | python3 -c "import json,sys; payload=json.load(sys.stdin); assert ('access' in payload or 'token' in payload), payload; assert 'refresh' in payload, payload"
+          # Verify services listing and search
+          SERVICES=$(curl --silent --fail -H "Authorization: Bearer $TOKEN" http://localhost/api/services/)
+          COUNT=$(echo "$SERVICES" | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('results',d) if isinstance(d,dict) else d; print(len(r))")
+          echo "Services API returned $COUNT services"
+          [ "$COUNT" -ge 1 ] || { echo "::error::Services API returned no data after seeding"; exit 1; }
 
-      # ── 9. Set up Node.js ─────────────────────────────────────────────────
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+          SEARCH=$(curl --silent --fail -H "Authorization: Bearer $TOKEN" "http://localhost/api/services/?search=Chess")
+          SEARCH_COUNT=$(echo "$SEARCH" | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('results',d) if isinstance(d,dict) else d; print(len(r))")
+          echo "Search for 'Chess' returned $SEARCH_COUNT results"
+          [ "$SEARCH_COUNT" -ge 1 ] || { echo "::error::Search returned no results"; exit 1; }
 
-      # ── 10. Remove Docker-owned node_modules (created as root) ────────────
-      # The docker compose build bind-mounts ./frontend and installs packages
-      # as root inside the container. Those root-owned files block npm ci
-      # on the non-root runner. Removing them lets npm ci start fresh.
-      - name: Remove Docker-owned node_modules
-        run: sudo rm -rf frontend/node_modules
-
-      # ── 11. Cache npm packages ────────────────────────────────────────────
-      - name: Cache npm packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: npm-e2e-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: npm-e2e-
-
-      # ── 12. Install JS dependencies (includes @playwright/test) ──────────
-      - name: Install dependencies
+      # ── 16. Run smoke tests (always, blocks PR) ──────────────────────────
+      - name: Run smoke tests
+        id: smoke
         working-directory: frontend
-        run: npm ci
-
-      # ── 13. Cache Playwright browsers ─────────────────────────────────────
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: playwright-
-
-      # ── 14. Install Playwright browsers ───────────────────────────────────
-      - name: Install Playwright browsers
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-
-      # ── 15. Run E2E tests ─────────────────────────────────────────────────
-      - name: Run Playwright tests
-        id: playwright
-        working-directory: frontend
-        continue-on-error: true   # soft-fail: results visible in artifact, not a blocker
         env:
           PLAYWRIGHT_BASE_URL: http://localhost
           CI: "true"
-        run: npm run test:e2e
+        run: |
+          echo "Running smoke tests..."
+          npx playwright test \
+            ${{ steps.select.outputs.smoke_tests }}
 
-      # ── 16. Upload HTML report (always, so failures are inspectable) ──────
+      # ── 17. Run feature tests (path-selected or full suite) ──────────────
+      - name: Run feature tests
+        id: feature
+        if: steps.select.outputs.feature_tests != ''
+        working-directory: frontend
+        continue-on-error: true  # soft-fail until suite is fully stable
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost
+          CI: "true"
+        run: |
+          echo "Running feature tests: ${{ steps.select.outputs.feature_tests }}"
+          npx playwright test \
+            ${{ steps.select.outputs.feature_tests }}
+
+      # ── 18. Upload HTML report (always, so failures are inspectable) ──────
       - name: Upload Playwright HTML report
         if: always()
         uses: actions/upload-artifact@v4
@@ -212,7 +276,7 @@ jobs:
           path: frontend/tests/reports/playwright/
           retention-days: 14
 
-      # ── 17. Upload JUnit XML (for CI summary) ─────────────────────────────
+      # ── 19. Upload JUnit XML (for CI summary) ─────────────────────────────
       - name: Upload JUnit report
         if: always()
         uses: actions/upload-artifact@v4
@@ -221,16 +285,18 @@ jobs:
           path: frontend/tests/reports/playwright-junit.xml
           retention-days: 14
 
-      # ── 18. Collect docker logs on failure ────────────────────────────────
+      # ── 20. Collect docker logs on failure ────────────────────────────────
       - name: Dump docker logs on failure
-        if: always() && (failure() || steps.playwright.outcome != 'success')
+        if: always() && (failure() || steps.smoke.outcome != 'success' || steps.feature.outcome != 'success')
         run: |
           docker compose logs --no-color --tail=200 backend  2>&1 | head -400
           docker compose logs --no-color --tail=100 frontend 2>&1 | head -200
           docker compose logs --no-color --tail=100 nginx    2>&1 | head -200
           docker compose logs --no-color --tail=100 minio    2>&1 | head -200
 
-      # ── 19. Tear down ─────────────────────────────────────────────────────
+      # ── 21. Tear down ─────────────────────────────────────────────────────
       - name: Tear down stack
         if: always()
-        run: docker compose down -v
+        run: |
+          touch .env  # ensure .env exists so docker compose doesn't fail
+          docker compose down -v

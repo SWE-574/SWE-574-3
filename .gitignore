@@ -228,6 +228,11 @@ logs/
 
 backend/tests/reports/
 frontend/tests/reports/
+tests/reports/
+
+
+# Test reports when pytest/coverage is run from repo root (outputs under ./tests/reports/)
+tests/reports/
 
 # Allow frontend src lib (validation helpers)
 !frontend/src/lib/
@@ -236,3 +241,9 @@ frontend/tests/reports/
 frontend/test-results/
 
 .DS_Store
+
+# IDE metadata
+mobile-client/.idea/
+
+# Coverage artifacts
+frontend/coverage/

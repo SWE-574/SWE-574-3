@@ -165,3 +165,65 @@ class TestAuthenticatedEndpoints:
         client = APIClient()
         response = client.get('/api/users/me/')
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestLogout:
+    """Test logout endpoint (FR01c) — cookie clearing and token blacklisting"""
+
+    def _login(self, client, email='logoutuser@test.com', password='testpass123'):
+        """Helper: create user, log in, return (user, refresh_token_str)."""
+        user = UserFactory(email=email)
+        user.set_password(password)
+        user.save()
+        resp = client.post('/api/auth/login/', {'email': email, 'password': password})
+        assert resp.status_code == status.HTTP_200_OK
+        return user, resp.data['refresh']
+
+    def test_logout_returns_200(self):
+        """POST /api/auth/logout/ returns 200 with success detail."""
+        client = APIClient()
+        self._login(client)
+        response = client.post('/api/auth/logout/')
+        assert response.status_code == status.HTTP_200_OK
+        assert 'detail' in response.data
+
+    def test_logout_clears_auth_cookies(self):
+        """Logout response includes cookie-deletion directives for both tokens."""
+        client = APIClient()
+        _, refresh_token = self._login(client, email='cookietest@test.com')
+
+        # Attach the refresh cookie so logout can blacklist it
+        client.cookies['refresh_token'] = refresh_token
+
+        response = client.post('/api/auth/logout/')
+        assert response.status_code == status.HTTP_200_OK
+
+        # Django sets max-age=0 when deleting a cookie
+        assert 'access_token' in response.cookies
+        assert 'refresh_token' in response.cookies
+        assert response.cookies['access_token']['max-age'] == 0
+        assert response.cookies['refresh_token']['max-age'] == 0
+
+    def test_logout_blacklists_refresh_token(self):
+        """Refresh token used before logout is unusable after logout."""
+        client = APIClient()
+        _, refresh_token = self._login(client, email='blacklist@test.com')
+
+        # Attach refresh cookie so logout can blacklist it
+        client.cookies['refresh_token'] = refresh_token
+        logout_resp = client.post('/api/auth/logout/')
+        assert logout_resp.status_code == status.HTTP_200_OK
+
+        # Attempt to use the blacklisted token on a fresh client (sent in body)
+        fresh_client = APIClient()
+        refresh_resp = fresh_client.post('/api/auth/refresh/', {'refresh': refresh_token})
+        assert refresh_resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_logout_without_cookies_is_safe(self):
+        """Logout is idempotent / safe when no refresh cookie is present."""
+        client = APIClient()
+        response = client.post('/api/auth/logout/')
+        assert response.status_code == status.HTTP_200_OK
+        assert 'detail' in response.data

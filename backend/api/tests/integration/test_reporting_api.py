@@ -99,7 +99,7 @@ class TestReportingAPI:
         assert handshake_report.status_code == status.HTTP_201_CREATED
         assert "report_id" in handshake_report.data
 
-    def test_non_event_handshake_rejects_behavior_issue_types(self):
+    def test_non_event_handshake_report_keeps_active_status(self):
         provider = UserFactory()
         reporter = UserFactory()
         service = ServiceFactory(user=provider, type="Offer")
@@ -108,12 +108,35 @@ class TestReportingAPI:
         reporter_client = AuthenticatedAPIClient().authenticate_user(reporter)
         response = reporter_client.post(
             f"/api/handshakes/{handshake.id}/report/",
-            {"issue_type": "harassment", "description": "Abusive language in chat."},
+            {"issue_type": "service_issue", "description": "Abusive language during handshake."},
             format="json",
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "invalid issue_type" in (response.data.get("detail", "") or "").lower()
+        assert response.status_code == status.HTTP_201_CREATED
+        handshake.refresh_from_db()
+        assert handshake.status == "accepted"
+
+    def test_non_event_handshake_accepts_behavior_issue_types(self):
+        provider = UserFactory()
+        reporter = UserFactory()
+        service = ServiceFactory(user=provider, type="Offer")
+        handshake = HandshakeFactory(service=service, requester=reporter, status="accepted")
+
+        reporter_client = AuthenticatedAPIClient().authenticate_user(reporter)
+        payload = {
+            "issue_type": "harassment",
+            "description": "Participant used abusive language during the exchange.",
+        }
+        response = reporter_client.post(
+            f"/api/handshakes/{handshake.id}/report/",
+            payload,
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        report = Report.objects.get(id=response.data["report_id"])
+        assert report.type == "harassment"
+        assert report.description == payload["description"]
 
     def test_event_handshake_allows_behavior_reports_during_24h_window(self):
         organizer = UserFactory()
@@ -138,7 +161,27 @@ class TestReportingAPI:
         assert report.type == "harassment"
         assert report.reported_user_id == organizer.id
 
-    def test_event_handshake_rejects_reports_before_event_start(self):
+    def test_event_handshake_allows_behavior_reports_before_event_start(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type="Event",
+            max_participants=10,
+            scheduled_time=timezone.now() + timedelta(hours=1),
+        )
+        handshake = HandshakeFactory(service=event, requester=participant, status="accepted")
+
+        participant_client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = participant_client.post(
+            f"/api/handshakes/{handshake.id}/report/",
+            {"issue_type": "harassment", "description": "Abusive chat behavior before event start."},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+    def test_event_handshake_rejects_no_show_reports_before_event_start(self):
         organizer = UserFactory()
         participant = UserFactory()
         event = ServiceFactory(
@@ -157,9 +200,9 @@ class TestReportingAPI:
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "up to 24 hours" in (response.data.get("detail", "") or "").lower()
+        assert "no-show reports are allowed" in (response.data.get("detail", "") or "").lower()
 
-    def test_event_handshake_rejects_reports_after_24h_window(self):
+    def test_event_handshake_rejects_no_show_reports_after_24h_window(self):
         organizer = UserFactory()
         participant = UserFactory()
         event = ServiceFactory(
@@ -173,12 +216,32 @@ class TestReportingAPI:
         participant_client = AuthenticatedAPIClient().authenticate_user(participant)
         response = participant_client.post(
             f"/api/handshakes/{handshake.id}/report/",
-            {"issue_type": "service_issue", "description": "Attempt after report window."},
+            {"issue_type": "no_show", "description": "Attempt after report window."},
             format="json",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "up to 24 hours" in (response.data.get("detail", "") or "").lower()
+        assert "no-show reports are allowed" in (response.data.get("detail", "") or "").lower()
+
+    def test_event_handshake_allows_behavior_reports_after_24h_window(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type="Event",
+            max_participants=10,
+            scheduled_time=timezone.now() - timedelta(hours=26),
+        )
+        handshake = HandshakeFactory(service=event, requester=participant, status="accepted")
+
+        participant_client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = participant_client.post(
+            f"/api/handshakes/{handshake.id}/report/",
+            {"issue_type": "service_issue", "description": "Late behavior report after event."},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
 
     def test_event_participant_can_report_another_participant_with_reported_user_id(self):
         organizer = UserFactory()
@@ -208,6 +271,10 @@ class TestReportingAPI:
         report = Report.objects.get(id=response.data["report_id"])
         assert report.reported_user_id == target_participant.id
         assert report.type == "spam"
+        # Reporter's own handshake must NOT be marked 'reported' when reporting
+        # a fellow participant (non-organizer).
+        reporter_handshake.refresh_from_db()
+        assert reporter_handshake.status == "accepted"
 
     def test_duplicate_open_handshake_report_is_blocked_but_resolved_report_allows_new(self):
         organizer = UserFactory()

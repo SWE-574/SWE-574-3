@@ -21,6 +21,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 import logging
+import os
 import bleach
 from typing import List
 
@@ -39,23 +40,26 @@ from .exceptions import create_error_response, ErrorCodes
 
 from .models import (
     User, Service, Tag, Handshake, ChatMessage,
-    Notification, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
+    Notification, DevicePushToken, ReputationRep, Badge, Report, UserBadge, TransactionHistory,
     ChatRoom, PublicChatMessage, ServiceGroupChatMessage, GroupChatSession, Comment, NegativeRep,
-    AdminAuditLog,
+    AdminAuditLog, PlatformSetting,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia,
     EmailVerificationToken, PasswordResetToken,
+    UserFollow, UserFollowEvent, CommentMedia,
 )
 from .serializers import (
     UserRegistrationSerializer, 
     UserProfileSerializer,
     AdminUserListSerializer,
+    AdminUserDetailSerializer,
     AdminCommentSerializer,
-    AdminAuditLogSerializer,
+    AdminAuditLogSerializer, PlatformSettingSerializer,
     ServiceSerializer,
     TagSerializer,
     HandshakeSerializer,
     ChatMessageSerializer,
     NotificationSerializer,
+    DevicePushTokenSerializer,
     ReputationRepSerializer,
     ReportSerializer,
     TransactionHistorySerializer,
@@ -68,19 +72,28 @@ from .serializers import (
     ForumCategorySerializer,
     ForumTopicSerializer,
     ForumTopicDetailSerializer,
-    ForumPostSerializer
+    ForumPostSerializer,
+    UserFollowRelationshipSerializer,
+    UserSummarySerializer,
 )
 from .achievement_utils import get_achievement_progress
 from .utils import (
     can_user_post_offer, provision_timebank, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
 )
-from .services import HandshakeService, EventHandshakeService, EventEvaluationService, EventNoShowAppealService
+from .services import (
+    HandshakeService, HandshakeServiceError,
+    EventHandshakeService, EventEvaluationService, EventNoShowAppealService,
+    ReputationService, ReputationServiceError,
+    get_social_proximity_boosts,
+)
+from .ranking_debug import build_service_debug_payload
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
+from django.db.models.functions import Coalesce
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     get_cached_user_profile, cache_user_profile, invalidate_user_profile,
@@ -113,6 +126,11 @@ def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
     """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS."""
     response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=True))
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
+
+
+# Roles that may access admin / moderation endpoints.
+# Keep in sync with User.ROLE_CHOICES and the frontend AdminProtectedRoute.
+ADMIN_ROLES = frozenset(('admin', 'super_admin', 'moderator'))
 
 
 def log_admin_action(admin_user, action_type: str, target_entity: str, target_obj, reason: str = '') -> None:
@@ -430,6 +448,11 @@ def _apply_blind_review_visibility(queryset):
             )
         ),
     ).exclude(
+        # Blind-review suppression applies only to non-Event (1-to-1) handshakes.
+        # For Events, the organizer never submits a reciprocal evaluation, so both
+        # eval flags are always False — applying this would hide event reviews for
+        # the entire 48-hour window.
+        related_handshake__service__type__in=['Offer', 'Need'],
         related_handshake__evaluation_window_ends_at__gt=now,
         blind_target_positive_eval=False,
         blind_target_negative_eval=False,
@@ -686,7 +709,7 @@ class ForgotPasswordView(APIView):
     def post(self, request, *args, **kwargs):
         email = request.data.get('email', '').strip().lower()
         if not email:
-            return Response({'detail': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Email is required.', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         try:
             user = User.objects.get(email=email)
             _send_password_reset_email(user)
@@ -839,7 +862,7 @@ class VerifyEmailView(APIView):
     def post(self, request, *args, **kwargs):
         token_str = request.data.get('token', '').strip()
         if not token_str:
-            return Response({'detail': 'Token is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Token is required.', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         try:
             ev_token = EmailVerificationToken.objects.select_related('user').get(
                 token=token_str, is_used=False
@@ -895,7 +918,7 @@ class SendVerificationEmailView(APIView):
     def post(self, request, *args, **kwargs):
         user = request.user
         if user.is_verified:
-            return Response({'detail': 'Email is already verified.'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Email is already verified.', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         _send_verification_email(user)
         return Response({'detail': 'Verification email sent.'}, status=status.HTTP_200_OK)
 
@@ -924,7 +947,7 @@ class ResendVerificationView(APIView):
     def post(self, request, *args, **kwargs):
         email = request.data.get('email', '').strip().lower()
         if not email:
-            return Response({'detail': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Email is required.', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         try:
             user = User.objects.get(email=email)
             if not user.is_verified:
@@ -1091,7 +1114,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         )
         
         # Filter services by visibility - admins can see all, others only visible
-        is_admin = self.request.user.is_authenticated and self.request.user.role == 'admin'
+        is_admin = self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES
         if is_admin:
             services_prefetch = Prefetch('services', queryset=Service.objects.prefetch_related('tags'))
         else:
@@ -1107,6 +1130,16 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
                 punctual_count=Count('received_reps', filter=Q(received_reps__is_punctual=True)),
                 helpful_count=Count('received_reps', filter=Q(received_reps__is_helpful=True)),
                 kind_count=Count('received_reps', filter=Q(received_reps__is_kind=True)),
+                followers_count=Count(
+                    'followed_by',
+                    filter=Q(followed_by__follower__is_active=True),
+                    distinct=True,
+                ),
+                following_count=Count(
+                    'follows',
+                    filter=Q(follows__following__is_active=True),
+                    distinct=True,
+                ),
             )
         )
     
@@ -1252,7 +1285,9 @@ class UserHistoryView(APIView):
                 'partner_id': partner.id,
                 'partner_avatar_url': partner.avatar_url,
                 'completed_date': handshake.updated_at,
-                'was_provider': was_provider
+                'was_provider': was_provider,
+                # For events: True when the attendee's evaluation window is still open.
+                'evaluation_pending': handshake.service.type == 'Event' and handshake.status == 'attended',
             })
 
         # Include owner-completed events that currently have no qualifying
@@ -1282,6 +1317,7 @@ class UserHistoryView(APIView):
                 'partner_avatar_url': target_user.avatar_url,
                 'completed_date': event.event_completed_at or event.updated_at,
                 'was_provider': True,
+                'evaluation_pending': False,
             })
 
         history.sort(key=lambda item: item['completed_date'], reverse=True)
@@ -1391,24 +1427,39 @@ class UserVerifiedReviewsView(APIView):
         # - Reviews about the requester: handshake.requester == target_user AND comment.user == service.owner
         from django.db.models import F, Q
         from .models import Comment
-        base_filter = (
-            Q(service__user=target_user, related_handshake__requester=F('user'))
-            | Q(related_handshake__requester=target_user, service__user=F('user'))
-        )
         role_param = (request.query_params.get('role') or '').strip().lower()
-        if role_param in ('provider', 'receiver'):
-            base_filter = base_filter & get_verified_reviews_role_filter(target_user, role_param)
+
+        if role_param == 'organizer':
+            # Event reviews written by attendees about this user as the event organizer.
+            # Filter through comment.service (not handshake.service) to avoid double-JOIN ambiguity.
+            review_filter = Q(
+                service__type='Event',
+                service__user=target_user,
+                related_handshake__requester=F('user'),
+            )
+        else:
+            # Restrict to Offer/Need only — Event reviews belong in the organizer section.
+            review_filter = (
+                Q(service__user=target_user, related_handshake__requester=F('user'),
+                  related_handshake__service__type__in=['Offer', 'Need'])
+                | Q(related_handshake__requester=target_user, service__user=F('user'),
+                    related_handshake__service__type__in=['Offer', 'Need'])
+            )
+            if role_param in ('provider', 'receiver'):
+                review_filter = review_filter & get_verified_reviews_role_filter(target_user, role_param)
+
         comments = Comment.objects.filter(
             is_verified_review=True,
             is_deleted=False,
             related_handshake__isnull=False,
-        ).filter(base_filter).select_related(
+        ).filter(review_filter).select_related(
             'user', 'service', 'related_handshake', 'related_handshake__service'
         ).prefetch_related(
             Prefetch(
                 'user__badges',
                 queryset=UserBadge.objects.select_related('badge')
-            )
+            ),
+            'media',
         ).order_by('-created_at')
         comments = _apply_blind_review_visibility(comments)
         
@@ -1422,6 +1473,222 @@ class UserVerifiedReviewsView(APIView):
         
         serializer = CommentSerializer(comments, many=True)
         return Response({'results': serializer.data, 'count': len(serializer.data)})
+
+
+class UserFollowView(APIView):
+    """
+    Follow or unfollow another user.
+
+    **POST /api/users/{id}/follow/** — Create ``UserFollow`` and a ``follow`` event.
+
+    **DELETE /api/users/{id}/follow/** — Remove ``UserFollow`` and append an ``unfollow`` event.
+
+    **Errors (POST):** 404 unknown user; 400 self-follow or already following.
+
+    **Errors (DELETE):** 404 unknown user; 400 self-unfollow or not following.
+
+    **401:** not authenticated
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [UserRateThrottle]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    @extend_schema(
+        summary='Follow user',
+        description=(
+            'Creates an active follow from the current user to the user specified by URL id. '
+            'Duplicate follows return 400.'
+        ),
+        request=None,
+        responses={
+            201: OpenApiResponse(description='Created with message and follow relationship payload.'),
+        },
+        tags=['Users'],
+    )
+    def post(self, request, id):
+        try:
+            target = User.objects.get(id=id)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        if target.id == request.user.id:
+            return create_error_response(
+                'You cannot follow yourself.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if UserFollow.objects.filter(follower=request.user, following=target).exists():
+            return create_error_response(
+                'You are already following this user.',
+                code=ErrorCodes.ALREADY_EXISTS,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                follow = UserFollow.objects.create(follower=request.user, following=target)
+                UserFollowEvent.objects.create(
+                    follower=request.user,
+                    following=target,
+                    action=UserFollowEvent.ACTION_FOLLOW,
+                )
+        except IntegrityError:
+            return create_error_response(
+                'You are already following this user.',
+                code=ErrorCodes.ALREADY_EXISTS,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = UserFollowRelationshipSerializer(follow)
+        invalidate_user_profile(str(request.user.id))
+        invalidate_user_profile(str(target.id))
+        return Response(
+            {
+                'message': 'Successfully followed user.',
+                'follow': serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        summary='Unfollow user',
+        description=(
+            'Removes the active follow from the current user to the user specified by URL id '
+            'and records an unfollow event. Returns 400 if there is no follow relationship.'
+        ),
+        responses={
+            200: OpenApiResponse(description='Unfollowed successfully.'),
+        },
+        tags=['Users'],
+    )
+    def delete(self, request, id):
+        try:
+            target = User.objects.get(id=id)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        if target.id == request.user.id:
+            return create_error_response(
+                'You cannot unfollow yourself.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            follow = UserFollow.objects.get(follower=request.user, following=target)
+        except UserFollow.DoesNotExist:
+            return create_error_response(
+                'You are not following this user.',
+                code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            follow.delete()
+            UserFollowEvent.objects.create(
+                follower=request.user,
+                following=target,
+                action=UserFollowEvent.ACTION_UNFOLLOW,
+            )
+
+        invalidate_user_profile(str(request.user.id))
+        invalidate_user_profile(str(target.id))
+        return Response(
+            {'message': 'Successfully unfollowed user.'},
+            status=status.HTTP_200_OK,
+        )
+
+
+def _user_follow_list_response(request, user_id, list_kind):
+    """
+    Return a paginated list of UserSummarySerializer data for followers or following.
+    list_kind: 'followers' | 'following'
+    """
+    try:
+        target = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return create_error_response(
+            'User not found.',
+            code=ErrorCodes.NOT_FOUND,
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    badge_prefetch = Prefetch(
+        'badges',
+        queryset=UserBadge.objects.select_related('badge'),
+    )
+    if list_kind == 'followers':
+        qs = (
+            User.objects.filter(follows__following=target, is_active=True)
+            .distinct()
+            .prefetch_related(badge_prefetch)
+            .order_by('first_name', 'last_name', 'id')
+        )
+    else:
+        qs = (
+            User.objects.filter(followed_by__follower=target, is_active=True)
+            .distinct()
+            .prefetch_related(badge_prefetch)
+            .order_by('first_name', 'last_name', 'id')
+        )
+
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(qs, request)
+    if page is not None:
+        serializer = UserSummarySerializer(page, many=True, context={'request': request})
+        return paginator.get_paginated_response(serializer.data)
+    serializer = UserSummarySerializer(qs, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+class UserFollowersListView(APIView):
+    """
+    List users who follow the user identified by ``id`` (active ``UserFollow`` rows).
+
+    **GET /api/users/{id}/followers/**
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [UserRateThrottle]
+
+    @extend_schema(
+        summary='List followers',
+        description='Returns user summaries for accounts that follow the given user.',
+        responses={200: OpenApiResponse(description='JSON array of user summary objects.')},
+        tags=['Users'],
+    )
+    def get(self, request, id):
+        return _user_follow_list_response(request, id, 'followers')
+
+
+class UserFollowingListView(APIView):
+    """
+    List users that the user identified by ``id`` is following.
+
+    **GET /api/users/{id}/following/**
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [UserRateThrottle]
+
+    @extend_schema(
+        summary='List following',
+        description='Returns user summaries for accounts followed by the given user.',
+        responses={200: OpenApiResponse(description='JSON array of user summary objects.')},
+        tags=['Users'],
+    )
+    def get(self, request, id):
+        return _user_follow_list_response(request, id, 'following')
 
 
 class ServiceViewSet(viewsets.ModelViewSet):
@@ -1495,7 +1762,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         # Include all search parameters in cache key
         # Include admin status since admins see hidden services (is_visible=False)
-        is_admin = request.user.is_authenticated and request.user.role == 'admin'
+        is_admin = request.user.is_authenticated and request.user.role in ADMIN_ROLES
         cache_key_params = {
             'type': request.query_params.get('type'),
             'tag': request.query_params.get('tag'),
@@ -1511,8 +1778,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'is_admin': str(is_admin),  # Different cache for admin vs non-admin
         }
         
-        # Don't cache location-based queries (results vary by user location)
-        use_cache = not (request.query_params.get('lat') and request.query_params.get('lng'))
+        sort_param = request.query_params.get('sort', 'latest')
+        # Don't cache location-based queries (results vary by user location).
+        # Also skip cache for hot-sort by authenticated users — social boost is per-user.
+        use_cache = not (
+            (request.query_params.get('lat') and request.query_params.get('lng'))
+            or (sort_param == 'hot' and request.user.is_authenticated)
+        )
         
         if use_cache:
             cached_result = get_cached_service_list(cache_key_params)
@@ -1568,7 +1840,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         )
         
         # Filter by visibility - admins can see all, others only visible
-        if not (self.request.user.is_authenticated and self.request.user.role == 'admin'):
+        if not (self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES):
             queryset = queryset.filter(is_visible=True)
         
         # Apply search engine filters (Strategy Pattern)
@@ -1578,6 +1850,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'tag': self.request.query_params.get('tag'),
             'tags': self.request.query_params.getlist('tags'),
             'search': self.request.query_params.get('search'),
+            'entity_type': self.request.query_params.get('entity_type'),
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
             'distance': self.request.query_params.get('distance', 10),
@@ -1617,12 +1890,33 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
             queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         elif sort_param == 'hot':
-            # Sort by hot score (descending - highest score first)
-            queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
+            if self.request.user.is_authenticated:
+                # Apply social proximity boost (weight 0.5) for authenticated users.
+                # composite_score = hot_score + 0.5 * social_boost
+                # social_boost: 1.0 (1st-degree) or 0.5 (2nd-degree), 0 otherwise.
+                # Single SQL CTE call — no pre-evaluation of the service queryset.
+                boosts = get_social_proximity_boosts(self.request.user.id)
+                if boosts:
+                    # boosts keys are UUID objects; user_id on Service is also UUID — no coercion needed.
+                    whens = [
+                        When(user_id=uid, then=Value(boost, output_field=FloatField()))
+                        for uid, boost in boosts.items()
+                    ]
+                    queryset = queryset.annotate(
+                        social_boost=Case(*whens, default=Value(0.0, output_field=FloatField()), output_field=FloatField()),
+                        composite_score=ExpressionWrapper(
+                            F('hot_score') + Value(0.5, output_field=FloatField()) * F('social_boost'),
+                            output_field=FloatField(),
+                        ),
+                    ).order_by('-is_pinned', '-composite_score', '-created_at')
+                else:
+                    queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
+            else:
+                queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
         else:
             # Default: sort by latest (created_at descending)
             queryset = queryset.order_by('-is_pinned', '-created_at')
-        
+
         return queryset
 
     def get_serializer_context(self):
@@ -1813,13 +2107,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
         is_admin = getattr(self.request.user, 'role', None) == 'admin'
 
-        # Block edits to Event details once inside the 24-hour lockdown window.
-        # Non-Event services are completely unaffected by this guard.
-        # Admins are exempt so they can still toggle visibility or moderate.
-        if service.type == 'Event' and service.is_in_lockdown_window and not is_admin:
-            raise PermissionDenied(
-                'Cannot edit event details within 24 hours of the scheduled start time.'
-            )
+        if service.type == 'Event' and not is_admin:
+            if service.is_in_lockdown_window:
+                raise PermissionDenied(
+                    'Cannot edit event details within 24 hours of the scheduled start time.'
+                )
 
         # Lock one-time Offer/Need listings while an approved session is still active.
         # Recurrent listings stay editable for future cycles.
@@ -1887,7 +2179,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         - 403 Forbidden: Admin role required
         - 404 Not Found: Service does not exist
         """
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             raise PermissionDenied('Admin access required')
         
         service = self.get_object()
@@ -1920,12 +2212,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
         **Endpoint:** POST /api/services/{id}/pin-event/
         """
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             raise PermissionDenied('Admin access required')
 
         service = self.get_object()
         if service.type != 'Event':
-            return Response({'error': 'Only events can be pinned'}, status=status.HTTP_400_BAD_REQUEST)
+            return create_error_response('Only events can be pinned', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
 
         service.is_pinned = not service.is_pinned
         service.save(update_fields=['is_pinned'])
@@ -2036,8 +2328,65 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 str(e), code=ErrorCodes.INVALID_STATE,
                 status_code=status.HTTP_400_BAD_REQUEST
             )
+        invalidate_service_lists()
         serializer = self.get_serializer(service)
         return Response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='debug-ranking-availability',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def debug_ranking_availability(self, request):
+        platform_settings = PlatformSetting.get_solo()
+        return Response({'enabled': platform_settings.ranking_debug_enabled})
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='debug-ranking',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def debug_ranking(self, request):
+        platform_settings = PlatformSetting.get_solo()
+        if not platform_settings.ranking_debug_enabled:
+            return create_error_response(
+                'Ranking debug is currently disabled by an administrator.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        raw_service_ids = request.data.get('service_ids') or []
+        service_ids = [str(service_id) for service_id in raw_service_ids if service_id]
+
+        if not service_ids:
+            return create_error_response(
+                'service_ids is required.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        def _to_float(value):
+            if value in (None, ''):
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        payload = build_service_debug_payload(
+            service_ids=service_ids,
+            selected_service_id=request.data.get('selected_service_id'),
+            request_user=request.user,
+            search=(request.data.get('search') or '').strip(),
+            tag_ids=[str(tag_id) for tag_id in (request.data.get('tags') or []) if tag_id],
+            lat=_to_float(request.data.get('lat')),
+            lng=_to_float(request.data.get('lng')),
+            distance=_to_float(request.data.get('distance')),
+            active_filter=(request.data.get('active_filter') or 'all').strip() or 'all',
+        )
+        return Response(payload)
 
     @action(
         detail=True,
@@ -2500,102 +2849,13 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         The other party (the one who expressed interest) then approves.
         """
         handshake = self.get_object()
-        user = request.user
-        
-        # Service owner always initiates — works for both Offer and Need
-        if handshake.service.user != user:
-            return create_error_response(
-                'Only the service owner can initiate the handshake',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
+        try:
+            handshake, session_msg = HandshakeService.initiate(handshake, request.user, request.data)
+        except HandshakeServiceError as exc:
+            extra = getattr(exc, 'extra', {})
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code, **extra)
 
-        if handshake.status != 'pending':
-            return create_error_response(
-                'Handshake is not pending',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Provider has already initiated
-        if handshake.provider_initiated:
-            return create_error_response(
-                'You have already initiated this handshake',
-                code=ErrorCodes.ALREADY_EXISTS,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        service = handshake.service
-        is_fixed_group_offer = (
-            service.type == 'Offer'
-            and service.schedule_type == 'One-Time'
-            and service.max_participants > 1
-        )
-
-        if is_fixed_group_offer:
-            if not service.location_area or not service.scheduled_time:
-                return create_error_response(
-                    'This group offer is missing its fixed meeting details.',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            handshake.provider_initiated = True
-            handshake.exact_duration = service.duration
-            handshake.scheduled_time = service.scheduled_time
-            if service.location_type == 'Online':
-                handshake.exact_location = ''
-                handshake.exact_location_guide = ''
-                handshake.exact_location_maps_url = None
-            else:
-                handshake.exact_location = service.session_exact_location or service.location_area
-                handshake.exact_location_guide = service.session_location_guide
-                from urllib.parse import quote
-                if service.session_exact_location_lat is not None and service.session_exact_location_lng is not None:
-                    handshake.exact_location_maps_url = (
-                        f"https://www.google.com/maps?q={float(service.session_exact_location_lat)},{float(service.session_exact_location_lng)}"
-                    )
-                elif service.location_lat is not None and service.location_lng is not None:
-                    handshake.exact_location_maps_url = (
-                        f"https://www.google.com/maps?q={float(service.location_lat)},{float(service.location_lng)}"
-                    )
-                else:
-                    handshake.exact_location_maps_url = (
-                        f"https://www.google.com/maps/search/?api=1&query={quote((service.session_exact_location or service.location_area or ''))}"
-                    )
-            handshake.save()
-
-            service_owner = handshake.service.user
-            other_party = handshake.requester
-            invalidate_conversations(str(service_owner.id))
-            invalidate_conversations(str(other_party.id))
-
-            create_notification(
-                user=other_party,
-                notification_type='handshake_request',
-                title='Group Offer Details Shared',
-                message=f"{user.first_name} shared the fixed session details for '{handshake.service.title}'. Please review and approve.",
-                handshake=handshake,
-                service=handshake.service
-            )
-
-            # Auto-post structured session summary to chat (use stored Google Maps URL)
-            from django.utils import timezone as tz
-            loc = handshake.exact_location or ''
-            guide = (handshake.exact_location_guide or '').strip()
-            summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
-            summary_parts = [f"\U0001F4C5 {summary_time}"]
-            if loc:
-                summary_parts.append(f"\U0001F4CD {loc}")
-            if guide:
-                summary_parts.append(f"\U0001F9ED {guide}")
-            if handshake.exact_location_maps_url:
-                summary_parts.append(f"\U0001F517 {handshake.exact_location_maps_url}")
-            session_msg = ChatMessage.objects.create(
-                handshake=handshake,
-                sender=user,
-                body=" | ".join(summary_parts)
-            )
+        if session_msg:
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync
             channel_layer = get_channel_layer()
@@ -2604,167 +2864,6 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                     f'chat_{handshake.id}',
                     {'type': 'chat_message', 'message': ChatMessageSerializer(session_msg).data}
                 )
-
-            serializer = self.get_serializer(handshake)
-            return Response(serializer.data, status=200)
-
-        # Require all details from provider
-        exact_location = request.data.get('exact_location', '').strip()
-        exact_duration = request.data.get('exact_duration')
-        scheduled_time = request.data.get('scheduled_time')
-        exact_location_lat = request.data.get('exact_location_lat')
-        exact_location_lng = request.data.get('exact_location_lng')
-
-        requires_exact_location = handshake.service.location_type != 'Online'
-
-        if requires_exact_location and not exact_location:
-            return create_error_response(
-                'Exact location is required',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not exact_duration:
-            return create_error_response(
-                'Exact duration is required',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if not scheduled_time:
-            return create_error_response(
-                'Scheduled time is required',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Parse and validate scheduled time using timezone utilities
-        from .timezone_utils import validate_and_normalize_datetime, validate_future_datetime
-        
-        parsed_time, parse_error = validate_and_normalize_datetime(scheduled_time)
-        
-        if parse_error:
-            return create_error_response(
-                parse_error,
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Validate that the time is in the future
-        future_error = validate_future_datetime(parsed_time)
-        if future_error:
-            return create_error_response(
-                future_error,
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Validate duration
-        try:
-            exact_duration_decimal = Decimal(str(exact_duration))
-            if exact_duration_decimal <= 0:
-                return create_error_response(
-                    'Duration must be greater than 0',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-            if (
-                handshake.service.type in ('Offer', 'Need')
-                and exact_duration_decimal != exact_duration_decimal.to_integral_value()
-            ):
-                return create_error_response(
-                    'Duration must be a whole number of hours',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-        except (InvalidOperation, ValueError, TypeError):
-            return create_error_response(
-                'Invalid duration format',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Check for schedule conflicts
-        from .schedule_utils import check_schedule_conflict
-        duration_hours = float(exact_duration_decimal)
-        conflicts = check_schedule_conflict(user, parsed_time, duration_hours, exclude_handshake=handshake)
-        
-        if conflicts:
-            conflict_info = conflicts[0]
-            other_user_name = f"{conflict_info['other_user'].first_name} {conflict_info['other_user'].last_name}".strip()
-            conflict_time = conflict_info['scheduled_time'].strftime('%Y-%m-%d %H:%M')
-            return create_error_response(
-                'Schedule conflict detected',
-                code=ErrorCodes.CONFLICT,
-                status_code=status.HTTP_400_BAD_REQUEST,
-                conflict=True,
-                conflict_details={
-                    'service_title': conflict_info['service_title'],
-                    'scheduled_time': conflict_time,
-                    'other_user': other_user_name
-                }
-            )
-
-        # Build and store Google Maps URL (coordinates preferred for accuracy)
-        if exact_location:
-            from urllib.parse import quote
-            if exact_location_lat is not None and exact_location_lng is not None:
-                try:
-                    lat_f = float(exact_location_lat)
-                    lng_f = float(exact_location_lng)
-                    handshake.exact_location_maps_url = f"https://www.google.com/maps?q={lat_f},{lng_f}"
-                except (TypeError, ValueError):
-                    handshake.exact_location_maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
-            else:
-                handshake.exact_location_maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(exact_location)}"
-        else:
-            handshake.exact_location_maps_url = None
-
-        # Set handshake details
-        handshake.provider_initiated = True
-        handshake.exact_location = exact_location
-        handshake.exact_duration = exact_duration_decimal
-        handshake.scheduled_time = parsed_time
-        handshake.save()
-        
-        # Invalidate conversations cache for both users
-        # service_owner = initiator (user), other party = handshake.requester
-        service_owner = handshake.service.user
-        other_party   = handshake.requester
-        invalidate_conversations(str(service_owner.id))
-        invalidate_conversations(str(other_party.id))
-
-        # Notify the other party (requester) that session details are ready
-        create_notification(
-            user=other_party,
-            notification_type='handshake_request',
-            title='Service Details Provided',
-            message=f"{user.first_name} has provided session details for '{handshake.service.title}'. Please review and approve.",
-            handshake=handshake,
-            service=handshake.service
-        )
-
-        # Auto-post structured session summary to chat (use stored Google Maps URL)
-        from django.utils import timezone as tz
-        summary_time = tz.localtime(parsed_time).strftime('%b %d, %Y %I:%M %p')
-        summary_parts = [f"\U0001F4C5 {summary_time}"]
-        if exact_location:
-            summary_parts.append(f"\U0001F4CD {exact_location}")
-        if handshake.exact_location_maps_url:
-            summary_parts.append(f"\U0001F517 {handshake.exact_location_maps_url}")
-        session_msg = ChatMessage.objects.create(
-            handshake=handshake,
-            sender=user,
-            body=" | ".join(summary_parts)
-        )
-        from channels.layers import get_channel_layer
-        from asgiref.sync import async_to_sync
-        channel_layer = get_channel_layer()
-        if channel_layer:
-            async_to_sync(channel_layer.group_send)(
-                f'chat_{handshake.id}',
-                {'type': 'chat_message', 'message': ChatMessageSerializer(session_msg).data}
-            )
 
         serializer = self.get_serializer(handshake)
         return Response(serializer.data, status=200)
@@ -2777,68 +2876,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         Works for both Offer and Need service types.
         """
         handshake = self.get_object()
-        user = request.user
-        
-        # Only the requester (the one who expressed interest) can approve
-        if handshake.requester != user:
-            return create_error_response(
-                'Only the requester can approve the handshake',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        if handshake.status != 'pending':
-            return create_error_response(
-                'Handshake is not pending',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Provider must have initiated first
-        if not handshake.provider_initiated:
-            return create_error_response(
-                'Provider must initiate the handshake first',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Require all details to be set
-        if not handshake.exact_location or not handshake.exact_duration or not handshake.scheduled_time:
-            return create_error_response(
-                'Provider must provide exact location, duration, and scheduled time before approval',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST,
-                requires_details=True
-            )
-
-        # Use negotiated duration instead of original post duration for TimeBank provisioning.
-        if handshake.service.type in ('Offer', 'Need') and handshake.exact_duration is not None:
-            handshake.provisioned_hours = handshake.exact_duration
-            handshake.save(update_fields=['provisioned_hours'])
-
-        # Provision TimeBank and accept handshake
         try:
-            provision_timebank(handshake)
-        except ValueError as e:
-            return create_error_response(
-                str(e),
-                code=ErrorCodes.INSUFFICIENT_BALANCE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-        
-        handshake.status = 'accepted'
-        handshake.requester_initiated = True  # Mark requester as having approved
-        handshake.save()
+            handshake, approve_msg = HandshakeService.approve(handshake, request.user)
+        except HandshakeServiceError as exc:
+            extra = getattr(exc, 'extra', {})
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code, **extra)
 
-        # Auto-post confirmation to chat and broadcast via WebSocket
-        from django.utils import timezone as tz
-        summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
-        loc = handshake.exact_location or ''
-        approve_msg = ChatMessage.objects.create(
-            handshake=handshake,
-            sender=user,
-            body=f"Session approved! See you on {summary_time} at {loc}."
-        )
         from channels.layers import get_channel_layer
         from asgiref.sync import async_to_sync
         channel_layer = get_channel_layer()
@@ -2848,60 +2891,6 @@ class HandshakeViewSet(viewsets.ModelViewSet):
                 {'type': 'chat_message', 'message': ChatMessageSerializer(approve_msg).data}
             )
 
-        # Notify provider that handshake was approved
-        create_notification(
-            user=handshake.service.user,
-            notification_type='handshake_accepted',
-            title='Handshake Approved',
-            message=f"{user.first_name} has approved the handshake for '{handshake.service.title}'. The handshake is now accepted.",
-            handshake=handshake,
-            service=handshake.service
-        )
-        
-        # Schedule reminders
-        from django.utils import timezone
-        from datetime import timedelta
-        
-        service_time = handshake.scheduled_time
-        duration_hours = float(handshake.exact_duration)
-        completion_time = service_time + timedelta(hours=duration_hours)
-        
-        if service_time > timezone.now():
-            create_notification(
-                user=handshake.service.user,
-                notification_type='service_reminder',
-                title='Service Reminder',
-                message=f"Your service '{handshake.service.title}' is scheduled for {service_time.strftime('%Y-%m-%d %H:%M')}",
-                handshake=handshake,
-                service=handshake.service
-            )
-            create_notification(
-                user=handshake.requester,
-                notification_type='service_reminder',
-                title='Service Reminder',
-                message=f"Your service '{handshake.service.title}' is scheduled for {service_time.strftime('%Y-%m-%d %H:%M')}",
-                handshake=handshake,
-                service=handshake.service
-            )
-        
-        if completion_time > timezone.now():
-            create_notification(
-                user=handshake.service.user,
-                notification_type='service_confirmation',
-                title='Service Completion Reminder',
-                message=f"Please confirm completion of '{handshake.service.title}' after {completion_time.strftime('%Y-%m-%d %H:%M')}",
-                handshake=handshake,
-                service=handshake.service
-            )
-            create_notification(
-                user=handshake.requester,
-                notification_type='service_confirmation',
-                title='Service Completion Reminder',
-                message=f"Please confirm completion of '{handshake.service.title}' after {completion_time.strftime('%Y-%m-%d %H:%M')}",
-                handshake=handshake,
-                service=handshake.service
-            )
-        
         serializer = self.get_serializer(handshake)
         return Response(serializer.data, status=200)
     
@@ -3018,86 +3007,10 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @track_performance
     def accept_handshake(self, request, pk=None):
         handshake = self.get_object()
-        
-        if handshake.service.user != request.user:
-            return create_error_response(
-                'Only the service provider can accept',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        if handshake.status != 'pending':
-            return create_error_response(
-                'Handshake is not pending',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
         try:
-            provision_timebank(handshake)
-        except ValueError as e:
-            return create_error_response(
-                str(e),
-                code=ErrorCodes.INSUFFICIENT_BALANCE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        service = handshake.service
-        with transaction.atomic():
-            handshake.status = 'accepted'
-            handshake.save()
-
-            # For One-Time services: check whether all slots are now filled.
-            # Only when capacity is reached do we deny remaining pending handshakes
-            # and transition the service to Agreed.
-            # Recurrent services stay Active so new participants can always join.
-            if service.schedule_type == 'One-Time':
-                accepted_count = Handshake.objects.filter(
-                    service=service,
-                    status__in=['accepted', 'completed', 'reported', 'paused'],
-                ).count()
-
-                if accepted_count >= service.max_participants:
-                    # Capacity is now full — deny all remaining pending handshakes.
-                    other_pending = Handshake.objects.filter(
-                        service=service,
-                        status='pending',
-                    ).exclude(pk=handshake.pk)
-
-                    denied_requesters = list(other_pending.values_list('requester_id', flat=True))
-                    other_pending.update(status='denied')
-
-                    # Bulk-load all requester users to avoid N+1 queries.
-                    users_by_id = User.objects.in_bulk(denied_requesters)
-
-                    for requester_id in denied_requesters:
-                        user = users_by_id.get(requester_id)
-                        if user is None:
-                            continue
-                        create_notification(
-                            user=user,
-                            notification_type='handshake_denied',
-                            title='Request Not Accepted',
-                            message=f"All slots for '{service.title}' are now filled.",
-                            service=service
-                        )
-                        invalidate_conversations(str(requester_id))
-
-                    # Mark service as Agreed so it is hidden from the public listing.
-                    if service.status == 'Active':
-                        Service.objects.filter(pk=service.pk).update(status='Agreed')
-
-        invalidate_conversations(str(handshake.requester.id))
-        invalidate_conversations(str(handshake.service.user.id))
-
-        create_notification(
-            user=handshake.requester,
-            notification_type='handshake_accepted',
-            title='Handshake Accepted',
-            message=f"Your interest in '{service.title}' has been accepted!",
-            handshake=handshake,
-            service=service
-        )
+            handshake = HandshakeService.accept(handshake, request.user)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
         serializer = self.get_serializer(handshake)
         return Response(serializer.data)
@@ -3129,416 +3042,57 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='cancel')
     def cancel_handshake(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        if handshake.service.user != user and handshake.requester != user:
-            return create_error_response(
-                'Only the service owner or the requester can cancel this handshake',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
+        try:
+            handshake = HandshakeService.cancel(handshake, request.user)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
-        with transaction.atomic():
-            locked_handshake = (
-                Handshake.objects
-                .select_for_update()
-                .select_related('service', 'requester', 'service__user')
-                .get(pk=handshake.pk)
-            )
-
-            if locked_handshake.status == 'accepted' and locked_handshake.service.type != 'Event':
-                return create_error_response(
-                    'Accepted handshakes require a cancellation request and approval',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.status != 'pending':
-                return create_error_response(
-                    'Can only directly cancel pending handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            locked_handshake.status = 'cancelled'
-            locked_handshake.save(update_fields=['status', 'updated_at'])
-
-            if user == locked_handshake.requester:
-                create_notification(
-                    user=locked_handshake.service.user,
-                    notification_type='handshake_cancelled',
-                    title='Handshake Cancelled',
-                    message=f"{user.first_name} {user.last_name} cancelled their request for '{locked_handshake.service.title}'.",
-                    handshake=locked_handshake,
-                    service=locked_handshake.service,
-                )
-
-            serializer = self.get_serializer(locked_handshake)
-            return Response(serializer.data)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='cancel-request')
     def request_cancellation(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        if handshake.service.user != user and handshake.requester != user:
-            return create_error_response(
-                'Only the service owner or the requester can request cancellation',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
         reason = str(request.data.get('reason') or '').strip()
+        try:
+            handshake = HandshakeService.request_cancellation(handshake, request.user, reason)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
-        with transaction.atomic():
-            locked_handshake = (
-                Handshake.objects
-                .select_for_update()
-                .select_related('service', 'requester', 'service__user')
-                .get(pk=handshake.pk)
-            )
-
-            if locked_handshake.service.type == 'Event':
-                return create_error_response(
-                    'Cancellation requests are only available for Offer and Need handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.status != 'accepted':
-                return create_error_response(
-                    'Can only request cancellation for accepted handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id is not None:
-                return create_error_response(
-                    'A cancellation request is already pending for this handshake',
-                    code=ErrorCodes.ALREADY_EXISTS,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            locked_handshake.cancellation_requested_by = user
-            locked_handshake.cancellation_requested_at = timezone.now()
-            locked_handshake.cancellation_reason = reason
-            locked_handshake.save(update_fields=[
-                'cancellation_requested_by',
-                'cancellation_requested_at',
-                'cancellation_reason',
-                'updated_at',
-            ])
-
-            other_user = (
-                locked_handshake.requester
-                if locked_handshake.service.user == user
-                else locked_handshake.service.user
-            )
-            display_name = f"{user.first_name} {user.last_name}".strip() or user.email
-            message = f"{display_name} requested to cancel '{locked_handshake.service.title}'."
-            if reason:
-                message = f"{message} Reason: {reason}"
-
-            create_notification(
-                user=other_user,
-                notification_type='handshake_cancellation_requested',
-                title='Cancellation Requested',
-                message=message,
-                handshake=locked_handshake,
-                service=locked_handshake.service,
-            )
-            invalidate_conversations(str(locked_handshake.requester_id))
-            invalidate_conversations(str(locked_handshake.service.user_id))
-
-            serializer = self.get_serializer(locked_handshake)
-            return Response(serializer.data)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='cancel-request/approve')
     def approve_cancellation_request(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        if handshake.service.user != user and handshake.requester != user:
-            return create_error_response(
-                'Only the service owner or the requester can approve cancellation',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
+        try:
+            handshake = HandshakeService.approve_cancellation(handshake, request.user)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
-        with transaction.atomic():
-            locked_handshake = (
-                Handshake.objects
-                .select_for_update()
-                .select_related('service', 'requester', 'service__user')
-                .get(pk=handshake.pk)
-            )
-
-            if locked_handshake.service.type == 'Event':
-                return create_error_response(
-                    'Cancellation requests are only available for Offer and Need handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.status != 'accepted':
-                return create_error_response(
-                    'Can only approve cancellation for accepted handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id is None:
-                return create_error_response(
-                    'There is no pending cancellation request for this handshake',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id == user.id:
-                return create_error_response(
-                    'The user who requested cancellation cannot approve it',
-                    code=ErrorCodes.PERMISSION_DENIED,
-                    status_code=status.HTTP_403_FORBIDDEN
-                )
-
-            svc = locked_handshake.service
-            requester_name = (
-                f"{locked_handshake.cancellation_requested_by.first_name} "
-                f"{locked_handshake.cancellation_requested_by.last_name}"
-            ).strip() or locked_handshake.cancellation_requested_by.email
-
-            cancel_timebank_transfer(locked_handshake)
-
-            if svc.status == 'Agreed':
-                Service.objects.filter(pk=svc.pk).update(status='Active')
-
-            create_notification(
-                user=svc.user,
-                notification_type='handshake_cancelled',
-                title='Cancellation Approved',
-                message=f"The cancellation request for '{svc.title}' was approved by mutual agreement. Requested by {requester_name}.",
-                handshake=locked_handshake,
-                service=svc,
-            )
-
-            serializer = self.get_serializer(locked_handshake)
-            return Response(serializer.data)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='cancel-request/reject')
     def reject_cancellation_request(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        if handshake.service.user != user and handshake.requester != user:
-            return create_error_response(
-                'Only the service owner or the requester can reject cancellation',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
+        try:
+            handshake = HandshakeService.reject_cancellation(handshake, request.user)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
-        with transaction.atomic():
-            locked_handshake = (
-                Handshake.objects
-                .select_for_update()
-                .select_related('service', 'requester', 'service__user')
-                .get(pk=handshake.pk)
-            )
-
-            if locked_handshake.service.type == 'Event':
-                return create_error_response(
-                    'Cancellation requests are only available for Offer and Need handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.status != 'accepted':
-                return create_error_response(
-                    'Can only reject cancellation for accepted handshakes',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id is None:
-                return create_error_response(
-                    'There is no pending cancellation request for this handshake',
-                    code=ErrorCodes.INVALID_STATE,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            if locked_handshake.cancellation_requested_by_id == user.id:
-                return create_error_response(
-                    'The user who requested cancellation cannot reject it',
-                    code=ErrorCodes.PERMISSION_DENIED,
-                    status_code=status.HTTP_403_FORBIDDEN
-                )
-
-            request_user = locked_handshake.cancellation_requested_by
-            locked_handshake.cancellation_requested_by = None
-            locked_handshake.cancellation_requested_at = None
-            locked_handshake.cancellation_reason = ''
-            locked_handshake.save(update_fields=[
-                'cancellation_requested_by',
-                'cancellation_requested_at',
-                'cancellation_reason',
-                'updated_at',
-            ])
-
-            responder_name = f"{user.first_name} {user.last_name}".strip() or user.email
-            create_notification(
-                user=request_user,
-                notification_type='handshake_cancellation_rejected',
-                title='Cancellation Request Declined',
-                message=f"{responder_name} declined your cancellation request for '{locked_handshake.service.title}'.",
-                handshake=locked_handshake,
-                service=locked_handshake.service,
-            )
-            invalidate_conversations(str(locked_handshake.requester_id))
-            invalidate_conversations(str(locked_handshake.service.user_id))
-
-            serializer = self.get_serializer(locked_handshake)
-            return Response(serializer.data)
+        serializer = self.get_serializer(handshake)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='confirm', throttle_classes=[ConfirmationThrottle])
     @track_performance
     def confirm_completion(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-
-        is_provider = provider == user
-        is_receiver = receiver == user
-
-        if not (is_provider or is_receiver):
-            return create_error_response(
-                'Not authorized',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        if handshake.status != 'accepted':
-            return create_error_response(
-                'Handshake must be accepted',
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
         hours = request.data.get('hours')
-        if hours is not None:
-            try:
-                hours_decimal = Decimal(str(hours))
-                if hours_decimal <= 0:
-                    return create_error_response(
-                        'Hours must be greater than 0',
-                        code=ErrorCodes.VALIDATION_ERROR,
-                        status_code=status.HTTP_400_BAD_REQUEST
-                    )
-                if hours_decimal > 24:
-                    return create_error_response(
-                        'Hours cannot exceed 24',
-                        code=ErrorCodes.VALIDATION_ERROR,
-                        status_code=status.HTTP_400_BAD_REQUEST
-                    )
-                if (
-                    handshake.service.type in ('Offer', 'Need')
-                    and hours_decimal != hours_decimal.to_integral_value()
-                ):
-                    return create_error_response(
-                        'Hours must be a whole number',
-                        code=ErrorCodes.VALIDATION_ERROR,
-                        status_code=status.HTTP_400_BAD_REQUEST
-                    )
-                
-                # If hours changed and handshake was already accepted (provisioned), 
-                # we need to adjust the provisioned amount
-                old_hours = handshake.provisioned_hours
-                if handshake.status == 'accepted' and hours_decimal != old_hours:
-                    # Adjust the escrowed amount
-                    difference = hours_decimal - old_hours
-                    receiver = handshake.requester
-                    with transaction.atomic():
-                        receiver_locked = User.objects.select_for_update().get(id=receiver.id)
-                        if difference > 0:
-                            # Need more hours - check balance and deduct
-                            if receiver_locked.timebank_balance < difference:
-                                return create_error_response(
-                                    f'Insufficient balance. Need {difference} more hours',
-                                    code=ErrorCodes.INSUFFICIENT_BALANCE,
-                                    status_code=status.HTTP_400_BAD_REQUEST
-                                )
-                            
-                            # Use F() expression for atomic balance update
-                            receiver_locked.timebank_balance = F("timebank_balance") - difference
-                            receiver_locked.save(update_fields=["timebank_balance"])
-                            receiver_locked.refresh_from_db(fields=["timebank_balance"])
-                            
-                            # Record adjustment transaction
-                            TransactionHistory.objects.create(
-                                user=receiver_locked,
-                                transaction_type='provision',
-                                amount=-difference,
-                                balance_after=receiver_locked.timebank_balance,
-                                handshake=handshake,
-                                description=f"Additional hours escrowed for '{handshake.service.title}' (adjusted from {old_hours} to {hours_decimal} hours)"
-                            )
-                            invalidate_transactions(str(receiver_locked.id))
-                        else:
-                            # Refund excess hours - use F() expression for atomic balance update
-                            receiver_locked.timebank_balance = F("timebank_balance") + abs(difference)
-                            receiver_locked.save(update_fields=["timebank_balance"])
-                            receiver_locked.refresh_from_db(fields=["timebank_balance"])
-                            
-                            # Record refund transaction
-                            TransactionHistory.objects.create(
-                                user=receiver_locked,
-                                transaction_type='refund',
-                                amount=abs(difference),
-                                balance_after=receiver_locked.timebank_balance,
-                                handshake=handshake,
-                                description=f"Hours adjusted for '{handshake.service.title}' (refunded {abs(difference)} hours, changed from {old_hours} to {hours_decimal} hours)"
-                            )
-                            invalidate_transactions(str(receiver_locked.id))
-                
-                handshake.provisioned_hours = hours_decimal
-            except (InvalidOperation, ValueError, TypeError):
-                return create_error_response(
-                    'Invalid hours value',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-        if is_provider:
-            handshake.provider_confirmed_complete = True
-        else:
-            handshake.receiver_confirmed_complete = True
-
-        handshake.save()
-        
-        # Invalidate conversations cache for both users so UI updates immediately
-        invalidate_conversations(str(handshake.service.user.id))
-        invalidate_conversations(str(handshake.requester.id))
-
-        if handshake.provider_confirmed_complete and handshake.receiver_confirmed_complete:
-            with transaction.atomic():
-                complete_timebank_transfer(handshake)
-                window_start = timezone.now()
-                Handshake.objects.filter(id=handshake.id).update(
-                    evaluation_window_starts_at=window_start,
-                    evaluation_window_ends_at=window_start + timedelta(hours=settings.FEEDBACK_WINDOW_HOURS),
-                    evaluation_window_closed_at=None,
-                )
-                handshake.refresh_from_db(fields=['status', 'evaluation_window_starts_at', 'evaluation_window_ends_at', 'evaluation_window_closed_at'])
-                create_notification(
-                    user=handshake.service.user,
-                    notification_type='positive_rep',
-                    title='Leave Feedback',
-                    message=f"Service completed! Would you like to leave positive feedback for {handshake.requester.first_name}?",
-                    handshake=handshake
-                )
-                create_notification(
-                    user=handshake.requester,
-                    notification_type='positive_rep',
-                    title='Leave Feedback',
-                    message=f"Service completed! Would you like to leave positive feedback for {handshake.service.user.first_name}?",
-                    handshake=handshake
-                )
+        try:
+            handshake = HandshakeService.confirm_completion(handshake, request.user, hours=hours)
+        except HandshakeServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
         serializer = self.get_serializer(handshake)
         return Response(serializer.data)
@@ -3546,145 +3100,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='report', throttle_classes=[ConfirmationThrottle])
     def report_issue(self, request, pk=None):
         handshake = self.get_object()
-        user = request.user
-        issue_type = (request.data.get('issue_type') or 'no_show').strip().lower()
-        description = (request.data.get('description') or '').strip()
-        is_event_handshake = handshake.service.type == 'Event'
-
-        # Event handshakes support broader behavior report types; non-event
-        # handshakes only support no-show/service-issue disputes.
-        if is_event_handshake:
-            allowed_types = {'no_show', 'service_issue', 'harassment', 'spam', 'scam', 'other'}
-        else:
-            allowed_types = {'no_show', 'service_issue'}
-
-        if issue_type not in allowed_types:
+        try:
+            report = HandshakeService.report_issue(handshake, request.user, request.data)
+        except HandshakeServiceError as exc:
             return create_error_response(
-                'Invalid issue_type.',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST,
+                str(exc), code=exc.code, status_code=exc.status_code,
             )
-        
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-
-        is_provider = provider == user
-        is_receiver = receiver == user
-
-        if not (is_provider or is_receiver):
-            return create_error_response(
-                'Not authorized',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        if is_event_handshake:
-            event_start = handshake.service.scheduled_time or handshake.scheduled_time
-            if not event_start:
-                return create_error_response(
-                    'Event start time is required to submit reports.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            now = timezone.now()
-            report_window_ends_at = event_start + timedelta(hours=24)
-            if now < event_start or now > report_window_ends_at:
-                return create_error_response(
-                    'Event reports are allowed from event start time up to 24 hours after start.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-        reported_user = receiver if is_provider else provider
-        reported_user_id = request.data.get('reported_user_id')
-        if reported_user_id is not None:
-            if not is_event_handshake:
-                return create_error_response(
-                    'reported_user_id can only be used for event reports.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            event_member_ids = set(
-                handshake.service.handshakes.filter(
-                    status__in=['accepted', 'reported', 'paused', 'checked_in', 'attended', 'no_show', 'completed']
-                ).values_list('requester_id', flat=True)
-            )
-            event_member_ids.add(handshake.service.user_id)
-
-            try:
-                target_user = User.objects.get(id=reported_user_id)
-            except (ValueError, TypeError, User.DoesNotExist):
-                return create_error_response(
-                    'Invalid reported_user_id.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if target_user.id not in event_member_ids:
-                return create_error_response(
-                    'reported_user_id must belong to the event organizer or an active participant.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if str(target_user.id) == str(user.id):
-                return create_error_response(
-                    'You cannot report yourself.',
-                    code=ErrorCodes.VALIDATION_ERROR,
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-
-            reported_user = target_user
-
-        has_open_duplicate = Report.objects.filter(
-            reporter=user,
-            reported_user=reported_user,
-            related_handshake=handshake,
-            type=issue_type,
-            status='pending',
-        ).exists()
-        if has_open_duplicate:
-            return create_error_response(
-                'You already have an open report for this issue and user in this event.',
-                code=ErrorCodes.VALIDATION_ERROR,
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not description:
-            default_descriptions = {
-                'no_show': 'No-show dispute reported',
-                'service_issue': 'Service issue reported',
-                'harassment': 'Harassment or abusive behavior reported',
-                'spam': 'Spam or disruptive behavior reported',
-                'scam': 'Scam or fraud concern reported',
-                'other': 'Other issue reported',
-            }
-            description = default_descriptions.get(issue_type, 'Issue reported')
-        
-        report = Report.objects.create(
-            reporter=user,
-            reported_user=reported_user,
-            related_handshake=handshake,
-            reported_service=handshake.service,
-            type=issue_type,
-            description=description,
-        )
-
-        handshake.status = 'reported'
-        handshake.save()
-
-        admins = User.objects.filter(role='admin')
-        for admin in admins:
-            create_notification(
-                user=admin,
-                notification_type='admin_warning',
-                title='New Report Requires Review',
-                message=f"New {report.get_type_display()} report for service '{handshake.service.title}'",
-                handshake=handshake
-            )
-
         return Response({'status': 'success', 'report_id': str(report.id)}, status=201)
 
     # ------------------------------------------------------------------
@@ -4314,6 +3735,35 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         count = Notification.objects.filter(user=request.user, is_read=False).count()
         return Response({'count': count})
 
+    @extend_schema(
+        summary='Register an Expo push token for this device',
+        request=DevicePushTokenSerializer,
+        responses={201: inline_serializer('PushTokenResponse', {'status': drf_serializers.CharField()})},
+    )
+    @action(detail=False, methods=['post'], url_path='register-push-token')
+    def register_push_token(self, request):
+        serializer = DevicePushTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = serializer.validated_data['token']
+        obj, created = DevicePushToken.objects.update_or_create(
+            token=token,
+            defaults={'user': request.user, 'is_active': True},
+        )
+        return Response({'status': 'created' if created else 'updated'}, status=201 if created else 200)
+
+    @extend_schema(
+        summary='Deregister an Expo push token (e.g. on logout)',
+        request=DevicePushTokenSerializer,
+        responses={200: inline_serializer('PushTokenDeregisterResponse', {'status': drf_serializers.CharField()})},
+    )
+    @action(detail=False, methods=['post'], url_path='deregister-push-token')
+    def deregister_push_token(self, request):
+        serializer = DevicePushTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = serializer.validated_data['token']
+        DevicePushToken.objects.filter(token=token, user=request.user).update(is_active=False)
+        return Response({'status': 'deregistered'})
+
 class ReputationViewSet(viewsets.ModelViewSet):
     """
     Reputation Management
@@ -4373,7 +3823,7 @@ class ReputationViewSet(viewsets.ModelViewSet):
         """Submit positive reputation"""
         handshake_id = request.data.get('handshake_id')
         raw_comment = (request.data.get('comment') or '').strip()
-        
+
         try:
             handshake = Handshake.objects.select_related(
                 'service', 'service__user', 'requester'
@@ -4382,155 +3832,13 @@ class ReputationViewSet(viewsets.ModelViewSet):
             return create_error_response(
                 'Handshake not found',
                 code=ErrorCodes.NOT_FOUND,
-                status_code=status.HTTP_404_NOT_FOUND
-            )
-
-        required_status = 'attended' if handshake.service.type == 'Event' else 'completed'
-        if handshake.status != required_status:
-            return create_error_response(
-                'Handshake not found or not eligible for evaluation',
-                code=ErrorCodes.NOT_FOUND,
-                status_code=status.HTTP_404_NOT_FOUND
-            )
-
-        in_window, window_error = _validate_feedback_window(handshake)
-        if not in_window:
-            return create_error_response(
-                window_error,
-                code=ErrorCodes.INVALID_STATE,
-                status_code=status.HTTP_410_GONE
-            )
-
-        user = request.user
-        
-        # Determine provider/receiver, then target the *other* party.
-        from .utils import get_provider_and_receiver
-        provider, receiver = get_provider_and_receiver(handshake)
-
-        # Check if user is not a participant
-        if user not in [provider, receiver]:
-            return create_error_response(
-                'Not authorized - you are not a participant in this handshake',
-                code=ErrorCodes.PERMISSION_DENIED,
-                status_code=status.HTTP_403_FORBIDDEN
-            )
-
-        is_event_evaluation = handshake.service.type == 'Event'
-        if is_event_evaluation:
-            if handshake.requester_id != user.id:
-                return create_error_response(
-                    'Only verified attendees can evaluate the organizer for events',
-                    code=ErrorCodes.PERMISSION_DENIED,
-                    status_code=status.HTTP_403_FORBIDDEN
-                )
-            target_user = handshake.service.user
-            is_punctual = request.data.get('well_organized', request.data.get('punctual', False))
-            is_helpful = request.data.get('engaging', request.data.get('helpful', False))
-            is_kind = request.data.get('welcoming', request.data.get('kindness', False))
-        else:
-            target_user = receiver if user == provider else provider
-            is_punctual = request.data.get('punctual', False)
-            is_helpful = request.data.get('helpful', False)
-            is_kind = request.data.get('kindness', False)
-
-        # Check if rep already given
-        existing = ReputationRep.objects.filter(handshake=handshake, giver=user).first()
-        if existing:
-            return create_error_response(
-                'Reputation already submitted',
-                code=ErrorCodes.ALREADY_EXISTS,
-                status_code=status.HTTP_400_BAD_REQUEST
+                status_code=status.HTTP_404_NOT_FOUND,
             )
 
         try:
-            cleaned_comment = None
-            if raw_comment:
-                cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000]
-                if not cleaned_comment:
-                    cleaned_comment = None
-
-            rep = ReputationRep.objects.create(
-                handshake=handshake,
-                giver=user,
-                receiver=target_user,  # Reputation goes to the other party
-                is_punctual=is_punctual,
-                is_helpful=is_helpful,
-                is_kind=is_kind,
-                comment=cleaned_comment
-            )
-        except IntegrityError:
-            # Handle race condition where duplicate rep was created between check and create
-            return create_error_response(
-                'Reputation already submitted',
-                code=ErrorCodes.ALREADY_EXISTS,
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Create a verified review entry for Service Detail from the reputation comment.
-        # This is intentionally the only write-path for service verified reviews.
-        if rep.comment:
-            existing_review = Comment.objects.filter(
-                related_handshake=handshake,
-                user=user,
-                is_verified_review=True,
-                is_deleted=False
-            ).exists()
-            if not existing_review:
-                Comment.objects.create(
-                    service=handshake.service,
-                    user=user,
-                    body=rep.comment,
-                    is_verified_review=True,
-                    related_handshake=handshake
-                )
-
-        # Check and assign badges for receiver
-        target_badges = check_and_assign_badges(target_user)
-        if target_badges:
-            # Fetch all badges at once to avoid N+1 queries
-            badges_dict = {badge.id: badge.name for badge in Badge.objects.filter(id__in=target_badges)}
-            badge_names = [badges_dict.get(bid, f"Badge {bid}") for bid in target_badges]
-            create_notification(
-                user=target_user,
-                notification_type='positive_rep',
-                title='New Badge Earned!',
-                message=f"Congratulations! You earned: {', '.join(badge_names)}",
-                handshake=handshake,
-                service=handshake.service
-            )
-
-        # For Offer/Need services, notify the reviewed user only when there is
-        # at least one positive trait or a review comment.
-        if not is_event_evaluation and (
-            rep.is_punctual or rep.is_helpful or rep.is_kind or bool(rep.comment)
-        ):
-            create_notification(
-                user=target_user,
-                notification_type='positive_rep',
-                title='Feedback Received',
-                message=f"{user.first_name} left feedback for '{handshake.service.title}'.",
-                handshake=handshake,
-                service=handshake.service,
-            )
-        
-        # Update karma (REQ-REP-006)
-        karma_gain = 0
-        if rep.is_punctual:
-            karma_gain += 1
-        if rep.is_helpful:
-            karma_gain += 1
-        if rep.is_kind:
-            karma_gain += 1
-        
-        target_user.karma_score += karma_gain
-        target_user.save()
-        
-        # Invalidate conversations cache so UI updates to show reputation was submitted
-        invalidate_conversations(str(provider.id))
-        invalidate_conversations(str(receiver.id))
-
-        if handshake.service.type == 'Event':
-            EventEvaluationService.refresh_summary(handshake.service)
+            rep = ReputationService.submit(handshake, request.user, request.data, raw_comment)
+        except ReputationServiceError as exc:
+            return create_error_response(str(exc), code=exc.code, status_code=exc.status_code)
 
         serializer = self.get_serializer(rep)
         return Response(serializer.data, status=201)
@@ -4602,33 +3910,69 @@ class ReputationViewSet(viewsets.ModelViewSet):
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
-        existing_review = Comment.objects.filter(
+        cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000] if raw_comment else ''
+        images = request.FILES.getlist('images')
+
+        # Validate images
+        _ALLOWED_IMG_EXT = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+        _MAX_IMG_SIZE = 10 * 1024 * 1024  # 10 MB
+        if images:
+            if len(images) > 3:
+                return create_error_response(
+                    'Maximum 3 images allowed per review.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            for img in images:
+                ext = os.path.splitext(img.name)[1].lower()
+                if ext not in _ALLOWED_IMG_EXT:
+                    return create_error_response(
+                        f'Unsupported image format: {ext}. Allowed: JPG, PNG, GIF, WebP.',
+                        code=ErrorCodes.VALIDATION_ERROR,
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                    )
+                if img.size > _MAX_IMG_SIZE:
+                    return create_error_response(
+                        'Each image must be under 10 MB.',
+                        code=ErrorCodes.VALIDATION_ERROR,
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        if not cleaned_comment and not images:
+            return Response(
+                {'status': 'success', 'message': 'Evaluation already recorded. No review text or images provided.'},
+                status=status.HTTP_200_OK,
+            )
+
+        # Resolve or create the Comment for this handshake+user pair.
+        # The Comment may already exist if the reputation submission included a comment text —
+        # in that case we attach images to the existing record rather than rejecting.
+        comment = Comment.objects.filter(
             related_handshake=handshake,
             user=user,
             is_verified_review=True,
             is_deleted=False,
-        ).exists()
-        if existing_review:
-            return create_error_response(
-                'Review already submitted',
-                code=ErrorCodes.ALREADY_EXISTS,
-                status_code=status.HTTP_400_BAD_REQUEST,
+        ).first()
+
+        if comment and cleaned_comment:
+            # Update body if the existing comment was empty (images-first path)
+            if not comment.body:
+                comment.body = cleaned_comment
+                comment.save(update_fields=['body'])
+        elif not comment:
+            comment = Comment.objects.create(
+                service=handshake.service,
+                user=user,
+                body=cleaned_comment,
+                is_verified_review=True,
+                related_handshake=handshake,
             )
 
-        cleaned_comment = bleach.clean(raw_comment, tags=[], strip=True).strip()[:2000]
-        if not cleaned_comment:
-            return Response(
-                {'status': 'success', 'message': 'Evaluation already recorded. No review text provided.'},
-                status=status.HTTP_200_OK,
-            )
-
-        comment = Comment.objects.create(
-            service=handshake.service,
-            user=user,
-            body=cleaned_comment,
-            is_verified_review=True,
-            related_handshake=handshake,
-        )
+        for img in images:
+            media_obj = CommentMedia(comment=comment)
+            media_obj.file.save(img.name, img, save=True)
+            media_obj.file_url = media_obj.file.url
+            media_obj.save(update_fields=['file_url'])
 
         return Response(CommentSerializer(comment).data, status=status.HTTP_201_CREATED)
 
@@ -4690,8 +4034,8 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Only admins can access
-        if self.request.user.role != 'admin':
+        # Only admin-role users can access
+        if self.request.user.role not in ADMIN_ROLES:
             return Report.objects.none()
 
         queryset = Report.objects.all()
@@ -4719,7 +4063,7 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         - confirm_no_show: Refund receiver, apply karma penalty, notify both parties
         - dismiss: Complete transfer to provider, notify both parties
         """
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             return create_error_response(
                 'Admin access required',
                 code=ErrorCodes.PERMISSION_DENIED,
@@ -4764,7 +4108,111 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         from .utils import get_provider_and_receiver
         from django.utils import timezone
 
-        if action_type == 'confirm_no_show':
+        if action_type == 'remove_from_event':
+            handshake = report.related_handshake
+            if not handshake:
+                return create_error_response(
+                    'This report has no related handshake. Cannot remove participant from event.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if handshake.service.type != 'Event':
+                return create_error_response(
+                    'Remove from event is only available for event reports.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if not report.reported_user_id:
+                return create_error_response(
+                    'This report has no reported participant to remove.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            if str(report.reported_user_id) == str(handshake.service.user_id):
+                return create_error_response(
+                    'Event organizer cannot be removed from their own event.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            with transaction.atomic():
+                target_handshake = (
+                    Handshake.objects
+                    .select_for_update()
+                    .select_related('service', 'requester')
+                    .filter(service=handshake.service, requester_id=report.reported_user_id)
+                    .order_by('-updated_at')
+                    .first()
+                )
+                if not target_handshake:
+                    return create_error_response(
+                        'Could not find an active event participant handshake for the reported user.',
+                        code=ErrorCodes.NOT_FOUND,
+                        status_code=status.HTTP_404_NOT_FOUND
+                    )
+
+                if target_handshake.status not in ['accepted', 'checked_in', 'reported', 'paused']:
+                    return create_error_response(
+                        f'Cannot remove participant with handshake status "{target_handshake.status}".',
+                        code=ErrorCodes.INVALID_STATE,
+                        status_code=status.HTTP_400_BAD_REQUEST
+                    )
+
+                target_handshake.status = 'cancelled'
+                target_handshake.save(update_fields=['status', 'updated_at'])
+
+                report.status = 'resolved'
+                report.resolved_by = request.user
+                report.resolved_at = timezone.now()
+                report.admin_notes = admin_notes or 'Reported participant removed from event by admin moderation'
+                report.save()
+
+                create_notification(
+                    user=target_handshake.requester,
+                    notification_type='admin_warning',
+                    title='Removed From Event',
+                    message=f'You were removed from the event "{target_handshake.service.title}" after moderator review.',
+                    handshake=target_handshake,
+                    service=target_handshake.service,
+                )
+
+                if report.reporter_id and report.reporter_id != target_handshake.requester_id:
+                    create_notification(
+                        user=report.reporter,
+                        notification_type='dispute_resolved',
+                        title='Report Resolved',
+                        message=f'Your report was upheld and the participant was removed from "{target_handshake.service.title}".',
+                        handshake=target_handshake,
+                        service=target_handshake.service,
+                    )
+
+                if target_handshake.service.user_id not in [target_handshake.requester_id, report.reporter_id]:
+                    create_notification(
+                        user=target_handshake.service.user,
+                        notification_type='admin_warning',
+                        title='Participant Removed',
+                        message=f'A participant was removed from your event "{target_handshake.service.title}" after moderation review.',
+                        handshake=target_handshake,
+                        service=target_handshake.service,
+                    )
+
+            invalidate_conversations(str(target_handshake.requester_id))
+            invalidate_conversations(str(target_handshake.service.user_id))
+            if report.reporter_id:
+                invalidate_conversations(str(report.reporter_id))
+
+            log_admin_action(
+                request.user,
+                'resolve_report',
+                'report',
+                report,
+                admin_notes or action_type,
+            )
+
+        elif action_type == 'confirm_no_show':
             # REQ-ADM-007: Handle no-show with correct financial action
             # REQ-ADM-008: Apply karma penalty to no-show user
             
@@ -4931,7 +4379,7 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         
         else:
             return create_error_response(
-                'Invalid action. Use "confirm_no_show" or "dismiss".',
+                'Invalid action. Use "confirm_no_show", "dismiss", or "remove_from_event".',
                 code=ErrorCodes.VALIDATION_ERROR,
                 status_code=status.HTTP_400_BAD_REQUEST
             )
@@ -4949,7 +4397,7 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
         
         **Endpoint:** POST /api/admin/reports/{id}/pause/
         """
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             return create_error_response(
                 'Admin access required',
                 code=ErrorCodes.PERMISSION_DENIED,
@@ -5061,8 +4509,18 @@ class AdminUserViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = StandardResultsSetPagination
 
+    # Ordered from highest to lowest privilege.  Used by assign_role to enforce
+    # the hierarchy: an actor may only target users below their own tier and
+    # may only grant roles strictly below their own tier.
+    _ROLE_HIERARCHY: dict[str, int] = {
+        'super_admin': 3,
+        'admin': 2,
+        'moderator': 1,
+        'member': 0,
+    }
+
     def check_admin(self, request):
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             return create_error_response(
                 'Admin access required',
                 code=ErrorCodes.PERMISSION_DENIED,
@@ -5070,13 +4528,38 @@ class AdminUserViewSet(viewsets.ViewSet):
             )
         return None
 
+    def _check_target_tier(self, request, target_user, allow_same_tier=False):
+        """Return an error response based on role-tier comparison.
+
+        By default requires actor tier to be strictly above target tier.
+        Pass allow_same_tier=True for actions (e.g. warn) that peers may perform
+        on each other, but that still cannot be performed upward.
+        """
+        actor_tier = self._ROLE_HIERARCHY.get(request.user.role, 0)
+        target_tier = self._ROLE_HIERARCHY.get(target_user.role, 0)
+        blocked = actor_tier < target_tier if allow_same_tier else actor_tier <= target_tier
+        if blocked:
+            return create_error_response(
+                'You cannot perform this action on a user at your tier or above.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _visible_users_queryset(self, request):
+        """Return a User queryset filtered to roles the actor is permitted to see."""
+        qs = User.objects.all()
+        if request.user.role != 'super_admin':
+            qs = qs.exclude(role='super_admin')
+        return qs
+
     def list(self, request):
         """List all users with search and filter support (admin only)"""
         admin_check = self.check_admin(request)
         if admin_check:
             return admin_check
 
-        queryset = User.objects.all().order_by('-date_joined')
+        queryset = self._visible_users_queryset(request).order_by('-date_joined')
         
         # Search by email, first_name, or last_name
         search = request.query_params.get('search', '').strip()
@@ -5104,6 +4587,24 @@ class AdminUserViewSet(viewsets.ViewSet):
         serializer = AdminUserListSerializer(queryset[:100], many=True)
         return Response(serializer.data)
 
+    def retrieve(self, request, pk=None):
+        """Return comprehensive user detail for admin review (admin only)"""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        try:
+            user = self._visible_users_queryset(request).get(id=pk)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = AdminUserDetailSerializer(user)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['post'], url_path='warn', throttle_classes=[ConfirmationThrottle])
     def warn_user(self, request, pk=None):
         """REQ-ADM-003: Issue warning to user"""
@@ -5126,6 +4627,11 @@ class AdminUserViewSet(viewsets.ViewSet):
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
+
+        # Peers at the same tier may warn each other; acting upward is still blocked.
+        tier_check = self._check_target_tier(request, user, allow_same_tier=True)
+        if tier_check:
+            return tier_check
 
         create_notification(
             user=user,
@@ -5167,6 +4673,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_403_FORBIDDEN
             )
 
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
+
         user.is_active = False
         user.save()
 
@@ -5189,6 +4699,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
+
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
 
         user.is_active = True
         user.save()
@@ -5213,6 +4727,10 @@ class AdminUserViewSet(viewsets.ViewSet):
                 status_code=status.HTTP_404_NOT_FOUND
             )
 
+        tier_check = self._check_target_tier(request, user)
+        if tier_check:
+            return tier_check
+
         adjustment = request.data.get('adjustment', 0)
         user.karma_score += adjustment
         user.save()
@@ -5231,6 +4749,167 @@ class AdminUserViewSet(viewsets.ViewSet):
             'message': f'Karma adjusted by {adjustment}'
         })
 
+    @action(detail=True, methods=['get'], url_path='transactions')
+    def transactions(self, request, pk=None):
+        """Return paginated transaction history for a user (admin only)."""
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        try:
+            user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        qs = TransactionHistory.objects.filter(user=user).select_related(
+            'handshake__service'
+        ).order_by('-created_at')
+
+        page_size = min(int(request.query_params.get('page_size', 20)), 100)
+        page = max(int(request.query_params.get('page', 1)), 1)
+        total = qs.count()
+        start = (page - 1) * page_size
+        items = qs[start:start + page_size]
+
+        data = [
+            {
+                'id': str(t.id),
+                'transaction_type': t.transaction_type,
+                'amount': str(t.amount),
+                'balance_after': str(t.balance_after),
+                'description': t.description,
+                'service_title': t.handshake.service.title if t.handshake and t.handshake.service else None,
+                'service_id': str(t.handshake.service_id) if t.handshake and t.handshake.service_id else None,
+                'created_at': t.created_at.isoformat(),
+            }
+            for t in items
+        ]
+
+        return Response({
+            'count': total,
+            'page': page,
+            'page_size': page_size,
+            'results': data,
+        })
+
+    @action(detail=True, methods=['post'], url_path='assign-role', throttle_classes=[ConfirmationThrottle])
+    def assign_role(self, request, pk=None):
+        """
+        REQ-ADM-010: Assign or change a user's role with strict hierarchy enforcement.
+
+        Role hierarchy (highest → lowest): super_admin → admin → moderator → member.
+
+        Rules enforced:
+        - Actor must be admin or super_admin.
+        - Self-modification is prohibited.
+        - Actor can only target users whose current role is strictly below the actor's tier.
+        - Actor can only grant roles strictly below their own tier.
+
+        Request body:
+        ```json
+        { "role": "moderator" }
+        ```
+
+        Response:
+        ```json
+        { "status": "success", "message": "...", "previous_role": "member", "new_role": "moderator" }
+        ```
+        """
+        admin_check = self.check_admin(request)
+        if admin_check:
+            return admin_check
+
+        try:
+            target_user = User.objects.get(id=pk)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Self-modification is never allowed, regardless of tier.
+        if target_user == request.user:
+            return create_error_response(
+                'You cannot modify your own role.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        new_role = (request.data.get('role') or '').strip()
+        if new_role not in self._ROLE_HIERARCHY:
+            return create_error_response(
+                f'Invalid role. Accepted values: {", ".join(self._ROLE_HIERARCHY)}.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        actor_tier = self._ROLE_HIERARCHY.get(request.user.role, 0)
+        target_current_tier = self._ROLE_HIERARCHY.get(target_user.role, 0)
+        new_role_tier = self._ROLE_HIERARCHY[new_role]
+
+        # Actor cannot modify a peer or someone above them.
+        if target_current_tier >= actor_tier:
+            return create_error_response(
+                'You cannot modify the role of a user at your tier or above.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Actor cannot elevate someone to their own tier or higher.
+        if new_role_tier >= actor_tier:
+            return create_error_response(
+                'You cannot assign a role equal to or above your own tier.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Only super_admin may grant the moderator role.
+        if new_role == 'moderator' and request.user.role != 'super_admin':
+            return create_error_response(
+                'Only a super_admin can assign the moderator role.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        previous_role = target_user.role
+
+        # Extract client IP for the audit trail (X-Forwarded-For respected for proxied setups).
+        ip_address = (
+            request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+            or request.META.get('REMOTE_ADDR', '')
+        ) or None
+
+        target_user.role = new_role
+        target_user.save(update_fields=['role'])
+
+        # Write an immutable audit record directly so we can capture the extra
+        # role-change fields that log_admin_action() does not support.
+        try:
+            AdminAuditLog.objects.create(
+                admin=request.user,
+                action_type='assign_role',
+                target_entity='user',
+                target_id=target_user.id,
+                previous_role=previous_role,
+                new_role=new_role,
+                ip_address=ip_address,
+                reason=f'Role changed from {previous_role} to {new_role}',
+            )
+        except Exception as exc:
+            logger.warning('Admin audit log failed for assign_role (user %s): %s', pk, exc)
+
+        return Response({
+            'status': 'success',
+            'message': f"Role updated to '{new_role}'",
+            'previous_role': previous_role,
+            'new_role': new_role,
+        })
+
 
 class AdminCommentViewSet(viewsets.ViewSet):
     """Admin-only moderation endpoints for service comments/reviews."""
@@ -5239,7 +4918,7 @@ class AdminCommentViewSet(viewsets.ViewSet):
     serializer_class = AdminCommentSerializer
 
     def check_admin(self, request):
-        if request.user.role != 'admin':
+        if request.user.role not in ADMIN_ROLES:
             return create_error_response(
                 'Admin access required',
                 code=ErrorCodes.PERMISSION_DENIED,
@@ -5336,7 +5015,7 @@ class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        if self.request.user.role != 'admin':
+        if self.request.user.role not in ADMIN_ROLES:
             return AdminAuditLog.objects.none()
 
         queryset = AdminAuditLog.objects.select_related('admin').all()
@@ -5350,6 +5029,38 @@ class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(target_entity=target_entity)
 
         return queryset.order_by('-created_at')
+
+
+class AdminSettingsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _check_admin(self, request):
+        if request.user.role not in ADMIN_ROLES:
+            return create_error_response(
+                'Admin access required',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def get(self, request):
+        admin_check = self._check_admin(request)
+        if admin_check:
+            return admin_check
+
+        serializer = PlatformSettingSerializer(PlatformSetting.get_solo())
+        return Response(serializer.data)
+
+    def patch(self, request):
+        admin_check = self._check_admin(request)
+        if admin_check:
+            return admin_check
+
+        settings_obj = PlatformSetting.get_solo()
+        serializer = PlatformSettingSerializer(settings_obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -5516,9 +5227,12 @@ class WikidataSearchView(APIView):
             limit = 10
         
         # Use existing wikidata utility
-        from .wikidata import search_wikidata_items
+        from .wikidata import search_wikidata_items, classify_and_filter_results
         results = search_wikidata_items(query, limit=limit)
-        
+
+        # Filter by entity type and add entity_type to each result
+        results = classify_and_filter_results(results)
+
         return Response(results)
 
 
@@ -5751,11 +5465,9 @@ class GroupChatViewSet(viewsets.ViewSet):
         try:
             session = GroupChatSession.objects.select_related('service').get(id=session_id)
         except (GroupChatSession.DoesNotExist, DjangoValidationError, ValueError):
-            from rest_framework.exceptions import NotFound
-            return None, Response({'detail': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+            return None, create_error_response('Session not found', code=ErrorCodes.NOT_FOUND, status_code=status.HTTP_404_NOT_FOUND)
         if str(session.service_id) != str(service.id):
-            from rest_framework.exceptions import PermissionDenied
-            return None, Response({'detail': 'Session does not belong to this service'}, status=status.HTTP_400_BAD_REQUEST)
+            return None, create_error_response('Session does not belong to this service', code=ErrorCodes.VALIDATION_ERROR, status_code=status.HTTP_400_BAD_REQUEST)
         return session, None
 
     def _user_has_session_access(self, request, service, session):
@@ -5987,7 +5699,8 @@ class CommentViewSet(viewsets.ViewSet):
                     'user', 'related_handshake'
                 ).prefetch_related(user_badges_prefetch),
                 to_attr='active_replies'
-            )
+            ),
+            'media',
         ).order_by('-created_at')
         comments = _apply_blind_review_visibility(comments)
 
@@ -6392,7 +6105,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         queryset = ForumTopic.objects.select_related('author', 'category')
-        
+
         # Filter by category if provided
         category_slug = self.request.query_params.get('category')
         if category_slug:
@@ -6400,12 +6113,23 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         else:
             # Only show topics from active categories
             queryset = queryset.filter(category__is_active=True)
+
+        author_id = self.request.query_params.get('author')
+        if author_id:
+            queryset = queryset.filter(author_id=author_id)
         
         # Annotate with reply count
         queryset = queryset.annotate(
-            reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False))
+            reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False)),
+            last_activity_annotated=Coalesce(
+                Max('posts__created_at', filter=Q(posts__is_deleted=False)),
+                'created_at',
+            ),
         )
-        
+
+        sort = self.request.query_params.get('sort', 'newest')
+        if sort == 'most_active':
+            return queryset.order_by('-is_pinned', '-reply_count_annotated', '-last_activity_annotated')
         return queryset.order_by('-is_pinned', '-created_at')
     
     def get_serializer_class(self):
@@ -6425,7 +6149,6 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
-    
     @track_performance
     def retrieve(self, request, pk=None):
         """Get a specific topic with its posts"""
@@ -6533,7 +6256,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         topic.is_pinned = not topic.is_pinned
         topic.save(update_fields=['is_pinned'])
 
-        if request.user.role == 'admin':
+        if request.user.role in ADMIN_ROLES:
             state = 'Pinned' if topic.is_pinned else 'Unpinned'
             log_admin_action(request.user, 'pin_topic', 'forum_topic', topic, state)
         
@@ -6556,7 +6279,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         topic.is_locked = not topic.is_locked
         topic.save(update_fields=['is_locked'])
 
-        if request.user.role == 'admin':
+        if request.user.role in ADMIN_ROLES:
             state = 'Locked' if topic.is_locked else 'Unlocked'
             log_admin_action(request.user, 'lock_topic', 'forum_topic', topic, state)
         
@@ -6613,6 +6336,56 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
             )
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
+
+class ForumActivityView(APIView):
+    """
+    Authenticated forum activity summary for the current user.
+
+    Returns stable user-scoped counts so clients do not need to infer
+    activity metrics from paginated public topic lists.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        tags=['Forum'],
+        responses={
+            200: inline_serializer(
+                'ForumActivityResponse',
+                {
+                    'my_topics': drf_serializers.IntegerField(),
+                    'my_replies': drf_serializers.IntegerField(),
+                    'open_topics': drf_serializers.IntegerField(),
+                },
+            ),
+        },
+    )
+    @track_performance
+    def get(self, request):
+        topic_queryset = ForumTopic.objects.filter(
+            author=request.user,
+            category__is_active=True,
+        )
+        open_topic_queryset = (
+            topic_queryset
+            .filter(is_locked=False)
+            .select_related('author', 'category')
+            .annotate(reply_count_annotated=Count('posts', filter=Q(posts__is_deleted=False)))
+            .order_by('-is_pinned', '-created_at')
+        )
+        return Response(
+            {
+                'my_topics': topic_queryset.count(),
+                'my_replies': ForumPost.objects.filter(
+                    topic__author=request.user,
+                    topic__category__is_active=True,
+                    is_deleted=False,
+                ).count(),
+                'open_topics': topic_queryset.filter(is_locked=False).count(),
+                'open_topic_items': ForumTopicSerializer(open_topic_queryset, many=True).data,
+            }
+        )
 
 
 class ForumPostViewSet(viewsets.ViewSet):
@@ -6766,6 +6539,28 @@ class ForumPostViewSet(viewsets.ViewSet):
         post.save(update_fields=['is_deleted'])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @action(detail=True, methods=['post'], url_path='restore')
+    @track_performance
+    def restore(self, request, pk=None):
+        """Restore a soft-deleted forum post (admin only)."""
+        if not request.user.is_staff:
+            return create_error_response(
+                'Admin access required',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            post = ForumPost.objects.select_related('topic', 'author').get(pk=pk, is_deleted=True)
+        except ForumPost.DoesNotExist:
+            return create_error_response(
+                'Post not found or not deleted',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        post.is_deleted = False
+        post.save(update_fields=['is_deleted'])
+        return Response(ForumPostSerializer(post).data)
+
     @action(detail=True, methods=['post'], url_path='report', throttle_classes=[ConfirmationThrottle])
     @track_performance
     def report(self, request, pk=None):
@@ -6817,3 +6612,58 @@ class ForumPostViewSet(viewsets.ViewSet):
             )
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
+
+# ── E2E Test Utilities ──────────────────────────────────────────────────────
+# These endpoints are ONLY available when DJANGO_E2E=1 (non-production).
+# They allow Playwright tests to set deterministic user state.
+
+class E2ESetBalanceView(APIView):
+    """
+    Set the authenticated user's timebank balance to an exact value.
+
+    Only available when DJANGO_E2E is enabled (non-production).
+
+    POST /api/e2e/set-balance/
+    Body: { "balance": 5.0 }
+    Response: { "id": "...", "email": "...", "balance": 5.0 }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if not getattr(settings, 'DJANGO_E2E', False):
+            return Response(
+                {'detail': 'This endpoint is only available in E2E mode.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        balance_raw = request.data.get('balance')
+        if balance_raw is None:
+            return Response(
+                {'detail': 'balance field is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            balance = Decimal(str(balance_raw))
+        except (InvalidOperation, ValueError, TypeError):
+            return Response(
+                {'detail': 'balance must be a valid number.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if balance < Decimal('-10.00') or balance > Decimal('99999999.99'):
+            return Response(
+                {'detail': 'balance out of allowed range.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user
+        user.timebank_balance = balance
+        user.save(update_fields=['timebank_balance'])
+
+        return Response({
+            'id': str(user.id),
+            'email': user.email,
+            'balance': float(user.timebank_balance),
+        })

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Box, Flex, SimpleGrid, Text } from '@chakra-ui/react'
-import { FiAlertTriangle, FiCheckCircle, FiClock, FiFlag, FiSlash, FiStar, FiUsers, FiX } from 'react-icons/fi'
+import { FiAlertTriangle, FiCamera, FiCheckCircle, FiClock, FiFlag, FiSlash, FiStar, FiUsers, FiX } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { reputationAPI } from '@/services/reputationAPI'
 
@@ -22,6 +22,7 @@ interface Props {
   onClose: () => void
   handshakeId: string
   counterpartName: string
+  isEventEvaluation?: boolean
   alreadyReviewed?: boolean
   onSubmitted?: () => Promise<void> | void
 }
@@ -33,13 +34,22 @@ interface TraitOption {
   icon: 'clock' | 'users' | 'star' | 'flag' | 'alert' | 'slash'
 }
 
-const TRAITS: TraitOption[] = [
+const SERVICE_TRAITS: TraitOption[] = [
   { key: 'punctual', label: 'Punctual', tone: 'positive', icon: 'clock' },
   { key: 'helpful', label: 'Helpful', tone: 'positive', icon: 'users' },
   { key: 'kindness', label: 'Kind', tone: 'positive', icon: 'star' },
   { key: 'is_late', label: 'Late', tone: 'negative', icon: 'slash' },
   { key: 'is_unhelpful', label: 'Unhelpful', tone: 'negative', icon: 'flag' },
   { key: 'is_rude', label: 'Rude', tone: 'negative', icon: 'alert' },
+]
+
+const EVENT_TRAITS: TraitOption[] = [
+  { key: 'well_organized', label: 'Well Organized', tone: 'positive', icon: 'star' },
+  { key: 'engaging', label: 'Engaging', tone: 'positive', icon: 'users' },
+  { key: 'welcoming', label: 'Welcoming', tone: 'positive', icon: 'clock' },
+  { key: 'disorganized', label: 'Disorganized', tone: 'negative', icon: 'slash' },
+  { key: 'boring', label: 'Boring', tone: 'negative', icon: 'flag' },
+  { key: 'unwelcoming', label: 'Unwelcoming', tone: 'negative', icon: 'alert' },
 ]
 
 function TraitIcon({ icon, color }: { icon: TraitOption['icon']; color: string }) {
@@ -56,19 +66,24 @@ export default function ServiceEvaluationModal({
   onClose,
   handshakeId,
   counterpartName,
+  isEventEvaluation = false,
   alreadyReviewed = false,
   onSubmitted,
 }: Props) {
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [comment, setComment] = useState('')
+  const [images, setImages] = useState<File[]>([])
+  const [imagePreviews, setImagePreviews] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
+
+  const traitSet = isEventEvaluation ? EVENT_TRAITS : SERVICE_TRAITS
 
   const selectedCount = useMemo(
     () => Object.values(selected).filter(Boolean).length,
     [selected],
   )
-  const positiveTraits = useMemo(() => TRAITS.filter((t) => t.tone === 'positive'), [])
-  const negativeTraits = useMemo(() => TRAITS.filter((t) => t.tone === 'negative'), [])
+  const positiveTraits = useMemo(() => traitSet.filter((t) => t.tone === 'positive'), [traitSet])
+  const negativeTraits = useMemo(() => traitSet.filter((t) => t.tone === 'negative'), [traitSet])
 
   if (!isOpen) return null
 
@@ -79,6 +94,25 @@ export default function ServiceEvaluationModal({
   const reset = () => {
     setSelected({})
     setComment('')
+    setImages([])
+    setImagePreviews([])
+  }
+
+  const handleImageAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || images.length >= 3) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setImagePreviews((p) => [...p, ev.target?.result as string])
+    }
+    reader.readAsDataURL(file)
+    setImages((prev) => [...prev, file])
+    e.target.value = ''
+  }
+
+  const removeImage = (idx: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== idx))
+    setImagePreviews((prev) => prev.filter((_, i) => i !== idx))
   }
 
   const handleClose = () => {
@@ -97,22 +131,47 @@ export default function ServiceEvaluationModal({
 
     setSubmitting(true)
     try {
-      await reputationAPI.submitCombined({
-        handshake_id: handshakeId,
-        positive: {
-          punctual: Boolean(selected.punctual),
-          helpful: Boolean(selected.helpful),
-          kindness: Boolean(selected.kindness),
-        },
-        negative: {
-          is_late: Boolean(selected.is_late),
-          is_unhelpful: Boolean(selected.is_unhelpful),
-          is_rude: Boolean(selected.is_rude),
-        },
-        comment,
-      })
+      if (isEventEvaluation) {
+        await reputationAPI.submitCombinedEvent({
+          handshake_id: handshakeId,
+          positive: {
+            well_organized: Boolean(selected.well_organized),
+            engaging: Boolean(selected.engaging),
+            welcoming: Boolean(selected.welcoming),
+          },
+          negative: {
+            disorganized: Boolean(selected.disorganized),
+            boring: Boolean(selected.boring),
+            unwelcoming: Boolean(selected.unwelcoming),
+          },
+          comment,
+        })
+      } else {
+        await reputationAPI.submitCombined({
+          handshake_id: handshakeId,
+          positive: {
+            punctual: Boolean(selected.punctual),
+            helpful: Boolean(selected.helpful),
+            kindness: Boolean(selected.kindness),
+          },
+          negative: {
+            is_late: Boolean(selected.is_late),
+            is_unhelpful: Boolean(selected.is_unhelpful),
+            is_rude: Boolean(selected.is_rude),
+          },
+          comment,
+        })
+      }
 
       toast.success('Evaluation submitted. Thank you for your feedback!')
+      // Attach images after the main evaluation — a failure here should not block the flow.
+      if (images.length > 0) {
+        try {
+          await reputationAPI.attachReviewImages(handshakeId, images)
+        } catch {
+          toast.warning('Evaluation saved, but photo upload failed. You can re-upload photos later.')
+        }
+      }
       await onSubmitted?.()
       reset()
       onClose()
@@ -148,7 +207,7 @@ export default function ServiceEvaluationModal({
       >
         <Flex align="center" justify="space-between" px={{ base: 4, md: 6 }} py={{ base: 4, md: 5 }} borderBottom={`1px solid ${GRAY100}`}>
           <Box>
-            <Text fontSize="18px" fontWeight={800} color={GRAY800}>Evaluate Exchange</Text>
+            <Text fontSize="18px" fontWeight={800} color={GRAY800}>{isEventEvaluation ? 'Evaluate Organizer' : 'Evaluate Exchange'}</Text>
             <Text fontSize="12px" color={GRAY400} mt="2px">
               Share feedback for {counterpartName}.
             </Text>
@@ -176,7 +235,7 @@ export default function ServiceEvaluationModal({
             <Box bg={GREEN_LT} border={`1px solid ${GREEN}40`} borderRadius="12px" p={4}>
               <Flex align="center" gap={2}>
                 <FiCheckCircle color={GREEN} />
-                <Text fontSize="13px" color={GREEN} fontWeight={700}>You already reviewed this exchange.</Text>
+                <Text fontSize="13px" color={GREEN} fontWeight={700}>You already reviewed this {isEventEvaluation ? 'event' : 'exchange'}.</Text>
               </Flex>
             </Box>
           ) : (
@@ -272,6 +331,64 @@ export default function ServiceEvaluationModal({
               <Text fontSize="11px" color={GRAY400} mt={1} textAlign="right">
                 {comment.length}/500
               </Text>
+
+              {/* Photo attachment */}
+              <Box mt={3}>
+                <Text fontSize="12px" fontWeight={700} color={GRAY700} mb={2}>
+                  Photos (optional · max 3 · JPG/PNG/WebP/GIF · 10 MB each)
+                </Text>
+                <Flex gap={2} flexWrap="wrap">
+                  {imagePreviews.map((src, i) => (
+                    <Box key={i} position="relative" w="72px" h="72px" flexShrink={0}>
+                      <img
+                        src={src}
+                        alt={`Preview ${i + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }}
+                      />
+                      <Box
+                        as="button"
+                        position="absolute"
+                        top="2px"
+                        right="2px"
+                        onClick={() => removeImage(i)}
+                        style={{
+                          background: 'rgba(0,0,0,0.55)',
+                          border: 'none',
+                          borderRadius: '50%',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          lineHeight: 1,
+                          padding: '2px 5px',
+                          fontSize: 13,
+                        }}
+                      >
+                        ×
+                      </Box>
+                    </Box>
+                  ))}
+                  {images.length < 3 && (
+                    <Box
+                      as="label"
+                      w="72px"
+                      h="72px"
+                      border={`2px dashed ${GRAY200}`}
+                      borderRadius="8px"
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="center"
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <FiCamera size={20} color={GRAY400} />
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/gif,image/webp"
+                        style={{ display: 'none' }}
+                        onChange={handleImageAdd}
+                      />
+                    </Box>
+                  )}
+                </Flex>
+              </Box>
             </>
           )}
         </Box>

@@ -36,6 +36,13 @@ export default function ServiceCard({
         ? colors.BLUE
         : colors.AMBER;
   const isOffer = service.type === "Offer";
+  const isGroupListing =
+    service.type === "Event" ||
+    (service.type === "Offer" && service.max_participants > 1);
+  const participantCount = service.participant_count ?? 0;
+  const maxParticipants = service.max_participants ?? 0;
+  const capacityRatio = maxParticipants > 0 ? participantCount / maxParticipants : 0;
+  const isNearlyFull = isGroupListing && capacityRatio >= 0.75 && capacityRatio < 1.0;
   const initials = getInitials(service.user.first_name, service.user.last_name);
   const displayName =
     [service.user.first_name, service.user.last_name]
@@ -47,7 +54,7 @@ export default function ServiceCard({
     <View style={[styles.card, style]}>
       {service.media && service.media.length > 0 ? (
         <ImageBackground
-          source={{ uri: (service.media[0] as { image: string }).image }}
+          source={{ uri: service.media[0]?.file_url }}
           style={styles.headerImage}
         >
           <Text
@@ -82,33 +89,6 @@ export default function ServiceCard({
       )}
 
       <View style={styles.body}>
-        <View
-          style={[
-            styles.typeBadge,
-            isOffer || service.type === "Offer"
-              ? styles.typeOffer
-              : service.type === "Need"
-                ? styles.typeWant
-                : styles.typeEvent,
-          ]}
-        >
-          <Text
-            style={
-              isOffer
-                ? styles.typeOfferBadgeText
-                : service.type === "Need"
-                  ? styles.typeWantBadgeText
-                  : styles.typeEventBadgeText
-            }
-          >
-            {service.type === "Offer"
-              ? "Offer"
-              : service.type === "Need"
-                ? "Want"
-                : "Event"}
-          </Text>
-        </View>
-
         <View style={styles.userRow}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initials}</Text>
@@ -119,6 +99,37 @@ export default function ServiceCard({
               • {formatTimeAgo(service.created_at)}
             </Text>
           </View>
+          <View
+            style={[
+              styles.typeBadge,
+              isOffer || service.type === "Offer"
+                ? styles.typeOffer
+                : service.type === "Need"
+                  ? styles.typeWant
+                  : styles.typeEvent,
+            ]}
+          >
+            <Text
+              style={
+                isOffer
+                  ? styles.typeOfferBadgeText
+                  : service.type === "Need"
+                    ? styles.typeWantBadgeText
+                    : styles.typeEventBadgeText
+              }
+            >
+              {service.type === "Offer"
+                ? "Offer"
+                : service.type === "Need"
+                  ? "Want"
+                  : "Event"}
+            </Text>
+          </View>
+          {isNearlyFull && (
+            <View style={styles.nearlyFullBadge}>
+              <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
+            </View>
+          )}
         </View>
 
         <Text style={styles.description} numberOfLines={3}>
@@ -243,12 +254,10 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   typeBadge: {
-    position: "absolute",
-    right: 12,
-    top: 12,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    marginLeft: 6,
   },
   typeOffer: {
     backgroundColor: "rgb(240, 253, 244)",
@@ -259,18 +268,30 @@ const styles = StyleSheet.create({
   typeEvent: {
     backgroundColor: "rgb(255, 245, 238)",
   },
+  nearlyFullBadge: {
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: colors.RED_LT,
+    marginLeft: 4,
+  },
+  nearlyFullBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.RED,
+  },
   typeOfferBadgeText: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.GREEN,
   },
   typeWantBadgeText: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.BLUE,
   },
   typeEventBadgeText: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.AMBER,
   },

@@ -155,7 +155,7 @@ const Navbar = () => {
 
   const balance = Number(user?.timebank_balance ?? 0)
   const p       = location.pathname
-  const isAdmin = user?.role === 'admin' || user?.is_admin === true
+  const isAdmin = ['admin', 'super_admin', 'moderator'].includes(user?.role ?? '') || user?.is_admin === true
   // On dashboard the sidebar already shows balance & post service — hide them from navbar
   const isDashboard = p === '/dashboard'
 
@@ -262,6 +262,7 @@ const Navbar = () => {
                 <Dropdown
                   trigger={
                     <Flex
+                      data-testid="user-menu-trigger"
                       align="center" gap="6px" p="5px" borderRadius="10px"
                       style={{ cursor: 'pointer', transition: 'background 0.15s' }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GRAY100 }}

@@ -4,6 +4,7 @@ export interface GroupedHistoryEntry {
   key: string
   serviceId: string
   serviceTitle: string
+  serviceType: 'Offer' | 'Need' | 'Event'
   duration: number
   completedDate: string
   items: UserHistoryItem[]
@@ -12,6 +13,7 @@ export interface GroupedHistoryEntry {
   partnerAvatarUrl?: string | null
   useCount: number
   isMultiUse: boolean
+  evaluationPending: boolean
 }
 
 function numericDuration(value: number | string) {
@@ -52,6 +54,7 @@ export function groupHistoryItems(items: UserHistoryItem[]): GroupedHistoryEntry
       key,
       serviceId: item.service_id,
       serviceTitle: item.service_title,
+      serviceType: item.service_type,
       duration: numericDuration(item.duration),
       completedDate: item.completed_date,
       items: [item],
@@ -60,6 +63,7 @@ export function groupHistoryItems(items: UserHistoryItem[]): GroupedHistoryEntry
       partnerAvatarUrl: item.partner_avatar_url,
       useCount: 1,
       isMultiUse,
+      evaluationPending: item.evaluation_pending ?? false,
     })
   }
 

@@ -1,5 +1,5 @@
 import apiClient from './api'
-import type { User, BadgeProgress, AchievementProgressItem, ProfileReviewsResponse } from '@/types'
+import type { User, UserSummary, BadgeProgress, AchievementProgressItem, ProfileReviewsResponse } from '@/types'
 
 export interface UserHistoryItem {
   service_id: string
@@ -13,6 +13,8 @@ export interface UserHistoryItem {
   partner_avatar_url?: string | null
   completed_date: string
   was_provider: boolean
+  /** True when service_type is Event and the attendee's evaluation window is still open */
+  evaluation_pending?: boolean
 }
 
 export interface UserUpdateData {
@@ -139,6 +141,26 @@ export const userAPI = {
     return res.data
   },
 
+  /** Create active follow + follow event (authenticated). */
+  followUser: async (userId: string): Promise<void> => {
+    await apiClient.post(`/users/${userId}/follow/`)
+  },
+
+  /** Remove follow + append unfollow event (authenticated). */
+  unfollowUser: async (userId: string): Promise<void> => {
+    await apiClient.delete(`/users/${userId}/follow/`)
+  },
+
+  getFollowers: async (userId: string, signal?: AbortSignal): Promise<UserSummary[]> => {
+    const res = await apiClient.get<{ results: UserSummary[] }>(`/users/${userId}/followers/`, { signal })
+    return res.data.results
+  },
+
+  getFollowing: async (userId: string, signal?: AbortSignal): Promise<UserSummary[]> => {
+    const res = await apiClient.get<{ results: UserSummary[] }>(`/users/${userId}/following/`, { signal })
+    return res.data.results
+  },
+
   getHistory: async (userId: string, signal?: AbortSignal): Promise<UserHistoryItem[]> => {
     const res = await apiClient.get<UserHistoryItem[] | { results: UserHistoryItem[] }>(
       `/users/${userId}/history/`,
@@ -180,7 +202,7 @@ export const userAPI = {
    */
   getVerifiedReviews: async (
     userId: string,
-    options?: { role?: 'provider' | 'receiver'; signal?: AbortSignal },
+    options?: { role?: 'provider' | 'receiver' | 'organizer'; signal?: AbortSignal },
   ): Promise<ProfileReviewsResponse> => {
     const params = options?.role ? { role: options.role } : {}
     const res = await apiClient.get<ProfileReviewsResponse>(

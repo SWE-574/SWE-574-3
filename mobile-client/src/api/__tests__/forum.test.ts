@@ -20,6 +20,8 @@ import {
   patchPost,
   deletePost,
   listRecentPosts,
+  reportTopic,
+  reportPost,
 } from "../forum";
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
 
@@ -63,8 +65,8 @@ describe("forum", () => {
 
   it("createTopic POSTs, getTopic GETs, patchTopic PATCHes, deleteTopic DELETEs", async () => {
     mockFetchResolve({ id: "t1", title: "T", category: "general" });
-    await createTopic({ title: "T", category: "general" });
-    expect(getLastFetchBody()).toEqual({ title: "T", category: "general" });
+    await createTopic({ title: "T", category: "general", body: "body" });
+    expect(getLastFetchBody()).toEqual({ title: "T", category: "general", body: "body" });
     mockFetchResolve({ id: "t1" });
     await getTopic("t1");
     expect(getLastFetchCall().url).toContain("/forum/topics/t1/");
@@ -92,15 +94,15 @@ describe("forum", () => {
   });
 
   it("createTopicPost POSTs to topic posts", async () => {
-    mockFetchResolve({ id: "p1", content: "Hello" });
-    await createTopicPost("t1", { content: "Hello" });
+    mockFetchResolve({ id: "p1", body: "Hello" });
+    await createTopicPost("t1", { body: "Hello" });
     expect(getLastFetchCall().url).toContain("/forum/topics/t1/posts/");
-    expect(getLastFetchBody()).toEqual({ content: "Hello" });
+    expect(getLastFetchBody()).toEqual({ body: "Hello" });
   });
 
   it("patchPost PATCHes /forum/posts/:id/, deletePost DELETEs", async () => {
     mockFetchResolve({});
-    await patchPost("p1", { content: "Updated" });
+    await patchPost("p1", { body: "Updated" });
     expect(getLastFetchCall().url).toContain("/forum/posts/p1/");
     expect(getLastFetchCall().init?.method).toBe("PATCH");
     mockFetchResolve(undefined);
@@ -113,5 +115,35 @@ describe("forum", () => {
     await listRecentPosts({ limit: 5 });
     expect(getLastFetchCall().url).toContain("/forum/posts/recent/");
     expect(getLastFetchCall().url).toContain("limit=5");
+  });
+
+  it("reportTopic POSTs to /forum/topics/:id/report/ with type and description", async () => {
+    mockFetchResolve({ id: "r1", type: "spam", status: "pending", description: "It is spam", created_at: "" });
+    await reportTopic("t1", { type: "spam", description: "It is spam" });
+    expect(getLastFetchCall().url).toContain("/forum/topics/t1/report/");
+    expect(getLastFetchCall().init?.method).toBe("POST");
+    expect(getLastFetchBody()).toEqual({ type: "spam", description: "It is spam" });
+  });
+
+  it("reportTopic POSTs with only type when description is omitted", async () => {
+    mockFetchResolve({ id: "r2", type: "harassment", status: "pending", description: "", created_at: "" });
+    await reportTopic("t2", { type: "harassment" });
+    expect(getLastFetchCall().url).toContain("/forum/topics/t2/report/");
+    expect(getLastFetchBody()).toEqual({ type: "harassment" });
+  });
+
+  it("reportPost POSTs to /forum/posts/:id/report/ with type and description", async () => {
+    mockFetchResolve({ id: "r3", type: "inappropriate_content", status: "pending", description: "Offensive reply", created_at: "" });
+    await reportPost("p1", { type: "inappropriate_content", description: "Offensive reply" });
+    expect(getLastFetchCall().url).toContain("/forum/posts/p1/report/");
+    expect(getLastFetchCall().init?.method).toBe("POST");
+    expect(getLastFetchBody()).toEqual({ type: "inappropriate_content", description: "Offensive reply" });
+  });
+
+  it("reportPost POSTs with only type when description is omitted", async () => {
+    mockFetchResolve({ id: "r4", type: "other", status: "pending", description: "", created_at: "" });
+    await reportPost("p2", { type: "other" });
+    expect(getLastFetchCall().url).toContain("/forum/posts/p2/report/");
+    expect(getLastFetchBody()).toEqual({ type: "other" });
   });
 });

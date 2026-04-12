@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Box, Flex, Grid, Stack, Text } from '@chakra-ui/react'
 import {
   FiArrowLeft, FiClock, FiCalendar, FiMapPin, FiMonitor,
-  FiUsers, FiStar, FiFlag, FiMessageSquare, FiSend,
+  FiUsers, FiStar, FiFlag, FiMessageSquare,
   FiAlertTriangle, FiRefreshCw, FiCheckCircle, FiExternalLink,
   FiChevronLeft, FiChevronRight, FiImage, FiX,
 } from 'react-icons/fi'
@@ -15,11 +15,12 @@ import { handshakeAPI } from '@/services/handshakeAPI'
 import { MapView } from '@/components/MapView'
 import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
+import ReportModal, { type ReportOption } from '@/components/ReportModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
   spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
 } from '@/utils/eventUtils'
-import type { Service } from '@/types'
+import type { Service, EventEvaluationSummary } from '@/types'
 import type { Comment } from '@/services/commentAPI'
 import type { Handshake } from '@/services/handshakeAPI'
 
@@ -51,8 +52,6 @@ const HS_BADGE: Record<Handshake['status'], { label: string; bg: string; color: 
 
 type ReportType = 'inappropriate_content' | 'spam' | 'service_issue' | 'scam' | 'harassment' | 'other'
 type EventBehaviorIssueType = 'service_issue' | 'harassment' | 'spam' | 'scam' | 'other'
-type ReportOption = { value: string; label: string; desc: string }
-
 const REPORT_OPTIONS: ReportOption[] = [
   { value: 'inappropriate_content', label: 'Inappropriate content', desc: 'Offensive or violates guidelines' },
   { value: 'spam',                  label: 'Spam',                  desc: 'Misleading or fake content' },
@@ -246,82 +245,58 @@ function LoadingSkeleton() {
   )
 }
 
-// ─── Report Modal ─────────────────────────────────────────────────────────────
+// ─── Event Evaluation Summary Card ────────────────────────────────────────────
 
-function ReportModal({
-  onClose,
-  onSubmit,
-  loading,
-  options,
-  title,
-  subtitle,
-  submitLabel = 'Submit Report',
-}: {
-  onClose: () => void
-  onSubmit: (t: string) => void
-  loading: boolean
-  options: ReportOption[]
-  title: string
-  subtitle: string
-  submitLabel?: string
-}) {
-  const [selected, setSelected] = useState<string>(options[0]?.value ?? '')
-  const selectedValue = options.some((opt) => opt.value === selected)
-    ? selected
-    : (options[0]?.value ?? '')
+const TRAIT_ROWS = [
+  { key: 'well_organized', label: 'Well Organized', positive: true },
+  { key: 'engaging',       label: 'Engaging',       positive: true },
+  { key: 'welcoming',      label: 'Welcoming',      positive: true },
+  { key: 'disorganized',   label: 'Disorganized',   positive: false },
+  { key: 'boring',         label: 'Boring',         positive: false },
+  { key: 'unwelcoming',    label: 'Unwelcoming',    positive: false },
+] as const
 
+function EventEvaluationSummaryCard({ summary }: { summary: EventEvaluationSummary }) {
   return (
-    <Box
-      position="fixed" inset={0} zIndex={200}
-      bg="rgba(0,0,0,0.55)"
-      display="flex" alignItems="center" justifyContent="center"
-      p={4} onClick={onClose}
+    <Box bg={WHITE} borderRadius="20px" border={`1px solid ${GRAY200}`} overflow="hidden"
+      boxShadow="0 2px 8px rgba(0,0,0,0.04)"
     >
-      <Box
-        bg={WHITE} borderRadius="20px" w="100%" maxW="440px" p={6}
-        boxShadow="0 20px 60px rgba(0,0,0,0.2)"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <Text fontWeight={800} fontSize="18px" color={GRAY800} mb="4px">{title}</Text>
-        <Text fontSize="13px" color={GRAY500} mb={5}>{subtitle}</Text>
-        <Stack gap={2} mb={5}>
-          {options.map((opt) => (
-            <Box
-              key={opt.value}
-              as="label"
-              display="flex" alignItems="flex-start" gap={3} p={3}
-              borderRadius="10px" border="1px solid"
-              borderColor={selected === opt.value ? '#FCA5A5' : GRAY200}
-              bg={selected === opt.value ? RED_LT : WHITE}
-              cursor="pointer" transition="all 0.15s"
-            >
-              <input type="radio" name="reportType" value={opt.value}
-                checked={selectedValue === opt.value} onChange={() => setSelected(opt.value)}
-                style={{ marginTop: '3px', accentColor: RED }} />
-              <Box>
-                <Text fontSize="14px" fontWeight={600} color={GRAY800}>{opt.label}</Text>
-                <Text fontSize="12px" color={GRAY500}>{opt.desc}</Text>
-              </Box>
-            </Box>
-          ))}
-        </Stack>
-        <Flex gap={2}>
-          <Box as="button" flex={1} py="10px" borderRadius="10px"
-            bg={RED} color={WHITE} fontSize="14px" fontWeight={700}
-            display="flex" alignItems="center" justifyContent="center" gap="6px"
-            onClick={() => !loading && selectedValue && onSubmit(selectedValue)}
-            style={{ opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer', border: 'none' }}
+      <Box px={6} py={5} borderBottom={`1px solid ${GRAY100}`}>
+        <Flex align="center" gap={2}>
+          <FiStar size={16} color={AMBER} />
+          <Text fontWeight={700} fontSize="16px" color={GRAY800}>
+            Event Ratings
+          </Text>
+          <Box px="6px" py="2px" borderRadius="full" fontSize="11px" fontWeight={700}
+            bg={GRAY100} color={GRAY600}
           >
-            <FiSend size={14} /> {loading ? 'Submitting…' : submitLabel}
-          </Box>
-          <Box as="button" flex={1} py="10px" borderRadius="10px"
-            bg={GRAY100} color={GRAY700} fontSize="14px" fontWeight={600}
-            onClick={onClose}
-            style={{ border: 'none', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.65 : 1 }}
-          >
-            Cancel
+            {summary.unique_evaluator_count} {summary.unique_evaluator_count === 1 ? 'review' : 'reviews'}
           </Box>
         </Flex>
+      </Box>
+      <Box px={6} py={5}>
+        <Stack gap={2}>
+          {TRAIT_ROWS.map(({ key, label, positive }) => {
+            const avg = summary[`${key}_average` as keyof EventEvaluationSummary] as number
+            const pct = Math.round(avg * 100)
+            const barColor = positive ? GREEN : RED
+            return (
+              <Flex key={key} align="center" gap={3}>
+                <Text fontSize="12px" color={GRAY700} fontWeight={600} w="110px" flexShrink={0}>
+                  {label}
+                </Text>
+                <Box flex={1} h="6px" borderRadius="full" bg={GRAY100} overflow="hidden">
+                  <Box h="100%" w={`${pct}%`} bg={pct > 0 ? barColor : GRAY200} borderRadius="full"
+                    style={{ transition: 'width 0.3s ease' }}
+                  />
+                </Box>
+                <Text fontSize="11px" color={pct > 0 ? barColor : GRAY400} fontWeight={700} w="32px" textAlign="right">
+                  {pct}%
+                </Text>
+              </Flex>
+            )
+          })}
+        </Stack>
       </Box>
     </Box>
   )
@@ -329,9 +304,11 @@ function ReportModal({
 
 // ─── Comment Section ──────────────────────────────────────────────────────────
 
-function CommentSection({ serviceId }: { serviceId: string }) {
+function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshKey?: number }) {
   const [comments, setComments]   = useState<Comment[]>([])
   const [loading, setLoading]     = useState(true)
+  const [lightboxUrls, setLightboxUrls] = useState<string[]>([])
+  const [lightboxIdx, setLightboxIdx]   = useState(0)
 
   const load = useCallback(async () => {
     try { const r = await commentAPI.list(serviceId); setComments(r.results) }
@@ -339,7 +316,10 @@ function CommentSection({ serviceId }: { serviceId: string }) {
     finally { setLoading(false) }
   }, [serviceId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, refreshKey])
+
+  const openLightbox = (urls: string[], idx: number) => { setLightboxUrls(urls); setLightboxIdx(idx) }
+  const closeLightbox = () => setLightboxUrls([])
 
   return (
     <Box bg={WHITE} borderRadius="20px" border={`1px solid ${GRAY200}`} overflow="hidden"
@@ -397,6 +377,19 @@ function CommentSection({ serviceId }: { serviceId: string }) {
                     <Text fontSize="14px" color={GRAY700} lineHeight={1.6}>
                       {c.is_deleted ? <em style={{ color: GRAY400 }}>Review deleted</em> : c.body}
                     </Text>
+                    {!c.is_deleted && c.media && c.media.length > 0 && (
+                      <Flex gap={2} mt={2} flexWrap="wrap">
+                        {c.media.map((m, mi) => (
+                          <img
+                            key={m.id}
+                            src={m.file_url}
+                            alt="Review photo"
+                            style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, cursor: 'pointer' }}
+                            onClick={() => openLightbox(c.media!.map((x) => x.file_url), mi)}
+                          />
+                        ))}
+                      </Flex>
+                    )}
                   </Box>
                 </Flex>
                 {c.replies?.length > 0 && (
@@ -422,6 +415,69 @@ function CommentSection({ serviceId }: { serviceId: string }) {
           </Stack>
         )}
       </Box>
+
+      {/* Review image lightbox */}
+      {lightboxUrls.length > 0 && (
+        <Box position="fixed" inset={0} bg="rgba(15,20,30,0.82)" zIndex={1500}
+          display="flex" alignItems="center" justifyContent="center" p={4}
+          onClick={closeLightbox}
+        >
+          <Box position="relative" maxW="900px" w="100%" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+            <Box borderRadius="16px" overflow="hidden" bg={WHITE} boxShadow="0 24px 72px rgba(0,0,0,0.24)">
+              {/* Header */}
+              <Flex align="center" justify="space-between" px={5} py={3} borderBottom={`1px solid ${GRAY200}`}>
+                <Text fontSize="13px" fontWeight={600} color={GRAY600}>
+                  Photo {lightboxIdx + 1} of {lightboxUrls.length}
+                </Text>
+                <Box as="button" w="32px" h="32px" borderRadius="full" bg={GRAY50}
+                  border={`1px solid ${GRAY200}`} display="flex" alignItems="center" justifyContent="center"
+                  style={{ cursor: 'pointer' }} onClick={closeLightbox} aria-label="Close lightbox"
+                >
+                  <FiX size={15} />
+                </Box>
+              </Flex>
+              {/* Image */}
+              <Box bg={GRAY50} display="flex" alignItems="center" justifyContent="center"
+                style={{ minHeight: 320, maxHeight: '70vh', position: 'relative' }}
+              >
+                <img src={lightboxUrls[lightboxIdx]} alt={`Photo ${lightboxIdx + 1}`}
+                  style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', display: 'block' }}
+                />
+                {lightboxUrls.length > 1 && (
+                  <>
+                    <Box as="button" position="absolute" left={3} top="50%" transform="translateY(-50%)"
+                      w="36px" h="36px" borderRadius="full" bg={WHITE} border={`1px solid ${GRAY200}`}
+                      display="flex" alignItems="center" justifyContent="center"
+                      boxShadow="0 2px 8px rgba(0,0,0,0.12)" style={{ cursor: 'pointer' }}
+                      onClick={() => setLightboxIdx((lightboxIdx - 1 + lightboxUrls.length) % lightboxUrls.length)}
+                    ><FiChevronLeft size={18} /></Box>
+                    <Box as="button" position="absolute" right={3} top="50%" transform="translateY(-50%)"
+                      w="36px" h="36px" borderRadius="full" bg={WHITE} border={`1px solid ${GRAY200}`}
+                      display="flex" alignItems="center" justifyContent="center"
+                      boxShadow="0 2px 8px rgba(0,0,0,0.12)" style={{ cursor: 'pointer' }}
+                      onClick={() => setLightboxIdx((lightboxIdx + 1) % lightboxUrls.length)}
+                    ><FiChevronRight size={18} /></Box>
+                  </>
+                )}
+              </Box>
+              {/* Thumbnails */}
+              {lightboxUrls.length > 1 && (
+                <Flex gap={2} p={3} justify="center" borderTop={`1px solid ${GRAY100}`}>
+                  {lightboxUrls.map((url, i) => (
+                    <Box key={i} w="48px" h="48px" borderRadius="6px" overflow="hidden" flexShrink={0}
+                      border={i === lightboxIdx ? `2px solid ${GREEN}` : `1px solid ${GRAY200}`}
+                      style={{ cursor: 'pointer' }} onClick={() => setLightboxIdx(i)}
+                    >
+                      <img src={url} alt={`Thumb ${i + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    </Box>
+                  ))}
+                </Flex>
+              )}
+            </Box>
+          </Box>
+        </Box>
+      )}
     </Box>
   )
 }
@@ -456,6 +512,7 @@ export default function ServiceDetailPage() {
   const [checkinLoading, setCheckinLoading] = useState(false)
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [removeLoading, setRemoveLoading]   = useState(false)
+  const [commentRefreshKey, setCommentRefreshKey] = useState(0)
   const [isEventDetailModalOpen, setIsEventDetailModalOpen] = useState(false)
   const [eventDetailModalTab, setEventDetailModalTab] = useState<EventDetailModalTab>('details')
   const [completing, setCompleting]         = useState(false)
@@ -620,7 +677,7 @@ export default function ServiceDetailPage() {
     ? handshakes.find((h) =>
         exId(h.service) === service?.id &&
         exId(h.requester) === user?.id &&
-        ['accepted', 'checked_in', 'attended', 'no_show'].includes(h.status)
+        ['accepted', 'checked_in', 'attended', 'no_show', 'reported', 'paused', 'completed', 'cancelled'].includes(h.status)
       )
     : undefined
 
@@ -678,6 +735,10 @@ export default function ServiceDetailPage() {
 
   const handleJoinEvent = async () => {
     if (!service || !isAuthenticated) { navigate('/login'); return }
+    if (service.status !== 'Active') {
+      toast.error('This event is no longer open for joining.')
+      return
+    }
     setJoinLoading(true)
     try {
       await handshakeAPI.joinEvent(service.id)
@@ -840,6 +901,8 @@ export default function ServiceDetailPage() {
     } catch {
       // Keep current UI state; submission success is already acknowledged in modal.
     }
+    // Increment key to trigger CommentSection refetch.
+    setCommentRefreshKey((k) => k + 1)
   }
 
   const handleCancelEvent = async () => {
@@ -1081,13 +1144,13 @@ export default function ServiceDetailPage() {
 
                 {/* Slot progress bar */}
                 {service.max_participants > 1 && (
-                  <Box mb={6} border={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? `1px solid ${AMBER}60` : 'none'}
-                    borderRadius={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? '12px' : 'none'}
-                    p={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? 3 : 0}
-                    bg={isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? AMBER_LT : 'transparent'}
+                  <Box mb={6} border={(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? `1px solid ${RED}60` : 'none'}
+                    borderRadius={(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? '12px' : 'none'}
+                    p={(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? 3 : 0}
+                    bg={(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) ? RED_LT : 'transparent'}
                   >
-                    {isEvent && isNearlyFull(service.max_participants, service.participant_count ?? 0) && (
-                      <Text fontSize="11px" fontWeight={700} color={AMBER} mb={2}>⚡ Last spots — hurry!</Text>
+                    {(isEvent || (isOffer && service.max_participants > 1)) && isNearlyFull(service.max_participants, service.participant_count ?? 0) && (
+                      <Text fontSize="11px" fontWeight={700} color={RED} mb={2}>Nearly Full</Text>
                     )}
                     <Flex justify="space-between" mb={2}>
                       <Text fontSize="12px" color={GRAY500} fontWeight={500}>
@@ -1199,24 +1262,40 @@ export default function ServiceDetailPage() {
                 )}
 
                 {/* Location map — In-Person only */}
-                {service.location_type === 'In-Person' && (service.location_lat || service.location_lng) && (
+                {service.location_type === 'In-Person' && (service.location_lat || service.location_lng) && (() => {
+                  const joinedEvent = isEvent && myEventHandshake && ['accepted', 'checked_in', 'attended'].includes(myEventHandshake.status)
+                  const showExact = isOwn || joinedEvent
+                  return (
                   <Box mb={6}>
                     <Flex align="center" gap={2} mb={3}>
                       <FiMapPin size={13} color={GRAY400} />
                       <Text fontSize="12px" fontWeight={700} color={GRAY400}
                         style={{ textTransform: 'uppercase', letterSpacing: '0.07em' }}
                       >
-                        Approximate Location
+                        {showExact ? 'Event Location' : 'Approximate Location'}
                       </Text>
                     </Flex>
+                    {showExact && service.session_exact_location && (
+                      <Text fontSize="13px" color={GRAY700} mb={2} fontWeight={500}>
+                        {service.session_exact_location}
+                      </Text>
+                    )}
+                    {showExact && service.session_location_guide && (
+                      <Text fontSize="12px" color={GRAY400} mb={2}>
+                        {service.session_location_guide}
+                      </Text>
+                    )}
                     <Box borderRadius="14px" overflow="hidden" border={`1px solid ${GRAY200}`}>
                       <MapView services={[service]} height="220px" />
                     </Box>
-                    <Text fontSize="11px" color={GRAY400} mt="6px">
-                      Exact address is hidden — shown within a 2 km privacy zone.
-                    </Text>
+                    {!showExact && (
+                      <Text fontSize="11px" color={GRAY400} mt="6px">
+                        Exact address is hidden — shown within a 2 km privacy zone.
+                      </Text>
+                    )}
                   </Box>
-                )}
+                  )
+                })()}
 
                 {/* Tags */}
                 {service.tags && service.tags.length > 0 && (
@@ -1241,8 +1320,13 @@ export default function ServiceDetailPage() {
               </Box>
             </Box>
 
+            {/* Event Evaluation Summary */}
+            {isEvent && service.event_evaluation_summary && service.event_evaluation_summary.feedback_submission_count > 0 && (
+              <EventEvaluationSummaryCard summary={service.event_evaluation_summary} />
+            )}
+
             {/* Comments */}
-            <CommentSection serviceId={service.id} />
+            <CommentSection serviceId={service.id} refreshKey={commentRefreshKey} />
           </Stack>
 
           {/* ── RIGHT SIDEBAR ─────────────────────────────────────────────── */}
@@ -1396,7 +1480,7 @@ export default function ServiceDetailPage() {
                                 }}
                               >
                                 <FiFlag size={11} />
-                                {alreadyReportedParticipant ? 'Reported' : 'Report user'}
+                                {alreadyReportedParticipant ? 'Reported' : ''}
                               </Box>
                               <Box px="7px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700}
                                 style={{ background: cfg.bg, color: cfg.color, flexShrink: 0 }}
@@ -1418,32 +1502,48 @@ export default function ServiceDetailPage() {
                       <FiMessageSquare size={14} /> Event Chat
                     </Box>
 
-                    <Box as="button" w="full" py="11px" borderRadius="10px"
-                      bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
-                      display="flex" alignItems="center" justifyContent="center" gap="7px"
-                      onClick={() => openEventDetailModal('roster')}
-                      style={{ border: 'none', cursor: 'pointer' }}
-                    >
-                      <FiCheckCircle size={14} /> Complete Event
-                    </Box>
-
-                    {isWithinLockdownWindow(service.scheduled_time) && (
-                      <Box bg={AMBER_LT} border={`1px solid ${AMBER}40`} borderRadius="10px" p={3}>
-                        <Text fontSize="12px" color="#92400E" fontWeight={600}>⚠ Lockdown window active</Text>
-                        <Text fontSize="11px" color="#92400E" mt="2px">
-                          Cancelling now will apply a 30-day event creation ban.
-                        </Text>
+                    {service.status === 'Completed' ? (
+                      <Box bg={GREEN_LT} borderRadius="12px" p={4} border={`1px solid ${GREEN}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiCheckCircle size={20} color={GREEN} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={GREEN}>Event completed</Text>
+                          <Text fontSize="12px" color="#166534" mt="2px">
+                            This event has been marked as completed.
+                          </Text>
+                        </Box>
                       </Box>
-                    )}
+                    ) : (
+                      <>
+                        <Box as="button" w="full" py="11px" borderRadius="10px"
+                          bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="7px"
+                          onClick={() => openEventDetailModal('roster')}
+                          style={{ border: 'none', cursor: 'pointer' }}
+                        >
+                          <FiCheckCircle size={14} /> Complete Event
+                        </Box>
 
-                    <Box as="button" w="full" py="10px" borderRadius="10px"
-                      bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
-                      display="flex" alignItems="center" justifyContent="center" gap="6px"
-                      onClick={handleCancelEvent}
-                      style={{ border: `1px solid ${RED}30`, cursor: cancelLoading ? 'not-allowed' : 'pointer', opacity: cancelLoading ? 0.65 : 1 }}
-                    >
-                      {cancelLoading ? 'Cancelling…' : 'Cancel Event'}
-                    </Box>
+                        {isWithinLockdownWindow(service.scheduled_time) && (
+                          <Box bg={AMBER_LT} border={`1px solid ${AMBER}40`} borderRadius="10px" p={3}>
+                            <Text fontSize="12px" color="#92400E" fontWeight={600}>⚠ Lockdown window active</Text>
+                            <Text fontSize="11px" color="#92400E" mt="2px">
+                              Cancelling now will apply a 30-day event creation ban.
+                            </Text>
+                          </Box>
+                        )}
+
+                        <Box as="button" w="full" py="10px" borderRadius="10px"
+                          bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="6px"
+                          onClick={handleCancelEvent}
+                          style={{ border: `1px solid ${RED}30`, cursor: cancelLoading ? 'not-allowed' : 'pointer', opacity: cancelLoading ? 0.65 : 1 }}
+                        >
+                          {cancelLoading ? 'Cancelling…' : 'Cancel Event'}
+                        </Box>
+                      </>
+                    )}
                   </Stack>
                 ) : isAuthenticated ? (
                   <>
@@ -1455,6 +1555,38 @@ export default function ServiceDetailPage() {
                         <Text fontSize="12px" color="#991B1B" mt="3px">
                           You have 3 no-shows. You can join events again after{' '}
                           <strong>{formatBanExpiry(user?.is_event_banned_until)}</strong>.
+                        </Text>
+                      </Box>
+                    </Stack>
+                  ) : service.status === 'Cancelled' ? (
+                    /* Cancelled event */
+                    <Stack gap={2}>
+                      <Box w="full" py="12px" borderRadius="11px"
+                        bg={GRAY100} color={GRAY400} fontSize="14px" fontWeight={700} textAlign="center"
+                      >
+                        Event Cancelled
+                      </Box>
+                      <Text fontSize="12px" color={GRAY400} textAlign="center">
+                        This event is no longer accepting participation.
+                      </Text>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'reported' ? (
+                    /* Participant has been reported — under review */
+                    <Stack gap={2}>
+                      <Box bg={AMBER_LT} borderRadius="12px" p={4} border={`1px solid ${AMBER}40`}>
+                        <Text fontSize="13px" fontWeight={700} color={AMBER}>Participation Under Review</Text>
+                        <Text fontSize="12px" color="#92400E" mt="3px">
+                          Your participation is being reviewed by a moderator. You cannot check in or join while the review is pending.
+                        </Text>
+                      </Box>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'cancelled' ? (
+                    /* Participant was removed from event */
+                    <Stack gap={2}>
+                      <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}>
+                        <Text fontSize="13px" fontWeight={700} color={RED}>Removed From Event</Text>
+                        <Text fontSize="12px" color="#991B1B" mt="3px">
+                          You have been removed from this event after a moderation review.
                         </Text>
                       </Box>
                     </Stack>
@@ -1494,6 +1626,16 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
+                      {!myEventHandshake.user_has_reviewed && (
+                        <Box as="button" w="full" py="11px" borderRadius="10px"
+                          bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
+                          display="flex" alignItems="center" justifyContent="center" gap="7px"
+                          onClick={() => setShowEvaluationModal(true)}
+                          style={{ border: 'none', cursor: 'pointer' }}
+                        >
+                          <FiStar size={14} /> Leave Evaluation
+                        </Box>
+                      )}
                       <Box as="button" w="full" py="11px" borderRadius="10px"
                         bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
                         display="flex" alignItems="center" justifyContent="center" gap="7px"
@@ -2106,6 +2248,17 @@ export default function ServiceDetailPage() {
           onClose={() => setShowEvaluationModal(false)}
           handshakeId={evaluationHandshake.id}
           counterpartName={evaluationCounterpartName}
+          onSubmitted={handleEvaluationSubmitted}
+        />
+      )}
+
+      {isEvent && myEventHandshake?.status === 'attended' && !myEventHandshake.user_has_reviewed && (
+        <ServiceEvaluationModal
+          isOpen={showEvaluationModal}
+          onClose={() => setShowEvaluationModal(false)}
+          handshakeId={myEventHandshake.id}
+          counterpartName={service?.title ?? 'this event'}
+          isEventEvaluation
           onSubmitted={handleEvaluationSubmitted}
         />
       )}

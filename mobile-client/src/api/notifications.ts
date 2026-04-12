@@ -1,18 +1,38 @@
 /**
- * Notifications API – list, retrieve, mark as read
- * GET /api/notifications/, GET /api/notifications/{id}/, POST /api/notifications/read/
+ * Notifications API – list, retrieve, mark as read, unread count, push token registration.
+ * GET /api/notifications/, GET /api/notifications/{id}/,
+ * GET /api/notifications/unread-count/, PATCH /api/notifications/{id}/read/,
+ * POST /api/notifications/read/,
+ * POST /api/notifications/register-push-token/, POST /api/notifications/deregister-push-token/
  */
 
 import { apiRequest } from './client';
 import type { PaginatedResponse } from './types';
 
+export type NotificationType =
+  | 'handshake_request'
+  | 'handshake_accepted'
+  | 'handshake_denied'
+  | 'handshake_cancellation_requested'
+  | 'handshake_cancellation_rejected'
+  | 'handshake_cancelled'
+  | 'service_updated'
+  | 'chat_message'
+  | 'service_reminder'
+  | 'service_confirmation'
+  | 'positive_rep'
+  | 'admin_warning'
+  | 'dispute_resolved';
+
 export interface Notification {
   id: string;
-  user?: string;
-  message?: string;
-  read?: boolean;
-  created_at?: string;
-  [key: string]: unknown;
+  type: NotificationType;
+  title: string;
+  message: string;
+  is_read: boolean;
+  related_handshake: string | null;
+  related_service: string | null;
+  created_at: string;
 }
 
 export interface NotificationsListParams {
@@ -29,6 +49,22 @@ export function getNotification(id: string): Promise<Notification> {
   return apiRequest<Notification>(`/notifications/${id}/`);
 }
 
-export function markNotificationsRead(body?: { ids?: string[] }): Promise<unknown> {
-  return apiRequest('/notifications/read/', { method: 'POST', body: body ?? {} });
+export function getUnreadCount(): Promise<{ count: number }> {
+  return apiRequest<{ count: number }>('/notifications/unread-count/');
+}
+
+export function markNotificationRead(id: string): Promise<void> {
+  return apiRequest('/notifications/' + id + '/read/', { method: 'PATCH' });
+}
+
+export function markAllNotificationsRead(): Promise<void> {
+  return apiRequest('/notifications/read/', { method: 'POST', body: {} });
+}
+
+export function registerPushToken(token: string): Promise<void> {
+  return apiRequest('/notifications/register-push-token/', { method: 'POST', body: { token } });
+}
+
+export function deregisterPushToken(token: string): Promise<void> {
+  return apiRequest('/notifications/deregister-push-token/', { method: 'POST', body: { token } });
 }

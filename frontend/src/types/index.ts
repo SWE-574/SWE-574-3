@@ -87,6 +87,10 @@ export interface User {
   punctual_count?: number
   helpful_count?: number
   kind_count?: number
+  // ─── Follow system (profile detail) ───────────────────────────────────────
+  followers_count?: number
+  following_count?: number
+  is_following?: boolean
   location?: string
   skills?: Tag[]
   // ─── Event System ───────────────────────────────────────────────────────────
@@ -96,6 +100,15 @@ export interface User {
   created_events?: Service[]
   joined_events?: ProfileEventHandshake[]
   invited_events?: ProfileEventHandshake[]
+}
+
+/** Minimal user row from GET /users/:id/followers/ and .../following/ */
+export interface UserSummary {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  avatar_url?: string | null
 }
 
 export interface ProfileEventHandshake {
@@ -184,6 +197,31 @@ export interface Service {
   is_pinned?: boolean
   comment_count?: number
   hot_score?: number
+  event_evaluation_summary?: EventEvaluationSummary | null
+}
+
+export interface EventEvaluationSummary {
+  total_attended: number
+  positive_feedback_count: number
+  negative_feedback_count: number
+  unique_evaluator_count: number
+  positive_score_total: number
+  negative_score_total: number
+  well_organized_count: number
+  engaging_count: number
+  welcoming_count: number
+  disorganized_count: number
+  boring_count: number
+  unwelcoming_count: number
+  well_organized_average: number
+  engaging_average: number
+  welcoming_average: number
+  disorganized_average: number
+  boring_average: number
+  unwelcoming_average: number
+  organizer_event_hot_score: number
+  feedback_submission_count: number
+  updated_at: string
 }
 
 export interface ServiceMedia {
@@ -193,10 +231,75 @@ export interface ServiceMedia {
   order?: number
 }
 
+export interface RecommendationDebugNode {
+  id: string
+  label: string
+  tone: 'positive' | 'negative' | 'neutral'
+}
+
+export interface RecommendationDebugLink {
+  source: string
+  target: string
+  value: number
+  tone: 'positive' | 'negative' | 'neutral'
+}
+
+export interface RecommendationDebugBreakdown {
+  positive_count: number
+  negative_count: number
+  comment_count: number
+  numerator: number
+  age_hours: number
+  denominator: number
+  raw_hot_score: number
+  capacity_ratio: number | null
+  capacity_boost_applied: boolean
+  social_reason: string
+}
+
+export interface RecommendationDebugSelectedService {
+  id: string
+  title: string
+  type: 'Offer' | 'Need' | 'Event'
+  owner_name: string
+  location_type: 'In-Person' | 'Online'
+  location_area?: string
+  current_position?: number
+  is_pinned: boolean
+  stored_hot_score: number
+  recomputed_hot_score: number
+  search_score: number
+  social_boost: number
+  weighted_social_boost: number
+  distance_km: number | null
+  participant_count: number
+  max_participants: number
+  breakdown: RecommendationDebugBreakdown
+  formula_lines: string[]
+  notes: string[]
+  sankey: {
+    nodes: RecommendationDebugNode[]
+    links: RecommendationDebugLink[]
+  }
+}
+
+export interface RecommendationDebugResponse {
+  active_filter: string
+  total_services: number
+  selected_service: RecommendationDebugSelectedService | null
+}
+
+export interface RecommendationDebugAvailabilityResponse {
+  enabled: boolean
+}
+
 export interface Tag {
   id: string
   name: string
   wikidata_id?: string
+  parent_qid?: string
+  entity_type?: string
+  description?: string
 }
 
 // ─── Handshake Types ──────────────────────────────────────────────────────────
@@ -304,6 +407,11 @@ export interface Transaction {
 
 // ─── Profile review (verified reviews on user profile) ───────────────────────
 
+export interface CommentMediaItem {
+  id: string
+  file_url: string
+}
+
 export interface ProfileReview {
   id: string
   service: string
@@ -322,6 +430,7 @@ export interface ProfileReview {
   reviewed_user_role?: 'provider' | 'receiver' | null
   reply_count: number
   replies: unknown[]
+  media?: CommentMediaItem[]
   created_at: string
   updated_at: string
 }
@@ -339,6 +448,10 @@ export interface ReputationData {
   punctual?: boolean
   helpful?: boolean
   kindness?: boolean
+  // Event-specific positive traits
+  well_organized?: boolean
+  engaging?: boolean
+  welcoming?: boolean
   handshake_id: string
   comment?: string
 }
@@ -348,6 +461,10 @@ export interface NegativeReputationData {
   is_late?: boolean
   is_unhelpful?: boolean
   is_rude?: boolean
+  // Event-specific negative traits
+  disorganized?: boolean
+  boring?: boolean
+  unwelcoming?: boolean
   comment?: string
 }
 
@@ -421,11 +538,106 @@ export interface AdminUserSummary {
   email: string
   first_name: string
   last_name: string
+  avatar_url: string | null
   timebank_balance: number
   karma_score: number
   role: string
   is_active: boolean
   date_joined: string
+}
+
+export interface AdminTransaction {
+  id: string
+  transaction_type: 'provision' | 'transfer' | 'refund' | 'adjustment'
+  amount: string
+  balance_after: string
+  description: string
+  service_title: string | null
+  service_id: string | null
+  created_at: string
+}
+
+export interface AdminUserDetailAction {
+  action_type: string
+  reason: string | null
+  created_at: string
+}
+
+export interface AdminUserDetail {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  bio: string | null
+  avatar_url: string | null
+  location: string | null
+  role: string
+  is_active: boolean
+  is_verified: boolean
+  is_onboarded: boolean
+  date_joined: string
+  last_login: string | null
+  timebank_balance: number
+  karma_score: number
+  no_show_count: number
+  is_event_banned_until: string | null
+  is_organizer_banned_until: string | null
+  locked_until: string | null
+  offers_count: number
+  requests_count: number
+  events_count: number
+  handshakes_as_requester_count: number
+  handshakes_as_provider_count: number
+  forum_topics_count: number
+  recent_admin_actions: AdminUserDetailAction[]
+  recent_offers?: { id: string; title: string }[]
+  recent_requests?: { id: string; title: string }[]
+  recent_events?: { id: string; title: string }[]
+  recent_forum_topics?: { id: string; title: string }[]
+  recent_handshakes_as_requester?: { id: string; title: string; service_id: string }[]
+  recent_handshakes_as_provider?: { id: string; title: string; service_id: string }[]
+  karma_adjustments?: { delta: number; karma: number; created_at: string; label: string }[]
+}
+
+export interface AdminUserDetailAction {
+  action_type: string
+  reason: string | null
+  created_at: string
+}
+
+export interface AdminUserDetail {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  bio: string | null
+  avatar_url: string | null
+  location: string | null
+  role: string
+  is_active: boolean
+  is_verified: boolean
+  is_onboarded: boolean
+  date_joined: string
+  last_login: string | null
+  timebank_balance: number
+  karma_score: number
+  no_show_count: number
+  is_event_banned_until: string | null
+  is_organizer_banned_until: string | null
+  locked_until: string | null
+  offers_count: number
+  requests_count: number
+  events_count: number
+  handshakes_as_requester_count: number
+  handshakes_as_provider_count: number
+  forum_topics_count: number
+  recent_admin_actions: AdminUserDetailAction[]
+  recent_offers?: { id: string; title: string }[]
+  recent_requests?: { id: string; title: string }[]
+  recent_events?: { id: string; title: string }[]
+  recent_forum_topics?: { id: string; title: string }[]
+  recent_handshakes_as_requester?: { id: string; title: string; service_id: string }[]
+  recent_handshakes_as_provider?: { id: string; title: string; service_id: string }[]
 }
 
 export interface AdminMetrics {
@@ -451,6 +663,11 @@ export interface AdminMetrics {
     total: number
     last_24h: number
   }
+}
+
+export interface AdminSettings {
+  ranking_debug_enabled: boolean
+  updated_at: string
 }
 
 export type AdminCommentStatus = 'active' | 'removed'
@@ -486,6 +703,10 @@ export interface AdminAuditLog {
     | 'restore_comment'
     | 'lock_topic'
     | 'pin_topic'
+    | 'assign_role'
+  previous_role?: string | null
+  new_role?: string | null
+  ip_address?: string | null
   target_entity: 'user' | 'report' | 'handshake' | 'comment' | 'forum_topic'
   target_id: string
   reason?: string | null
@@ -543,6 +764,12 @@ export interface ForumPost {
   is_deleted: boolean
   created_at: string
   updated_at: string
+}
+
+export interface ForumActivity {
+  my_topics: number
+  my_replies: number
+  open_topics: number
 }
 
 // ─── Achievement / Badge Types ────────────────────────────────────────────────

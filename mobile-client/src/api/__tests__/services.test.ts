@@ -12,6 +12,7 @@ import {
   reportService,
   toggleServiceVisibility,
   addServiceInterest,
+  completeEvent,
 } from "../services";
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
 
@@ -58,6 +59,15 @@ describe("services", () => {
     expect(getLastFetchBody()).toEqual(body);
   });
 
+  it("createService accepts FormData payloads", async () => {
+    const body = new FormData();
+    body.append("title", "Wizard form");
+    mockFetchResolve({ id: "s1" });
+    await createService(body);
+    expect(getLastFetchCall().init?.method).toBe("POST");
+    expect(getLastFetchCall().init?.body).toBe(body);
+  });
+
   it("updateService PUTs to /services/:id/", async () => {
     mockFetchResolve({ id: "s1" });
     await updateService("s1", { title: "Updated" });
@@ -82,9 +92,9 @@ describe("services", () => {
 
   it("reportService POSTs to /services/:id/report/", async () => {
     mockFetchResolve({});
-    await reportService("s1", { reason: "spam" });
+    await reportService("s1", { issue_type: "spam", description: "Looks like spam" });
     expect(getLastFetchCall().url).toContain("/services/s1/report/");
-    expect(getLastFetchBody()).toEqual({ reason: "spam" });
+    expect(getLastFetchBody()).toEqual({ issue_type: "spam", description: "Looks like spam" });
   });
 
   it("toggleServiceVisibility POSTs to /services/:id/toggle-visibility/", async () => {
@@ -99,5 +109,12 @@ describe("services", () => {
     await addServiceInterest("s1", { message: "Hi" });
     expect(getLastFetchCall().url).toContain("/services/s1/interest/");
     expect(getLastFetchBody()).toEqual({ message: "Hi" });
+  });
+
+  it("completeEvent POSTs to /services/:id/complete-event/", async () => {
+    mockFetchResolve(undefined);
+    await completeEvent("svc-1");
+    expect(getLastFetchCall().url).toContain("/services/svc-1/complete-event/");
+    expect(getLastFetchCall().init?.method).toBe("POST");
   });
 });

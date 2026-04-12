@@ -2,10 +2,13 @@ import { useCallback, useMemo } from "react";
 import { Alert } from "react-native";
 import {
   approveHandshake,
+  approveCancellationHandshake,
   cancelHandshake,
   confirmHandshake,
-  declineHandshake,
   getHandshake,
+  rejectCancellationHandshake,
+  requestCancellationHandshake,
+  requestHandshakeChanges,
   type Handshake,
 } from "../api/handshakes";
 import {
@@ -19,6 +22,7 @@ import type { ActionType, HandshakeRole } from "../types/chatTypes";
 export type UseHandshakeParams = {
   handshakeId: string;
   handshake: Handshake | null;
+  isCurrentUserServiceOwner?: boolean;
   setHandshake: React.Dispatch<React.SetStateAction<Handshake | null>>;
   handshakeLoading: boolean;
   setHandshakeLoading: React.Dispatch<React.SetStateAction<boolean>>;
@@ -33,6 +37,7 @@ export type UseHandshakeParams = {
 export function useHandshake({
   handshakeId,
   handshake,
+  isCurrentUserServiceOwner = false,
   setHandshake,
   handshakeLoading,
   setHandshakeLoading,
@@ -65,6 +70,16 @@ export function useHandshake({
 
     return "other";
   }, [currentUserEmail, currentUserId, handshake]);
+
+  /**
+   * Whether the provider/service-owner has already proposed session details.
+   * Until this is true, the approve/decline actions must be hidden — the
+   * backend will reject them with "Provider must initiate the handshake first".
+   */
+  const providerInitiated = useMemo(() => {
+    if (!handshake) return false;
+    return !!(handshake.provider_initiated as boolean | undefined);
+  }, [handshake]);
 
   const isPendingLike = useMemo(
     () =>
@@ -129,14 +144,29 @@ export function useHandshake({
     return true;
   }, [isClosedLike, isCompletedLike]);
 
+  /**
+   * Web parity:
+   * - Pending action ownership is based on SERVICE OWNERSHIP, not provider role.
+   * - Offer: service owner == provider
+   * - Need/Want: service owner == receiver
+   *
+   * Therefore:
+   * - service owner initiates
+   * - non-owner/requester approves or declines after details are proposed
+   */
   const canApprovePending = useMemo(
-    () => isPendingLike && handshakeRole === "other",
-    [handshakeRole, isPendingLike],
+    () => isPendingLike && !isCurrentUserServiceOwner && providerInitiated,
+    [isCurrentUserServiceOwner, isPendingLike, providerInitiated],
   );
 
   const canDeclinePending = useMemo(
-    () => isPendingLike && handshakeRole === "other",
-    [handshakeRole, isPendingLike],
+    () => isPendingLike && !isCurrentUserServiceOwner && providerInitiated,
+    [isCurrentUserServiceOwner, isPendingLike, providerInitiated],
+  );
+
+  const canInitiatePending = useMemo(
+    () => isPendingLike && isCurrentUserServiceOwner && !providerInitiated,
+    [isCurrentUserServiceOwner, isPendingLike, providerInitiated],
   );
 
   const canCancelPending = useMemo(() => isPendingLike, [isPendingLike]);
@@ -144,6 +174,29 @@ export function useHandshake({
   const canConfirmCompletion = useMemo(
     () => isAcceptedLike || isAwaitingSecondConfirmationLike,
     [isAcceptedLike, isAwaitingSecondConfirmationLike],
+  );
+
+  const canRequestCancellation = useMemo(
+    () => Boolean(handshake?.can_request_cancellation),
+    [handshake?.can_request_cancellation],
+  );
+
+  const canRespondToCancellation = useMemo(
+    () => Boolean(handshake?.can_respond_to_cancellation),
+    [handshake?.can_respond_to_cancellation],
+  );
+
+  const cancellationRequestedByName = useMemo(
+    () =>
+      typeof handshake?.cancellation_requested_by_name === "string"
+        ? handshake.cancellation_requested_by_name
+        : null,
+    [handshake?.cancellation_requested_by_name],
+  );
+
+  const hasCancellationRequest = useMemo(
+    () => Boolean(handshake?.cancellation_requested_at),
+    [handshake?.cancellation_requested_at],
   );
 
   const loadHandshake = useCallback(async () => {
@@ -178,13 +231,22 @@ export function useHandshake({
               updated = await approveHandshake(handshakeId);
               break;
             case "decline":
-              updated = await declineHandshake(handshakeId);
+              updated = await requestHandshakeChanges(handshakeId);
               break;
             case "cancel":
               updated = await cancelHandshake(handshakeId);
               break;
             case "confirm":
               updated = await confirmHandshake(handshakeId);
+              break;
+            case "requestCancellation":
+              updated = await requestCancellationHandshake(handshakeId);
+              break;
+            case "approveCancellation":
+              updated = await approveCancellationHandshake(handshakeId);
+              break;
+            case "rejectCancellation":
+              updated = await rejectCancellationHandshake(handshakeId);
               break;
             default:
               return;
@@ -202,11 +264,11 @@ export function useHandshake({
 
       if (type === "decline") {
         Alert.alert(
-          "Decline request",
-          "Are you sure you want to decline this exchange request?",
+          "Request changes",
+          "Ask the service owner to revise the proposed session details?",
           [
             { text: "Keep", style: "cancel" },
-            { text: "Decline", style: "destructive", onPress: runner },
+            { text: "Request changes", onPress: runner },
           ],
         );
         return;
@@ -231,6 +293,42 @@ export function useHandshake({
           [
             { text: "Not yet", style: "cancel" },
             { text: "Confirm", onPress: runner },
+          ],
+        );
+        return;
+      }
+
+      if (type === "requestCancellation") {
+        Alert.alert(
+          "Request cancellation",
+          "Send a cancellation request to the other participant?",
+          [
+            { text: "Keep handshake", style: "cancel" },
+            { text: "Request cancellation", style: "destructive", onPress: runner },
+          ],
+        );
+        return;
+      }
+
+      if (type === "approveCancellation") {
+        Alert.alert(
+          "Approve cancellation",
+          "Approve this cancellation request and close the handshake?",
+          [
+            { text: "Keep handshake", style: "cancel" },
+            { text: "Approve cancellation", style: "destructive", onPress: runner },
+          ],
+        );
+        return;
+      }
+
+      if (type === "rejectCancellation") {
+        Alert.alert(
+          "Keep handshake",
+          "Reject this cancellation request and keep the handshake active?",
+          [
+            { text: "Back", style: "cancel" },
+            { text: "Keep handshake", onPress: runner },
           ],
         );
         return;
@@ -268,20 +366,42 @@ export function useHandshake({
     }
 
     if (isPendingLike) {
-      if (handshakeRole === "initiator") {
+      // Provider has NOT yet proposed session details
+      if (!providerInitiated) {
+        if (!isCurrentUserServiceOwner) {
+          // Current user is the requester — waiting for the service owner to propose
+          return {
+            tone: "warning" as const,
+            title: "Waiting for session details",
+            description:
+              "Your interest has been received. The service owner will share the session details (time, location, duration) before you can approve.",
+          };
+        }
+        // Current user owns the service — they need to propose session details
         return {
           tone: "warning" as const,
-          title: "Waiting for approval",
+          title: "Session details required",
           description:
-            "Your request is pending. The other participant can approve or decline the exchange details.",
+            "Someone has expressed interest in your service. Share the session details (time, location, duration) to continue.",
         };
       }
 
+      // Service owner HAS proposed session details
+      if (!isCurrentUserServiceOwner) {
+        // Current user is the requester — can now approve or decline
+        return {
+          tone: "warning" as const,
+          title: "Session details received",
+          description:
+            "The service owner has shared the session details. Review and approve to confirm the exchange, or decline if the details do not work for you.",
+        };
+      }
+      // Current user is the service owner — waiting for requester to approve
       return {
-        tone: "warning" as const,
-        title: "Approval required",
+        tone: "info" as const,
+        title: "Waiting for approval",
         description:
-          "This exchange is pending your review. You can approve or decline it from here.",
+          "Session details have been sent. The other participant can now approve or decline your proposal.",
       };
     }
 
@@ -336,7 +456,9 @@ export function useHandshake({
     isAwaitingSecondConfirmationLike,
     isClosedLike,
     isCompletedLike,
+    isCurrentUserServiceOwner,
     isPendingLike,
+    providerInitiated,
   ]);
 
   return {
@@ -347,11 +469,17 @@ export function useHandshake({
     isAwaitingSecondConfirmationLike,
     isCompletedLike,
     isClosedLike,
+    providerInitiated,
     canSendMessages,
+    canInitiatePending,
     canApprovePending,
     canDeclinePending,
     canCancelPending,
     canConfirmCompletion,
+    canRequestCancellation,
+    canRespondToCancellation,
+    cancellationRequestedByName,
+    hasCancellationRequest,
     loadHandshake,
     runHandshakeAction,
     handshakeBanner,
