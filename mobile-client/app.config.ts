@@ -1,6 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
-import baseConfig from "./app.json";
+const fs = require("fs");
+const path = require("path");
+const baseConfig = require("./app.json");
 
 type EnvMap = Record<string, string>;
 
@@ -50,7 +50,7 @@ const apiUrl =
 const mapboxToken =
   rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || rootEnv.VITE_MAPBOX_TOKEN || "";
 
-export default {
+module.exports = {
   ...mobileConfig,
   plugins: [
     ...(mobileConfig.plugins ?? []),
