@@ -3028,6 +3028,176 @@ AdminAuditLog.objects.bulk_create([
 
 print(f"  Created 7 audit log entries")
 
+# ══════════════════════════════════════════════════════════════════════════════
+# DEMO SCENARIO: April 23rd Children's Festival (pre-seeded at 3 lifecycle stages)
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n[DEMO] Seeding April 23rd Festival scenario events...")
+
+FESTIVAL_TITLE = 'April 23rd Children\'s Festival in the Park'
+FESTIVAL_DESC = (
+    'A neighborhood festival for families to celebrate together! '
+    'We will play traditional street games like sack races and tug-of-war, '
+    'have face painting for the kids, and share tea and snacks. '
+    'Everyone pitches in — this is a community effort (imece). '
+    'Bring your kids, your energy, and something to share!'
+)
+FESTIVAL_IMG = 'https://images.unsplash.com/photo-1472162072942-cd5147eb3902?auto=format&fit=crop&w=800&h=600&q=80'
+FESTIVAL_LAT = Decimal('41.1080')
+FESTIVAL_LNG = Decimal('28.9680')
+
+# ── Event 1: CHECK-IN READY (Scene 2 — 24h lockdown window open) ──────────
+# scheduled_time = 30 min from now → inside lockdown, before start
+demo_fest_checkin = Service.objects.create(
+    user=zeynep,
+    title=FESTIVAL_TITLE,
+    description=FESTIVAL_DESC,
+    type='Event',
+    duration=Decimal('3.00'),
+    location_type='In-Person',
+    location_area='Eyüpsultan',
+    location_lat=FESTIVAL_LAT,
+    location_lng=FESTIVAL_LNG,
+    max_participants=20,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(minutes=30),
+    schedule_details='At the wide grassy area in the middle of the park, 14:00',
+    status='Active',
+    created_at=now - timedelta(days=8),
+)
+demo_fest_checkin.tags.set([education_tag, sports_tag])
+ServiceMedia.objects.create(
+    service=demo_fest_checkin, media_type='image',
+    file_url=FESTIVAL_IMG, display_order=0,
+)
+# Ayse, Burak, Cem joined
+for participant in [ayse, burak, cem]:
+    h = EventHandshakeService.join_event(demo_fest_checkin, participant)
+    Handshake.objects.filter(pk=h.pk).update(
+        created_at=now - timedelta(days=5),
+        updated_at=now - timedelta(days=5),
+    )
+# Group chat messages (imece conversation)
+add_group_chat_messages(demo_fest_checkin, [
+    (ayse, "I will bring the face painting supplies — I can paint the kids' faces!"),
+    (burak, "Great, I am coming with my car. I will get the sack race and tug-of-war materials from the warehouse."),
+    (cem, "We will take care of tea and plastic cups for everyone on our way."),
+    (zeynep, "Wonderful teamwork! See you at the wide grassy area in the middle of the park at 14:00."),
+], now - timedelta(days=4))
+print(f"  Created: {demo_fest_checkin.title} (check-in ready, 30 min from now)")
+
+# ── Event 2: READY TO CLOSE (Scene 4 — event happened, organizer can close) ─
+# scheduled_time = 3h ago → event happened, Ayse+Burak checked in, Cem did not
+demo_fest_close = Service.objects.create(
+    user=zeynep,
+    title=FESTIVAL_TITLE,
+    description=FESTIVAL_DESC,
+    type='Event',
+    duration=Decimal('3.00'),
+    location_type='In-Person',
+    location_area='Eyüpsultan',
+    location_lat=FESTIVAL_LAT,
+    location_lng=FESTIVAL_LNG,
+    max_participants=20,
+    schedule_type='One-Time',
+    scheduled_time=now - timedelta(hours=3),
+    schedule_details='At the wide grassy area in the middle of the park, 14:00',
+    status='Active',
+    created_at=now - timedelta(days=8),
+)
+demo_fest_close.tags.set([education_tag, sports_tag])
+ServiceMedia.objects.create(
+    service=demo_fest_close, media_type='image',
+    file_url=FESTIVAL_IMG, display_order=0,
+)
+# Directly create handshakes (bypassing join_event since scheduled_time is past)
+for participant in [ayse, burak, cem]:
+    Handshake.objects.create(
+        service=demo_fest_close, requester=participant,
+        status='accepted', provisioned_hours=0,
+        scheduled_time=demo_fest_close.scheduled_time,
+        created_at=now - timedelta(days=5),
+        updated_at=now - timedelta(days=5),
+    )
+for participant in [ayse, burak]:
+    Handshake.objects.filter(
+        service=demo_fest_close, requester=participant,
+    ).update(status='checked_in', updated_at=now - timedelta(hours=4))
+# Group chat with Cem's apology
+add_group_chat_messages(demo_fest_close, [
+    (ayse, "I will bring the face painting supplies — I can paint the kids' faces!"),
+    (burak, "Great, I am coming with my car. I will get the sack race and tug-of-war materials from the warehouse."),
+    (cem, "We will take care of tea and plastic cups for everyone on our way."),
+    (zeynep, "Wonderful teamwork! See you at the wide grassy area in the middle of the park at 14:00."),
+    (cem, "I am so sorry everyone. My son got a fever last night, we will not be able to make it to the park tomorrow. Happy holidays!"),
+    (zeynep, "Get well soon Cem, health comes first."),
+], now - timedelta(days=4))
+print(f"  Created: {demo_fest_close.title} (ready to close, Ayse+Burak checked in, Cem not)")
+
+# ── Event 3: COMPLETED (Scene 5 — event completed, evaluation window open) ───
+demo_fest_done = Service.objects.create(
+    user=zeynep,
+    title=FESTIVAL_TITLE,
+    description=FESTIVAL_DESC,
+    type='Event',
+    duration=Decimal('3.00'),
+    location_type='In-Person',
+    location_area='Eyüpsultan',
+    location_lat=FESTIVAL_LAT,
+    location_lng=FESTIVAL_LNG,
+    max_participants=20,
+    schedule_type='One-Time',
+    scheduled_time=now - timedelta(hours=4),
+    schedule_details='At the wide grassy area in the middle of the park, 14:00',
+    status='Active',
+    created_at=now - timedelta(days=8),
+)
+demo_fest_done.tags.set([education_tag, sports_tag])
+ServiceMedia.objects.create(
+    service=demo_fest_done, media_type='image',
+    file_url=FESTIVAL_IMG, display_order=0,
+)
+# Directly create handshakes and set final states (bypassing service layer)
+for participant in [ayse, burak, cem]:
+    Handshake.objects.create(
+        service=demo_fest_done, requester=participant,
+        status='accepted', provisioned_hours=0,
+        scheduled_time=demo_fest_done.scheduled_time,
+        created_at=now - timedelta(days=5),
+        updated_at=now - timedelta(days=5),
+    )
+# Mark Ayse + Burak as attended
+Handshake.objects.filter(
+    service=demo_fest_done, requester__in=[ayse, burak],
+).update(status='attended', updated_at=now - timedelta(minutes=30))
+# Mark Cem as no_show
+Handshake.objects.filter(
+    service=demo_fest_done, requester=cem,
+).update(status='no_show', updated_at=now - timedelta(minutes=30))
+# Complete the event and set evaluation windows
+completion_time = now - timedelta(minutes=30)
+window_end = completion_time + timedelta(hours=48)
+Service.objects.filter(pk=demo_fest_done.pk).update(
+    status='Completed', event_completed_at=completion_time,
+)
+Handshake.objects.filter(
+    service=demo_fest_done, status='attended',
+).update(
+    evaluation_window_starts_at=completion_time,
+    evaluation_window_ends_at=window_end,
+    evaluation_window_closed_at=None,
+)
+demo_fest_done.refresh_from_db()
+# Group chat
+add_group_chat_messages(demo_fest_done, [
+    (ayse, "I will bring the face painting supplies — I can paint the kids' faces!"),
+    (burak, "Great, I am coming with my car. I will get the sack race and tug-of-war materials from the warehouse."),
+    (cem, "We will take care of tea and plastic cups for everyone on our way."),
+    (zeynep, "Wonderful teamwork! See you at the wide grassy area in the middle of the park at 14:00."),
+    (cem, "I am so sorry everyone. My son got a fever last night, we will not be able to make it to the park tomorrow. Happy holidays!"),
+    (zeynep, "Get well soon Cem, health comes first."),
+], now - timedelta(days=4))
+print(f"  Created: {demo_fest_done.title} (completed, Ayse+Burak attended, Cem no-show, evaluation window open)")
+
 print("\n" + "=" * 60)
 print("Demo setup complete!")
 print("=" * 60)

@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -1310,13 +1311,38 @@ export default function ServiceWizard({
       </View>
 
       {pickerMode ? (
-        <DateTimePicker
-          value={scheduledAt ?? new Date()}
-          mode={pickerMode}
-          minimumDate={pickerMode === "date" ? new Date() : undefined}
-          is24Hour
-          onChange={onDateTimeChange}
-        />
+        Platform.OS === "ios" ? (
+          <Modal transparent animationType="slide">
+            <View style={styles.pickerOverlay}>
+              <View style={styles.pickerSheet}>
+                <View style={styles.pickerSheetHeader}>
+                  <Text style={styles.pickerSheetTitle}>
+                    {pickerMode === "date" ? "Select date" : "Select time"}
+                  </Text>
+                  <Pressable onPress={() => setPickerMode(null)}>
+                    <Text style={styles.pickerSheetDone}>Done</Text>
+                  </Pressable>
+                </View>
+                <DateTimePicker
+                  value={scheduledAt ?? new Date()}
+                  mode={pickerMode}
+                  display="spinner"
+                  minimumDate={pickerMode === "date" ? new Date() : undefined}
+                  is24Hour
+                  onChange={onDateTimeChange}
+                />
+              </View>
+            </View>
+          </Modal>
+        ) : (
+          <DateTimePicker
+            value={scheduledAt ?? new Date()}
+            mode={pickerMode}
+            minimumDate={pickerMode === "date" ? new Date() : undefined}
+            is24Hour
+            onChange={onDateTimeChange}
+          />
+        )
       ) : null}
 
       <LeafletLocationPickerModal
@@ -1946,6 +1972,36 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: colors.GRAY900,
     fontWeight: "600",
+  },
+  pickerOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
+  pickerSheet: {
+    backgroundColor: colors.WHITE,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 32,
+  },
+  pickerSheetHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.GRAY200,
+  },
+  pickerSheetTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: colors.GRAY800,
+  },
+  pickerSheetDone: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.GREEN,
   },
   footer: {
     flexDirection: "row",
