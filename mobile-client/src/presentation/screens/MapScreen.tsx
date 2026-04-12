@@ -13,9 +13,10 @@ import {
 import { Asset } from "expo-asset";
 import { File } from "expo-file-system";
 import * as Location from "expo-location";
-import { LeafletView } from "react-native-leaflet-view";
+import { LeafletView, MapShapeType } from "react-native-leaflet-view";
 import type {
   MapMarker,
+  MapShape,
   WebviewLeafletMessage,
 } from "react-native-leaflet-view";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -30,11 +31,58 @@ type FilterType = "all" | ServiceType;
 // Istanbul city center — used when location permission is denied
 const DEFAULT_LOCATION = { latitude: 41.0082, longitude: 28.9784 };
 
-const TYPE_ICON: Record<ServiceType, React.ReactNode> = {
-  Offer: "🟢",
-  Need: "🔵",
-  Event: "🟠",
+// ─── Marker helpers ───────────────────────────────────────────────────────────
+
+const MARKER_COLOR: Record<ServiceType, string> = {
+  Offer: colors.GREEN,
+  Need: colors.BLUE,
+  Event: colors.AMBER,
 };
+
+/**
+ * Small solid dot marker used purely as a tap target inside the area circle.
+ * Intentionally minimal — the large translucent shape carries the visual weight.
+ */
+function buildMarkerSvg(type: ServiceType): string {
+  const fill = MARKER_COLOR[type] ?? colors.GRAY700;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"></svg>`;
+}
+
+/**
+ * Builds large translucent Leaflet Circle shapes — one per service — that
+ * highlight the approximate area (~650 m radius) without revealing the exact
+ * location. Extra Leaflet path options (fillOpacity, opacity, weight) are
+ * spread directly onto the react-leaflet Circle by the library.
+ */
+function buildAreaShapes(
+  services: Service[],
+): (MapShape & Record<string, unknown>)[] {
+  return services.map((s) => {
+    const color = MARKER_COLOR[s.type] ?? colors.GRAY700;
+    return {
+      shapeType: MapShapeType.CIRCLE,
+      id: `area-${s.id}`,
+      center: { lat: Number(s.location_lat), lng: Number(s.location_lng) },
+      radius: 500,
+      color,
+      fillColor: color,
+      fillOpacity: 0.4,
+      opacity: 0,
+      weight: 2,
+    };
+  });
+}
+
+/**
+ * Tiny spiral jitter so co-located fuzzy markers don't perfectly overlap.
+ * Same algorithm as the web MapView's stackJitter.
+ */
+function stackJitter(rank: number): { dLat: number; dLng: number } {
+  if (rank === 0) return { dLat: 0, dLng: 0 };
+  const angle = (rank * 137.5 * Math.PI) / 180;
+  const r = 0.0005 * Math.sqrt(rank); // ~55 m max extra spread
+  return { dLat: r * Math.sin(angle), dLng: r * Math.cos(angle) };
+}
 
 const FILTER_CONFIG: {
   label: string;
@@ -174,16 +222,29 @@ export default function MapScreen() {
       ? services
       : services.filter((s) => s.type === activeFilter);
 
-  const markers: MapMarker[] = visibleServices.map((s) => ({
-    id: s.id,
-    position: {
-      lat: Number(s.location_lat),
-      lng: Number(s.location_lng),
-    },
-    icon: TYPE_ICON[s.type] as any,
-    size: [12, 12] as [number, number],
-    title: s.title,
-  }));
+  // Large translucent circles that show the approximate area (privacy-safe).
+  const areaShapes = buildAreaShapes(visibleServices);
+
+  // Small dot markers — stack-jittered so co-located ones don't perfectly
+  // overlap. These serve as the tap target inside each area circle.
+  const markers: MapMarker[] = (() => {
+    const coordRank: Record<string, number> = {};
+    return visibleServices.map((s) => {
+      const lat = Number(s.location_lat);
+      const lng = Number(s.location_lng);
+      const key = `${(lat * 100).toFixed(0)}-${(lng * 100).toFixed(0)}`;
+      const rank = coordRank[key] ?? 0;
+      coordRank[key] = rank + 1;
+      const { dLat, dLng } = stackJitter(rank);
+      return {
+        id: s.id,
+        position: { lat: lat + dLat, lng: lng + dLng },
+        icon: buildMarkerSvg(s.type),
+        size: [22, 22] as [number, number],
+        title: s.title,
+      };
+    });
+  })();
 
   // Open the summary sheet when a marker is tapped
   const handleMessage = useCallback(
@@ -218,6 +279,7 @@ export default function MapScreen() {
         mapCenterPosition={initialCenterRef.current}
         zoom={10}
         mapMarkers={markers}
+        mapShapes={areaShapes as MapShape[]}
         onMessageReceived={handleMessage}
       />
 
@@ -305,18 +367,20 @@ export default function MapScreen() {
 
 const TYPE_COLOR: Record<string, string> = {
   Offer: colors.GREEN,
-  Need:  colors.BLUE,
+  Need: colors.BLUE,
   Event: colors.AMBER,
 };
 
 const TYPE_LABEL: Record<string, string> = {
   Offer: "Offer",
-  Need:  "Want",
+  Need: "Want",
   Event: "Event",
 };
 
 function getInitials(first: string, last: string) {
-  return ((first || "").charAt(0) + (last || "").charAt(0)).toUpperCase() || "?";
+  return (
+    ((first || "").charAt(0) + (last || "").charAt(0)).toUpperCase() || "?"
+  );
 }
 
 function MarkerSheet({
@@ -330,8 +394,9 @@ function MarkerSheet({
 }) {
   const accentColor = TYPE_COLOR[service.type] ?? colors.GRAY700;
   const displayName =
-    [service.user.first_name, service.user.last_name].filter(Boolean).join(" ") ||
-    "Unknown";
+    [service.user.first_name, service.user.last_name]
+      .filter(Boolean)
+      .join(" ") || "Unknown";
   const initials = getInitials(service.user.first_name, service.user.last_name);
   const isRecurring = service.schedule_type === "Recurrent";
 
@@ -343,7 +408,12 @@ function MarkerSheet({
         <Text style={sheetStyles.title} numberOfLines={2}>
           {service.title}
         </Text>
-        <View style={[sheetStyles.typeBadge, { backgroundColor: accentColor + "22" }]}>
+        <View
+          style={[
+            sheetStyles.typeBadge,
+            { backgroundColor: accentColor + "22" },
+          ]}
+        >
           <Text style={[sheetStyles.typeBadgeText, { color: accentColor }]}>
             {TYPE_LABEL[service.type]}
           </Text>
@@ -376,7 +446,11 @@ function MarkerSheet({
         )}
         {(service.location_area || service.location_type) && (
           <View style={sheetStyles.chip}>
-            <Ionicons name="location-outline" size={13} color={colors.GRAY500} />
+            <Ionicons
+              name="location-outline"
+              size={13}
+              color={colors.GRAY500}
+            />
             <Text style={sheetStyles.chipText}>
               {service.location_area || service.location_type}
             </Text>
@@ -384,12 +458,18 @@ function MarkerSheet({
         )}
         {!!service.schedule_details && (
           <View style={sheetStyles.chip}>
-            <Ionicons name="calendar-outline" size={13} color={colors.GRAY500} />
+            <Ionicons
+              name="calendar-outline"
+              size={13}
+              color={colors.GRAY500}
+            />
             <Text style={sheetStyles.chipText}>{service.schedule_details}</Text>
           </View>
         )}
         {isRecurring && (
-          <View style={[sheetStyles.chip, { backgroundColor: colors.PURPLE_LT }]}>
+          <View
+            style={[sheetStyles.chip, { backgroundColor: colors.PURPLE_LT }]}
+          >
             <Ionicons name="repeat-outline" size={13} color={colors.PURPLE} />
             <Text style={[sheetStyles.chipText, { color: colors.PURPLE }]}>
               Recurring
