@@ -2112,12 +2112,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 raise PermissionDenied(
                     'Cannot edit event details within 24 hours of the scheduled start time.'
                 )
-            if service.handshakes.filter(
-                status__in=['accepted', 'checked_in', 'attended'],
-            ).exists():
-                raise PermissionDenied(
-                    'Cannot edit event details after participants have joined.'
-                )
 
         # Lock one-time Offer/Need listings while an approved session is still active.
         # Recurrent listings stay editable for future cycles.
