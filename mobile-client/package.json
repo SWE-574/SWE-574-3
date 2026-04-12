@@ -4,8 +4,10 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start --clear",
-    "start:local:android": "EXPO_PUBLIC_API_URL=http://10.0.2.2:8000/api expo run:android",
-    "start:local:ios": "EXPO_PUBLIC_API_URL=http://localhost/api expo run:ios",
+    "start:local:android": "EXPO_PUBLIC_API_URL=http://10.0.2.2:8000/api expo start --clear --android",
+    "start:local:ios": "EXPO_PUBLIC_API_URL=http://localhost/api expo start --clear --ios --localhost",
+    "build:android": "EXPO_PUBLIC_API_URL=http://10.0.2.2:8000/api expo run:android",
+    "build:ios": "EXPO_PUBLIC_API_URL=http://localhost/api expo run:ios",
     "start:local:device": "expo start --clear --host lan",
     "prebuild": "expo prebuild --clean",
     "android": "expo run:android",

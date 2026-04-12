@@ -76,9 +76,10 @@ export function EventRosterPanel({ handshakes, onComplete, onMarkAttended, marki
           <Flex align="flex-start" gap={3}>
             <FiAlertCircle size={16} color={AMBER} style={{ marginTop: 2, flexShrink: 0 }} />
             <Text fontSize="13px" color="#92400E" lineHeight={1.5}>
-              <strong>{willBeNoShow}</strong> registered participant{willBeNoShow !== 1 ? 's' : ''} without
-              check-in will be marked as <strong>No-Show</strong>. After 3 no-shows, a 14-day participation
-              ban is applied automatically.
+              <strong>{willBeNoShow}</strong> participant{willBeNoShow !== 1 ? 's' : ''} not yet marked as
+              attended will become <strong>No-Show</strong> when you complete the event.
+              {checkedIn > 0 && <> Use the <strong>Mark Attended</strong> button for checked-in participants first.</>}
+              {' '}After 3 no-shows, a 14-day participation ban is applied automatically.
             </Text>
           </Flex>
         </Box>

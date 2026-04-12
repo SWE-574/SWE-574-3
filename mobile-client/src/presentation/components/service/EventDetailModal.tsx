@@ -357,8 +357,13 @@ export default function EventDetailModal({
                         </View>
                       </View>
 
-                      {eventEvaluationTarget ? (
-                        eventEvaluationTarget.user_has_reviewed ? (
+                      {eventEvaluationTarget ? (() => {
+                        const windowEnd = eventEvaluationTarget.evaluation_window_ends_at
+                          ? new Date(eventEvaluationTarget.evaluation_window_ends_at).getTime()
+                          : null;
+                        const windowClosed = eventEvaluationTarget.evaluation_window_closed_at
+                          || (windowEnd != null && windowEnd <= Date.now());
+                        return eventEvaluationTarget.user_has_reviewed ? (
                           <View style={styles.infoCard}>
                             <Ionicons
                               name="star-outline"
@@ -369,6 +374,20 @@ export default function EventDetailModal({
                               <Text style={styles.infoCardTitle}>Evaluation submitted</Text>
                               <Text style={styles.infoCardText}>
                                 You already reviewed this event.
+                              </Text>
+                            </View>
+                          </View>
+                        ) : windowClosed ? (
+                          <View style={styles.infoCard}>
+                            <Ionicons
+                              name="time-outline"
+                              size={18}
+                              color={colors.GRAY400}
+                            />
+                            <View style={styles.infoCardTextWrap}>
+                              <Text style={styles.infoCardTitle}>Evaluation window closed</Text>
+                              <Text style={styles.infoCardText}>
+                                The 48-hour feedback window has ended.
                               </Text>
                             </View>
                           </View>
@@ -387,8 +406,8 @@ export default function EventDetailModal({
                               Leave Evaluation
                             </Text>
                           </TouchableOpacity>
-                        )
-                      ) : null}
+                        );
+                      })() : null}
                     </>
                   ) : null}
 
@@ -617,7 +636,7 @@ export default function EventDetailModal({
                 })
               )}
 
-              {service.status === "Active" ? (
+              {(service.status === "Active" || service.status === "Agreed") ? (
                 <TouchableOpacity
                   style={[styles.completeButton, completing && styles.completeButtonDisabled]}
                   onPress={onCompleteEvent}

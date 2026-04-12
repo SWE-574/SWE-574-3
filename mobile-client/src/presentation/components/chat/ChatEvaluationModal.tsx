@@ -89,8 +89,13 @@ export function ChatEvaluationModal({
 
   const pickImages = async () => {
     if (imageUris.length >= MAX_IMAGES) return;
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Please allow photo library access to attach images.");
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: true,
       selectionLimit: MAX_IMAGES - imageUris.length,
       quality: 0.8,
@@ -198,7 +203,7 @@ export function ChatEvaluationModal({
 
           {alreadyReviewed ? (
             <View style={styles.infoCard}>
-              <Text style={styles.infoText}>You already reviewed this exchange.</Text>
+              <Text style={styles.infoText}>You already reviewed this {isEventEvaluation ? 'event' : 'exchange'}.</Text>
             </View>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false}>
