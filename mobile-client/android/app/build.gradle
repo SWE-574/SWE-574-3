@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.diclenaz.thehive'
+    namespace 'com.apiary.thehive'
     defaultConfig {
-        applicationId 'com.diclenaz.thehive'
+        applicationId 'com.apiary.thehive'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

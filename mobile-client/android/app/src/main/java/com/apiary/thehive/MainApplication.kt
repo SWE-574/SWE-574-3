@@ -1,4 +1,4 @@
-package com.diclenaz.thehive
+package com.apiary.thehive
 
 import android.app.Application
 import android.content.res.Configuration
