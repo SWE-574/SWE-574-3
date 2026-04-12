@@ -57,6 +57,7 @@ services:
     restart: unless-stopped
     environment:
       - VITE_API_URL=/api
+      - VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:5173/login >/dev/null 2>&1 || exit 1"]
       interval: 10s

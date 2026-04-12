@@ -2107,13 +2107,17 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
         is_admin = getattr(self.request.user, 'role', None) == 'admin'
 
-        # Block edits to Event details once inside the 24-hour lockdown window.
-        # Non-Event services are completely unaffected by this guard.
-        # Admins are exempt so they can still toggle visibility or moderate.
-        if service.type == 'Event' and service.is_in_lockdown_window and not is_admin:
-            raise PermissionDenied(
-                'Cannot edit event details within 24 hours of the scheduled start time.'
-            )
+        if service.type == 'Event' and not is_admin:
+            if service.is_in_lockdown_window:
+                raise PermissionDenied(
+                    'Cannot edit event details within 24 hours of the scheduled start time.'
+                )
+            if service.handshakes.filter(
+                status__in=['accepted', 'checked_in', 'attended'],
+            ).exists():
+                raise PermissionDenied(
+                    'Cannot edit event details after participants have joined.'
+                )
 
         # Lock one-time Offer/Need listings while an approved session is still active.
         # Recurrent listings stay editable for future cycles.

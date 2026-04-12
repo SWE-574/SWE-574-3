@@ -789,6 +789,8 @@ export default function ServiceWizard({
           placeholder="Describe what participants can expect — schedule, materials, skill level…"
           placeholderTextColor={colors.GRAY400}
           multiline
+          blurOnSubmit={false}
+          scrollEnabled={false}
           style={[styles.input, styles.textarea]}
         />
       </InputLabel>
@@ -1237,7 +1239,8 @@ export default function ServiceWizard({
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
       <View style={styles.progressWrap}>
         {STEPS.map((item, index) => (
@@ -1265,6 +1268,8 @@ export default function ServiceWizard({
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
       >
         {renderStep()}
       </ScrollView>
@@ -1543,7 +1548,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 40,
   },
   sectionCard: {
     backgroundColor: colors.WHITE,

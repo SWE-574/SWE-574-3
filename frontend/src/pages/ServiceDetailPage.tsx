@@ -609,12 +609,17 @@ export default function ServiceDetailPage() {
   })()
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
-  const eventEditLocked = isEvent && isWithinLockdownWindow(service?.scheduled_time)
+  const eventEditLocked = isEvent && (
+    isWithinLockdownWindow(service?.scheduled_time)
+    || incoming.some((h) => ['accepted', 'checked_in', 'attended'].includes(h.status))
+  )
   const hasActiveApprovedSession = incoming.some((h) => ['accepted', 'reported', 'paused'].includes(h.status))
   const activeApprovedSessionEditLocked = !isEvent && !isRecurr && hasActiveApprovedSession
   const ownerEditLocked = isOwn && ((isEvent && eventEditLocked) || activeApprovedSessionEditLocked)
   const ownerEditLockReason = isEvent
-    ? 'Editing is locked during the final 24 hours before event start.'
+    ? (isWithinLockdownWindow(service?.scheduled_time)
+      ? 'Editing is locked during the final 24 hours before event start.'
+      : 'Editing is locked because the event already has active participants.')
     : 'Editing is locked while an approved session is still active.'
   const reportedParticipantIds = new Set(
     incoming
@@ -1262,24 +1267,40 @@ export default function ServiceDetailPage() {
                 )}
 
                 {/* Location map — In-Person only */}
-                {service.location_type === 'In-Person' && (service.location_lat || service.location_lng) && (
+                {service.location_type === 'In-Person' && (service.location_lat || service.location_lng) && (() => {
+                  const joinedEvent = isEvent && myEventHandshake && ['accepted', 'checked_in', 'attended'].includes(myEventHandshake.status)
+                  const showExact = isOwn || joinedEvent
+                  return (
                   <Box mb={6}>
                     <Flex align="center" gap={2} mb={3}>
                       <FiMapPin size={13} color={GRAY400} />
                       <Text fontSize="12px" fontWeight={700} color={GRAY400}
                         style={{ textTransform: 'uppercase', letterSpacing: '0.07em' }}
                       >
-                        Approximate Location
+                        {showExact ? 'Event Location' : 'Approximate Location'}
                       </Text>
                     </Flex>
+                    {showExact && service.session_exact_location && (
+                      <Text fontSize="13px" color={GRAY700} mb={2} fontWeight={500}>
+                        {service.session_exact_location}
+                      </Text>
+                    )}
+                    {showExact && service.session_location_guide && (
+                      <Text fontSize="12px" color={GRAY400} mb={2}>
+                        {service.session_location_guide}
+                      </Text>
+                    )}
                     <Box borderRadius="14px" overflow="hidden" border={`1px solid ${GRAY200}`}>
                       <MapView services={[service]} height="220px" />
                     </Box>
-                    <Text fontSize="11px" color={GRAY400} mt="6px">
-                      Exact address is hidden — shown within a 2 km privacy zone.
-                    </Text>
+                    {!showExact && (
+                      <Text fontSize="11px" color={GRAY400} mt="6px">
+                        Exact address is hidden — shown within a 2 km privacy zone.
+                      </Text>
+                    )}
                   </Box>
-                )}
+                  )
+                })()}
 
                 {/* Tags */}
                 {service.tags && service.tags.length > 0 && (

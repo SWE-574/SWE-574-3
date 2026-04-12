@@ -235,7 +235,7 @@ export default function ServiceEvaluationModal({
             <Box bg={GREEN_LT} border={`1px solid ${GREEN}40`} borderRadius="12px" p={4}>
               <Flex align="center" gap={2}>
                 <FiCheckCircle color={GREEN} />
-                <Text fontSize="13px" color={GREEN} fontWeight={700}>You already reviewed this exchange.</Text>
+                <Text fontSize="13px" color={GREEN} fontWeight={700}>You already reviewed this {isEventEvaluation ? 'event' : 'exchange'}.</Text>
               </Flex>
             </Box>
           ) : (

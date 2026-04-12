@@ -408,7 +408,7 @@ export default function ServiceDetailScreen() {
     );
   }, [isEvent, serviceHandshakes]);
 
-  const evaluationWindow = getEvaluationWindowInfo(evaluationHandshake);
+  const evaluationWindow = getEvaluationWindowInfo(isEvent ? eventEvaluationTarget : evaluationHandshake);
   const participantCount = service?.participant_count ?? 0;
   const maxParticipants = service?.max_participants ?? 1;
   const isFull =
@@ -1326,17 +1326,33 @@ export default function ServiceDetailScreen() {
             </View>
           ) : null}
 
-          {mapPreviewUrl ? (
+          {mapPreviewUrl ? (() => {
+            const joinedEvent = isEvent && myEventHandshake && ['accepted', 'checked_in', 'attended'].includes(myEventHandshake.status?.toLowerCase());
+            const showExact = isOwner || joinedEvent;
+            return (
             <View style={styles.sectionBlock}>
-              <Text style={styles.sectionLabel}>Approximate Location</Text>
+              <Text style={styles.sectionLabel}>{showExact ? 'Event Location' : 'Approximate Location'}</Text>
+              {showExact && service.session_exact_location ? (
+                <Text style={[styles.mapPrivacyText, { marginBottom: 6, color: colors.GRAY700, fontWeight: '500' }]}>
+                  {service.session_exact_location}
+                </Text>
+              ) : null}
+              {showExact && service.session_location_guide ? (
+                <Text style={[styles.mapPrivacyText, { marginBottom: 6 }]}>
+                  {service.session_location_guide}
+                </Text>
+              ) : null}
               <View style={styles.mapCard}>
                 <Image source={{ uri: mapPreviewUrl }} style={styles.mapPreview} />
-                <Text style={styles.mapPrivacyText}>
-                  Approximate location only. Exact address is shared after acceptance.
-                </Text>
+                {!showExact && (
+                  <Text style={styles.mapPrivacyText}>
+                    Approximate location only. Exact address is shared after acceptance.
+                  </Text>
+                )}
               </View>
             </View>
-          ) : null}
+            );
+          })() : null}
 
           {service.tags?.length > 0 && (
             <View style={styles.sectionBlock}>
@@ -1618,7 +1634,7 @@ export default function ServiceDetailScreen() {
                 ) : null}
                 <Text style={styles.statusHelperText}>
                   {evaluationTarget.user_has_reviewed
-                    ? "You already reviewed this exchange."
+                    ? `You already reviewed this ${isEvent ? 'event' : 'exchange'}.`
                     : evaluationWindow.label}
                 </Text>
               </View>
