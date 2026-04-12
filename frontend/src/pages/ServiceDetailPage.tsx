@@ -609,17 +609,12 @@ export default function ServiceDetailPage() {
   })()
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
-  const eventEditLocked = isEvent && (
-    isWithinLockdownWindow(service?.scheduled_time)
-    || incoming.some((h) => ['accepted', 'checked_in', 'attended'].includes(h.status))
-  )
+  const eventEditLocked = isEvent && isWithinLockdownWindow(service?.scheduled_time)
   const hasActiveApprovedSession = incoming.some((h) => ['accepted', 'reported', 'paused'].includes(h.status))
   const activeApprovedSessionEditLocked = !isEvent && !isRecurr && hasActiveApprovedSession
   const ownerEditLocked = isOwn && ((isEvent && eventEditLocked) || activeApprovedSessionEditLocked)
   const ownerEditLockReason = isEvent
-    ? (isWithinLockdownWindow(service?.scheduled_time)
-      ? 'Editing is locked during the final 24 hours before event start.'
-      : 'Editing is locked because the event already has active participants.')
+    ? 'Editing is locked during the final 24 hours before event start.'
     : 'Editing is locked while an approved session is still active.'
   const reportedParticipantIds = new Set(
     incoming
