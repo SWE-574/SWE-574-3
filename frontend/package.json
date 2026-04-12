@@ -20,7 +20,7 @@
     "@hookform/resolvers": "^5.2.2",
     "axios": "^1.13.6",
     "date-fns": "^4.1.0",
-    "mapbox-gl": "^3.19.0",
+    "mapbox-gl": "^3.21.0",
     "plotly.js-dist-min": "^3.5.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
