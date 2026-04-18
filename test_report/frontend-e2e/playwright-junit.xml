@@ -1,0 +1,2441 @@
+<testsuites id="" name="" tests="294" failures="39" skipped="9" errors="0" time="1394.929052">
+<testsuite name="auth.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="6" failures="0" skipped="0" time="5.217" errors="0">
+<testcase name="Authentication › valid credentials → lands on dashboard" classname="auth.spec.ts" time="1.353">
+</testcase>
+<testcase name="Authentication › wrong password → shows error message" classname="auth.spec.ts" time="0.814">
+</testcase>
+<testcase name="Authentication › empty email → client-side validation blocks submit" classname="auth.spec.ts" time="0.852">
+</testcase>
+<testcase name="Authentication › logged-in user can log out" classname="auth.spec.ts" time="0.977">
+</testcase>
+<testcase name="Authentication › visiting /profile while unauthenticated redirects to login" classname="auth.spec.ts" time="0.593">
+</testcase>
+<testcase name="Authentication › visiting /messages while unauthenticated redirects to login" classname="auth.spec.ts" time="0.628">
+</testcase>
+</testsuite>
+<testsuite name="chat.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="5" failures="1" skipped="0" time="9.012" errors="0">
+<testcase name="1-to-1 Chat › conversation list loads with at least one item" classname="chat.spec.ts" time="1.644">
+</testcase>
+<testcase name="1-to-1 Chat › user can select a conversation and the message input appears" classname="chat.spec.ts" time="2.05">
+</testcase>
+<testcase name="1-to-1 Chat › user can send a message and it appears in the thread" classname="chat.spec.ts" time="2.08">
+<failure message="chat.spec.ts:43:3 user can send a message and it appears in the thread" type="FAILURE">
+<![CDATA[  [chromium] › chat.spec.ts:43:3 › 1-to-1 Chat › user can send a message and it appears in the thread 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText('E2E test message 1776495485089')
+    Expected: visible
+    Error: strict mode violation: getByText('E2E test message 1776495485089') resolved to 2 elements:
+        1) <p class="css-uwqs0u">E2E test message 1776495485089</p> aka getByRole('button', { name: 'Zeynep Arslan Zeynep Arslan' })
+        2) <div class="css-xhtg17">E2E test message 1776495485089</div> aka locator('div').filter({ hasText: /^E2E test message 1776495485089$/ })
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for getByText('E2E test message 1776495485089')
+
+
+      60 |
+      61 |     // The message should appear in the chat thread
+    > 62 |     await expect(page.getByText(uniqueText)).toBeVisible({ timeout: 10_000 })
+         |                                              ^
+      63 |   })
+      64 |
+      65 |   test('message input clears after sending', async ({ page }) => {
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/chat.spec.ts:62:46
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/chat-1-to-1-Chat-user-can--21a01-nd-it-appears-in-the-thread-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/chat-1-to-1-Chat-user-can--21a01-nd-it-appears-in-the-thread-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/chat-1-to-1-Chat-user-can--21a01-nd-it-appears-in-the-thread-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/chat-1-to-1-Chat-user-can--21a01-nd-it-appears-in-the-thread-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="1-to-1 Chat › message input clears after sending" classname="chat.spec.ts" time="1.412">
+</testcase>
+<testcase name="1-to-1 Chat › clicking a conversation shows its messages and input" classname="chat.spec.ts" time="1.826">
+</testcase>
+</testsuite>
+<testsuite name="dashboard.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="9.221" errors="0">
+<testcase name="Dashboard › authenticated user sees service cards on the dashboard" classname="dashboard.spec.ts" time="1.151">
+</testcase>
+<testcase name="Dashboard › search bar is present and filters services" classname="dashboard.spec.ts" time="1.207">
+</testcase>
+<testcase name="Dashboard › filter tabs are visible and clickable" classname="dashboard.spec.ts" time="0.954">
+</testcase>
+<testcase name="Dashboard › dashboard polling does not cause page crashes" classname="dashboard.spec.ts" time="5.909">
+</testcase>
+</testsuite>
+<testsuite name="edit-locks.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="1" skipped="0" time="30.172" errors="0">
+<testcase name="Owner edit locks › owner can edit unlocked Offer" classname="edit-locks.spec.ts" time="21.729">
+<failure message="edit-locks.spec.ts:20:3 owner can edit unlocked Offer" type="FAILURE">
+<![CDATA[  [chromium] › edit-locks.spec.ts:20:3 › Owner edit locks › owner can edit unlocked Offer ──────────
+
+    Error: expect(page).toHaveURL(expected) failed
+
+    Expected pattern: /\/service-detail\//
+    Received string:  "http://localhost:5173/post-offer"
+    Timeout: 20000ms
+
+    Call log:
+      - Expect "toHaveURL" with timeout 20000ms
+        24 × unexpected value "http://localhost:5173/post-offer"
+
+
+      31 |
+      32 |     await page.getByRole('button', { name: 'Post Offer' }).click()
+    > 33 |     await expect(page).toHaveURL(/\/service-detail\//, { timeout: 20_000 })
+         |                        ^
+      34 |
+      35 |     await page.getByRole('button', { name: 'Edit Listing' }).click()
+      36 |     await expect(page).toHaveURL(/\/edit-service\//, { timeout: 10_000 })
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/edit-locks.spec.ts:33:24
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/edit-locks-Owner-edit-locks-owner-can-edit-unlocked-Offer-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/edit-locks-Owner-edit-locks-owner-can-edit-unlocked-Offer-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/edit-locks-Owner-edit-locks-owner-can-edit-unlocked-Offer-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/edit-locks-Owner-edit-locks-owner-can-edit-unlocked-Offer-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="Owner edit locks › Offer owner can still edit after interest and applicant is notified" classname="edit-locks.spec.ts" time="5.934">
+</testcase>
+<testcase name="Owner edit locks › Event owner sees 24-hour edit lock for near-term events" classname="edit-locks.spec.ts" time="2.509">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/01-fr-01a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="4.034" errors="0">
+<testcase name="FR-01a: Login with email and password › valid credentials create a session and redirect away from login" classname="feature-1/01-fr-01a.spec.ts" time="1.277">
+</testcase>
+<testcase name="FR-01a: Login with email and password › wrong password shows an error and keeps user on login page" classname="feature-1/01-fr-01a.spec.ts" time="1.204">
+</testcase>
+<testcase name="FR-01a: Login with email and password › unknown email shows an error and keeps user on login page" classname="feature-1/01-fr-01a.spec.ts" time="0.779">
+</testcase>
+<testcase name="FR-01a: Login with email and password › empty form fields block submission via client-side validation" classname="feature-1/01-fr-01a.spec.ts" time="0.774">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/02-fr-01b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="2.51" errors="0">
+<testcase name="FR-01b: Session creation and redirect on login › after login user is redirected to the default landing page (dashboard)" classname="feature-1/02-fr-01b.spec.ts" time="0.614">
+</testcase>
+<testcase name="FR-01b: Session creation and redirect on login › unauthenticated visit to a protected route redirects to login" classname="feature-1/02-fr-01b.spec.ts" time="0.615">
+</testcase>
+<testcase name="FR-01b: Session creation and redirect on login › unauthenticated visit to /profile redirects to login" classname="feature-1/02-fr-01b.spec.ts" time="0.738">
+</testcase>
+<testcase name="FR-01b: Session creation and redirect on login › unauthenticated visit to /messages redirects to login" classname="feature-1/02-fr-01b.spec.ts" time="0.543">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/03-fr-01c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="2.796" errors="0">
+<testcase name="FR-01c: Logout invalidates session and redirects › logged-in user can log out via the nav dropdown" classname="feature-1/03-fr-01c.spec.ts" time="0.971">
+</testcase>
+<testcase name="FR-01c: Logout invalidates session and redirects › after logout the session cookie is cleared" classname="feature-1/03-fr-01c.spec.ts" time="0.972">
+</testcase>
+<testcase name="FR-01c: Logout invalidates session and redirects › after logout the login page is accessible (public redirect works)" classname="feature-1/03-fr-01c.spec.ts" time="0.853">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/04-fr-01d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="3.477" errors="0">
+<testcase name="FR-01d: Route protection (auth + RBAC) › unauthenticated user cannot access any protected route" classname="feature-1/04-fr-01d.spec.ts" time="1.173">
+</testcase>
+<testcase name="FR-01d: Route protection (auth + RBAC) › non-admin user is denied access to /admin" classname="feature-1/04-fr-01d.spec.ts" time="0.963">
+</testcase>
+<testcase name="FR-01d: Route protection (auth + RBAC) › admin user can access /admin panel" classname="feature-1/04-fr-01d.spec.ts" time="1.341">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/05-fr-01e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="3.76" errors="0">
+<testcase name="FR-01e: Registration with unique email constraints › registration page is accessible at /register" classname="feature-1/05-fr-01e.spec.ts" time="0.718">
+</testcase>
+<testcase name="FR-01e: Registration with unique email constraints › valid registration creates account and redirects away from register page" classname="feature-1/05-fr-01e.spec.ts" time="1.342">
+</testcase>
+<testcase name="FR-01e: Registration with unique email constraints › duplicate email is rejected with an error" classname="feature-1/05-fr-01e.spec.ts" time="0.887">
+</testcase>
+<testcase name="FR-01e: Registration with unique email constraints › weak password is rejected by client-side validation" classname="feature-1/05-fr-01e.spec.ts" time="0.813">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/06-fr-01f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="5" failures="0" skipped="0" time="3.631" errors="0">
+<testcase name="FR-01f: Password reset via email token › forgot-password page is accessible at /forgot-password" classname="feature-1/06-fr-01f.spec.ts" time="0.743">
+</testcase>
+<testcase name="FR-01f: Password reset via email token › submitting a valid email shows a confirmation / sent state" classname="feature-1/06-fr-01f.spec.ts" time="0.822">
+</testcase>
+<testcase name="FR-01f: Password reset via email token › submitting an unknown email does not leak whether account exists" classname="feature-1/06-fr-01f.spec.ts" time="0.786">
+</testcase>
+<testcase name="FR-01f: Password reset via email token › invalid email format is rejected by client-side validation" classname="feature-1/06-fr-01f.spec.ts" time="0.77">
+</testcase>
+<testcase name="FR-01f: Password reset via email token › reset-password page is accessible at /reset-password" classname="feature-1/06-fr-01f.spec.ts" time="0.51">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/07-nfr-01a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="4.371" errors="0">
+<testcase name="NFR-01a: Passwords not exposed in API responses › login response does not contain a plaintext password field" classname="feature-1/07-nfr-01a.spec.ts" time="0.725">
+</testcase>
+<testcase name="NFR-01a: Passwords not exposed in API responses › user profile API response does not expose a password field" classname="feature-1/07-nfr-01a.spec.ts" time="0.769">
+</testcase>
+<testcase name="NFR-01a: Passwords not exposed in API responses › registration response does not echo back the password" classname="feature-1/07-nfr-01a.spec.ts" time="2.877">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/08-nfr-01b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="2.505" errors="0">
+<testcase name="NFR-01b: Generic error messages on login failure › wrong-password error message is generic (no &quot;incorrect password&quot; hint)" classname="feature-1/08-nfr-01b.spec.ts" time="0.837">
+</testcase>
+<testcase name="NFR-01b: Generic error messages on login failure › unknown email error message is generic (no &quot;email not found&quot; hint)" classname="feature-1/08-nfr-01b.spec.ts" time="0.803">
+</testcase>
+<testcase name="NFR-01b: Generic error messages on login failure › wrong-password and unknown-email produce visually equivalent feedback" classname="feature-1/08-nfr-01b.spec.ts" time="0.865">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/09-nfr-01c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="0" skipped="0" time="3.187" errors="0">
+<testcase name="NFR-01c: Login and logout complete within 2 seconds › login round-trip (submit → redirect) completes within 2 s" classname="feature-1/09-nfr-01c.spec.ts" time="1.332">
+</testcase>
+<testcase name="NFR-01c: Login and logout complete within 2 seconds › logout round-trip (click → redirect) completes within 2 s" classname="feature-1/09-nfr-01c.spec.ts" time="1.855">
+</testcase>
+</testsuite>
+<testsuite name="feature-1/10-nfr-01d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="3.262" errors="0">
+<testcase name="NFR-01d: Session persistence across page reload › authenticated session survives a full page reload on dashboard" classname="feature-1/10-nfr-01d.spec.ts" time="0.926">
+</testcase>
+<testcase name="NFR-01d: Session persistence across page reload › session persists when navigating to another protected route then reloading" classname="feature-1/10-nfr-01d.spec.ts" time="1.252">
+</testcase>
+<testcase name="NFR-01d: Session persistence across page reload › session is gone after logout — auth cookies are cleared" classname="feature-1/10-nfr-01d.spec.ts" time="1.084">
+</testcase>
+</testsuite>
+<testsuite name="feature-10/01-fr-10a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.054" errors="0">
+<testcase name="FR-10a: pending exchange opens a private requester-provider chat thread" classname="feature-10/01-fr-10a.spec.ts" time="3.054">
+</testcase>
+</testsuite>
+<testsuite name="feature-10/02-fr-10b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.037" errors="0">
+<testcase name="FR-10b: opening message is auto-created when private thread starts" classname="feature-10/02-fr-10b.spec.ts" time="2.037">
+</testcase>
+</testsuite>
+<testsuite name="feature-10/03-fr-10c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.432" errors="0">
+<testcase name="FR-10c: private thread remains accessible after lifecycle closes" classname="feature-10/03-fr-10c.spec.ts" time="1.432">
+</testcase>
+</testsuite>
+<testsuite name="feature-10/04-fr-10d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.955" errors="0">
+<testcase name="FR-10d: accepted participant can access offer-level group chat thread" classname="feature-10/04-fr-10d.spec.ts" time="1.955">
+</testcase>
+</testsuite>
+<testsuite name="feature-10/05-fr-10e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.659" errors="0">
+<testcase name="FR-10e: private thread access is isolated to the thread members" classname="feature-10/05-fr-10e.spec.ts" time="1.659">
+</testcase>
+</testsuite>
+<testsuite name="feature-10/06-fr-10f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.652" errors="0">
+<testcase name="FR-10f: user-sent private messages are delivered in near real time" classname="feature-10/06-fr-10f.spec.ts" time="2.652">
+</testcase>
+</testsuite>
+<testsuite name="feature-10/07-nfr-10a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.053" errors="0">
+<testcase name="NFR-10a: private chat delivery should complete within one second" classname="feature-10/07-nfr-10a.spec.ts" time="3.053">
+</testcase>
+</testsuite>
+<testsuite name="feature-10/08-nfr-10b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.794" errors="0">
+<testcase name="NFR-10b: only authorized members can read or send in private threads" classname="feature-10/08-nfr-10b.spec.ts" time="1.794">
+</testcase>
+</testsuite>
+<testsuite name="feature-10/09-nfr-10c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.119" errors="0">
+<testcase name="NFR-10c: chat history remains after reconnect and page reload" classname="feature-10/09-nfr-10c.spec.ts" time="3.119">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/01-fr-13a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.343" errors="0">
+<testcase name="FR-13a: detail page shows core listing details including schedule, capacity, tags, and creation metadata" classname="feature-13/01-fr-13a.spec.ts" time="1.343">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/02-fr-13b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.395" errors="0">
+<testcase name="FR-13b: detail page shows the poster profile summary with name, karma, and member-since data" classname="feature-13/02-fr-13b.spec.ts" time="1.395">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/03-fr-13c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.506" errors="0">
+<testcase name="FR-13c: authenticated non-owners see Express Interest on active offer pages while capacity is available" classname="feature-13/03-fr-13c.spec.ts" time="2.506">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/04-fr-13d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.981" errors="0">
+<testcase name="FR-13d: authenticated non-owners see Respond on request pages when they have not initiated an exchange yet" classname="feature-13/04-fr-13d.spec.ts" time="2.981">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/05-fr-13e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.494" errors="0">
+<testcase name="FR-13e: triggering the detail-page action creates a pending exchange and opens the private chat thread" classname="feature-13/05-fr-13e.spec.ts" time="3.494">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/06-fr-13f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="11.212" errors="0">
+<testcase name="FR-13f: anonymous users do not see protected action buttons and are redirected to login for protected interactions" classname="feature-13/06-fr-13f.spec.ts" time="11.212">
+<failure message="06-fr-13f.spec.ts:5:1 FR-13f: anonymous users do not see protected action buttons and are redirected to login for protected interactions" type="FAILURE">
+<![CDATA[  [chromium] › feature-13/06-fr-13f.spec.ts:5:1 › FR-13f: anonymous users do not see protected action buttons and are redirected to login for protected interactions 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('button', { name: 'Log In to Request' })
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for getByRole('button', { name: 'Log In to Request' })
+
+
+      31 |   await expect(page.getByRole('button', { name: 'Request this Service' })).toHaveCount(0)
+      32 |   await expect(page.getByRole('button', { name: 'Offer to Help' })).toHaveCount(0)
+    > 33 |   await expect(page.getByRole('button', { name: 'Log In to Request' })).toBeVisible({ timeout: 10_000 })
+         |                                                                         ^
+      34 |
+      35 |   await page.getByRole('button', { name: 'Log In to Request' }).click()
+      36 |   await expect(page).toHaveURL(/\/login/, { timeout: 10_000 })
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-13/06-fr-13f.spec.ts:33:73
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-13-06-fr-13f-FR-13-e1d8d--for-protected-interactions-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-13-06-fr-13f-FR-13-e1d8d--for-protected-interactions-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-13-06-fr-13f-FR-13-e1d8d--for-protected-interactions-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-13-06-fr-13f-FR-13-e1d8d--for-protected-interactions-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/07-fr-13g.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="4.496" errors="0">
+<testcase name="FR-13g: owner view shows an Interests panel with interested users and their exchange statuses" classname="feature-13/07-fr-13g.spec.ts" time="4.496">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/08-fr-13h.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13h: each Interests row shows user summary, exchange state, and a public-profile link" classname="feature-13/08-fr-13h.spec.ts" time="0">
+<properties>
+<property name="skip" value="Owner-side interest rows do not currently expose a requester profile link.">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/09-fr-13i.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="5.62" errors="0">
+<testcase name="FR-13i: pending requests do not consume capacity, but accepted capacity blocks the offer action" classname="feature-13/09-fr-13i.spec.ts" time="5.62">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/10-fr-13j.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13j: detail page exposes a public discussion tab and authenticated users can post comments" classname="feature-13/10-fr-13j.spec.ts" time="0">
+<properties>
+<property name="skip" value="Public discussion posting is not implemented in the current detail-page UI.">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/11-fr-13k.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="10.926" errors="0">
+<testcase name="FR-13k: in-person pre-accepted detail views show only approximate location and hide the precise address" classname="feature-13/11-fr-13k.spec.ts" time="10.926">
+<failure message="11-fr-13k.spec.ts:5:1 FR-13k: in-person pre-accepted detail views show only approximate location and hide the precise address" type="FAILURE">
+<![CDATA[  [chromium] › feature-13/11-fr-13k.spec.ts:5:1 › FR-13k: in-person pre-accepted detail views show only approximate location and hide the precise address 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText(/Approximate Location/i).first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for getByText(/Approximate Location/i).first()
+
+
+      30 |
+      31 |   // Public viewers should only see the approximate area, not the private exact address.
+    > 32 |   await expect(page.getByText(/Approximate Location/i).first()).toBeVisible({ timeout: 10_000 })
+         |                                                                 ^
+      33 |   await expect(page.getByText(/Kadikoy/i).first()).toBeVisible({ timeout: 10_000 })
+      34 |   await expect(page.getByText(/Exact address is hidden/i).first()).toBeVisible({ timeout: 10_000 })
+      35 |   await expect(page.getByText('Moda Sahili No: 12, Kadikoy')).toHaveCount(0)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-13/11-fr-13k.spec.ts:32:65
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-13-11-fr-13k-FR-13-cfa01-nd-hide-the-precise-address-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-13-11-fr-13k-FR-13-cfa01-nd-hide-the-precise-address-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-13-11-fr-13k-FR-13-cfa01-nd-hide-the-precise-address-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-13-11-fr-13k-FR-13-cfa01-nd-hide-the-precise-address-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/12-fr-13l.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="8.084" errors="0">
+<testcase name="FR-13l: the meeting link is disclosed only to parties whose exchange reaches accepted state" classname="feature-13/12-fr-13l.spec.ts" time="8.084">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/13-fr-13m.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13m: owner Interests panel includes a manual Mark as Complete fallback for eligible accepted in-person exchanges" classname="feature-13/13-fr-13m.spec.ts" time="0">
+<properties>
+<property name="skip" value="Manual service-completion fallback is not implemented in the current detail-page UI.">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/14-nfr-13a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.447" errors="0">
+<testcase name="NFR-13a: detail page loads within 2 seconds under normal load" classname="feature-13/14-nfr-13a.spec.ts" time="1.447">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/15-nfr-13b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="5.81" errors="0">
+<testcase name="NFR-13b: owner-only Interests panel data is not visible to other regular users" classname="feature-13/15-nfr-13b.spec.ts" time="5.81">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/16-nfr-13c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.915" errors="0">
+<testcase name="NFR-13c: precise location data is not transmitted to clients whose status is below accepted" classname="feature-13/16-nfr-13c.spec.ts" time="2.915">
+</testcase>
+</testsuite>
+<testsuite name="feature-13/17-nfr-13d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="17.99" errors="0">
+<testcase name="NFR-13d: detail layout remains usable on desktop and mobile viewports" classname="feature-13/17-nfr-13d.spec.ts" time="17.99">
+<failure message="17-nfr-13d.spec.ts:12:1 NFR-13d: detail layout remains usable on desktop and mobile viewports" type="FAILURE">
+<![CDATA[  [chromium] › feature-13/17-nfr-13d.spec.ts:12:1 › NFR-13d: detail layout remains usable on desktop and mobile viewports 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator:  getByTestId('user-menu-trigger')
+    Expected: visible
+    Received: hidden
+    Timeout:  15000ms
+
+    Call log:
+      - Expect "toBeVisible" with timeout 15000ms
+      - waiting for getByTestId('user-menu-trigger')
+        18 × locator resolved to <div class="css-poa978" data-testid="user-menu-trigger">…</div>
+           - unexpected value "hidden"
+
+
+       at helpers/auth.ts:77
+
+      75 |   //    instantly from the intercepted route, so the navbar renders fast.
+      76 |   await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
+    > 77 |   await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 15_000 })
+         |                                                       ^
+      78 |
+      79 |   // 6. Keep the interception active — it prevents React from losing auth
+      80 |   //    state when the CI backend is slow.  logout() unroutes it explicitly.
+        at loginAs (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/auth.ts:77:55)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-13/17-nfr-13d.spec.ts:40:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-13-17-nfr-13d-NFR--5b15a-esktop-and-mobile-viewports-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-13-17-nfr-13d-NFR--5b15a-esktop-and-mobile-viewports-chromium/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-13-17-nfr-13d-NFR--5b15a-esktop-and-mobile-viewports-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-13-17-nfr-13d-NFR--5b15a-esktop-and-mobile-viewports-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-13-17-nfr-13d-NFR--5b15a-esktop-and-mobile-viewports-chromium/test-failed-2.png]]
+
+[[ATTACHMENT|../../test-results/feature-13-17-nfr-13d-NFR--5b15a-esktop-and-mobile-viewports-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-14/01-fr-14a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="7.635" errors="0">
+<testcase name="FR-14a: evaluation CTA is absent before COMPLETED and visible once exchange reaches COMPLETED state" classname="feature-14/01-fr-14a.spec.ts" time="7.635">
+</testcase>
+</testsuite>
+<testsuite name="feature-14/02-fr-14b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="8.596" errors="0">
+<testcase name="FR-14b: users can select traits from both positive and negative categories when submitting service evaluation" classname="feature-14/02-fr-14b.spec.ts" time="8.596">
+</testcase>
+</testsuite>
+<testsuite name="feature-14/03-fr-14c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="8.795" errors="0">
+<testcase name="FR-14c: negative trait selections are not publicly displayed on service detail and public profile" classname="feature-14/03-fr-14c.spec.ts" time="8.795">
+</testcase>
+</testsuite>
+<testsuite name="feature-14/04-fr-14d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="9.23" errors="0">
+<testcase name="FR-14d: service receiver and provider can submit optional text review comment" classname="feature-14/04-fr-14d.spec.ts" time="9.23">
+</testcase>
+</testsuite>
+<testsuite name="feature-14/05-fr-14e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="7.325" errors="0">
+<testcase name="FR-14e: submitted evaluation attaches to the related exchange (modal shows already-reviewed state on revisit)" classname="feature-14/05-fr-14e.spec.ts" time="7.325">
+</testcase>
+</testsuite>
+<testsuite name="feature-14/06-nfr-14a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="7.481" errors="0">
+<testcase name="NFR-14a: only users party to a completed exchange can access the evaluation CTA" classname="feature-14/06-nfr-14a.spec.ts" time="7.481">
+</testcase>
+</testsuite>
+<testsuite name="feature-14/07-nfr-14b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="7.686" errors="0">
+<testcase name="NFR-14b: evaluation submissions are idempotent — second submission attempt shows already-reviewed state" classname="feature-14/07-nfr-14b.spec.ts" time="7.686">
+</testcase>
+</testsuite>
+<testsuite name="feature-14/08-nfr-14c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="7.719" errors="0">
+<testcase name="NFR-14c: evaluation form clearly distinguishes required trait selection from optional review comment" classname="feature-14/08-nfr-14c.spec.ts" time="7.719">
+</testcase>
+</testsuite>
+<testsuite name="feature-14/09-fr-14f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="23.654" errors="0">
+<testcase name="FR-14f: user can attach a photo when submitting evaluation" classname="feature-14/09-fr-14f.spec.ts" time="8.27">
+</testcase>
+<testcase name="FR-14f: camera icon button is present in evaluation modal" classname="feature-14/09-fr-14f.spec.ts" time="7.792">
+</testcase>
+<testcase name="FR-14f: removing a photo preview works before submission" classname="feature-14/09-fr-14f.spec.ts" time="7.592">
+</testcase>
+</testsuite>
+<testsuite name="feature-14/10-fr-14g.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="1" skipped="0" time="29.38" errors="0">
+<testcase name="FR-14g: review photo thumbnails appear in Reviews tab after evaluation" classname="feature-14/10-fr-14g.spec.ts" time="11.278">
+</testcase>
+<testcase name="FR-14g: clicking review photo thumbnail opens lightbox" classname="feature-14/10-fr-14g.spec.ts" time="18.102">
+<failure message="10-fr-14g.spec.ts:97:1 FR-14g: clicking review photo thumbnail opens lightbox" type="FAILURE">
+<![CDATA[  [chromium] › feature-14/10-fr-14g.spec.ts:97:1 › FR-14g: clicking review photo thumbnail opens lightbox 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-sonner-toaster] li').filter({ hasText: /Evaluation submitted/i }).first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('[data-sonner-toaster] li').filter({ hasText: /Evaluation submitted/i }).first()
+
+
+       at helpers/auth.ts:130
+
+      128 |   // Sonner toasts are rendered in a <li> inside [data-sonner-toaster]
+      129 |   const toast = page.locator('[data-sonner-toaster] li').filter({ hasText: text })
+    > 130 |   await expect(toast.first()).toBeVisible({ timeout: 10_000 })
+          |                               ^
+      131 | }
+      132 |
+        at expectToast (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/auth.ts:130:31)
+        at setupReviewWithPhoto (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-14/10-fr-14g.spec.ts:46:9)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-14/10-fr-14g.spec.ts:108:3
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-14-10-fr-14g-FR-14-fe085-to-thumbnail-opens-lightbox-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-14-10-fr-14g-FR-14-fe085-to-thumbnail-opens-lightbox-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-14-10-fr-14g-FR-14-fe085-to-thumbnail-opens-lightbox-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-14-10-fr-14g-FR-14-fe085-to-thumbnail-opens-lightbox-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-14/11-nfr-14d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="1" skipped="0" time="22.225" errors="0">
+<testcase name="NFR-14d: evaluation is saved even when image upload fails" classname="feature-14/11-nfr-14d.spec.ts" time="8.426">
+</testcase>
+<testcase name="NFR-14d: evaluation modal closes after submission regardless of image upload outcome" classname="feature-14/11-nfr-14d.spec.ts" time="13.799">
+<failure message="11-nfr-14d.spec.ts:72:1 NFR-14d: evaluation modal closes after submission regardless of image upload outcome" type="FAILURE">
+<![CDATA[  [chromium] › feature-14/11-nfr-14d.spec.ts:72:1 › NFR-14d: evaluation modal closes after submission regardless of image upload outcome 
+
+    Error: Could not find handshake for NFR-14d Modal Close 1776495797243-300 / Ayşe Kaya.
+
+       at helpers/feature7.ts:321
+
+      319 |   }
+      320 |
+    > 321 |   throw new Error(`Could not find handshake for ${options.serviceTitle} / ${options.requesterName}.`)
+          |         ^
+      322 | }
+      323 |
+      324 | export async function confirmHandshakeViaApi(page: Page, handshakeId: string): Promise<void> {
+        at findHandshakeId (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature7.ts:321:9)
+        at initiateOnlineHandshakeViaApi (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature8.ts:133:23)
+        at setupCompletedExchange (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature14.ts:46:23)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-14/11-nfr-14d.spec.ts:77:32
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-14-11-nfr-14d-NFR--b7da4-ess-of-image-upload-outcome-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-14-11-nfr-14d-NFR--b7da4-ess-of-image-upload-outcome-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-14-11-nfr-14d-NFR--b7da4-ess-of-image-upload-outcome-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-14-11-nfr-14d-NFR--b7da4-ess-of-image-upload-outcome-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-15/01-fr-15a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="4.873" errors="0">
+<testcase name="FR-15a: event evaluation access is restricted to participants with ATTENDED status" classname="feature-15/01-fr-15a.spec.ts" time="4.873">
+</testcase>
+</testsuite>
+<testsuite name="feature-15/02-fr-15b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.03" errors="0">
+<testcase name="FR-15b: users with JOINED status are blocked from submitting event evaluations" classname="feature-15/02-fr-15b.spec.ts" time="2.03">
+</testcase>
+</testsuite>
+<testsuite name="feature-15/03-fr-15c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.16" errors="0">
+<testcase name="FR-15c: organizer can manually override CHECK-IN to ATTENDED as fallback when QR fails" classname="feature-15/03-fr-15c.spec.ts" time="3.16">
+</testcase>
+</testsuite>
+<testsuite name="feature-15/04-fr-15d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.28" errors="0">
+<testcase name="FR-15d: organizer completing event transitions remaining CHECK-IN and JOINED participants to NO-SHOW" classname="feature-15/04-fr-15d.spec.ts" time="3.28">
+</testcase>
+</testsuite>
+<testsuite name="feature-15/05-fr-15e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="0" skipped="0" time="10.828" errors="0">
+<testcase name="FR-15e: event evaluation comment is optional and publicly visible on organizer profile when provided" classname="feature-15/05-fr-15e.spec.ts" time="5.875">
+</testcase>
+<testcase name="FR-15e: event evaluation without comment is accepted" classname="feature-15/05-fr-15e.spec.ts" time="4.953">
+</testcase>
+</testsuite>
+<testsuite name="feature-15/06-fr-15f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="0" skipped="0" time="11.54" errors="0">
+<testcase name="FR-15f: positive event trait submission changes event hot score and not service hot score" classname="feature-15/06-fr-15f.spec.ts" time="5.794">
+</testcase>
+<testcase name="FR-15f: negative event trait submission changes event hot score and not service hot score" classname="feature-15/06-fr-15f.spec.ts" time="5.746">
+</testcase>
+</testsuite>
+<testsuite name="feature-15/07-nfr-15a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="4.521" errors="0">
+<testcase name="NFR-15a: event evaluations are accepted only from verified eligible participants — ineligible API calls are rejected" classname="feature-15/07-nfr-15a.spec.ts" time="4.521">
+</testcase>
+</testsuite>
+<testsuite name="feature-15/08-nfr-15b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.952" errors="0">
+<testcase name="NFR-15b: attendance status transitions are atomic — both mark-attended calls succeed without corrupting each other" classname="feature-15/08-nfr-15b.spec.ts" time="3.952">
+</testcase>
+</testsuite>
+<testsuite name="feature-15/09-nfr-15c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.912" errors="0">
+<testcase name="NFR-15c: event evaluation UI explains why ineligible users are blocked from submitting" classname="feature-15/09-nfr-15c.spec.ts" time="1.912">
+</testcase>
+</testsuite>
+<testsuite name="feature-16/01-fr-16a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="14.353" errors="0">
+<testcase name="FR-16a: 48-hour evaluation window opens immediately after service exchange COMPLETED" classname="feature-16/01-fr-16a.spec.ts" time="4.498">
+</testcase>
+<testcase name="FR-16a: 48-hour evaluation window opens immediately after event COMPLETED" classname="feature-16/01-fr-16a.spec.ts" time="4.103">
+</testcase>
+<testcase name="FR-16a: evaluation window is not open before exchange reaches COMPLETED" classname="feature-16/01-fr-16a.spec.ts" time="5.752">
+</testcase>
+</testsuite>
+<testsuite name="feature-16/02-fr-16b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="13.673" errors="0">
+<testcase name="FR-16b: evaluation UI hides Leave Evaluation button after participant already reviewed" classname="feature-16/02-fr-16b.spec.ts" time="4.727">
+</testcase>
+<testcase name="FR-16b: second evaluation submission for the same exchange is rejected (400)" classname="feature-16/02-fr-16b.spec.ts" time="4.899">
+</testcase>
+<testcase name="FR-16b: evaluation API returns 410 for an expired-window handshake" classname="feature-16/02-fr-16b.spec.ts" time="4.047">
+</testcase>
+</testsuite>
+<testsuite name="feature-16/03-fr-16c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="0" skipped="0" time="11.237" errors="0">
+<testcase name="FR-16c: evaluation comment is not visible in public profile during the blind-review window" classname="feature-16/03-fr-16c.spec.ts" time="5.506">
+</testcase>
+<testcase name="FR-16c: evaluation trait summary is visible on public profile after submission" classname="feature-16/03-fr-16c.spec.ts" time="5.731">
+</testcase>
+</testsuite>
+<testsuite name="feature-16/04-fr-16d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="14.176" errors="0">
+<testcase name="FR-16d: requester can submit service evaluation without waiting for provider — non-reciprocal allowed" classname="feature-16/04-fr-16d.spec.ts" time="4.267">
+</testcase>
+<testcase name="FR-16d: provider can independently submit their evaluation without requester submitting first" classname="feature-16/04-fr-16d.spec.ts" time="4.897">
+</testcase>
+<testcase name="FR-16d: both parties can independently submit evaluations for the same event" classname="feature-16/04-fr-16d.spec.ts" time="5.012">
+</testcase>
+</testsuite>
+<testsuite name="feature-16/05-fr-16e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="0" skipped="0" time="10.324" errors="0">
+<testcase name="FR-16e: submitting an event evaluation updates the organizer karma_score" classname="feature-16/05-fr-16e.spec.ts" time="5.93">
+</testcase>
+<testcase name="FR-16e: event evaluation updates organizer_event_hot_score in event summary" classname="feature-16/05-fr-16e.spec.ts" time="4.394">
+</testcase>
+</testsuite>
+<testsuite name="feature-16/06-nfr-16a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="14.075" errors="0">
+<testcase name="NFR-16a: duplicate service evaluation from same party is rejected — exactly-once enforced" classname="feature-16/06-nfr-16a.spec.ts" time="4.853">
+</testcase>
+<testcase name="NFR-16a: duplicate event evaluation from same attendee is rejected — exactly-once enforced" classname="feature-16/06-nfr-16a.spec.ts" time="4.277">
+</testcase>
+<testcase name="NFR-16a: user_has_reviewed flag is set after first submission — UI prevents re-entry" classname="feature-16/06-nfr-16a.spec.ts" time="4.945">
+</testcase>
+</testsuite>
+<testsuite name="feature-16/07-nfr-16c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="1" skipped="0" time="16.101" errors="0">
+<testcase name="NFR-16c: non-participant cannot submit service evaluation via direct API call" classname="feature-16/07-nfr-16c.spec.ts" time="1.718">
+<failure message="07-nfr-16c.spec.ts:10:1 NFR-16c: non-participant cannot submit service evaluation via direct API call" type="FAILURE">
+<![CDATA[  [chromium] › feature-16/07-nfr-16c.spec.ts:10:1 › NFR-16c: non-participant cannot submit service evaluation via direct API call 
+
+    Error: express-interest failed: 400 {"detail":"Insufficient TimeBank balance. You need 1.00 hours, have 0.00","code":"INSUFFICIENT_BALANCE"}
+
+    expect(received).toBeTruthy()
+
+    Received: false
+
+       at helpers/feature16.ts:54
+
+      52 |     return { ok: r.ok, status: r.status, id: body.id ?? null, error: JSON.stringify(body) }
+      53 |   }, { serviceId })
+    > 54 |   expect(interestResult.ok, `express-interest failed: ${interestResult.status} ${interestResult.error}`).toBeTruthy()
+         |                                                                                                          ^
+      55 |   const handshakeId = interestResult.id as string
+      56 |
+      57 |   // Provider initiates handshake with online details (1 day ahead to avoid conflicts).
+        at setupCompletedServiceHandshake (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature16.ts:54:106)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-16/07-nfr-16c.spec.ts:16:27
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-16-07-nfr-16c-NFR--985ea-luation-via-direct-API-call-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-16-07-nfr-16c-NFR--985ea-luation-via-direct-API-call-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-16-07-nfr-16c-NFR--985ea-luation-via-direct-API-call-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-16-07-nfr-16c-NFR--985ea-luation-via-direct-API-call-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="NFR-16c: non-attendee cannot submit event evaluation via direct API call" classname="feature-16/07-nfr-16c.spec.ts" time="4.831">
+</testcase>
+<testcase name="NFR-16c: organizer cannot self-evaluate their own event via direct API call" classname="feature-16/07-nfr-16c.spec.ts" time="5.106">
+</testcase>
+<testcase name="NFR-16c: unauthenticated evaluation attempt is blocked with 401 or redirect" classname="feature-16/07-nfr-16c.spec.ts" time="4.446">
+</testcase>
+</testsuite>
+<testsuite name="feature-2/profile-fr02a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.6" errors="0">
+<testcase name="Self-profile (FR-02a) › shows display name, avatar, join year, and bio for seeded demo user" classname="feature-2/profile-fr02a.spec.ts" time="1.6">
+</testcase>
+</testsuite>
+<testsuite name="feature-2/profile-fr02b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="7.755" errors="0">
+<testcase name="Self-profile (FR-02b) › user can edit display name, bio, avatar and show_history preference" classname="feature-2/profile-fr02b.spec.ts" time="7.755">
+<failure message="profile-fr02b.spec.ts:29:3 user can edit display name, bio, avatar and show_history preference" type="FAILURE">
+<![CDATA[  [chromium] › feature-2/profile-fr02b.spec.ts:29:3 › Self-profile (FR-02b) › user can edit display name, bio, avatar and show_history preference 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText('Elif956768 FR02b956768')
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByText('Elif956768 FR02b956768')
+
+
+      80 |
+      81 |     // Updated read-mode UI checks
+    > 82 |     await expect(page.getByText(`${firstName} ${lastName}`)).toBeVisible()
+         |                                                              ^
+      83 |     await expect(page.getByText('About')).toBeVisible()
+      84 |     await expect(page.getByText(updatedBio)).toBeVisible()
+      85 |
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-2/profile-fr02b.spec.ts:82:62
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-2-profile-fr02b-Se-53dc0-and-show-history-preference-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-2-profile-fr02b-Se-53dc0-and-show-history-preference-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-2-profile-fr02b-Se-53dc0-and-show-history-preference-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-2-profile-fr02b-Se-53dc0-and-show-history-preference-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-2/profile-fr02c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.088" errors="0">
+<testcase name="Self-profile (FR-02c) › rejects overlong bio and keeps stored profile unchanged" classname="feature-2/profile-fr02c.spec.ts" time="2.088">
+</testcase>
+</testsuite>
+<testsuite name="feature-2/profile-fr02d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.718" errors="0">
+<testcase name="Public profile privacy (FR-02d) › viewer cannot see sensitive fields on another user profile" classname="feature-2/profile-fr02d.spec.ts" time="1.718">
+</testcase>
+</testsuite>
+<testsuite name="feature-20/urgency-badge.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="1" skipped="0" time="7.325" errors="0">
+<testcase name="FR-RANK-03a: &quot;Nearly Full&quot; badge appears on dashboard card for a 75%-full event" classname="feature-20/urgency-badge.spec.ts" time="2.278">
+</testcase>
+<testcase name="FR-RANK-03b: &quot;Nearly Full&quot; label appears in the service detail progress bar section" classname="feature-20/urgency-badge.spec.ts" time="2.323">
+</testcase>
+<testcase name="FR-RANK-03c: &quot;Nearly Full&quot; badge does NOT appear for a low-capacity event (&lt;75% full)" classname="feature-20/urgency-badge.spec.ts" time="1.99">
+</testcase>
+<testcase name="FR-RANK-03d: &quot;Nearly Full&quot; badge appears for a Group Offer at 75% capacity" classname="feature-20/urgency-badge.spec.ts" time="0.734">
+<failure message="urgency-badge.spec.ts:70:1 FR-RANK-03d: &quot;Nearly Full&quot; badge appears for a Group Offer at 75% capacity" type="FAILURE">
+<![CDATA[  [chromium] › feature-20/urgency-badge.spec.ts:70:1 › FR-RANK-03d: "Nearly Full" badge appears for a Group Offer at 75% capacity 
+
+    Error: Create service failed: 400 {"detail":"Validation failed.","code":"VALIDATION_ERROR","field_errors":{"scheduled_time":["One-time group offers require a scheduled date and time."]}}
+
+    expect(received).toBeTruthy()
+
+    Received: false
+
+       at helpers/feature13.ts:90
+
+      88 |   }, options)
+      89 |
+    > 90 |   expect(result.ok, `Create service failed: ${result.status} ${result.body}`).toBeTruthy()
+         |                                                                               ^
+      91 |
+      92 |   const created = JSON.parse(result.body) as { id: string; title: string }
+      93 |   return {
+        at createServiceViaApi (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature13.ts:90:79)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-20/urgency-badge.spec.ts:75:19
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-20-urgency-badge-F-25b6c--Group-Offer-at-75-capacity-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-20-urgency-badge-F-25b6c--Group-Offer-at-75-capacity-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-20-urgency-badge-F-25b6c--Group-Offer-at-75-capacity-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-20-urgency-badge-F-25b6c--Group-Offer-at-75-capacity-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-3/01-fr-03a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="9" failures="0" skipped="0" time="16.62" errors="0">
+<testcase name="FR-03a: admin user lands on the admin panel after navigating to /admin" classname="feature-3/01-fr-03a.spec.ts" time="1.714">
+</testcase>
+<testcase name="FR-03a: admin dashboard shows the platform overview heading" classname="feature-3/01-fr-03a.spec.ts" time="1.632">
+</testcase>
+<testcase name="FR-03a: admin can navigate to the User Management tab via sidebar" classname="feature-3/01-fr-03a.spec.ts" time="1.744">
+</testcase>
+<testcase name="FR-03a: admin can navigate to the Reports &amp; Flags tab via sidebar" classname="feature-3/01-fr-03a.spec.ts" time="1.578">
+</testcase>
+<testcase name="FR-03a: admin can navigate to the Comments tab via sidebar" classname="feature-3/01-fr-03a.spec.ts" time="1.701">
+</testcase>
+<testcase name="FR-03a: admin can navigate to the Forum Topics tab via sidebar" classname="feature-3/01-fr-03a.spec.ts" time="1.566">
+</testcase>
+<testcase name="FR-03a: admin can navigate to the Audit Logs tab via sidebar" classname="feature-3/01-fr-03a.spec.ts" time="1.626">
+</testcase>
+<testcase name="FR-03a: direct URL navigation to each tab opens the correct view" classname="feature-3/01-fr-03a.spec.ts" time="3.287">
+</testcase>
+<testcase name="FR-03a: super-admin can also access and use the admin dashboard" classname="feature-3/01-fr-03a.spec.ts" time="1.772">
+</testcase>
+</testsuite>
+<testsuite name="feature-3/02-fr-03b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="8.471" errors="0">
+<testcase name="FR-03b: admin can view the user list in the User Management tab" classname="feature-3/02-fr-03b.spec.ts" time="1.824">
+</testcase>
+<testcase name="FR-03b: admin can search for a user by name" classname="feature-3/02-fr-03b.spec.ts" time="1.986">
+</testcase>
+<testcase name="FR-03b: clicking a user row opens the admin user detail page" classname="feature-3/02-fr-03b.spec.ts" time="1.925">
+</testcase>
+<testcase name="FR-03b: user detail page shows profile information" classname="feature-3/02-fr-03b.spec.ts" time="2.736">
+</testcase>
+</testsuite>
+<testsuite name="feature-3/03-fr-03c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="8.716" errors="0">
+<testcase name="FR-03c: admin can open the warn modal for a user" classname="feature-3/03-fr-03c.spec.ts" time="1.911">
+</testcase>
+<testcase name="FR-03c: admin can open the suspend confirmation dialog for a user" classname="feature-3/03-fr-03c.spec.ts" time="1.938">
+</testcase>
+<testcase name="FR-03c: admin can open the karma adjustment modal" classname="feature-3/03-fr-03c.spec.ts" time="2.036">
+</testcase>
+<testcase name="FR-03c: super-admin can access role management on the user detail page" classname="feature-3/03-fr-03c.spec.ts" time="2.831">
+</testcase>
+</testsuite>
+<testsuite name="feature-3/04-fr-03d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="12.348" errors="0">
+<testcase name="FR-03d: Forum Topics tab loads without an auth error" classname="feature-3/04-fr-03d.spec.ts" time="1.474">
+</testcase>
+<testcase name="FR-03d: Forum Topics tab shows lock and pin controls when topics exist" classname="feature-3/04-fr-03d.spec.ts" time="3.457">
+</testcase>
+<testcase name="FR-03d: admin can toggle the lock state on a forum topic" classname="feature-3/04-fr-03d.spec.ts" time="3.675">
+</testcase>
+<testcase name="FR-03d: admin can toggle the pin state on a forum topic" classname="feature-3/04-fr-03d.spec.ts" time="3.742">
+</testcase>
+</testsuite>
+<testsuite name="feature-3/05-fr-03e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="8.935" errors="0">
+<testcase name="FR-03e: Comment Moderation tab loads with the active comments view" classname="feature-3/05-fr-03e.spec.ts" time="3.558">
+</testcase>
+<testcase name="FR-03e: admin can open the remove-comment confirmation dialog" classname="feature-3/05-fr-03e.spec.ts" time="3.778">
+</testcase>
+<testcase name="FR-03e: admin can switch to the &quot;removed&quot; comments filter" classname="feature-3/05-fr-03e.spec.ts" time="1.599">
+</testcase>
+</testsuite>
+<testsuite name="feature-3/06-fr-03f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="12.212" errors="0">
+<testcase name="FR-03f: admin can view the Audit Logs tab" classname="feature-3/06-fr-03f.spec.ts" time="1.48">
+</testcase>
+<testcase name="FR-03f: audit log rows have no edit buttons (immutability)" classname="feature-3/06-fr-03f.spec.ts" time="3.584">
+</testcase>
+<testcase name="FR-03f: audit log rows have no delete buttons (immutability)" classname="feature-3/06-fr-03f.spec.ts" time="3.505">
+</testcase>
+<testcase name="FR-03f: no editable input fields are rendered inside audit log rows" classname="feature-3/06-fr-03f.spec.ts" time="3.643">
+</testcase>
+</testsuite>
+<testsuite name="feature-3/07-nfr-03a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="5" failures="0" skipped="0" time="5.019" errors="0">
+<testcase name="NFR-03a: unauthenticated user visiting /admin is redirected to /login" classname="feature-3/07-nfr-03a.spec.ts" time="0.577">
+</testcase>
+<testcase name="NFR-03a: unauthenticated user visiting /admin/users/&lt;id&gt; is redirected to /login" classname="feature-3/07-nfr-03a.spec.ts" time="0.553">
+</testcase>
+<testcase name="NFR-03a: regular member cannot access the admin panel" classname="feature-3/07-nfr-03a.spec.ts" time="0.913">
+</testcase>
+<testcase name="NFR-03a: regular member cannot access the users tab directly" classname="feature-3/07-nfr-03a.spec.ts" time="0.971">
+</testcase>
+<testcase name="NFR-03a: back navigation from a user detail page returns to the admin panel" classname="feature-3/07-nfr-03a.spec.ts" time="2.005">
+</testcase>
+</testsuite>
+<testsuite name="feature-3/08-nfr-03b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="16.559" errors="0">
+<testcase name="NFR-03b: performing an admin action appends a new entry to the audit log" classname="feature-3/08-nfr-03b.spec.ts" time="6.469">
+</testcase>
+<testcase name="NFR-03b: existing audit log entries are retained after a new action is appended" classname="feature-3/08-nfr-03b.spec.ts" time="6.524">
+</testcase>
+<testcase name="NFR-03b: audit log has no delete or edit controls on any entry" classname="feature-3/08-nfr-03b.spec.ts" time="3.566">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/01-fr-04a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="5.073" errors="0">
+<testcase name="FR-04a: visitor can browse forum and filter by category" classname="feature-4/01-fr-04a.spec.ts" time="1.595">
+</testcase>
+<testcase name="FR-04a: forum category filter shows only topics in that category" classname="feature-4/01-fr-04a.spec.ts" time="1.562">
+</testcase>
+<testcase name="FR-04a: sort toggle switches between Newest and Most Active" classname="feature-4/01-fr-04a.spec.ts" time="1.916">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/02-fr-04b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="1" skipped="0" time="22.493" errors="0">
+<testcase name="FR-04b: authenticated user can create a forum topic with title and body" classname="feature-4/02-fr-04b.spec.ts" time="21.072">
+<failure message="02-fr-04b.spec.ts:4:1 FR-04b: authenticated user can create a forum topic with title and body" type="FAILURE">
+<![CDATA[  [chromium] › feature-4/02-fr-04b.spec.ts:4:1 › FR-04b: authenticated user can create a forum topic with title and body 
+
+    Error: expect(page).toHaveURL(expected) failed
+
+    Expected pattern: /\/forum\/topic\//
+    Received string:  "http://localhost:5173/forum/new"
+    Timeout: 20000ms
+
+    Call log:
+      - Expect "toHaveURL" with timeout 20000ms
+        24 × unexpected value "http://localhost:5173/forum/new"
+
+
+      20 |
+      21 |   // Successful creation navigates to the topic detail page.
+    > 22 |   await expect(page).toHaveURL(/\/forum\/topic\//, { timeout: 20_000 })
+         |                      ^
+      23 |
+      24 |   // The topic title is visible on the detail page.
+      25 |   await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 })
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-4/02-fr-04b.spec.ts:22:22
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-4-02-fr-04b-FR-04b-6a74d-m-topic-with-title-and-body-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-4-02-fr-04b-FR-04b-6a74d-m-topic-with-title-and-body-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-4-02-fr-04b-FR-04b-6a74d-m-topic-with-title-and-body-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-4-02-fr-04b-FR-04b-6a74d-m-topic-with-title-and-body-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="FR-04b: topic creation form validates minimum title length" classname="feature-4/02-fr-04b.spec.ts" time="1.421">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/03-fr-04c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="0" skipped="0" time="4.195" errors="0">
+<testcase name="FR-04c: authenticated user can add a reply to a forum topic" classname="feature-4/03-fr-04c.spec.ts" time="2.403">
+</testcase>
+<testcase name="FR-04c: reply count increments after a reply is posted" classname="feature-4/03-fr-04c.spec.ts" time="1.792">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/04-fr-04d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="6.649" errors="0">
+<testcase name="FR-04d: author can edit their own reply" classname="feature-4/04-fr-04d.spec.ts" time="2.076">
+</testcase>
+<testcase name="FR-04d: author can soft-delete their own reply" classname="feature-4/04-fr-04d.spec.ts" time="2.362">
+</testcase>
+<testcase name="FR-04d: other users cannot edit a reply they did not write" classname="feature-4/04-fr-04d.spec.ts" time="2.211">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/05-fr-04e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="6.925" errors="0">
+<testcase name="FR-04e: authenticated user can report a topic" classname="feature-4/05-fr-04e.spec.ts" time="2.384">
+</testcase>
+<testcase name="FR-04e: authenticated user can report a reply" classname="feature-4/05-fr-04e.spec.ts" time="1.896">
+</testcase>
+<testcase name="FR-04e: user cannot report their own topic" classname="feature-4/05-fr-04e.spec.ts" time="1.318">
+</testcase>
+<testcase name="FR-04e: unauthenticated user cannot report content" classname="feature-4/05-fr-04e.spec.ts" time="1.327">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/06-fr-04f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="6.748" errors="0">
+<testcase name="FR-04f: admin can lock a topic and the thread shows locked state" classname="feature-4/06-fr-04f.spec.ts" time="2.027">
+</testcase>
+<testcase name="FR-04f: locked topic rejects new replies" classname="feature-4/06-fr-04f.spec.ts" time="1.745">
+</testcase>
+<testcase name="FR-04f: admin can restore a soft-deleted post" classname="feature-4/06-fr-04f.spec.ts" time="1.891">
+</testcase>
+<testcase name="FR-04f: regular user cannot restore a deleted post" classname="feature-4/06-fr-04f.spec.ts" time="1.085">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/07-fr-04g.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="3" failures="0" skipped="0" time="3.965" errors="0">
+<testcase name="FR-04g: forum topic persists after author account is deleted" classname="feature-4/07-fr-04g.spec.ts" time="1.016">
+</testcase>
+<testcase name="FR-04g: deleted author is shown as placeholder in topic list" classname="feature-4/07-fr-04g.spec.ts" time="1.52">
+</testcase>
+<testcase name="FR-04g: reply list still shows deleted placeholder for removed author" classname="feature-4/07-fr-04g.spec.ts" time="1.429">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/08-nfr-04a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="1" skipped="0" time="12.252" errors="0">
+<testcase name="NFR-04a: forum topic list loads within 2 seconds" classname="feature-4/08-nfr-04a.spec.ts" time="1.265">
+</testcase>
+<testcase name="NFR-04a: topic detail page loads within 2 seconds" classname="feature-4/08-nfr-04a.spec.ts" time="1.211">
+</testcase>
+<testcase name="NFR-04a: creating a topic via UI completes within 2 seconds" classname="feature-4/08-nfr-04a.spec.ts" time="8.192">
+<failure message="08-nfr-04a.spec.ts:33:1 NFR-04a: creating a topic via UI completes within 2 seconds" type="FAILURE">
+<![CDATA[  [chromium] › feature-4/08-nfr-04a.spec.ts:33:1 › NFR-04a: creating a topic via UI completes within 2 seconds 
+
+    Error: expect(page).toHaveURL(expected) failed
+
+    Expected pattern: /\/forum\/topic\//
+    Received string:  "http://localhost:5173/forum/new"
+    Timeout: 7000ms
+
+    Call log:
+      - Expect "toHaveURL" with timeout 7000ms
+        11 × unexpected value "http://localhost:5173/forum/new"
+
+
+      42 |   const start = Date.now()
+      43 |   await page.getByRole('button', { name: /create topic/i }).click()
+    > 44 |   await expect(page).toHaveURL(/\/forum\/topic\//, { timeout: PERF_THRESHOLD_MS + 5_000 })
+         |                      ^
+      45 |   const elapsed = Date.now() - start
+      46 |
+      47 |   expect(elapsed, `Topic creation took ${elapsed} ms — exceeds budget`).toBeLessThan(
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-4/08-nfr-04a.spec.ts:44:22
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-4-08-nfr-04a-NFR-0-3b7c9--completes-within-2-seconds-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-4-08-nfr-04a-NFR-0-3b7c9--completes-within-2-seconds-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-4-08-nfr-04a-NFR-0-3b7c9--completes-within-2-seconds-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-4-08-nfr-04a-NFR-0-3b7c9--completes-within-2-seconds-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="NFR-04a: posting a reply completes within 2 seconds" classname="feature-4/08-nfr-04a.spec.ts" time="1.584">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/09-nfr-04b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="5" failures="0" skipped="0" time="6.099" errors="0">
+<testcase name="NFR-04b: unauthenticated user cannot create a topic via API" classname="feature-4/09-nfr-04b.spec.ts" time="0.746">
+</testcase>
+<testcase name="NFR-04b: unauthenticated user cannot post a reply via API" classname="feature-4/09-nfr-04b.spec.ts" time="0.774">
+</testcase>
+<testcase name="NFR-04b: unauthenticated user cannot submit a new topic via the form" classname="feature-4/09-nfr-04b.spec.ts" time="1.099">
+</testcase>
+<testcase name="NFR-04b: user cannot delete another user&apos;s reply" classname="feature-4/09-nfr-04b.spec.ts" time="1.879">
+</testcase>
+<testcase name="NFR-04b: user cannot edit another user&apos;s reply" classname="feature-4/09-nfr-04b.spec.ts" time="1.601">
+</testcase>
+</testsuite>
+<testsuite name="feature-4/10-nfr-04c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="1" skipped="0" time="39.239" errors="0">
+<testcase name="NFR-04c: public forum list is readable without authentication" classname="feature-4/10-nfr-04c.spec.ts" time="1.981">
+</testcase>
+<testcase name="NFR-04c: topic detail is readable without authentication" classname="feature-4/10-nfr-04c.spec.ts" time="1.243">
+</testcase>
+<testcase name="NFR-04c: forum shows empty state when no topics exist in a category" classname="feature-4/10-nfr-04c.spec.ts" time="0.97">
+</testcase>
+<testcase name="NFR-04c: forum shows a loading indicator while fetching topics" classname="feature-4/10-nfr-04c.spec.ts" time="35.045">
+<failure message="10-nfr-04c.spec.ts:41:1 NFR-04c: forum shows a loading indicator while fetching topics" type="FAILURE">
+<![CDATA[  [chromium] › feature-4/10-nfr-04c.spec.ts:41:1 › NFR-04c: forum shows a loading indicator while fetching topics 
+
+    Test timeout of 30000ms exceeded.
+
+    TimeoutError: page.goto: Timeout 30000ms exceeded.
+    Call log:
+      - navigating to "http://localhost:5173/forum", waiting until "load"
+
+
+      51 |   })
+      52 |
+    > 53 |   await page.goto('/forum')
+         |              ^
+      54 |
+      55 |   // Loading state (spinner or skeleton) or final topic list — both are valid.
+      56 |   // We assert only that the page doesn't show an error.
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-4/10-nfr-04c.spec.ts:53:14
+]]>
+</failure>
+</testcase>
+</testsuite>
+<testsuite name="feature-5/01-fr-05a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.365" errors="0">
+<testcase name="FR-05a: registered user can create an offer with core details and location type" classname="feature-5/01-fr-05a.spec.ts" time="3.365">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/02-fr-05b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.438" errors="0">
+<testcase name="FR-05b: registered user can upload one or more images for an offer" classname="feature-5/02-fr-05b.spec.ts" time="2.438">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/03-fr-05c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.831" errors="0">
+<testcase name="FR-05c: registered user can configure a group offer with quota greater than one" classname="feature-5/03-fr-05c.spec.ts" time="1.831">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/04-fr-05d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.294" errors="0">
+<testcase name="FR-05d: invalid payload is rejected with clear field-level validation errors" classname="feature-5/04-fr-05d.spec.ts" time="1.294">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/05-fr-05e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="6.578" errors="0">
+<testcase name="FR-05e: group offer owner sees edit lock once an approved exchange is active" classname="feature-5/05-fr-05e.spec.ts" time="6.578">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/06-fr-05f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="5.536" errors="0">
+<testcase name="FR-05f: affected applicants receive an in-app notification with changed fields after offer edit" classname="feature-5/06-fr-05f.spec.ts" time="5.536">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/07-fr-05g.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="0" skipped="0" time="6.668" errors="0">
+<testcase name="FR-05g: owner can remove an offer when there are no pending or accepted exchanges" classname="feature-5/07-fr-05g.spec.ts" time="2.29">
+</testcase>
+<testcase name="FR-05g: owner cannot remove an offer while a pending exchange exists" classname="feature-5/07-fr-05g.spec.ts" time="4.378">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/08-fr-05h.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.31" errors="0">
+<testcase name="FR-05h: the system requires a confirmation step before cancellation" classname="feature-5/08-fr-05h.spec.ts" time="2.31">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/09-fr-05i.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="4.966" errors="0">
+<testcase name="FR-05i: one-to-one offers allow at most one accepted exchange at a time" classname="feature-5/09-fr-05i.spec.ts" time="4.966">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/10-fr-05j.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="5.339" errors="0">
+<testcase name="FR-05j: group offers allow accepted exchanges up to the configured quota" classname="feature-5/10-fr-05j.spec.ts" time="5.339">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/11-fr-05k.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="5.355" errors="0">
+<testcase name="FR-05k: a full group offer is hidden from public discovery" classname="feature-5/11-fr-05k.spec.ts" time="5.355">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/12-fr-05l.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.248" errors="0">
+<testcase name="FR-05l: offer edits remain owner-only authorized" classname="feature-5/12-fr-05l.spec.ts" time="3.248">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/13-nfr-05a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.235" errors="0">
+<testcase name="NFR-05a: offer creation is reflected in feed views within 2 seconds under normal load" classname="feature-5/13-nfr-05a.spec.ts" time="2.235">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/14-nfr-05b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="17.9" errors="0">
+<testcase name="NFR-05b: only authenticated users can create, edit, or cancel offers" classname="feature-5/14-nfr-05b.spec.ts" time="17.9">
+<failure message="14-nfr-05b.spec.ts:4:1 NFR-05b: only authenticated users can create, edit, or cancel offers" type="FAILURE">
+<![CDATA[  [chromium] › feature-5/14-nfr-05b.spec.ts:4:1 › NFR-05b: only authenticated users can create, edit, or cancel offers 
+
+    Error: expect(page).toHaveURL(expected) failed
+
+    Expected pattern: /\/login/
+    Received string:  "http://localhost:5173/edit-service/c9f658b1-a0f2-4126-8fe3-88b921e3ccf7"
+    Timeout: 15000ms
+
+    Call log:
+      - Expect "toHaveURL" with timeout 15000ms
+        19 × unexpected value "http://localhost:5173/edit-service/c9f658b1-a0f2-4126-8fe3-88b921e3ccf7"
+
+
+      18 |   await page.context().clearCookies()
+      19 |   await page.goto(editUrl)
+    > 20 |   await expect(page).toHaveURL(/\/login/, { timeout: 15_000 })
+         |                      ^
+      21 |
+      22 |   // Anonymous users should not see owner-only mutation actions on the detail page.
+      23 |   await page.context().clearCookies()
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-5/14-nfr-05b.spec.ts:20:22
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-5-14-nfr-05b-NFR-0-23388-reate-edit-or-cancel-offers-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-5-14-nfr-05b-NFR-0-23388-reate-edit-or-cancel-offers-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-5-14-nfr-05b-NFR-0-23388-reate-edit-or-cancel-offers-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-5-14-nfr-05b-NFR-0-23388-reate-edit-or-cancel-offers-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-5/15-nfr-05c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.565" errors="0">
+<testcase name="NFR-05c: offer form remains responsive and accessible on desktop and mobile" classname="feature-5/15-nfr-05c.spec.ts" time="1.565">
+</testcase>
+</testsuite>
+<testsuite name="feature-5/16-nfr-05d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="4.618" errors="0">
+<testcase name="NFR-05d: concurrent edits do not cause silent data loss" classname="feature-5/16-nfr-05d.spec.ts" time="4.618">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/01-fr-06a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="4.088" errors="0">
+<testcase name="FR-06a: registered user can create a request with core details and location type" classname="feature-6/01-fr-06a.spec.ts" time="4.088">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/02-fr-06b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.618" errors="0">
+<testcase name="FR-06b: registered user can upload one or more images for a request" classname="feature-6/02-fr-06b.spec.ts" time="2.618">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/03-fr-06c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="11.859" errors="0">
+<testcase name="FR-06c: request creation is blocked when the user does not have enough available hours" classname="feature-6/03-fr-06c.spec.ts" time="11.859">
+<failure message="03-fr-06c.spec.ts:5:1 FR-06c: request creation is blocked when the user does not have enough available hours" type="FAILURE">
+<![CDATA[  [chromium] › feature-6/03-fr-06c.spec.ts:5:1 › FR-06c: request creation is blocked when the user does not have enough available hours 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-sonner-toaster] li').filter({ hasText: /insufficient|balance|need .* more hours/i }).first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('[data-sonner-toaster] li').filter({ hasText: /insufficient|balance|need .* more hours/i }).first()
+
+
+      19 |   await expect(page.locator('[data-sonner-toaster] li').filter({
+      20 |     hasText: /insufficient|balance|need .* more hours/i,
+    > 21 |   }).first()).toBeVisible({ timeout: 10_000 })
+         |               ^
+      22 | })
+      23 |
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-6/03-fr-06c.spec.ts:21:15
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-6-03-fr-06c-FR-06c-8ca02-have-enough-available-hours-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-6-03-fr-06c-FR-06c-8ca02-have-enough-available-hours-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-6-03-fr-06c-FR-06c-8ca02-have-enough-available-hours-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-6-03-fr-06c-FR-06c-8ca02-have-enough-available-hours-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-6/04-fr-06d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="11.875" errors="0">
+<testcase name="FR-06d: request creation reserves hours equal to the request duration from available balance" classname="feature-6/04-fr-06d.spec.ts" time="11.875">
+<failure message="04-fr-06d.spec.ts:5:1 FR-06d: request creation reserves hours equal to the request duration from available balance" type="FAILURE">
+<![CDATA[  [chromium] › feature-6/04-fr-06d.spec.ts:5:1 › FR-06d: request creation reserves hours equal to the request duration from available balance 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText(/^15\.0h$/).first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for getByText(/^15\.0h$/).first()
+
+
+       at helpers/feature6.ts:66
+
+      64 | export async function expectNavbarBalance(page: Page, expectedBalance: number): Promise<void> {
+      65 |   const escaped = expectedBalance.toFixed(1).replace('.', '\\.')
+    > 66 |   await expect(page.getByText(new RegExp(`^${escaped}h$`)).first()).toBeVisible({
+         |                                                                     ^
+      67 |     timeout: 10_000,
+      68 |   })
+      69 | }
+        at expectNavbarBalance (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature6.ts:66:69)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-6/04-fr-06d.spec.ts:21:9
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-6-04-fr-06d-FR-06d-8d13a-tion-from-available-balance-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-6-04-fr-06d-FR-06d-8d13a-tion-from-available-balance-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-6-04-fr-06d-FR-06d-8d13a-tion-from-available-balance-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-6-04-fr-06d-FR-06d-8d13a-tion-from-available-balance-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-6/05-fr-06e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="6.123" errors="0">
+<testcase name="FR-06e: request owner sees edit lock once an approved exchange is active" classname="feature-6/05-fr-06e.spec.ts" time="6.123">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/06-fr-06f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="8.198" errors="0">
+<testcase name="FR-06f: affected responders receive an in-app notification after request edit" classname="feature-6/06-fr-06f.spec.ts" time="8.198">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/07-fr-06g.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="4.651" errors="0">
+<testcase name="FR-06g: another user can respond to a request and create a pending exchange" classname="feature-6/07-fr-06g.spec.ts" time="4.651">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/08-fr-06h.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="2" failures="0" skipped="0" time="6.406" errors="0">
+<testcase name="FR-06h: owner can cancel a request before any exchange is initiated" classname="feature-6/08-fr-06h.spec.ts" time="2.345">
+</testcase>
+<testcase name="FR-06h: owner cannot cancel a request after a responder has already created a pending exchange" classname="feature-6/08-fr-06h.spec.ts" time="4.061">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/09-fr-06i.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="11.808" errors="0">
+<testcase name="FR-06i: cancelling a valid request returns the reserved hours immediately" classname="feature-6/09-fr-06i.spec.ts" time="11.808">
+<failure message="09-fr-06i.spec.ts:5:1 FR-06i: cancelling a valid request returns the reserved hours immediately" type="FAILURE">
+<![CDATA[  [chromium] › feature-6/09-fr-06i.spec.ts:5:1 › FR-06i: cancelling a valid request returns the reserved hours immediately 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText(/^14\.0h$/).first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for getByText(/^14\.0h$/).first()
+
+
+       at helpers/feature6.ts:66
+
+      64 | export async function expectNavbarBalance(page: Page, expectedBalance: number): Promise<void> {
+      65 |   const escaped = expectedBalance.toFixed(1).replace('.', '\\.')
+    > 66 |   await expect(page.getByText(new RegExp(`^${escaped}h$`)).first()).toBeVisible({
+         |                                                                     ^
+      67 |     timeout: 10_000,
+      68 |   })
+      69 | }
+        at expectNavbarBalance (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature6.ts:66:69)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-6/09-fr-06i.spec.ts:20:9
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-6-09-fr-06i-FR-06i-0bd23--reserved-hours-immediately-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-6-09-fr-06i-FR-06i-0bd23--reserved-hours-immediately-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-6-09-fr-06i-FR-06i-0bd23--reserved-hours-immediately-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-6-09-fr-06i-FR-06i-0bd23--reserved-hours-immediately-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-6/10-fr-06j.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.748" errors="0">
+<testcase name="FR-06j: active requests remain discoverable in the public feed" classname="feature-6/10-fr-06j.spec.ts" time="2.748">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/11-fr-06k.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.308" errors="0">
+<testcase name="FR-06k: empty or invalid required fields are rejected with field-level validation errors" classname="feature-6/11-fr-06k.spec.ts" time="1.308">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/12-fr-06l.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.856" errors="0">
+<testcase name="FR-06l: request edits remain owner-only authorized" classname="feature-6/12-fr-06l.spec.ts" time="2.856">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/13-nfr-06a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="3.452" errors="0">
+<testcase name="NFR-06a: request create, update, and cancel operations complete within 2 seconds under normal load" classname="feature-6/13-nfr-06a.spec.ts" time="3.452">
+</testcase>
+</testsuite>
+<testsuite name="feature-6/14-nfr-06b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="16.946" errors="0">
+<testcase name="NFR-06b: only authenticated users can create, edit, or cancel requests" classname="feature-6/14-nfr-06b.spec.ts" time="16.946">
+<failure message="14-nfr-06b.spec.ts:5:1 NFR-06b: only authenticated users can create, edit, or cancel requests" type="FAILURE">
+<![CDATA[  [chromium] › feature-6/14-nfr-06b.spec.ts:5:1 › NFR-06b: only authenticated users can create, edit, or cancel requests 
+
+    Error: expect(page).toHaveURL(expected) failed
+
+    Expected pattern: /\/login/
+    Received string:  "http://localhost:5173/edit-service/76eab79c-979e-4500-aead-a2031f6644ca"
+    Timeout: 15000ms
+
+    Call log:
+      - Expect "toHaveURL" with timeout 15000ms
+        19 × unexpected value "http://localhost:5173/edit-service/76eab79c-979e-4500-aead-a2031f6644ca"
+
+
+      19 |   await page.context().clearCookies()
+      20 |   await page.goto(editUrl)
+    > 21 |   await expect(page).toHaveURL(/\/login/, { timeout: 15_000 })
+         |                      ^
+      22 |
+      23 |   // Anonymous users should not see owner-only mutation actions on the detail page.
+      24 |   await page.context().clearCookies()
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-6/14-nfr-06b.spec.ts:21:22
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-6-14-nfr-06b-NFR-0-ed601-ate-edit-or-cancel-requests-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-6-14-nfr-06b-NFR-0-ed601-ate-edit-or-cancel-requests-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-6-14-nfr-06b-NFR-0-ed601-ate-edit-or-cancel-requests-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-6-14-nfr-06b-NFR-0-ed601-ate-edit-or-cancel-requests-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-6/15-nfr-06c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.531" errors="0">
+<testcase name="NFR-06c: request form remains responsive and accessible on desktop and mobile" classname="feature-6/15-nfr-06c.spec.ts" time="1.531">
+</testcase>
+</testsuite>
+<testsuite name="feature-7/01-fr-07a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="0.956" errors="0">
+<testcase name="FR-07a: each newly registered user starts with an initial available balance of 3 hours" classname="feature-7/01-fr-07a.spec.ts" time="0.956">
+</testcase>
+</testsuite>
+<testsuite name="feature-7/02-fr-07b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="3.676" errors="0">
+<testcase name="FR-07b: time activity keeps available hours separate from reserved accepted-exchange hours" classname="feature-7/02-fr-07b.spec.ts" time="3.676">
+<failure message="02-fr-07b.spec.ts:12:1 FR-07b: time activity keeps available hours separate from reserved accepted-exchange hours" type="FAILURE">
+<![CDATA[  [chromium] › feature-7/02-fr-07b.spec.ts:12:1 › FR-07b: time activity keeps available hours separate from reserved accepted-exchange hours 
+
+    Error: Accept handshake failed: 404 Pending handshake not found
+
+    expect(received).toBeTruthy()
+
+    Received: false
+
+       at helpers/feature5.ts:264
+
+      262 |   }, options)
+      263 |
+    > 264 |   expect(result.ok, `Accept handshake failed: ${result.status} ${result.body}`).toBeTruthy()
+          |                                                                                 ^
+      265 | }
+      266 |
+      267 | export { openConversationForService, openDashboardSearch, openServiceFromDashboard }
+        at acceptPendingHandshakeViaApi (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature5.ts:264:81)
+        at createAcceptedOfferExchange (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature7.ts:238:3)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-7/02-fr-07b.spec.ts:24:21
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-7-02-fr-07b-FR-07b-73f8b-ved-accepted-exchange-hours-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-7-02-fr-07b-FR-07b-73f8b-ved-accepted-exchange-hours-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-7-02-fr-07b-FR-07b-73f8b-ved-accepted-exchange-hours-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-7-02-fr-07b-FR-07b-73f8b-ved-accepted-exchange-hours-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-7/03-fr-07c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="1.658" errors="0">
+<testcase name="FR-07c: request creation reserves hours when a Time Share rule requires it" classname="feature-7/03-fr-07c.spec.ts" time="1.658">
+<failure message="03-fr-07c.spec.ts:11:1 FR-07c: request creation reserves hours when a Time Share rule requires it" type="FAILURE">
+<![CDATA[  [chromium] › feature-7/03-fr-07c.spec.ts:11:1 › FR-07c: request creation reserves hours when a Time Share rule requires it 
+
+    Error: expect(received).toBe(expected) // Object.is equality
+
+    Expected: 14
+    Received: 15
+
+      19 |   // The reserved hour should immediately reduce available balance.
+      20 |   const currentBalance = await getCurrentBalance(page)
+    > 21 |   expect(currentBalance).toBe(startingBalance - 1)
+         |                          ^
+      22 |
+      23 |   // The same reservation should appear in the visible transaction history for the created request.
+      24 |   await openTimeActivity(page)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-7/03-fr-07c.spec.ts:21:26
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-7-03-fr-07c-FR-07c-4f276-Time-Share-rule-requires-it-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-7-03-fr-07c-FR-07c-4f276-Time-Share-rule-requires-it-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-7-03-fr-07c-FR-07c-4f276-Time-Share-rule-requires-it-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-7-03-fr-07c-FR-07c-4f276-Time-Share-rule-requires-it-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-7/04-fr-07d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="4.697" errors="0">
+<testcase name="FR-07d: completing a one-to-one exchange transfers reserved hours to the provider" classname="feature-7/04-fr-07d.spec.ts" time="4.697">
+<failure message="04-fr-07d.spec.ts:14:1 FR-07d: completing a one-to-one exchange transfers reserved hours to the provider" type="FAILURE">
+<![CDATA[  [chromium] › feature-7/04-fr-07d.spec.ts:14:1 › FR-07d: completing a one-to-one exchange transfers reserved hours to the provider 
+
+    Error: Accept handshake failed: 404 Pending handshake not found
+
+    expect(received).toBeTruthy()
+
+    Received: false
+
+       at helpers/feature5.ts:264
+
+      262 |   }, options)
+      263 |
+    > 264 |   expect(result.ok, `Accept handshake failed: ${result.status} ${result.body}`).toBeTruthy()
+          |                                                                                 ^
+      265 | }
+      266 |
+      267 | export { openConversationForService, openDashboardSearch, openServiceFromDashboard }
+        at acceptPendingHandshakeViaApi (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature5.ts:264:81)
+        at createAcceptedOfferExchange (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature7.ts:238:3)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-7/04-fr-07d.spec.ts:23:21
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-7-04-fr-07d-FR-07d-c1f2c-erved-hours-to-the-provider-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-7-04-fr-07d-FR-07d-c1f2c-erved-hours-to-the-provider-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-7-04-fr-07d-FR-07d-c1f2c-erved-hours-to-the-provider-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-7-04-fr-07d-FR-07d-c1f2c-erved-hours-to-the-provider-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-7/05-fr-07e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="6.698" errors="0">
+<testcase name="FR-07e: group offers transfer hours only on first completion and burn later reserved hours" classname="feature-7/05-fr-07e.spec.ts" time="6.698">
+<failure message="05-fr-07e.spec.ts:14:1 FR-07e: group offers transfer hours only on first completion and burn later reserved hours" type="FAILURE">
+<![CDATA[  [chromium] › feature-7/05-fr-07e.spec.ts:14:1 › FR-07e: group offers transfer hours only on first completion and burn later reserved hours 
+
+    Error: Accept handshake failed: 404 Pending handshake not found
+
+    expect(received).toBeTruthy()
+
+    Received: false
+
+       at helpers/feature5.ts:264
+
+      262 |   }, options)
+      263 |
+    > 264 |   expect(result.ok, `Accept handshake failed: ${result.status} ${result.body}`).toBeTruthy()
+          |                                                                                 ^
+      265 | }
+      266 |
+      267 | export { openConversationForService, openDashboardSearch, openServiceFromDashboard }
+        at acceptPendingHandshakeViaApi (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature5.ts:264:81)
+        at createAcceptedGroupOfferExchanges (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature7.ts:277:5)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-7/05-fr-07e.spec.ts:26:21
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-7-05-fr-07e-FR-07e-ea5a2-d-burn-later-reserved-hours-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-7-05-fr-07e-FR-07e-ea5a2-d-burn-later-reserved-hours-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-7-05-fr-07e-FR-07e-ea5a2-d-burn-later-reserved-hours-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-7-05-fr-07e-FR-07e-ea5a2-d-burn-later-reserved-hours-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-7/06-fr-07f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.985" errors="0">
+<testcase name="FR-07f: cancelling before completion returns reserved hours to the requester balance" classname="feature-7/06-fr-07f.spec.ts" time="2.985">
+</testcase>
+</testsuite>
+<testsuite name="feature-7/07-fr-07g.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="4.568" errors="0">
+<testcase name="FR-07g: each Time Share movement is persisted as a ledger record with traceable fields" classname="feature-7/07-fr-07g.spec.ts" time="4.568">
+<failure message="07-fr-07g.spec.ts:13:1 FR-07g: each Time Share movement is persisted as a ledger record with traceable fields" type="FAILURE">
+<![CDATA[  [chromium] › feature-7/07-fr-07g.spec.ts:13:1 › FR-07g: each Time Share movement is persisted as a ledger record with traceable fields 
+
+    Error: Accept handshake failed: 404 Pending handshake not found
+
+    expect(received).toBeTruthy()
+
+    Received: false
+
+       at helpers/feature5.ts:264
+
+      262 |   }, options)
+      263 |
+    > 264 |   expect(result.ok, `Accept handshake failed: ${result.status} ${result.body}`).toBeTruthy()
+          |                                                                                 ^
+      265 | }
+      266 |
+      267 | export { openConversationForService, openDashboardSearch, openServiceFromDashboard }
+        at acceptPendingHandshakeViaApi (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature5.ts:264:81)
+        at createAcceptedOfferExchange (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature7.ts:238:3)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-7/07-fr-07g.spec.ts:18:21
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-7-07-fr-07g-FR-07g-3ec1e-ecord-with-traceable-fields-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-7-07-fr-07g-FR-07g-3ec1e-ecord-with-traceable-fields-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-7-07-fr-07g-FR-07g-3ec1e-ecord-with-traceable-fields-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-7-07-fr-07g-FR-07g-3ec1e-ecord-with-traceable-fields-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-7/08-fr-07h.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.073" errors="0">
+<testcase name="FR-07h: users can open and browse their full Time Share transaction history" classname="feature-7/08-fr-07h.spec.ts" time="2.073">
+</testcase>
+</testsuite>
+<testsuite name="feature-7/09-fr-07i.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.092" errors="0">
+<testcase name="FR-07i: failed Time Share operations do not partially commit balance or ledger changes" classname="feature-7/09-fr-07i.spec.ts" time="2.092">
+</testcase>
+</testsuite>
+<testsuite name="feature-7/10-fr-07j.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="5.67" errors="0">
+<testcase name="FR-07j: concurrent requester actions do not deduct the same balance twice" classname="feature-7/10-fr-07j.spec.ts" time="5.67">
+</testcase>
+</testsuite>
+<testsuite name="feature-7/11-nfr-07a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="2.302" errors="0">
+<testcase name="NFR-07a: hour reservation and refund operations complete within 1 second under normal load" classname="feature-7/11-nfr-07a.spec.ts" time="2.302">
+</testcase>
+</testsuite>
+<testsuite name="feature-7/12-nfr-07b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="0.808" errors="0">
+<testcase name="NFR-07b: only authenticated users can read Time Share state or reach balance-mutating entry points" classname="feature-7/12-nfr-07b.spec.ts" time="0.808">
+</testcase>
+</testsuite>
+<testsuite name="feature-7/13-nfr-07c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="4.561" errors="0">
+<testcase name="NFR-07c: ledger rows and visible balances remain transactionally consistent after a reservation" classname="feature-7/13-nfr-07c.spec.ts" time="4.561">
+<failure message="13-nfr-07c.spec.ts:14:1 NFR-07c: ledger rows and visible balances remain transactionally consistent after a reservation" type="FAILURE">
+<![CDATA[  [chromium] › feature-7/13-nfr-07c.spec.ts:14:1 › NFR-07c: ledger rows and visible balances remain transactionally consistent after a reservation 
+
+    Error: Accept handshake failed: 404 Pending handshake not found
+
+    expect(received).toBeTruthy()
+
+    Received: false
+
+       at helpers/feature5.ts:264
+
+      262 |   }, options)
+      263 |
+    > 264 |   expect(result.ok, `Accept handshake failed: ${result.status} ${result.body}`).toBeTruthy()
+          |                                                                                 ^
+      265 | }
+      266 |
+      267 | export { openConversationForService, openDashboardSearch, openServiceFromDashboard }
+        at acceptPendingHandshakeViaApi (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature5.ts:264:81)
+        at createAcceptedOfferExchange (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature7.ts:238:3)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-7/13-nfr-07c.spec.ts:19:21
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-7-13-nfr-07c-NFR-0-50bc9-sistent-after-a-reservation-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-7-13-nfr-07c-NFR-0-50bc9-sistent-after-a-reservation-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-7-13-nfr-07c-NFR-0-50bc9-sistent-after-a-reservation-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-7-13-nfr-07c-NFR-0-50bc9-sistent-after-a-reservation-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-8/01-fr-08a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="4.53" errors="0">
+<testcase name="FR-08a: offer interest creates a pending exchange and reserves hours immediately" classname="feature-8/01-fr-08a.spec.ts" time="4.53">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/02-fr-08b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="5.92" errors="0">
+<testcase name="FR-08b: responding to a request creates a pending exchange without extra reservation" classname="feature-8/02-fr-08b.spec.ts" time="5.92">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/03-fr-08c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="14.914" errors="0">
+<testcase name="FR-08c: provider can submit final session details while the exchange is pending" classname="feature-8/03-fr-08c.spec.ts" time="14.914">
+<failure message="03-fr-08c.spec.ts:13:1 FR-08c: provider can submit final session details while the exchange is pending" type="FAILURE">
+<![CDATA[  [chromium] › feature-8/03-fr-08c.spec.ts:13:1 › FR-08c: provider can submit final session details while the exchange is pending 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-sonner-toaster] li').filter({ hasText: /Session details sent/i }).first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('[data-sonner-toaster] li').filter({ hasText: /Session details sent/i }).first()
+
+
+       at helpers/auth.ts:130
+
+      128 |   // Sonner toasts are rendered in a <li> inside [data-sonner-toaster]
+      129 |   const toast = page.locator('[data-sonner-toaster] li').filter({ hasText: text })
+    > 130 |   await expect(toast.first()).toBeVisible({ timeout: 10_000 })
+          |                               ^
+      131 | }
+      132 |
+        at expectToast (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/auth.ts:130:31)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-8/03-fr-08c.spec.ts:36:9
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-8-03-fr-08c-FR-08c-5fa63-ile-the-exchange-is-pending-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-8-03-fr-08c-FR-08c-5fa63-ile-the-exchange-is-pending-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-8-03-fr-08c-FR-08c-5fa63-ile-the-exchange-is-pending-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-8-03-fr-08c-FR-08c-5fa63-ile-the-exchange-is-pending-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-8/04-fr-08d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="8.105" errors="0">
+<testcase name="FR-08d: requester can review proposed details, request changes, and see approve-or-decline controls" classname="feature-8/04-fr-08d.spec.ts" time="8.105">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/05-fr-08e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="7.819" errors="0">
+<testcase name="FR-08e: requester approval moves the exchange to accepted and notifies the provider in real time" classname="feature-8/05-fr-08e.spec.ts" time="7.819">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/06-fr-08f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="6.809" errors="0">
+<testcase name="FR-08f: declining a pending exchange cancels it and refunds reserved hours immediately" classname="feature-8/06-fr-08f.spec.ts" time="6.809">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/07-fr-08g.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-08g: in-person accepted exchanges require QR-based completion checks" classname="feature-8/07-fr-08g.spec.ts" time="0">
+<properties>
+<property name="skip" value="Service QR completion is not implemented in the current frontend.">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-8/08-fr-08h.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="9.395" errors="0">
+<testcase name="FR-08h: remote accepted exchanges require independent completion confirmations from both parties" classname="feature-8/08-fr-08h.spec.ts" time="9.395">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/09-fr-08i.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="9.912" errors="0">
+<testcase name="FR-08i: completing a one-to-one exchange transfers the reserved hours from requester to provider" classname="feature-8/09-fr-08i.spec.ts" time="9.912">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/10-fr-08j.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="13.346" errors="0">
+<testcase name="FR-08j: only the first completed group-offer exchange transfers hours to the provider" classname="feature-8/10-fr-08j.spec.ts" time="13.346">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/11-fr-08k.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="11.672" errors="0">
+<testcase name="FR-08k: either exchange party can cancel unilaterally while the handshake is still pending" classname="feature-8/11-fr-08k.spec.ts" time="11.672">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/12-fr-08l.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="10.011" errors="0">
+<testcase name="FR-08l: accepted-state cancellation requires an explicit second-party approval" classname="feature-8/12-fr-08l.spec.ts" time="10.011">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/13-fr-08m.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="11.658" errors="0">
+<testcase name="FR-08m: websocket notifications surface representative handshake state transitions in real time" classname="feature-8/13-fr-08m.spec.ts" time="11.658">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/14-nfr-08a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="10.349" errors="0">
+<testcase name="NFR-08a: accepted-state propagation reaches the other party within two seconds under normal load" classname="feature-8/14-nfr-08a.spec.ts" time="10.349">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/15-nfr-08b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="10.57" errors="0">
+<testcase name="NFR-08b: only handshake parties can execute state-changing exchange actions" classname="feature-8/15-nfr-08b.spec.ts" time="10.57">
+</testcase>
+</testsuite>
+<testsuite name="feature-8/16-nfr-08c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="8.574" errors="0">
+<testcase name="NFR-08c: competing transition requests resolve to a single consistent final state" classname="feature-8/16-nfr-08c.spec.ts" time="8.574">
+<failure message="16-nfr-08c.spec.ts:16:1 NFR-08c: competing transition requests resolve to a single consistent final state" type="FAILURE">
+<![CDATA[  [chromium] › feature-8/16-nfr-08c.spec.ts:16:1 › NFR-08c: competing transition requests resolve to a single consistent final state 
+
+    Error: expect(received).toBeLessThanOrEqual(expected)
+
+    Expected: <= 1
+    Received:    2
+
+      65 |
+      66 |     const successCount = [approveResult, cancelResult].filter((result) => result.ok).length
+    > 67 |     expect(successCount).toBeLessThanOrEqual(1)
+         |                          ^
+      68 |
+      69 |     // The handshake must settle into one valid state with a matching balance outcome.
+      70 |     const finalHandshake = await fetchHandshake(ownerPage, handshakeId)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-8/16-nfr-08c.spec.ts:67:26
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-8-16-nfr-08c-NFR-0-23d10-ngle-consistent-final-state-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-8-16-nfr-08c-NFR-0-23d10-ngle-consistent-final-state-chromium/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #3: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-8-16-nfr-08c-NFR-0-23d10-ngle-consistent-final-state-chromium/test-failed-3.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-8-16-nfr-08c-NFR-0-23d10-ngle-consistent-final-state-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-8-16-nfr-08c-NFR-0-23d10-ngle-consistent-final-state-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-8-16-nfr-08c-NFR-0-23d10-ngle-consistent-final-state-chromium/test-failed-2.png]]
+
+[[ATTACHMENT|../../test-results/feature-8-16-nfr-08c-NFR-0-23d10-ngle-consistent-final-state-chromium/test-failed-3.png]]
+
+[[ATTACHMENT|../../test-results/feature-8-16-nfr-08c-NFR-0-23d10-ngle-consistent-final-state-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-9/01-fr-09a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="17.43" errors="0">
+<testcase name="FR-09a: provider can submit meeting details, date/time, and final duration while the exchange is pending" classname="feature-9/01-fr-09a.spec.ts" time="17.43">
+<failure message="01-fr-09a.spec.ts:13:1 FR-09a: provider can submit meeting details, date/time, and final duration while the exchange is pending" type="FAILURE">
+<![CDATA[  [chromium] › feature-9/01-fr-09a.spec.ts:13:1 › FR-09a: provider can submit meeting details, date/time, and final duration while the exchange is pending 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-sonner-toaster] li').filter({ hasText: /Session details sent/i }).first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('[data-sonner-toaster] li').filter({ hasText: /Session details sent/i }).first()
+
+
+       at helpers/auth.ts:130
+
+      128 |   // Sonner toasts are rendered in a <li> inside [data-sonner-toaster]
+      129 |   const toast = page.locator('[data-sonner-toaster] li').filter({ hasText: text })
+    > 130 |   await expect(toast.first()).toBeVisible({ timeout: 10_000 })
+          |                               ^
+      131 | }
+      132 |
+        at expectToast (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/auth.ts:130:31)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-9/01-fr-09a.spec.ts:36:9
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-9-01-fr-09a-FR-09a-36e33-ile-the-exchange-is-pending-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-9-01-fr-09a-FR-09a-36e33-ile-the-exchange-is-pending-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-9-01-fr-09a-FR-09a-36e33-ile-the-exchange-is-pending-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-9-01-fr-09a-FR-09a-36e33-ile-the-exchange-is-pending-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-9/02-fr-09b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="9.178" errors="0">
+<testcase name="FR-09b: only the requester can approve or decline provider-submitted session details" classname="feature-9/02-fr-09b.spec.ts" time="9.178">
+</testcase>
+</testsuite>
+<testsuite name="feature-9/03-fr-09c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="11.754" errors="0">
+<testcase name="FR-09c: request changes keeps the handshake pending and lets the provider resubmit" classname="feature-9/03-fr-09c.spec.ts" time="11.754">
+</testcase>
+</testsuite>
+<testsuite name="feature-9/04-fr-09d.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-09d: provider can generate a unique QR code for accepted in-person exchanges" classname="feature-9/04-fr-09d.spec.ts" time="0">
+<properties>
+<property name="skip" value="Service QR generation is not implemented in the current frontend.">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-9/05-fr-09e.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-09e: handshake QR codes expire after use, cancellation, or scheduled session end" classname="feature-9/05-fr-09e.spec.ts" time="0">
+<properties>
+<property name="skip" value="Service QR expiration flow is not implemented in the current frontend.">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-9/06-fr-09f.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="10.096" errors="0">
+<testcase name="FR-09f: remote accepted exchanges require two separate completion confirmations" classname="feature-9/06-fr-09f.spec.ts" time="10.096">
+</testcase>
+</testsuite>
+<testsuite name="feature-9/07-fr-09g.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-09g: listing owners have a manual completion fallback when QR scan is not possible" classname="feature-9/07-fr-09g.spec.ts" time="0">
+<properties>
+<property name="skip" value="Manual service-completion fallback is not implemented in the current frontend.">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-9/08-fr-09h.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-09h: manual completion fallback only completes after requester confirmation" classname="feature-9/08-fr-09h.spec.ts" time="0">
+<properties>
+<property name="skip" value="Manual completion fallback confirmation is not implemented in the current frontend.">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-9/09-fr-09i.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="4.454" errors="0">
+<testcase name="FR-09i: group-offer handshakes stay independent while the owner still sees consolidated participant progress" classname="feature-9/09-fr-09i.spec.ts" time="4.454">
+<failure message="09-fr-09i.spec.ts:13:1 FR-09i: group-offer handshakes stay independent while the owner still sees consolidated participant progress" type="FAILURE">
+<![CDATA[  [chromium] › feature-9/09-fr-09i.spec.ts:13:1 › FR-09i: group-offer handshakes stay independent while the owner still sees consolidated participant progress 
+
+    Error: Could not find 2 demo users with balance at least 2.
+
+       at helpers/feature7.ts:209
+
+      207 |   }
+      208 |
+    > 209 |   throw new Error(`Could not find ${count} demo users with balance at least ${minInclusive}.`)
+          |         ^
+      210 | }
+      211 |
+      212 | export async function createAcceptedOfferExchange(page: Page, options: {
+        at pickUsersWithBalanceAtLeast (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/helpers/feature7.ts:209:9)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-9/09-fr-09i.spec.ts:15:18
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-9-09-fr-09i-FR-09i-687fd-idated-participant-progress-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-9-09-fr-09i-FR-09i-687fd-idated-participant-progress-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-9-09-fr-09i-FR-09i-687fd-idated-participant-progress-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-9-09-fr-09i-FR-09i-687fd-idated-participant-progress-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-9/10-nfr-09a.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="20.276" errors="0">
+<testcase name="NFR-09a: the current actor and expected next action stay explicit in the handshake UI" classname="feature-9/10-nfr-09a.spec.ts" time="20.276">
+<failure message="10-nfr-09a.spec.ts:12:1 NFR-09a: the current actor and expected next action stay explicit in the handshake UI" type="FAILURE">
+<![CDATA[  [chromium] › feature-9/10-nfr-09a.spec.ts:12:1 › NFR-09a: the current actor and expected next action stay explicit in the handshake UI 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText(/Review the details and approve or decline/i).first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for getByText(/Review the details and approve or decline/i).first()
+
+
+      40 |   await switchUser(page, requester)
+      41 |   await openConversationForService(page, title)
+    > 42 |   await expect(page.getByText(/Review the details and approve or decline/i).first()).toBeVisible({ timeout: 10_000 })
+         |                                                                                      ^
+      43 |   await expect(page.getByRole('button', { name: 'Review & Approve' })).toBeVisible({ timeout: 10_000 })
+      44 | })
+      45 |
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-9/10-nfr-09a.spec.ts:42:86
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-9-10-nfr-09a-NFR-0-a11d3-xplicit-in-the-handshake-UI-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-9-10-nfr-09a-NFR-0-a11d3-xplicit-in-the-handshake-UI-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-9-10-nfr-09a-NFR-0-a11d3-xplicit-in-the-handshake-UI-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-9-10-nfr-09a-NFR-0-a11d3-xplicit-in-the-handshake-UI-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="feature-9/11-nfr-09b.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0.001" errors="0">
+<testcase name="NFR-09b: manual completion fallback requires a secondary confirmation" classname="feature-9/11-nfr-09b.spec.ts" time="0.001">
+<properties>
+<property name="skip" value="Manual service-completion fallback is not implemented in the current frontend.">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-9/12-nfr-09c.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="1" skipped="0" time="19.214" errors="0">
+<testcase name="NFR-09c: handshake state updates render in-place without a full page refresh" classname="feature-9/12-nfr-09c.spec.ts" time="19.214">
+<failure message="12-nfr-09c.spec.ts:13:1 NFR-09c: handshake state updates render in-place without a full page refresh" type="FAILURE">
+<![CDATA[  [chromium] › feature-9/12-nfr-09c.spec.ts:13:1 › NFR-09c: handshake state updates render in-place without a full page refresh 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('button', { name: 'Review & Approve' })
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for getByRole('button', { name: 'Review & Approve' })
+
+
+      44 |     await page.getByRole('button', { name: 'Send Details' }).click()
+      45 |
+    > 46 |     await expect(requesterPage.getByRole('button', { name: 'Review & Approve' })).toBeVisible({ timeout: 10_000 })
+         |                                                                                   ^
+      47 |     expect(requesterPage.url()).toBe(openThreadUrl)
+      48 |   } finally {
+      49 |     await requesterContext.close()
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/feature-9/12-nfr-09c.spec.ts:46:83
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-9-12-nfr-09c-NFR-0-e1d25-without-a-full-page-refresh-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/feature-9-12-nfr-09c-NFR-0-e1d25-without-a-full-page-refresh-chromium/test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/feature-9-12-nfr-09c-NFR-0-e1d25-without-a-full-page-refresh-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/feature-9-12-nfr-09c-NFR-0-e1d25-without-a-full-page-refresh-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/feature-9-12-nfr-09c-NFR-0-e1d25-without-a-full-page-refresh-chromium/test-failed-2.png]]
+
+[[ATTACHMENT|../../test-results/feature-9-12-nfr-09c-NFR-0-e1d25-without-a-full-page-refresh-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="follow-system/01-self-profile-follow-lists.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.363" errors="0">
+<testcase name="Feature 20 — self profile follow lists › logged-in user can open Following modal and close with ✕" classname="follow-system/01-self-profile-follow-lists.spec.ts" time="1.363">
+</testcase>
+</testsuite>
+<testsuite name="follow-system/02-self-profile-followers-list.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="1" failures="0" skipped="0" time="1.339" errors="0">
+<testcase name="Feature 20 — self profile followers list › logged-in user can open Followers modal and close with ✕" classname="follow-system/02-self-profile-followers-list.spec.ts" time="1.339">
+</testcase>
+</testsuite>
+<testsuite name="group-chat.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="5" failures="5" skipped="0" time="104.389" errors="0">
+<testcase name="Group Chat › provider sees the GROUP badge for a multi-slot service" classname="group-chat.spec.ts" time="20.821">
+<failure message="group-chat.spec.ts:46:3 provider sees the GROUP badge for a multi-slot service" type="FAILURE">
+<![CDATA[  [chromium] › group-chat.spec.ts:46:3 › Group Chat › provider sees the GROUP badge for a multi-slot service 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+    Expected: visible
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 20000ms
+      - waiting for getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+
+
+      50 |     // The service title should appear in the left sidebar accordion header
+      51 |     const header = page.getByRole('button', { name: new RegExp(GROUP_SERVICE_TITLE, 'i') }).first()
+    > 52 |     await expect(header).toBeVisible({ timeout: 20_000 })
+         |                          ^
+      53 |
+      54 |     // The "GROUP" badge should be present on the header
+      55 |     await expect(header.getByText('GROUP')).toBeVisible({ timeout: 5_000 })
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/group-chat.spec.ts:52:26
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/group-chat-Group-Chat-prov-419aa-ge-for-a-multi-slot-service-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/group-chat-Group-Chat-prov-419aa-ge-for-a-multi-slot-service-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-prov-419aa-ge-for-a-multi-slot-service-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-prov-419aa-ge-for-a-multi-slot-service-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="Group Chat › clicking group row opens the group thread with message input" classname="group-chat.spec.ts" time="20.968">
+<failure message="group-chat.spec.ts:58:3 clicking group row opens the group thread with message input" type="FAILURE">
+<![CDATA[  [chromium] › group-chat.spec.ts:58:3 › Group Chat › clicking group row opens the group thread with message input 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+    Expected: visible
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 20000ms
+      - waiting for getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+
+
+      27 |   // Wait for the accordion header to appear
+      28 |   const header = page.getByRole('button', { name: new RegExp(GROUP_SERVICE_TITLE, 'i') }).first()
+    > 29 |   await expect(header).toBeVisible({ timeout: 20_000 })
+         |                        ^
+      30 |
+      31 |   // The group row is inside the expanded accordion — a button with "participant" text
+      32 |   const groupRow = page.locator('button').filter({ hasText: /participant/i }).first()
+        at openGroupChat (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/group-chat.spec.ts:29:24)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/group-chat.spec.ts:62:28
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/group-chat-Group-Chat-clic-a4cae-p-thread-with-message-input-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/group-chat-Group-Chat-clic-a4cae-p-thread-with-message-input-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-clic-a4cae-p-thread-with-message-input-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-clic-a4cae-p-thread-with-message-input-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="Group Chat › provider can send a group message and it appears in the thread" classname="group-chat.spec.ts" time="20.848">
+<failure message="group-chat.spec.ts:70:3 provider can send a group message and it appears in the thread" type="FAILURE">
+<![CDATA[  [chromium] › group-chat.spec.ts:70:3 › Group Chat › provider can send a group message and it appears in the thread 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+    Expected: visible
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 20000ms
+      - waiting for getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+
+
+      27 |   // Wait for the accordion header to appear
+      28 |   const header = page.getByRole('button', { name: new RegExp(GROUP_SERVICE_TITLE, 'i') }).first()
+    > 29 |   await expect(header).toBeVisible({ timeout: 20_000 })
+         |                        ^
+      30 |
+      31 |   // The group row is inside the expanded accordion — a button with "participant" text
+      32 |   const groupRow = page.locator('button').filter({ hasText: /participant/i }).first()
+        at openGroupChat (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/group-chat.spec.ts:29:24)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/group-chat.spec.ts:74:28
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/group-chat-Group-Chat-prov-bb3eb-nd-it-appears-in-the-thread-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/group-chat-Group-Chat-prov-bb3eb-nd-it-appears-in-the-thread-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-prov-bb3eb-nd-it-appears-in-the-thread-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-prov-bb3eb-nd-it-appears-in-the-thread-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="Group Chat › group message input clears after sending" classname="group-chat.spec.ts" time="20.929">
+<failure message="group-chat.spec.ts:88:3 group message input clears after sending" type="FAILURE">
+<![CDATA[  [chromium] › group-chat.spec.ts:88:3 › Group Chat › group message input clears after sending ─────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+    Expected: visible
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 20000ms
+      - waiting for getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+
+
+      27 |   // Wait for the accordion header to appear
+      28 |   const header = page.getByRole('button', { name: new RegExp(GROUP_SERVICE_TITLE, 'i') }).first()
+    > 29 |   await expect(header).toBeVisible({ timeout: 20_000 })
+         |                        ^
+      30 |
+      31 |   // The group row is inside the expanded accordion — a button with "participant" text
+      32 |   const groupRow = page.locator('button').filter({ hasText: /participant/i }).first()
+        at openGroupChat (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/group-chat.spec.ts:29:24)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/group-chat.spec.ts:92:28
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/group-chat-Group-Chat-grou-50c9d--input-clears-after-sending-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/group-chat-Group-Chat-grou-50c9d--input-clears-after-sending-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-grou-50c9d--input-clears-after-sending-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-grou-50c9d--input-clears-after-sending-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="Group Chat › participant also sees the GROUP badge" classname="group-chat.spec.ts" time="20.823">
+<failure message="group-chat.spec.ts:104:3 participant also sees the GROUP badge" type="FAILURE">
+<![CDATA[  [chromium] › group-chat.spec.ts:104:3 › Group Chat › participant also sees the GROUP badge ───────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+    Expected: visible
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 20000ms
+      - waiting for getByRole('button', { name: /Traditional Manti Cooking Workshop/i }).first()
+
+
+      108 |
+      109 |     const header = page.getByRole('button', { name: new RegExp(GROUP_SERVICE_TITLE, 'i') }).first()
+    > 110 |     await expect(header).toBeVisible({ timeout: 20_000 })
+          |                          ^
+      111 |
+      112 |     // Expand and verify the group row is accessible
+      113 |     await header.click()
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/group-chat.spec.ts:110:26
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/group-chat-Group-Chat-participant-also-sees-the-GROUP-badge-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/group-chat-Group-Chat-participant-also-sees-the-GROUP-badge-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-participant-also-sees-the-GROUP-badge-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/group-chat-Group-Chat-participant-also-sees-the-GROUP-badge-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="handshake.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="7" failures="4" skipped="0" time="83.626" errors="0">
+<testcase name="Handshake — express interest › requester can request a service from the dashboard" classname="handshake.spec.ts" time="20.997">
+<failure message="handshake.spec.ts:34:3 requester can request a service from the dashboard" type="FAILURE">
+<![CDATA[  [chromium] › handshake.spec.ts:34:3 › Handshake — express interest › requester can request a service from the dashboard 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText('Watercolor Postcards for the Community Board').first()
+    Expected: visible
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 20000ms
+      - waiting for getByText('Watercolor Postcards for the Community Board').first()
+
+
+      36 |     await page.goto('/dashboard')
+      37 |
+    > 38 |     await expect(page.getByText(TARGET_SERVICE).first()).toBeVisible({ timeout: 20_000 })
+         |                                                          ^
+      39 |     await page.getByText(TARGET_SERVICE).first().click()
+      40 |     await expect(page).toHaveURL(/\/service-detail\//)
+      41 |
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/handshake.spec.ts:38:58
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/handshake-Handshake-—-expr-7d7ea--service-from-the-dashboard-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/handshake-Handshake-—-expr-7d7ea--service-from-the-dashboard-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/handshake-Handshake-—-expr-7d7ea--service-from-the-dashboard-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/handshake-Handshake-—-expr-7d7ea--service-from-the-dashboard-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="Handshake — express interest › requester sees the new conversation in /messages" classname="handshake.spec.ts" time="1.254">
+</testcase>
+<testcase name="Handshake — express interest › provider sees incoming request on their service detail page" classname="handshake.spec.ts" time="20.958">
+<failure message="handshake.spec.ts:64:3 provider sees incoming request on their service detail page" type="FAILURE">
+<![CDATA[  [chromium] › handshake.spec.ts:64:3 › Handshake — express interest › provider sees incoming request on their service detail page 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText('Watercolor Postcards for the Community Board').first()
+    Expected: visible
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 20000ms
+      - waiting for getByText('Watercolor Postcards for the Community Board').first()
+
+
+      66 |     await page.goto('/dashboard')
+      67 |
+    > 68 |     await expect(page.getByText(TARGET_SERVICE).first()).toBeVisible({ timeout: 20_000 })
+         |                                                          ^
+      69 |     await page.getByText(TARGET_SERVICE).first().click()
+      70 |     await expect(page).toHaveURL(/\/service-detail\//)
+      71 |
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/handshake.spec.ts:68:58
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/handshake-Handshake-—-expr-e96c6-n-their-service-detail-page-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/handshake-Handshake-—-expr-e96c6-n-their-service-detail-page-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/handshake-Handshake-—-expr-e96c6-n-their-service-detail-page-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/handshake-Handshake-—-expr-e96c6-n-their-service-detail-page-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="Handshake — navigation to chat › clicking a conversation opens the message thread" classname="handshake.spec.ts" time="1.376">
+</testcase>
+<testcase name="Handshake — initiate session details › provider can initiate or has already initiated session details" classname="handshake.spec.ts" time="1.826">
+</testcase>
+<testcase name="Handshake — initiate session details › session summary in chat contains clickable Google Maps link" classname="handshake.spec.ts" time="16.333">
+<failure message="handshake.spec.ts:139:3 session summary in chat contains clickable Google Maps link" type="FAILURE">
+<![CDATA[  [chromium] › handshake.spec.ts:139:3 › Handshake — initiate session details › session summary in chat contains clickable Google Maps link 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('a[href*="google.com/maps"]').first()
+    Expected: visible
+    Timeout: 15000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 15000ms
+      - waiting for locator('a[href*="google.com/maps"]').first()
+
+
+      143 |
+      144 |     const mapsLink = page.locator('a[href*="google.com/maps"]').first()
+    > 145 |     await expect(mapsLink).toBeVisible({ timeout: 15_000 })
+          |                            ^
+      146 |     await expect(mapsLink).toHaveAttribute('href', /google\.com\/maps/)
+      147 |     await expect(mapsLink).toHaveAttribute('target', '_blank')
+      148 |   })
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/handshake.spec.ts:145:28
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/handshake-Handshake-—-init-44f58--clickable-Google-Maps-link-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/handshake-Handshake-—-init-44f58--clickable-Google-Maps-link-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/handshake-Handshake-—-init-44f58--clickable-Google-Maps-link-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/handshake-Handshake-—-init-44f58--clickable-Google-Maps-link-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+<testcase name="Handshake — initiate session details › requester sees session details with Open in Google Maps link" classname="handshake.spec.ts" time="20.882">
+<failure message="handshake.spec.ts:150:3 requester sees session details with Open in Google Maps link" type="FAILURE">
+<![CDATA[  [chromium] › handshake.spec.ts:150:3 › Handshake — initiate session details › requester sees session details with Open in Google Maps link 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('button').filter({ hasText: /Help Organizing Family Recipe Notes/i }).first()
+    Expected: visible
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 20000ms
+      - waiting for locator('button').filter({ hasText: /Help Organizing Family Recipe Notes/i }).first()
+
+
+      27 | async function openServiceGroup(page: Page, serviceTitle: string) {
+      28 |   const groupHeader = page.locator('button').filter({ hasText: new RegExp(serviceTitle, 'i') }).first()
+    > 29 |   await expect(groupHeader).toBeVisible({ timeout: 20_000 })
+         |                             ^
+      30 |   await groupHeader.click()
+      31 | }
+      32 |
+        at openServiceGroup (/Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/handshake.spec.ts:29:29)
+        at /Users/mustafaselmangunes/Desktop/574/SWE-574-3/frontend/tests/e2e/handshake.spec.ts:153:11
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    ../../test-results/handshake-Handshake-—-init-fbd5b-th-Open-in-Google-Maps-link-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: ../../test-results/handshake-Handshake-—-init-fbd5b-th-Open-in-Google-Maps-link-chromium/error-context.md
+]]>
+</failure>
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../../test-results/handshake-Handshake-—-init-fbd5b-th-Open-in-Google-Maps-link-chromium/test-failed-1.png]]
+
+[[ATTACHMENT|../../test-results/handshake-Handshake-—-init-fbd5b-th-Open-in-Google-Maps-link-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="service-detail.spec.ts" timestamp="2026-04-18T06:57:52.820Z" hostname="chromium" tests="4" failures="0" skipped="0" time="6.1" errors="0">
+<testcase name="Service Detail Page › clicking a service card navigates to its detail page" classname="service-detail.spec.ts" time="2.106">
+</testcase>
+<testcase name="Service Detail Page › service detail page shows title and description" classname="service-detail.spec.ts" time="1.381">
+</testcase>
+<testcase name="Service Detail Page › service creator info is displayed" classname="service-detail.spec.ts" time="1.296">
+</testcase>
+<testcase name="Service Detail Page › service detail page does not crash on direct URL access" classname="service-detail.spec.ts" time="1.317">
+</testcase>
+</testsuite>
+</testsuites>

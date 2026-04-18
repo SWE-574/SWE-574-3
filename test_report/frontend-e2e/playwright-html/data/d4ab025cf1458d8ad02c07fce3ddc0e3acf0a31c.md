@@ -1,0 +1,228 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - navigation [ref=e4]:
+      - generic [ref=e5]:
+        - link "The Hive" [ref=e6] [cursor=pointer]:
+          - /url: /dashboard
+          - generic [ref=e7]:
+            - img [ref=e8]
+            - paragraph [ref=e12]: The Hive
+        - generic [ref=e13]:
+          - link "Browse" [ref=e14] [cursor=pointer]:
+            - /url: /dashboard
+            - img [ref=e15]
+            - text: Browse
+          - link "Forum" [ref=e20] [cursor=pointer]:
+            - /url: /forum
+            - img [ref=e21]
+            - text: Forum
+          - link "Messages" [ref=e23] [cursor=pointer]:
+            - /url: /messages
+            - img [ref=e24]
+            - text: Messages
+        - generic [ref=e26]:
+          - generic [ref=e30] [cursor=pointer]:
+            - img [ref=e31]
+            - text: Post Service
+            - img [ref=e33]
+          - button "⏱ 19.0h" [ref=e35] [cursor=pointer]:
+            - generic [ref=e36]: ⏱
+            - text: 19.0h
+          - button "9+" [ref=e39] [cursor=pointer]:
+            - img [ref=e40]
+            - generic [ref=e43]: 9+
+          - generic [ref=e47] [cursor=pointer]:
+            - img "avatar" [ref=e49]
+            - img [ref=e50]
+    - generic [ref=e52]:
+      - generic [ref=e53]:
+        - generic [ref=e54]:
+          - generic [ref=e55]:
+            - paragraph [ref=e56]: Messages
+            - paragraph [ref=e57]: 11 active conversations
+          - generic [ref=e58]:
+            - generic [ref=e60]:
+              - button "All 20" [ref=e61] [cursor=pointer]:
+                - text: All
+                - generic [ref=e62]: "20"
+              - button "My Services 20" [ref=e63] [cursor=pointer]:
+                - text: My Services
+                - generic [ref=e64]: "20"
+              - button "My Interests" [ref=e65] [cursor=pointer]
+            - generic [ref=e66]:
+              - generic [ref=e67]:
+                - paragraph [ref=e71]: Active · 11
+                - button "NFR-09c Offer 1776496641704 1" [ref=e73]:
+                  - generic [ref=e74]:
+                    - img [ref=e76]
+                    - paragraph [ref=e78]: NFR-09c Offer 1776496641704
+                    - generic [ref=e79]: "1"
+                - button "NFR-09a Offer 1776496620223 1" [ref=e81]:
+                  - generic [ref=e82]:
+                    - img [ref=e84]
+                    - paragraph [ref=e86]: NFR-09a Offer 1776496620223
+                    - generic [ref=e87]: "1"
+                - button "FR-09c Offer 1776496591383 1" [ref=e89]:
+                  - generic [ref=e90]:
+                    - img [ref=e92]
+                    - paragraph [ref=e94]: FR-09c Offer 1776496591383
+                    - generic [ref=e95]: "1"
+                - button "FR-09b Offer 1776496582469 1" [ref=e97]:
+                  - generic [ref=e98]:
+                    - img [ref=e100]
+                    - paragraph [ref=e102]: FR-09b Offer 1776496582469
+                    - generic [ref=e103]: "1"
+                - button "FR-09a Offer 1776496563613 1" [ref=e105]:
+                  - generic [ref=e106]:
+                    - img [ref=e108]
+                    - paragraph [ref=e110]: FR-09a Offer 1776496563613
+                    - generic [ref=e111]: "1"
+                - button "NFR-08c Offer 1776496553626 1" [ref=e113]:
+                  - generic [ref=e114]:
+                    - img [ref=e116]
+                    - paragraph [ref=e118]: NFR-08c Offer 1776496553626
+                    - generic [ref=e119]: "1"
+                - button "NFR-08b Offer 1776496544214 1" [ref=e121]:
+                  - generic [ref=e122]:
+                    - img [ref=e124]
+                    - paragraph [ref=e126]: NFR-08b Offer 1776496544214
+                    - generic [ref=e127]: "1"
+                - button "NFR-08a Offer 1776496532676 1" [ref=e129]:
+                  - generic [ref=e130]:
+                    - img [ref=e132]
+                    - paragraph [ref=e134]: NFR-08a Offer 1776496532676
+                    - generic [ref=e135]: "1"
+                - button "FR-08m Offer 1776496520909 1" [ref=e137]:
+                  - generic [ref=e138]:
+                    - img [ref=e140]
+                    - paragraph [ref=e142]: FR-08m Offer 1776496520909
+                    - generic [ref=e143]: "1"
+                - button "FR-08e Offer 1776496449835 1" [ref=e145]:
+                  - generic [ref=e146]:
+                    - img [ref=e148]
+                    - paragraph [ref=e150]: FR-08e Offer 1776496449835
+                    - generic [ref=e151]: "1"
+                - button "FR-08d Offer 1776496441799 1" [ref=e153]:
+                  - generic [ref=e154]:
+                    - img [ref=e156]
+                    - paragraph [ref=e158]: FR-08d Offer 1776496441799
+                    - generic [ref=e159]: "1"
+              - generic [ref=e160]:
+                - paragraph [ref=e164]: Evaluation Pending · 5
+                - button "FR-09f Offer 1776496603183 1" [ref=e166]:
+                  - generic [ref=e167]:
+                    - img [ref=e169]
+                    - paragraph [ref=e171]: FR-09f Offer 1776496603183
+                    - generic [ref=e172]: "1"
+                - button "FR-08j Group Offer 1776496487059 2" [ref=e174]:
+                  - generic [ref=e175]:
+                    - img [ref=e177]
+                    - paragraph [ref=e179]: FR-08j Group Offer 1776496487059
+                    - generic [ref=e180]: "2"
+                - button "FR-08i Offer 1776496475180 1" [ref=e182]:
+                  - generic [ref=e183]:
+                    - img [ref=e185]
+                    - paragraph [ref=e187]: FR-08i Offer 1776496475180
+                    - generic [ref=e188]: "1"
+                - button "FR-08h Offer 1776496465574 1" [ref=e190]:
+                  - generic [ref=e191]:
+                    - img [ref=e193]
+                    - paragraph [ref=e195]: FR-08h Offer 1776496465574
+                    - generic [ref=e196]: "1"
+              - button "Completed / Closed · 4" [ref=e198]:
+                - generic [ref=e199]:
+                  - img [ref=e201]
+                  - paragraph [ref=e204]: Completed / Closed · 4
+        - generic [ref=e205]:
+          - generic [ref=e207]:
+            - button "View Yasemin Ergin's profile" [ref=e208] [cursor=pointer]:
+              - img "Yasemin Ergin" [ref=e210]
+            - generic [ref=e211]:
+              - generic [ref=e212]:
+                - button "Yasemin Ergin" [ref=e213] [cursor=pointer]
+                - generic [ref=e214]: Offer
+              - button "NFR-09c Offer 1776496641704" [ref=e215] [cursor=pointer]:
+                - paragraph [ref=e216]: NFR-09c Offer 1776496641704
+                - img [ref=e218]
+          - generic [ref=e221]:
+            - paragraph [ref=e226]: INTEREST SENT
+            - paragraph [ref=e231]: SESSION PROPOSED
+            - paragraph [ref=e236]: SESSION CONFIRMED
+            - paragraph [ref=e241]: COMPLETED
+          - generic [ref=e243]:
+            - generic [ref=e244]:
+              - img [ref=e246]
+              - generic [ref=e248]:
+                - paragraph [ref=e249]: Propose a session
+                - paragraph [ref=e250]: Set a date and duration
+            - generic [ref=e251]:
+              - button "Initiate Handshake" [ref=e252] [cursor=pointer]
+              - button "Cancel" [ref=e253] [cursor=pointer]
+              - button "Report participant" [ref=e254] [cursor=pointer]:
+                - img [ref=e255]
+          - generic [ref=e259]:
+            - img "Yasemin Ergin" [ref=e261]
+            - generic [ref=e262]:
+              - paragraph [ref=e263]: Yasemin Ergin
+              - generic [ref=e264]: "Hi! I'm interested in your service: NFR-09c Offer 1776496641704"
+              - paragraph [ref=e265]: Just now
+          - generic [ref=e266]:
+            - generic [ref=e267]:
+              - textbox "Write a message…" [ref=e269]
+              - button [ref=e270]:
+                - img [ref=e271]
+            - paragraph [ref=e274]: Enter to send · Shift+Enter for new line
+      - generic [ref=e276]:
+        - paragraph [ref=e277]: Initiate Handshake
+        - paragraph [ref=e278]: Provide session details. The requester will review and approve.
+        - generic [ref=e279]:
+          - generic [ref=e280]:
+            - paragraph [ref=e281]: "Original post: 1 hours"
+            - paragraph [ref=e282]: Agreed duration (hours)
+            - spinbutton [ref=e283]: "1"
+            - paragraph [ref=e284]: Time credit will be based on this agreed duration.
+          - generic [ref=e285]:
+            - paragraph [ref=e286]: Scheduled Date & Time
+            - generic [ref=e287]:
+              - textbox [ref=e288]: 2026-04-21
+              - generic [ref=e289]:
+                - combobox [ref=e290]:
+                  - option "00"
+                  - option "01"
+                  - option "02"
+                  - option "03"
+                  - option "04"
+                  - option "05"
+                  - option "06"
+                  - option "07"
+                  - option "08"
+                  - option "09"
+                  - option "10" [selected]
+                  - option "11"
+                  - option "12"
+                  - option "13"
+                  - option "14"
+                  - option "15"
+                  - option "16"
+                  - option "17"
+                  - option "18"
+                  - option "19"
+                  - option "20"
+                  - option "21"
+                  - option "22"
+                  - option "23"
+                - paragraph [ref=e291]: ":"
+                - combobox [ref=e292]:
+                  - option "00" [selected]
+                  - option "15"
+                  - option "30"
+                  - option "45"
+        - paragraph [ref=e293]: Schedule conflict detected
+        - generic [ref=e294]:
+          - button "Cancel" [ref=e295] [cursor=pointer]
+          - button "Send Details" [ref=e296] [cursor=pointer]
+  - region "Notifications alt+T"
+```
