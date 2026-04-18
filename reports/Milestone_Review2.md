@@ -698,33 +698,63 @@ This is therefore a **substantially stronger and more mature testing process tha
 
 ## Changes Made Since Milestone 1
 
+### Requirements Review and SRS Alignment
+
 After the M1 demo we held a structured requirements review pass (issues #194–#196) where each team member took ownership of a feature cluster and walked its current state against the SRS. This directly surfaced the admin panel gaps (FR-03b and FR-03d were missing outright) and the Feature 14–16 test gaps, both of which were fixed before any new development started. Running that review at the top of the milestone removed most of the late-cycle surprises we had in M1.
 
 Customer feedback from the M1 demo was converted into explicit SRS deltas before the corresponding implementation PRs were opened. The review photo attachment requirement and the evaluation window rule clarifications were documented in the SRS first, then implemented. This reversed the M1 pattern where requirements drifted during coding.
 
+### Issue-Driven Coordination and Communication
+
 Coordination also became more issue-driven in this milestone. Each feature was broken down into GitHub issues with an explicit owner and acceptance criteria, which made it easier for members to work in parallel without stepping on each other's branches and made review scope clearer. We kept a weekly meeting cadence and wrote up meeting notes on the wiki for each session, so decisions (state transitions like `PENDING → ACCEPTED → COMPLETED` for handshakes, no-show policy direction, penalty-flow simplification) had a written record that the implementation PRs could refer back to.
 
+Task distribution itself changed character between milestones. Until CM1, work had been fairly segmented, with each member staying close to a single area. After CM1 we shifted toward members taking responsibility across multiple parts of the project, which meant reviews could cross modules and nobody was a single point of failure on a feature for long.
+
+### Mobile and Monorepo Synchronization
+
 The mobile client moved from a Git submodule to the main monorepo at the start of the milestone (PR #191). Having mobile, backend, and web in one repository meant unified CI, shared tooling configuration, and a single PR context for cross-stack changes. It was a prerequisite for the full mobile forum module that landed later.
+
+Mobile also started the milestone well behind the backend and web on several modules, and we treated that as its own piece of work rather than something that would sort itself out. We opened targeted catch-up issues for each area that was lagging, standardized how the mobile client consumes the backend API, and reused type definitions across clients wherever it was practical so the same request and response contract did not have to be maintained in two places. The focus shifted to completing end-to-end flows on device (browse → handshake → evaluate, and later the event join → check-in → evaluation path) rather than landing isolated screens that looked right on their own but did not hook into the surrounding flow.
+
+### CI and Engineering Practices
 
 CI also changed shape during the milestone. Tiered E2E test selection (PR #360) lets feature-branch PRs run only the suites affected by their changes rather than the full matrix, which cut average CI time as the Playwright suite grew. A dedicated mobile CI workflow (`ci-mobile.yml`) was added at the same time so the React Native codebase gets its own lint and unit-test signal on every PR.
 
 The backend refactor from views into a service layer (PR #354, later extended as the pattern for `EventHandshakeService`) became the default for new features rather than an exception. Business rules now live in `services.py` with their own error types, which keeps views thin and makes the rules easier to test in isolation. The Definition of Done going forward reflects this: a feature adding non-trivial backend logic is expected to place that logic in a service class.
 
+### Weaknesses and Room for Improvement
+
 One weakness that did show up in the milestone was long-lived branches causing migration conflicts, most visibly on PR #382 which needed three fix commits to reconcile the migration dependency chain. For the next cycle we have committed to shorter-lived feature branches and more frequent rebases onto `dev`, so that migration graph divergence is caught while it is still small. Tiered E2E selection has already reduced the cost of running tests often, which makes shorter branches workable day to day.
+
+The other area we want to improve is catching integration issues earlier. A few cross-module mismatches only became visible once the full E2E suite ran at PR time, which was later than we would have liked. Running end-to-end flows more often during development, rather than leaving them for the end of a branch, should shorten that feedback loop.
 
 ## Plan for Completing the Project
 
-With Customer Milestone 2 closed, the remaining work is about finishing rather than expanding. The goals for the rest of the project are:
+With Customer Milestone 2 closed, the remaining work is about finishing rather than expanding. The goals for the rest of the project are grouped below.
+
+### Core Functional Flows and Recommendations
 
 - Finalize the requirements by closing the partial items still open (FR-18d–f for penalty management, FR-19b mobile offline cache, the QR and GPS dual-factor behind FR-19i, and the advanced ranking signals in FR-17f–g).
-- Close the remaining functional test gaps so every feature mentioned in the SRS has at least one integration or E2E test exercising its full path, and put the NFR performance baselines (NFR-12a–b, NFR-17a) behind automated SLA checks.
-- Optimize and fix bugs that surfaced during M2 integration and the customer demo, focusing on edge cases around cancellations, concurrent handshake actions, and TimeBank credit conflicts rather than adding new functional breadth.
-- Reach feature parity on mobile and web for the flows customers actually use day to day (offer, request, event, evaluation, chat), with the same test coverage on both sides.
 - Complete the recommendation engine so the discovery side of the product feels alive, which includes the age dampener rework and the newcomer-friendly signals agreed with the customer at the M2 demo.
 
-## Project Plan Link
+### Mobile Client Completion
 
-The live project plan is tracked on GitHub Projects at [https://github.com/orgs/SWE-574/projects/4](https://github.com/orgs/SWE-574/projects/4). The board is the source of truth for backlog prioritization and sprint assignments; each card links back to the underlying issues and pull requests in [SWE-574-3](https://github.com/SWE-574/SWE-574-3/issues).
+- Reach feature parity on mobile and web for the flows customers actually use day to day (offer, request, event, evaluation, chat), with the same test coverage on both sides.
+- Finish the mobile client with the same UI and navigation language used on web, so the remaining modules do not look like they were built by a different team or grafted on at the end.
+
+### Integration and Testing
+
+- Close the remaining functional test gaps so every feature mentioned in the SRS has at least one integration or E2E test exercising its full path, and put the NFR performance baselines (NFR-12a–b, NFR-17a) behind automated SLA checks.
+- Optimize and fix bugs that surfaced during M2 integration and the customer demo, focusing on edge cases around cancellations, concurrent handshake actions, and TimeBank credit conflicts rather than adding new functional breadth.
+
+### Documentation and Finalization
+
+- Update the SRS and wiki for the scope changes that came out of the M2 demo (no-show penalty simplification, ranking parameter rework) and prepare the final report and user manual alongside the remaining implementation rather than saving them for the last week.
+- Clean up the codebase where M2 left temporary scaffolding, feature flags, or xfail markers behind, so what we hand over is maintainable rather than full of transitional code.
+
+## Project Plan and Tracking
+
+The live project plan is tracked on GitHub Projects at [https://github.com/orgs/SWE-574/projects/4](https://github.com/orgs/SWE-574/projects/4). The board is the source of truth for backlog prioritization and sprint assignments, with each feature represented as a set of issues, cards moved through the usual To Do / In Progress / Done columns, and each card linked back to the underlying issues and pull requests in [SWE-574-3](https://github.com/SWE-574/SWE-574-3/issues) so progress is visible to the whole team as it is updated.
 
 ---
 
