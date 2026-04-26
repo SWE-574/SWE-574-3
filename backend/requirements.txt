@@ -1,4 +1,4 @@
-django>=4.2,<7.0
+django>=6.0.4,<7.0
 python-dotenv
 resend>=2.0.0
 djangorestframework
