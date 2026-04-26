@@ -21,6 +21,6 @@ pytest-django>=4.7.0
 pytest-cov>=4.1.0
 pytest-html>=3.2.0
 pytest-xdist>=3.3.0
-factory-boy>=3.3.0
+factory-boy>=3.3.3
 faker>=19.0.0
 exponent-server-sdk>=2.1.0
