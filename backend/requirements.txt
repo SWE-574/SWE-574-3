@@ -6,7 +6,7 @@ djangorestframework-simplejwt
 psycopg2-binary
 django-cors-headers
 requests>=2.31.0
-channels>=4.0.0
+channels>=4.3.2
 channels-redis>=4.2.0
 daphne>=4.0.0
 drf-spectacular>=0.27.0
