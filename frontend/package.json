@@ -18,7 +18,7 @@
   "dependencies": {
     "@chakra-ui/react": "^3.33.0",
     "@hookform/resolvers": "^5.2.2",
-    "axios": "^1.13.6",
+    "axios": "^1.15.2",
     "date-fns": "^4.1.0",
     "mapbox-gl": "^3.21.0",
     "plotly.js-dist-min": "^3.5.0",
