@@ -62,6 +62,12 @@ const FILTERS = [
   { id: 'weekend',   label: 'Weekend',    icon: <FiCalendar size={12} /> },
 ]
 
+const TYPE_FILTERS = [
+  { id: 'Offer' as const, label: 'Offers', activeBg: GREEN, activeColor: WHITE, dotColor: GREEN },
+  { id: 'Need'  as const, label: 'Needs',  activeBg: BLUE,  activeColor: WHITE, dotColor: BLUE  },
+  { id: 'Event' as const, label: 'Events', activeBg: AMBER, activeColor: WHITE, dotColor: AMBER },
+]
+
 // ─── Handshake badge ──────────────────────────────────────────────────────────
 
 const HANDSHAKE_BADGE: Record<
@@ -386,6 +392,7 @@ const DashboardPage = () => {
   const { isAuthenticated, user } = useAuthStore()
 
   const [activeFilter, setActiveFilter]             = useState('all')
+  const [activeTypes, setActiveTypes]               = useState<Set<'Offer' | 'Need' | 'Event'>>(new Set())
   const [searchQuery, setSearchQuery]               = useState('')
   const [debouncedSearch, setDebouncedSearch]       = useState('')
   const [services, setServices]                     = useState<Service[]>([])
@@ -524,19 +531,38 @@ const DashboardPage = () => {
     else { requestLocation() }
   }, [locationEnabled, userLocation, requestLocation])
 
+  const toggleType = useCallback((t: 'Offer' | 'Need' | 'Event') => {
+    setActiveTypes((prev) => {
+      const next = new Set(prev)
+      if (next.has(t)) next.delete(t); else next.add(t)
+      return next
+    })
+  }, [])
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const ownServiceHandshakes = Array.from(incomingMap.values()).flat()
   const myServices         = allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id })
 
   // Hide events from the browse feed where the logged-in user was removed
   // (i.e. their handshake was cancelled by an admin after a report).
-  const displayServices = isAuthenticated
+  const displayServices = (isAuthenticated
     ? services.filter((s) => {
         if (s.type !== 'Event') return true
         const hs = handshakeMap.get(s.id)
         return hs?.status !== 'cancelled'
       })
     : services
+  )
+    .filter((s) => {
+      if (s.type === 'Event' && s.scheduled_time && new Date(s.scheduled_time).getTime() <= Date.now()) return false
+      return activeTypes.size === 0 || activeTypes.has(s.type)
+    })
+    .sort((a, b) => {
+      const aInactive = ['denied', 'cancelled'].includes(handshakeMap.get(a.id)?.status ?? '')
+      const bInactive = ['denied', 'cancelled'].includes(handshakeMap.get(b.id)?.status ?? '')
+      if (aInactive === bInactive) return 0
+      return aInactive ? 1 : -1
+    })
   const pendingHs          = myServices.filter((service) => {
     const incoming = incomingMap.get(service.id) ?? []
     return incoming.some((h) => h.status === 'pending')
@@ -646,7 +672,7 @@ const DashboardPage = () => {
               <Flex
                 gap="3px" bg={GRAY100} p="3px" borderRadius="10px"
                 display={{ base: 'none', sm: 'flex' }}
-                flexShrink={0}
+                flexShrink={0} align="center"
               >
                 {FILTERS.map((f) => (
                   <Box
@@ -664,6 +690,28 @@ const DashboardPage = () => {
                     <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
                   </Box>
                 ))}
+                {/* Divider */}
+                <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
+                {/* Type chips */}
+                {TYPE_FILTERS.map((tf) => {
+                  const isActive = activeTypes.has(tf.id)
+                  return (
+                    <Box
+                      key={tf.id} as="button"
+                      onClick={() => toggleType(tf.id)}
+                      px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
+                      fontSize="12px" fontWeight={isActive ? 700 : 500}
+                      bg={isActive ? tf.activeBg : 'transparent'}
+                      color={isActive ? tf.activeColor : GRAY500}
+                      boxShadow={isActive ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                      cursor="pointer" transition="all 0.12s"
+                      display="flex" alignItems="center" gap="4px"
+                    >
+                      <Box w="6px" h="6px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                      <Box display={{ base: 'none', md: 'block' }}>{tf.label}</Box>
+                    </Box>
+                  )
+                })}
               </Flex>
 
               {/* Map toggle */}
@@ -686,7 +734,7 @@ const DashboardPage = () => {
             {/* Filter pills row on mobile (below search bar) */}
             <Flex
               display={{ base: 'flex', sm: 'none' }}
-              gap="5px" mt="8px" overflowX="auto"
+              gap="5px" mt="8px" overflowX="auto" align="center"
               style={{ scrollbarWidth: 'none' }}
             >
               {FILTERS.map((f) => (
@@ -705,6 +753,28 @@ const DashboardPage = () => {
                   {f.label}
                 </Box>
               ))}
+              {/* Divider */}
+              <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
+              {/* Type chips */}
+              {TYPE_FILTERS.map((tf) => {
+                const isActive = activeTypes.has(tf.id)
+                return (
+                  <Box
+                    key={tf.id} as="button" flexShrink={0}
+                    onClick={() => toggleType(tf.id)}
+                    px="10px" py="5px" borderRadius="20px"
+                    fontSize="12px" fontWeight={isActive ? 700 : 500}
+                    bg={isActive ? tf.activeBg : WHITE}
+                    color={isActive ? tf.activeColor : GRAY600}
+                    border={`1px solid ${isActive ? tf.activeBg : GRAY200}`}
+                    cursor="pointer" transition="all 0.12s"
+                    display="flex" alignItems="center" gap="4px"
+                  >
+                    <Box w="6px" h="6px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                    {tf.label}
+                  </Box>
+                )
+              })}
             </Flex>
           </Box>
 
@@ -716,6 +786,7 @@ const DashboardPage = () => {
                 <HStack gap={3} fontSize="11px" color={GRAY500}>
                   <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={GREEN} />Offers</Flex>
                   <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={BLUE} />Wants</Flex>
+                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={AMBER} />Events</Flex>
                 </HStack>
                 {isLoading && services.length > 0 && (
                   <Flex align="center" gap="5px" ml="auto">

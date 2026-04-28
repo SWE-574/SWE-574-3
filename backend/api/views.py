@@ -1870,6 +1870,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 scheduled_time__isnull=False,
                 scheduled_time__lte=timezone.now(),
             )
+            queryset = queryset.exclude(
+                type='Event',
+                scheduled_time__isnull=False,
+                scheduled_time__lte=timezone.now(),
+            )
         
         # Apply ordering based on sort parameter
         # Must validate that lat/lng are valid numbers, not just truthy strings
@@ -2316,8 +2321,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
         POST /api/services/{id}/cancel-event/
         """
         service = self.get_object()
+        reason = request.data.get('reason', '')
         try:
-            EventHandshakeService.cancel_event(service, request.user)
+            EventHandshakeService.cancel_event(service, request.user, reason=reason)
         except PermissionError as e:
             return create_error_response(
                 str(e), code=ErrorCodes.PERMISSION_DENIED,

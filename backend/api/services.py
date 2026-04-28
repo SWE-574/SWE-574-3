@@ -1684,7 +1684,7 @@ class EventHandshakeService:
                 )
 
     @staticmethod
-    def cancel_event(service: Service, organizer: User) -> None:
+    def cancel_event(service: Service, organizer: User, reason: str = '') -> None:
         """
         Organizer cancels an Event.
 
@@ -1744,7 +1744,8 @@ class EventHandshakeService:
                 )
 
             service.status = 'Cancelled'
-            service.save(update_fields=['status', 'updated_at'])
+            service.cancellation_reason = reason
+            service.save(update_fields=['status', 'cancellation_reason', 'updated_at'])
 
 
 class EventNoShowAppealService:
