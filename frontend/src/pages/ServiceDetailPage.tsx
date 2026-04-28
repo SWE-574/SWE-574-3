@@ -2319,10 +2319,9 @@ export default function ServiceDetailPage() {
                 </Box>
               )}
               <ModalFieldLabel>Reason for cancellation (required)</ModalFieldLabel>
-              <Box
-                as="textarea"
+              <textarea
                 value={cancelReason}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCancelReason(e.target.value)}
+                onChange={(e) => setCancelReason(e.target.value)}
                 rows={4}
                 placeholder="Let participants know why this event is being cancelled…"
                 style={{
