@@ -553,7 +553,10 @@ const DashboardPage = () => {
       })
     : services
   )
-    .filter((s) => activeTypes.size === 0 || activeTypes.has(s.type))
+    .filter((s) => {
+      if (s.type === 'Event' && s.scheduled_time && new Date(s.scheduled_time).getTime() <= Date.now()) return false
+      return activeTypes.size === 0 || activeTypes.has(s.type)
+    })
     .sort((a, b) => {
       const aInactive = ['denied', 'cancelled'].includes(handshakeMap.get(a.id)?.status ?? '')
       const bInactive = ['denied', 'cancelled'].includes(handshakeMap.get(b.id)?.status ?? '')
