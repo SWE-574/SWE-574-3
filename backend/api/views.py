@@ -2321,8 +2321,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
         POST /api/services/{id}/cancel-event/
         """
         service = self.get_object()
+        reason = request.data.get('reason', '')
         try:
-            EventHandshakeService.cancel_event(service, request.user)
+            EventHandshakeService.cancel_event(service, request.user, reason=reason)
         except PermissionError as e:
             return create_error_response(
                 str(e), code=ErrorCodes.PERMISSION_DENIED,
