@@ -552,7 +552,14 @@ const DashboardPage = () => {
         return hs?.status !== 'cancelled'
       })
     : services
-  ).filter((s) => activeTypes.size === 0 || activeTypes.has(s.type))
+  )
+    .filter((s) => activeTypes.size === 0 || activeTypes.has(s.type))
+    .sort((a, b) => {
+      const aInactive = ['denied', 'cancelled'].includes(handshakeMap.get(a.id)?.status ?? '')
+      const bInactive = ['denied', 'cancelled'].includes(handshakeMap.get(b.id)?.status ?? '')
+      if (aInactive === bInactive) return 0
+      return aInactive ? 1 : -1
+    })
   const pendingHs          = myServices.filter((service) => {
     const incoming = incomingMap.get(service.id) ?? []
     return incoming.some((h) => h.status === 'pending')
