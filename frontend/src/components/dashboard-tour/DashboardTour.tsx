@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Joyride, STATUS, type CallBackProps, type Step } from 'react-joyride'
 import { useTourStore } from '@/store/useTourStore'
 import { GREEN, GRAY800 } from '@/theme/tokens'
@@ -196,11 +196,14 @@ export default function DashboardTour() {
   const runId = useTourStore((s) => s.runId)
   const endTour = useTourStore((s) => s.endTour)
 
-  /* Re-evaluate which optional steps are present every time we open. */
-  const [steps, setSteps] = useState<TourStep[]>(ALL_STEPS)
-  useEffect(() => {
-    if (!isOpen) return
-    setSteps(pickAvailableSteps())
+  /* Re-evaluate which optional steps are present every time the tour
+   * is (re)started. Derived during render (no setState-in-effect) so
+   * the list always reflects the latest DOM when the tour opens.
+   * `runId` is referenced so the memo recomputes when startTour() is
+   * called even if `isOpen` was already true. */
+  const steps = useMemo<TourStep[]>(() => {
+    void runId
+    return isOpen ? pickAvailableSteps() : ALL_STEPS
   }, [isOpen, runId])
 
   /* Lock background scrolling while the tour is active. */
