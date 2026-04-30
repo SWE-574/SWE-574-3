@@ -34,6 +34,7 @@ import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
 import type { Handshake } from '@/services/handshakeAPI'
+import DashboardTour from '@/components/dashboard-tour/DashboardTour'
 
 import {
   GREEN, GREEN_LT,
@@ -239,7 +240,7 @@ function CardHeader({ service, gradient }: { service: Service; gradient: [string
 }
 
 function ServiceCard({
-  service, isOwn, handshake, incomingCount, pendingCount, onClick, onHover,
+  service, isOwn, handshake, incomingCount, pendingCount, onClick, onHover, dataTour,
 }: {
   service: Service
   isOwn: boolean
@@ -248,6 +249,7 @@ function ServiceCard({
   pendingCount: number
   onClick: () => void
   onHover?: () => void
+  dataTour?: string
 }) {
   const owner     = service.user ?? service.provider
   const isOffer   = service.type === 'Offer'
@@ -263,6 +265,7 @@ function ServiceCard({
       as="button" onClick={onClick} w="full" textAlign="left"
       onMouseEnter={onHover}
       onFocus={onHover}
+      data-tour={dataTour}
       bg={WHITE} borderRadius="16px"
       border="1px solid" borderColor={isOwn ? '#FED7AA' : GRAY200}
       overflow="hidden"
@@ -618,6 +621,7 @@ const DashboardPage = () => {
 
               {/* Search */}
               <Flex
+                data-tour="search"
                 flex={1} align="center" gap={2}
                 bg={GRAY50} border={`1px solid ${GRAY200}`} borderRadius="10px"
                 px={3} overflow="hidden"
@@ -644,6 +648,7 @@ const DashboardPage = () => {
 
               {/* Filter pills — hidden on very small screens */}
               <Flex
+                data-tour="filters"
                 gap="3px" bg={GRAY100} p="3px" borderRadius="10px"
                 display={{ base: 'none', sm: 'flex' }}
                 flexShrink={0}
@@ -669,6 +674,7 @@ const DashboardPage = () => {
               {/* Map toggle */}
               <Box
                 as="button" flexShrink={0}
+                data-tour="map-toggle"
                 px="11px" py="7px" borderRadius="9px"
                 bg={mapOpen ? GREEN : GRAY100}
                 color={mapOpen ? WHITE : GRAY600}
@@ -768,7 +774,7 @@ const DashboardPage = () => {
                 gap={4}
                 alignItems="stretch"
               >
-                {displayServices.map((service) => {
+                {displayServices.map((service, idx) => {
                   const owner    = service.user ?? service.provider
                   const isOwn    = !!user && owner?.id === user.id
                   const hs       = handshakeMap.get(service.id)
@@ -788,6 +794,7 @@ const DashboardPage = () => {
                       pendingCount={pCount}
                       onClick={() => navigate(`/service-detail/${service.id}`)}
                       onHover={() => setHoveredServiceId(service.id)}
+                      dataTour={idx === 0 ? 'listing-card' : undefined}
                     />
                   )
                 })}
@@ -796,6 +803,7 @@ const DashboardPage = () => {
           </Box>
         </Flex>
       </Box>
+      <DashboardTour />
     </Box>
   )
 }
