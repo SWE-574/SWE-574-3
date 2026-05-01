@@ -16,6 +16,7 @@ import { MapView } from '@/components/MapView'
 import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import ReportModal, { type ReportOption } from '@/components/ReportModal'
+import VerificationRequiredModal from '@/components/VerificationRequiredModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
   spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
@@ -681,9 +682,35 @@ export default function ServiceDetailPage() {
       )
     : undefined
 
+  // ── Email-verification gate for join/request actions ───────────────
+  // Backend already rejects unverified users (HTTP 403, EMAIL_NOT_VERIFIED)
+  // on /services/<id>/interest/ and /handshakes/services/<id>/join-event/.
+  // We block in the UI too so the user understands *why* and can resend the
+  // verification email without leaving the page.
+  const [verificationGate, setVerificationGate] = useState<{
+    open: boolean
+    actionLabel: string
+  }>({ open: false, actionLabel: 'continue' })
+
+  const isUnverified = user?.is_verified === false
+
+  const promptVerification = (actionLabel: string) => {
+    setVerificationGate({ open: true, actionLabel })
+  }
+
+  const closeVerificationGate = () => {
+    setVerificationGate((prev) => ({ ...prev, open: false }))
+  }
+
   const handleExpressInterest = async () => {
     if (!service) return
     if (!isAuthenticated) { navigate('/login'); return }
+    if (isUnverified) {
+      promptVerification(
+        service.type === 'Need' ? 'offer help on a Need' : 'request this service',
+      )
+      return
+    }
     setInterestLoading(true)
     try {
       await serviceAPI.expressInterest(service.id)
@@ -695,6 +722,11 @@ export default function ServiceDetailPage() {
       const detail = err.response?.data?.detail
       if (code === 'ALREADY_EXISTS') { toast.info('You already have an active request.'); handshakeAPI.list().then(setHandshakes).catch(() => {}) }
       else if (code === 'INSUFFICIENT_BALANCE') toast.error(detail ?? 'Insufficient TimeBank balance.')
+      else if (code === 'EMAIL_NOT_VERIFIED') {
+        promptVerification(
+          service.type === 'Need' ? 'offer help on a Need' : 'request this service',
+        )
+      }
       else toast.error(detail ?? 'Could not express interest. Please try again.')
     } finally { setInterestLoading(false) }
   }
@@ -735,6 +767,10 @@ export default function ServiceDetailPage() {
 
   const handleJoinEvent = async () => {
     if (!service || !isAuthenticated) { navigate('/login'); return }
+    if (isUnverified) {
+      promptVerification('join this event')
+      return
+    }
     if (service.status !== 'Active') {
       toast.error('This event is no longer open for joining.')
       return
@@ -745,8 +781,12 @@ export default function ServiceDetailPage() {
       toast.success('You\'ve joined the event!')
       setHandshakes(await handshakeAPI.list())
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail ?? 'Could not join event.')
+      const err = e as { response?: { data?: { detail?: string; code?: string } } }
+      if (err.response?.data?.code === 'EMAIL_NOT_VERIFIED') {
+        promptVerification('join this event')
+      } else {
+        toast.error(err.response?.data?.detail ?? 'Could not join event.')
+      }
     } finally { setJoinLoading(false) }
   }
 
@@ -2280,6 +2320,13 @@ export default function ServiceDetailPage() {
           isOwner={isOwn}
         />
       )}
+
+      <VerificationRequiredModal
+        isOpen={verificationGate.open}
+        onClose={closeVerificationGate}
+        actionLabel={verificationGate.actionLabel}
+        email={user?.email}
+      />
 
     </Box>
   )

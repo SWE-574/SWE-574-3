@@ -4,6 +4,7 @@ import { Box } from '@chakra-ui/react'
 import { useAuthStore } from '@/store/useAuthStore'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import AdminProtectedRoute from '@/components/AdminProtectedRoute'
+import RequireVerifiedEmail from '@/components/RequireVerifiedEmail'
 import Navbar from '@/components/Navbar'
 import { authAPI } from '@/services/authAPI'
 import { toast } from 'sonner'
@@ -267,15 +268,33 @@ function App() {
           {/* ── Authenticated ────────────────────────────────────────── */}
           <Route
             path="/post-offer"
-            element={<ProtectedRoute><PostOfferForm /></ProtectedRoute>}
+            element={
+              <ProtectedRoute>
+                <RequireVerifiedEmail actionLabel="post an Offer">
+                  <PostOfferForm />
+                </RequireVerifiedEmail>
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/post-need"
-            element={<ProtectedRoute><PostNeedForm /></ProtectedRoute>}
+            element={
+              <ProtectedRoute>
+                <RequireVerifiedEmail actionLabel="post a Need">
+                  <PostNeedForm />
+                </RequireVerifiedEmail>
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/post-event"
-            element={<ProtectedRoute><PostEventForm /></ProtectedRoute>}
+            element={
+              <ProtectedRoute>
+                <RequireVerifiedEmail actionLabel="post an Event">
+                  <PostEventForm />
+                </RequireVerifiedEmail>
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/edit-service/:id"
