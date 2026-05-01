@@ -275,12 +275,12 @@ const Navbar = () => {
                   bg="transparent" color={GRAY600}
                   style={{ border: 'none', cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s, color 0.15s' }}
                   onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = GREEN_LT
-                    ;(e.currentTarget as HTMLButtonElement).style.color = GREEN
+                    (e.currentTarget as HTMLDivElement).style.background = GREEN_LT
+                    ;(e.currentTarget as HTMLDivElement).style.color = GREEN
                   }}
                   onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-                    ;(e.currentTarget as HTMLButtonElement).style.color = GRAY600
+                    (e.currentTarget as HTMLDivElement).style.background = 'transparent'
+                    ;(e.currentTarget as HTMLDivElement).style.color = GRAY600
                   }}
                 >
                   <FiHelpCircle size={20} />

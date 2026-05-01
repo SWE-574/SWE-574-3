@@ -1,5 +1,12 @@
 import { useEffect, useMemo } from 'react'
-import { Joyride, STATUS, type CallBackProps, type Step } from 'react-joyride'
+import {
+  Joyride,
+  EVENTS,
+  ACTIONS,
+  type EventData,
+  type Options,
+  type Step,
+} from 'react-joyride'
 import { useTourStore } from '@/store/useTourStore'
 import { GREEN, GRAY800 } from '@/theme/tokens'
 
@@ -27,7 +34,7 @@ const ALL_STEPS: TourStep[] = [
     id: 'welcome',
     target: 'body',
     placement: 'center',
-    disableBeacon: true,
+    skipBeacon: true,
     title: 'Welcome to The Hive',
     content: (
       <p>
@@ -216,22 +223,36 @@ export default function DashboardTour() {
     }
   }, [isOpen])
 
-  const handleCallback = (data: CallBackProps) => {
-    const { status } = data
-    if (status === STATUS.FINISHED) endTour('done')
-    else if (status === STATUS.SKIPPED) endTour('skipped')
+  /* End-of-tour detection. v3 emits a single `tour:end` event and reports
+   * how it ended via `data.action` (`complete` for natural finish,
+   * `skip` when the user used the skip button). */
+  const handleEvent = (data: EventData) => {
+    if (data.type !== EVENTS.TOUR_END) return
+    if (data.action === ACTIONS.SKIP) endTour('skipped')
+    else endTour('done')
   }
+
+  /* Behaviour and theming options. In v3 these live on the `options`
+   * prop; only pure CSS overrides go in `styles`. */
+  const options = useMemo<Partial<Options>>(
+    () => ({
+      primaryColor: GREEN,
+      textColor: GRAY800,
+      backgroundColor: '#ffffff',
+      arrowColor: '#ffffff',
+      overlayColor: 'rgba(15, 23, 42, 0.55)',
+      zIndex: 10_000,
+      showProgress: true,
+      skipScroll: true,
+      skipBeacon: true,
+      // Show Back / Next-or-Finish / Skip — omit "Close" so there is no X.
+      buttons: ['back', 'primary', 'skip'],
+    }),
+    [],
+  )
 
   const styles = useMemo(
     () => ({
-      options: {
-        primaryColor: GREEN,
-        textColor: GRAY800,
-        backgroundColor: '#ffffff',
-        arrowColor: '#ffffff',
-        overlayColor: 'rgba(15, 23, 42, 0.55)',
-        zIndex: 10_000,
-      },
       tooltip: {
         borderRadius: 14,
         padding: 18,
@@ -245,7 +266,7 @@ export default function DashboardTour() {
         marginBottom: 6,
         color: GRAY800,
       },
-      buttonNext: {
+      buttonPrimary: {
         backgroundColor: GREEN,
         borderRadius: 9,
         padding: '8px 14px',
@@ -261,7 +282,6 @@ export default function DashboardTour() {
         color: '#6b7280',
         fontSize: 13,
       },
-      buttonClose: { display: 'none' as const },
     }),
     [],
   )
@@ -273,13 +293,9 @@ export default function DashboardTour() {
       key={runId}
       run
       continuous
-      showProgress
-      showSkipButton
-      disableScrolling
-      disableScrollParentFix
-      hideCloseButton
       steps={steps}
-      callback={handleCallback}
+      onEvent={handleEvent}
+      options={options}
       styles={styles}
       locale={{
         back: 'Back',
@@ -288,7 +304,6 @@ export default function DashboardTour() {
         next: 'Next',
         skip: 'Skip tour',
       }}
-      floaterProps={{ disableAnimation: true }}
     />
   )
 }
