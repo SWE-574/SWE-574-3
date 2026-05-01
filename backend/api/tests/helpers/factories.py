@@ -30,6 +30,11 @@ class UserFactory(factory.django.DjangoModelFactory):
     karma_score = 0
     role = 'member'
     is_active = True
+    # Default to verified so tests of normal flows (offer/need/event create,
+    # express interest, join event, etc.) succeed out of the box. Tests that
+    # exercise the verification gate or the email-verification flow itself
+    # explicitly pass `is_verified=False`.
+    is_verified = True
 
     @classmethod
     def _create(cls, model_class, *args, **kwargs):
