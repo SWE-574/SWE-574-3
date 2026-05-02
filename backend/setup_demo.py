@@ -103,8 +103,27 @@ print(f"  Processed {len(tags_data)} tags ({created_count} created)")
 
 print("\n[3/8] Creating demo users with Turkish names...")
 
+CURATED_AVATARS = {
+    'elif':       'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'cem':        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'ayse':       'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'mehmet':     'https://images.unsplash.com/photo-1552058544-f2b08422138a?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'zeynep':     'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'can':        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'deniz':      'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'burak':      'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'selin':      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'emre':       'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'yasemin':    'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'murat':      'https://images.unsplash.com/photo-1504257432389-52343af06ae3?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'levent':     'https://images.unsplash.com/photo-1566492031773-4f4e44671857?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'moderator':  'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'superadmin': 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+}
+
+
 def dicebear_avatar(seed):
-    return f"https://api.dicebear.com/9.x/avataaars/png?seed={seed}"
+    return CURATED_AVATARS.get(seed, f"https://api.dicebear.com/9.x/avataaars/png?seed={seed}")
 
 
 def picsum_image(seed, width, height):
@@ -113,87 +132,149 @@ def picsum_image(seed, width, height):
 
 CURATED_MEDIA_LIBRARY = {
     'cooking': [
-        'https://images.unsplash.com/photo-1752652012719-91c73fafdcb7',
-        'https://images.unsplash.com/photo-1683555500010-e2315045eef9',
-        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
+        'https://images.unsplash.com/photo-1556910103-1c02745aae4d',
+        'https://images.unsplash.com/photo-1466637574441-749b8f19452f',
+        'https://images.unsplash.com/photo-1507048331197-7d4ac70811cf',
+        'https://images.unsplash.com/photo-1528712306091-ed0763094c98',
     ],
     'coffee': [
-        'https://images.unsplash.com/photo-1742867113796-510f600e777f',
-        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
-        'https://images.unsplash.com/photo-1682490323164-f0bc834dab67',
+        'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085',
+        'https://images.unsplash.com/photo-1514432324607-a09d9b4aefda',
+        'https://images.unsplash.com/photo-1442512595331-e89e73853f31',
     ],
     'music': [
-        'https://images.unsplash.com/photo-1758275557159-e83a257c52f4',
-        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
-        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
+        'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4',
+        'https://images.unsplash.com/photo-1507838153414-b4b713384a76',
+        'https://images.unsplash.com/photo-1524650359799-842906ca1c06',
+        'https://images.unsplash.com/photo-1460723237483-7a6dc9d0b212',
     ],
     'books': [
-        'https://images.unsplash.com/photo-1739015828099-29531aa4bd1a',
-        'https://images.unsplash.com/photo-1742867113796-510f600e777f',
-        'https://images.unsplash.com/photo-1682490323164-f0bc834dab67',
+        'https://images.unsplash.com/photo-1481627834876-b7833e8f5570',
+        'https://images.unsplash.com/photo-1524995997946-a1c2e315a42f',
+        'https://images.unsplash.com/photo-1512820790803-83ca734da794',
     ],
     'conversation': [
-        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
-        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
-        'https://images.unsplash.com/photo-1758275557159-e83a257c52f4',
+        'https://images.unsplash.com/photo-1529156069898-49953e39b3ac',
+        'https://images.unsplash.com/photo-1521737711867-e3b97375f902',
+        'https://images.unsplash.com/photo-1543269865-cbf427effbad',
     ],
     'history': [
-        'https://images.unsplash.com/photo-1769117619707-4b3446365845',
-        'https://images.unsplash.com/photo-1739015828099-29531aa4bd1a',
-        'https://images.unsplash.com/photo-1755302731296-0c92f76eb1ec',
+        'https://images.unsplash.com/photo-1461360370896-922624d12a74',
+        'https://images.unsplash.com/photo-1524492412937-b28074a5d7da',
+        'https://images.unsplash.com/photo-1553708881-112abc53fe54',
     ],
     'garden': [
-        'https://images.unsplash.com/photo-1745415271518-e3844abfec58',
-        'https://images.unsplash.com/photo-1739015828099-29531aa4bd1a',
-        'https://images.unsplash.com/photo-1755302731296-0c92f76eb1ec',
+        'https://images.unsplash.com/photo-1416879595882-3373a0480b5b',
+        'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae',
+        'https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e',
+        'https://images.unsplash.com/photo-1523348837708-15d4a09cfac2',
     ],
     'art': [
-        'https://images.unsplash.com/photo-1753366394931-32dd91d99d78',
-        'https://images.unsplash.com/photo-1769117619707-4b3446365845',
-        'https://images.unsplash.com/photo-1742867113796-510f600e777f',
+        'https://images.unsplash.com/photo-1513364776144-60967b0f800f',
+        'https://images.unsplash.com/photo-1460661419201-fd4cecdf8a8b',
+        'https://images.unsplash.com/photo-1452860606245-08b6390b1e23',
     ],
     'photography': [
-        'https://images.unsplash.com/photo-1755302731296-0c92f76eb1ec',
-        'https://images.unsplash.com/photo-1769117619707-4b3446365845',
-        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
+        'https://images.unsplash.com/photo-1542038784456-1ea8e935640e',
+        'https://images.unsplash.com/photo-1554080353-a576cf803bda',
+        'https://images.unsplash.com/photo-1452587925148-ce544e77e70d',
     ],
     'walk': [
-        'https://images.unsplash.com/photo-1755302731296-0c92f76eb1ec',
-        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
-        'https://images.unsplash.com/photo-1769117619707-4b3446365845',
+        'https://images.unsplash.com/photo-1501785888041-af3ef285b470',
+        'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1',
+        'https://images.unsplash.com/photo-1506929562872-bb421503ef21',
     ],
     'chess': [
-        'https://images.unsplash.com/photo-1682490323164-f0bc834dab67',
-        'https://images.unsplash.com/photo-1742867113796-510f600e777f',
-        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
+        'https://images.unsplash.com/photo-1529699211952-734e80c4d42b',
+        'https://images.unsplash.com/photo-1560174038-da43ac74f01b',
+        'https://images.unsplash.com/photo-1586165368502-1bad197a6461',
     ],
     'technology': [
-        'https://images.unsplash.com/photo-1758686254007-a1aec378eca3',
-        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
-        'https://images.unsplash.com/photo-1739015828099-29531aa4bd1a',
+        'https://images.unsplash.com/photo-1531297484001-80022131f5a1',
+        'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b',
+        'https://images.unsplash.com/photo-1519389950473-47ba0277781c',
     ],
     'community': [
-        'https://images.unsplash.com/photo-1734304096560-86bdd0deb0f7',
-        'https://images.unsplash.com/photo-1714974528761-4297fe19252c',
-        'https://images.unsplash.com/photo-1758275557159-e83a257c52f4',
+        'https://images.unsplash.com/photo-1511632765486-a01980e01a18',
+        'https://images.unsplash.com/photo-1529156069898-49953e39b3ac',
+        'https://images.unsplash.com/photo-1517457373958-b7bdd4587205',
+        'https://images.unsplash.com/photo-1559027615-cd4628902d4a',
+    ],
+    'crafts': [
+        'https://images.unsplash.com/photo-1452860606245-08b6390b1e23',
+        'https://images.unsplash.com/photo-1513364776144-60967b0f800f',
+        'https://images.unsplash.com/photo-1558618666-fcd25c85f82e',
+    ],
+    'storytelling': [
+        'https://images.unsplash.com/photo-1529156069898-49953e39b3ac',
+        'https://images.unsplash.com/photo-1517457373958-b7bdd4587205',
+        'https://images.unsplash.com/photo-1491438590914-bc09fcaaf77a',
+    ],
+    'wellness': [
+        'https://images.unsplash.com/photo-1506126613408-eca07ce68773',
+        'https://images.unsplash.com/photo-1545205597-3d9d02c29597',
+        'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b',
+    ],
+    'neighborhood': [
+        'https://images.unsplash.com/photo-1559027615-cd4628902d4a',
+        'https://images.unsplash.com/photo-1517457373958-b7bdd4587205',
+        'https://images.unsplash.com/photo-1511632765486-a01980e01a18',
+    ],
+    'repair': [
+        'https://images.unsplash.com/photo-1530124566582-a45a7e3f3526',
+        'https://images.unsplash.com/photo-1558618666-fcd25c85f82e',
+        'https://images.unsplash.com/photo-1581092160562-40aa08e78837',
+    ],
+    'nature': [
+        'https://images.unsplash.com/photo-1441974231531-c6227db76b6e',
+        'https://images.unsplash.com/photo-1501854140801-50d01698950b',
+        'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05',
+    ],
+    'cinema': [
+        'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba',
+        'https://images.unsplash.com/photo-1478720568477-152d9b164e26',
+        'https://images.unsplash.com/photo-1440404653325-ab127d49abc1',
+    ],
+    'vinyl': [
+        'https://images.unsplash.com/photo-1539375665275-f9de415ef9ac',
+        'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4',
+        'https://images.unsplash.com/photo-1507838153414-b4b713384a76',
+    ],
+    'potluck': [
+        'https://images.unsplash.com/photo-1528605248644-14dd04022da1',
+        'https://images.unsplash.com/photo-1556910103-1c02745aae4d',
+        'https://images.unsplash.com/photo-1414235077428-338989a2e8c0',
+    ],
+    'zine': [
+        'https://images.unsplash.com/photo-1513364776144-60967b0f800f',
+        'https://images.unsplash.com/photo-1554080353-a576cf803bda',
+        'https://images.unsplash.com/photo-1542038784456-1ea8e935640e',
     ],
 }
 
 
 SEMANTIC_MEDIA_OVERRIDES = [
-    (('manti', 'börek', 'potluck', 'shared meal', 'recipe', 'kitchen', 'cooking'), 'cooking'),
+    (('manti', 'börek', 'shared meal', 'recipe', 'kitchen', 'cooking'), 'cooking'),
+    (('potluck', 'dinner under the stars', 'communal dinner'), 'potluck'),
     (('turkish coffee', 'coffee ritual', 'coffee', 'cafe'), 'coffee'),
-    (('singalong', 'acoustic', 'guitar', 'song', 'music', 'lyrics'), 'music'),
-    (('reading circle', 'reading', 'book club', 'book', 'poem', 'library'), 'books'),
-    (('language exchange', 'conversation exchange', 'conversation', 'language', 'welcome guide'), 'conversation'),
-    (('family archive', 'genealogy', 'history', 'story', 'museum', 'memory'), 'history'),
-    (('garden', 'gardening', 'plant', 'balcony', 'flowers'), 'garden'),
+    (('singalong', 'acoustic', 'guitar', 'song', 'music', 'lyrics', 'open mic'), 'music'),
+    (('vinyl', 'record', 'listening session', 'turntable'), 'vinyl'),
+    (('reading circle', 'reading', 'book club', 'book', 'poem', 'library', 'book exchange'), 'books'),
+    (('language exchange', 'conversation exchange', 'conversation hour', 'language', 'welcome guide', 'french', 'english practice'), 'conversation'),
+    (('family archive', 'genealogy', 'history', 'story', 'museum', 'memory', 'oral history'), 'history'),
+    (('garden', 'gardening', 'plant', 'balcony', 'flowers', 'composting', 'compost'), 'garden'),
     (('watercolor', 'painting', 'postcard', 'art', 'illustration'), 'art'),
-    (('photo walk', 'photography', 'camera'), 'photography'),
-    (('walk', 'walking', 'ferry', 'orientation', 'neighborhood', 'sunrise'), 'walk'),
+    (('knitting', 'crochet', 'sewing', 'mending', 'crafts', 'handmade', 'weaving'), 'crafts'),
+    (('repair', 'mending cafe', 'upcycling', 'fix'), 'repair'),
+    (('photo walk', 'photography', 'camera', 'zine'), 'photography'),
+    (('walk', 'walking', 'ferry', 'orientation', 'neighborhood', 'sunrise', 'walking buddy'), 'walk'),
     (('jog', 'jogging', 'running'), 'walk'),
     (('chess', 'board game', 'board-game', 'game night', 'study session'), 'chess'),
-    (('smartphone', 'phone basics', 'digital', 'app', 'tech'), 'technology'),
+    (('smartphone', 'phone basics', 'digital', 'app', 'tech', 'presentation'), 'technology'),
+    (('meditation', 'mindfulness', 'breathing', 'wellness', 'yoga', 'stretching'), 'wellness'),
+    (('storytelling', 'oral tradition', 'narrative'), 'storytelling'),
+    (('film', 'cinema', 'movie', 'screening', 'documentary'), 'cinema'),
+    (('birdwatching', 'nature', 'park', 'trees', 'wildlife'), 'nature'),
     (('community', 'gathering', 'meetup', 'event', 'neighbors'), 'community'),
 ]
 
@@ -530,6 +611,19 @@ follow(murat, elif_user)
 # Levent — retired musician, intergenerational
 follow(levent, murat);       follow(levent, mehmet);      follow(levent, elif_user)
 follow(levent, yasemin);     follow(levent, ayse)
+
+# Cross-cluster bridges for a denser, more realistic social graph
+follow(elif_user, cem);      follow(elif_user, can);       follow(elif_user, emre)
+follow(ayse, levent);        follow(ayse, emre);           follow(ayse, murat)
+follow(zeynep, levent);      follow(zeynep, yasemin);      follow(zeynep, can)
+follow(cem, elif_user);       follow(cem, selin);           follow(cem, deniz)
+follow(can, selin);           follow(can, zeynep);          follow(can, yasemin)
+follow(deniz, burak);         follow(deniz, murat);         follow(deniz, levent)
+follow(burak, selin);         follow(burak, levent);        follow(burak, deniz)
+follow(selin, emre);          follow(selin, can);           follow(selin, murat)
+follow(emre, selin);          follow(emre, ayse);           follow(emre, levent)
+follow(yasemin, cem);         follow(yasemin, can);         follow(yasemin, murat)
+follow(murat, ayse);          follow(murat, selin);         follow(murat, can)
 
 total_follows = UserFollow.objects.filter(
     follower__email__in=[u.email for u in all_users]
@@ -1266,6 +1360,231 @@ elif_photo_event = create_demo_service(
     created_days_ago=5,
 )
 
+# ── New community-aligned services ────────────────────────────────────────────
+
+elif_knitting = create_demo_service(
+    user=elif_user,
+    title='Neighborhood Knitting and Conversation Circle',
+    description='Bring yarn, needles, and whatever you are working on. This is less about perfecting stitches and more about slowing down together, sharing stories, and making something with your hands while the tea stays warm.',
+    service_type='Offer',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Beşiktaş',
+    location_lat=Decimal('41.0422'),
+    location_lng=Decimal('29.0089'),
+    max_participants=5,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=6, hours=3),
+    schedule_details='Saturday afternoon at 15:00 in Beşiktaş',
+    tags=[art_tag, education_tag],
+    created_days_ago=6,
+)
+
+ayse_composting = create_demo_service(
+    user=ayse,
+    title='Composting Basics for Apartment Dwellers',
+    description='A practical walkthrough of how to compost kitchen scraps in a small flat without odor or mess. We will set up a simple system together and talk through what works month to month.',
+    service_type='Offer',
+    duration='1.00',
+    location_type='In-Person',
+    location_area='Üsküdar',
+    location_lat=Decimal('41.0214'),
+    location_lng=Decimal('29.0125'),
+    max_participants=3,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=5, hours=1),
+    schedule_details='This weekend at 11:00 in Üsküdar',
+    tags=[gardening_tag, education_tag],
+    created_days_ago=4,
+)
+
+mehmet_oral_history = create_demo_service(
+    user=mehmet,
+    title='Oral History Recording for Elders',
+    description='I help families record conversations with older relatives so their stories, voices, and memories are preserved. We use a simple phone setup and I guide the questions gently.',
+    service_type='Offer',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Şişli',
+    location_lat=Decimal('41.0602'),
+    location_lng=Decimal('28.9874'),
+    max_participants=1,
+    schedule_type='One-Time',
+    schedule_details='Weekday afternoon, flexible scheduling',
+    tags=[education_tag],
+    created_days_ago=15,
+)
+
+selin_meditation = create_demo_service(
+    user=selin,
+    title='Gentle Morning Meditation in the Park',
+    description='A quiet, beginner-friendly guided meditation in a Cihangir park. No experience needed. We sit, breathe, and start the day with a few minutes of shared calm before the city wakes up.',
+    service_type='Offer',
+    duration='1.00',
+    location_type='In-Person',
+    location_area='Beyoğlu',
+    location_lat=Decimal('41.0320'),
+    location_lng=Decimal('28.9740'),
+    max_participants=6,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=3, hours=-2),
+    schedule_details='Wednesday at 07:30 in Cihangir park',
+    tags=[sports_tag, education_tag],
+    created_days_ago=7,
+)
+
+zeynep_french = create_demo_service(
+    user=zeynep,
+    title='French Conversation Hour for Curious Neighbors',
+    description='Relaxed spoken French practice for anyone who studied it years ago or just wants to try. We talk about food, travel, and daily life in simple sentences with no textbook pressure.',
+    service_type='Offer',
+    duration='1.00',
+    location_type='Online',
+    max_participants=2,
+    schedule_type='One-Time',
+    schedule_details='Thursday evening at 20:00 online',
+    tags=[language_tag, education_tag],
+    created_days_ago=9,
+)
+
+can_zine = create_demo_service(
+    user=can,
+    title='DIY Photo Zine Workshop for Beginners',
+    description='We will take a handful of phone photos, print them cheaply, and fold them into a small zine that tells a neighborhood story. No design experience needed, just curiosity and a few snapshots.',
+    service_type='Offer',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Beşiktaş',
+    location_lat=Decimal('41.0422'),
+    location_lng=Decimal('29.0089'),
+    max_participants=3,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=8, hours=2),
+    schedule_details='Next Sunday at 14:00 in Beşiktaş',
+    tags=[photography_tag, art_tag],
+    created_days_ago=3,
+)
+
+levent_vinyl = create_demo_service(
+    user=levent,
+    title='Vinyl Listening Session and Music Stories',
+    description='Bring a record or just your ears. We listen to one album side together, share what we notice, and talk about the stories behind the music. All genres welcome.',
+    service_type='Offer',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Beyoğlu',
+    location_lat=Decimal('41.0320'),
+    location_lng=Decimal('28.9740'),
+    max_participants=4,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=7, hours=4),
+    schedule_details='Next Saturday at 19:00 in Beyoğlu',
+    tags=[music_tag, art_tag],
+    created_days_ago=12,
+)
+
+deniz_bookbox = create_demo_service(
+    user=deniz,
+    title='Need Help Setting Up a Neighborhood Book Exchange Box',
+    description='I bought a small weatherproof box and want to mount it on our street as a free book exchange. Looking for someone handy who can help me install it and maybe paint it together.',
+    service_type='Need',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Kadıköy',
+    location_lat=Decimal('40.9819'),
+    location_lng=Decimal('29.0244'),
+    max_participants=1,
+    schedule_type='One-Time',
+    schedule_details='Any weekend morning works',
+    tags=[education_tag, art_tag],
+    created_days_ago=2,
+)
+
+murat_walkbuddy = create_demo_service(
+    user=murat,
+    title='Looking for a Walking Buddy for Weekend Mornings',
+    description='I work remotely and most of my week is screens. Looking for someone to share a quiet, no-agenda Saturday morning walk in Kadıköy. Just fresh air, conversation, and getting to know someone.',
+    service_type='Need',
+    duration='1.00',
+    location_type='In-Person',
+    location_area='Kadıköy',
+    location_lat=Decimal('40.9870'),
+    location_lng=Decimal('29.0280'),
+    max_participants=1,
+    schedule_type='One-Time',
+    schedule_details='Saturday mornings around 09:00',
+    tags=[sports_tag],
+    created_days_ago=3,
+)
+
+emre_presentation = create_demo_service(
+    user=emre,
+    title='Need Someone to Practice Presentation Skills With',
+    description='I have a community talk coming up and I get nervous speaking in front of people. Would love a patient listener who can give honest, gentle feedback on my delivery and timing.',
+    service_type='Need',
+    duration='1.00',
+    location_type='Online',
+    max_participants=1,
+    schedule_type='One-Time',
+    schedule_details='Any evening this week',
+    tags=[education_tag],
+    created_days_ago=1,
+)
+
+yasemin_potluck_event = create_demo_service(
+    user=yasemin,
+    title='Neighborhood Potluck Dinner Under the Stars',
+    description='Everyone brings one dish and one story about where it comes from. We set up a long table in the courtyard, light candles, and eat together like neighbors used to.',
+    service_type='Event',
+    duration='3.00',
+    location_type='In-Person',
+    location_area='Fatih',
+    location_lat=Decimal('41.0186'),
+    location_lng=Decimal('28.9647'),
+    max_participants=12,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=10, hours=3),
+    schedule_details='Next Friday evening at 19:30 in a Fatih courtyard',
+    tags=[cooking_tag, art_tag],
+    created_days_ago=8,
+)
+
+burak_openmic = create_demo_service(
+    user=burak,
+    title='Open Mic Night for First-Timers',
+    description='A warm, pressure-free open mic where the audience is there to encourage, not judge. Read a poem, play a song, tell a story, or just come to listen and clap.',
+    service_type='Event',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Kadıköy',
+    location_lat=Decimal('40.9819'),
+    location_lng=Decimal('29.0244'),
+    max_participants=10,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=6, hours=5),
+    schedule_details='Saturday evening at 20:00 in Kadıköy',
+    tags=[music_tag, art_tag],
+    created_days_ago=5,
+)
+
+elif_mending = create_demo_service(
+    user=elif_user,
+    title='Community Mending and Repair Cafe',
+    description='Bring something that needs fixing: a torn shirt, a broken zipper, a loose button. We sit together, share tools, teach each other basic repairs, and save things from the bin.',
+    service_type='Event',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Beşiktaş',
+    location_lat=Decimal('41.0422'),
+    location_lng=Decimal('29.0089'),
+    max_participants=8,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=9, hours=2),
+    schedule_details='Next Sunday at 14:00 in Beşiktaş community space',
+    tags=[art_tag, education_tag],
+    created_days_ago=4,
+)
+
 print(f"\n  Created {len(services)} services")
 
 for service in services:
@@ -1821,6 +2140,85 @@ attended_event_handshakes.extend([levent_event_1, levent_event_2, levent_event_3
 no_show_event_handshakes.append(levent_event_4)
 print(f"  Completed event: {levent_music_event.title} (3 attended, 1 no-show)")
 
+# ── New handshakes for new community-aligned services ─────────────────────────
+
+handshake25, completed25 = simulate_handshake_workflow(
+    mehmet_oral_history, yasemin, provider_initiated_days_ago=12, completed_days_ago=7
+)
+handshake25 = expect_handshake_state(handshake25, completed25, expected_completed=True, label='Oral History Recording for Elders (Mehmet -> Yasemin)')
+completed_handshakes.append(handshake25)
+print(f"  Completed: {mehmet_oral_history.title} (Mehmet -> Yasemin)")
+
+handshake26, completed26 = simulate_handshake_workflow(
+    zeynep_french, selin, provider_initiated_days_ago=7, completed_days_ago=3
+)
+handshake26 = expect_handshake_state(handshake26, completed26, expected_completed=True, label='French Conversation Hour for Curious Neighbors (Zeynep -> Selin)')
+completed_handshakes.append(handshake26)
+print(f"  Completed: {zeynep_french.title} (Zeynep -> Selin)")
+
+handshake27, completed27 = simulate_handshake_workflow(
+    deniz_bookbox, emre, provider_initiated_days_ago=1
+)
+handshake27 = expect_handshake_state(handshake27, completed27, expected_completed=False, label='Need Help Setting Up a Neighborhood Book Exchange Box (Deniz -> Emre)')
+accepted_handshakes.append(handshake27)
+print(f"  Accepted (pending completion): {deniz_bookbox.title} (Deniz -> Emre)")
+
+handshake28, completed28 = simulate_handshake_workflow(
+    elif_knitting, yasemin, provider_initiated_days_ago=2
+)
+handshake28 = expect_handshake_state(handshake28, completed28, expected_completed=False, label='Neighborhood Knitting and Conversation Circle (Elif -> Yasemin)')
+accepted_handshakes.append(handshake28)
+print(f"  Accepted (pending completion): {elif_knitting.title} (Elif -> Yasemin)")
+
+handshake29, completed29 = simulate_handshake_workflow(
+    emre_presentation, zeynep, provider_initiated_days_ago=0
+)
+handshake29 = expect_handshake_state(handshake29, completed29, expected_completed=False, label='Need Someone to Practice Presentation Skills With (Emre -> Zeynep)')
+accepted_handshakes.append(handshake29)
+print(f"  Accepted (pending completion): {emre_presentation.title} (Emre -> Zeynep)")
+
+handshake30, completed30 = simulate_handshake_workflow(
+    ayse_composting, deniz, provider_initiated_days_ago=3, completed_days_ago=1
+)
+handshake30 = expect_handshake_state(handshake30, completed30, expected_completed=True, label='Composting Basics for Apartment Dwellers (Ayşe -> Deniz)')
+completed_handshakes.append(handshake30)
+print(f"  Completed: {ayse_composting.title} (Ayşe -> Deniz)")
+
+handshake31, completed31 = simulate_handshake_workflow(
+    levent_vinyl, mehmet, provider_initiated_days_ago=5, completed_days_ago=2
+)
+handshake31 = expect_handshake_state(handshake31, completed31, expected_completed=True, label='Vinyl Listening Session and Music Stories (Levent -> Mehmet)')
+completed_handshakes.append(handshake31)
+print(f"  Completed: {levent_vinyl.title} (Levent -> Mehmet)")
+
+pending6 = create_pending_interest(elif_knitting, zeynep, age_delta=timedelta(days=1), label='Elif Knitting -> Zeynep')
+pending7 = create_pending_interest(can_zine, emre, age_delta=timedelta(hours=8), label='Can Zine -> Emre')
+pending8 = create_pending_interest(selin_meditation, ayse, age_delta=timedelta(hours=16), label='Selin Meditation -> Ayse')
+
+print("  Creating event participation for new events...")
+potluck_rsvp_1 = event_rsvp(yasemin_potluck_event, elif_user, joined_days_ago=5)
+potluck_rsvp_2 = event_rsvp(yasemin_potluck_event, selin, joined_days_ago=4)
+potluck_rsvp_3 = event_rsvp(yasemin_potluck_event, mehmet, joined_days_ago=3)
+potluck_rsvp_4 = event_rsvp(yasemin_potluck_event, levent, joined_days_ago=2)
+potluck_rsvp_5 = event_rsvp(yasemin_potluck_event, ayse, joined_days_ago=1)
+event_handshakes.extend([potluck_rsvp_1, potluck_rsvp_2, potluck_rsvp_3, potluck_rsvp_4, potluck_rsvp_5])
+upcoming_event_handshakes.extend([potluck_rsvp_1, potluck_rsvp_2, potluck_rsvp_3, potluck_rsvp_4, potluck_rsvp_5])
+
+openmic_rsvp_1 = event_rsvp(burak_openmic, cem, joined_days_ago=3)
+openmic_rsvp_2 = event_rsvp(burak_openmic, levent, joined_days_ago=2)
+openmic_rsvp_3 = event_rsvp(burak_openmic, elif_user, joined_days_ago=2)
+openmic_rsvp_4 = event_rsvp(burak_openmic, can, joined_days_ago=1)
+openmic_rsvp_5 = event_rsvp(burak_openmic, deniz, joined_days_ago=1)
+event_handshakes.extend([openmic_rsvp_1, openmic_rsvp_2, openmic_rsvp_3, openmic_rsvp_4, openmic_rsvp_5])
+upcoming_event_handshakes.extend([openmic_rsvp_1, openmic_rsvp_2, openmic_rsvp_3, openmic_rsvp_4, openmic_rsvp_5])
+
+mending_rsvp_1 = event_rsvp(elif_mending, ayse, joined_days_ago=3)
+mending_rsvp_2 = event_rsvp(elif_mending, yasemin, joined_days_ago=2)
+mending_rsvp_3 = event_rsvp(elif_mending, selin, joined_days_ago=1)
+mending_rsvp_4 = event_rsvp(elif_mending, zeynep, joined_days_ago=1)
+event_handshakes.extend([mending_rsvp_1, mending_rsvp_2, mending_rsvp_3, mending_rsvp_4])
+upcoming_event_handshakes.extend([mending_rsvp_1, mending_rsvp_2, mending_rsvp_3, mending_rsvp_4])
+
 print(
     f"\n  Created {len(completed_handshakes)} completed, {len(accepted_handshakes)} accepted, "
     f"{len(pending_handshakes)} pending, {len(cancelled_handshakes)} cancelled handshakes "
@@ -1904,6 +2302,30 @@ levent.save(update_fields=['karma_score'])
 
 EventEvaluationService.refresh_summary(levent_music_event)
 
+# ── Reputation for new completed handshakes ───────────────────────────────────
+
+new_reputation_data = [
+    (handshake25, yasemin, mehmet, True, True, True,
+     "Mehmet was so gentle with my mother during the recording. He asked questions I would never have thought of and she opened up beautifully."),
+    (handshake25, mehmet, yasemin, True, True, True,
+     "Yasemin's family stories were deeply moving. It was a privilege to help preserve them."),
+    (handshake26, selin, zeynep, True, True, True,
+     "Zeynep made the French hour feel effortless. We talked about Paris markets and I forgot I was practicing."),
+    (handshake26, zeynep, selin, True, True, True,
+     "Selin brought such warmth to the conversation. Her French is better than she thinks."),
+    (handshake30, deniz, ayse, True, True, True,
+     "Ayşe explained composting so clearly that I set up my own bin the same evening. No smell at all."),
+    (handshake30, ayse, deniz, True, True, True,
+     "Deniz asked really practical questions and already sent me a photo of her working compost bin."),
+    (handshake31, mehmet, levent, True, True, True,
+     "Listening to Levent's records while he told the stories behind each track was like a private museum visit."),
+    (handshake31, levent, mehmet, True, True, True,
+     "Mehmet brought a record I hadn't heard in forty years. That alone made the evening."),
+]
+
+for handshake, giver, receiver, punctual, helpful, kind, comment in new_reputation_data:
+    create_verified_reputation(handshake, giver, receiver, punctual, helpful, kind, comment)
+
 public_chat_scenarios = [
     (
         elif_manti,
@@ -1941,6 +2363,45 @@ public_chat_scenarios = [
             (ayse, "Can we bring a recipe even if it is written from memory and not exact?"),
             (yasemin, "Please do. Those are usually the best stories."),
             (selin, "I am already looking forward to hearing everyone's family context around the recipes."),
+        ],
+    ),
+    (
+        elif_knitting,
+        timezone.now() - timedelta(days=3),
+        [
+            (zeynep, "I have not knitted since I was a child. Is this really open to beginners?"),
+            (elif_user, "Absolutely. Half the point is conversation, not perfection."),
+            (yasemin, "I will bring extra needles in case anyone forgets theirs."),
+            (elif_user, "That would be lovely. Tea is on me."),
+        ],
+    ),
+    (
+        ayse_composting,
+        timezone.now() - timedelta(days=2),
+        [
+            (deniz, "Does it really not smell? My flatmate is skeptical."),
+            (ayse, "If the ratio is right, it just smells like earth. I will show you."),
+            (selin, "I have been curious about this for months. Finally someone offering it."),
+        ],
+    ),
+    (
+        levent_vinyl,
+        timezone.now() - timedelta(days=4),
+        [
+            (mehmet, "I might bring my father's old Zeki Müren record if that is alright."),
+            (levent, "That would be perfect. The stories behind the records matter as much as the music."),
+            (burak, "Do you have a turntable or should someone bring one?"),
+            (levent, "I have one. Just bring your ears and your stories."),
+        ],
+    ),
+    (
+        can_zine,
+        timezone.now() - timedelta(days=1),
+        [
+            (emre, "Can I use phone photos or does it have to be a real camera?"),
+            (can, "Phone photos are perfect. That is actually the whole idea."),
+            (ayse, "I love the idea of a neighborhood zine. Would you share the result?"),
+            (can, "I was thinking we could leave copies at the local coffee shop."),
         ],
     ),
 ]
@@ -1985,6 +2446,41 @@ group_chat_scenarios = [
         [
             (murat, "I am aiming for easy-to-learn games and a small group."),
             (burak, "That sounds ideal. I can bring tea and help explain one game too."),
+        ],
+    ),
+    (
+        yasemin_potluck_event,
+        timezone.now() - timedelta(days=3),
+        [
+            (yasemin, "Everyone brings one dish and one story. No need to cook anything fancy."),
+            (elif_user, "I am making a simple lentil salad. The story is about my grandmother's kitchen."),
+            (selin, "I will bring bread and cheese from the Fatih market. Easy to share."),
+            (mehmet, "Can I bring my wife's grape leaves? She insists."),
+            (yasemin, "Of course. The more hands that touched the food, the better the evening."),
+            (levent, "I will bring something sweet and a story about the bakery that used to be on our street."),
+        ],
+    ),
+    (
+        burak_openmic,
+        timezone.now() - timedelta(days=2),
+        [
+            (burak, "Just a reminder: no pressure to perform. Coming to listen counts too."),
+            (cem, "I might try reading a short poem if the mood is right."),
+            (levent, "I can play a few old songs on guitar if there is a gap."),
+            (elif_user, "I am coming to listen. That is my way of participating."),
+            (can, "I might bring my camera if that is alright. Would love to capture the evening."),
+            (burak, "Photos welcome, just keep it candid. No stage fright needed."),
+        ],
+    ),
+    (
+        elif_mending,
+        timezone.now() - timedelta(days=1),
+        [
+            (elif_user, "Bring anything that needs a second life. Buttons, zippers, small tears."),
+            (ayse, "I have a bag full of things I keep meaning to fix. Finally a reason."),
+            (yasemin, "My daughter has a backpack with a broken strap. Can we fix that?"),
+            (elif_user, "Definitely. I will bring extra thread and a few spare zippers."),
+            (selin, "This is such a good idea. Less waste, more community."),
         ],
     ),
 ]
@@ -2185,6 +2681,82 @@ for topic, author, body, created_at in posts_data:
     )
     ForumPost.objects.filter(pk=post.pk).update(created_at=created_at)
     print(f"  Added forum post to: {topic.title[:30]}...")
+
+# ── New forum topics and posts ────────────────────────────────────────────────
+
+new_topics_data = [
+    {
+        'category': forum_success,
+        'author': deniz,
+        'title': 'My first composting workshop changed more than my kitchen',
+        'body': 'I went to Ayşe\'s composting session mostly out of curiosity. Came home and set up a bin the same night. But the real takeaway was meeting three neighbors I see every day but never talked to. We now check in on each other\'s compost bins like they are pets.',
+        'created_at': timezone.now() - timedelta(days=2),
+        'view_count': 27,
+    },
+    {
+        'category': forum_tips,
+        'author': yasemin,
+        'title': 'How to make a potluck feel welcoming instead of performative',
+        'body': 'I have hosted a few community dinners and learned that the key is lowering the bar. Tell people they can bring bread and butter. Assign someone to greet first-timers at the door. Make the table setting imperfect on purpose. It signals that this is about presence, not presentation.',
+        'created_at': timezone.now() - timedelta(days=1, hours=12),
+        'view_count': 35,
+    },
+    {
+        'category': forum_events,
+        'author': burak,
+        'title': 'Open mic night: what makes first-timers actually get on stage?',
+        'body': 'I am organizing an open mic and I want it to feel safe for people who have never performed before. What helped you take the leap at a community event? Was it a friend in the audience, a warm host, or just the right amount of dimmed lights?',
+        'created_at': timezone.now() - timedelta(days=1),
+        'view_count': 22,
+    },
+    {
+        'category': forum_skills,
+        'author': elif_user,
+        'title': 'Mending clothes together: what I learned about community repair',
+        'body': 'I started a small repair cafe out of frustration with throwing things away. What surprised me is how personal it gets. People bring a torn jacket and end up talking about where they wore it, who gave it to them, why it matters. Fixing things becomes a way of telling stories.',
+        'created_at': timezone.now() - timedelta(hours=18),
+        'view_count': 41,
+    },
+]
+
+new_forum_topics = []
+for spec in new_topics_data:
+    topic = ForumTopic.objects.create(
+        category=spec['category'],
+        author=spec['author'],
+        title=spec['title'],
+        body=spec['body'],
+        is_pinned=spec.get('is_pinned', False),
+        is_locked=spec.get('is_locked', False),
+        view_count=spec.get('view_count', 0),
+    )
+    ForumTopic.objects.filter(pk=topic.pk).update(created_at=spec['created_at'])
+    new_forum_topics.append(topic)
+    print(f"  Created new forum topic: {spec['title'][:40]}...")
+
+new_posts_data = [
+    (new_forum_topics[0], ayse, "This makes me so happy. Composting is really just the excuse to start talking to your neighbors.", timezone.now() - timedelta(days=1, hours=20)),
+    (new_forum_topics[0], emre, "I had a similar experience at Emre's walk. Sometimes the secondary effect of a meetup is the one that sticks.", timezone.now() - timedelta(days=1, hours=14)),
+    (new_forum_topics[1], selin, "I always put out a few conversation starter cards on the table. It helps shy guests find an entry point.", timezone.now() - timedelta(days=1, hours=6)),
+    (new_forum_topics[1], elif_user, "The imperfect table setting idea is brilliant. I want to try that at the mending cafe too.", timezone.now() - timedelta(hours=22)),
+    (new_forum_topics[1], mehmet, "At my age I have learned that the best gatherings are the ones where nobody is trying too hard.", timezone.now() - timedelta(hours=16)),
+    (new_forum_topics[2], levent, "When I hosted my singalong, I started by playing something everyone knows. That broke the ice.", timezone.now() - timedelta(hours=20)),
+    (new_forum_topics[2], cem, "I would get on stage if there was a rule that everyone claps no matter what. Kindness over quality.", timezone.now() - timedelta(hours=14)),
+    (new_forum_topics[2], can, "Having a host who goes first and is slightly imperfect really helps. It gives permission.", timezone.now() - timedelta(hours=8)),
+    (new_forum_topics[3], yasemin, "This is exactly what happened at the recipe swap. The stories outlasted the food.", timezone.now() - timedelta(hours=12)),
+    (new_forum_topics[3], selin, "I want to come to the next one. Repair as storytelling is such a beautiful frame.", timezone.now() - timedelta(hours=6)),
+    (forum_topics[3], selin, "I had a lovely French conversation hour with Zeynep recently. She made me feel like my rusty French was actually charming.", timezone.now() - timedelta(days=3)),
+    (forum_topics[8], mehmet, "The vinyl listening session with Levent. We sat and listened to a whole album side without checking phones. I had forgotten what that felt like.", timezone.now() - timedelta(days=2)),
+]
+
+for topic, author, body, created_at in new_posts_data:
+    post = ForumPost.objects.create(
+        topic=topic,
+        author=author,
+        body=body,
+    )
+    ForumPost.objects.filter(pk=post.pk).update(created_at=created_at)
+    print(f"  Added new forum post to: {topic.title[:30]}...")
 
 flagged_forum_post = ForumPost.objects.create(
     topic=forum_topics[5],
@@ -2455,6 +3027,176 @@ AdminAuditLog.objects.bulk_create([
 ])
 
 print(f"  Created 7 audit log entries")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DEMO SCENARIO: April 23rd Children's Festival (pre-seeded at 3 lifecycle stages)
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n[DEMO] Seeding April 23rd Festival scenario events...")
+
+FESTIVAL_TITLE = 'April 23rd Children\'s Festival in the Park'
+FESTIVAL_DESC = (
+    'A neighborhood festival for families to celebrate together! '
+    'We will play traditional street games like sack races and tug-of-war, '
+    'have face painting for the kids, and share tea and snacks. '
+    'Everyone pitches in — this is a community effort (imece). '
+    'Bring your kids, your energy, and something to share!'
+)
+FESTIVAL_IMG = 'https://images.unsplash.com/photo-1472162072942-cd5147eb3902?auto=format&fit=crop&w=800&h=600&q=80'
+FESTIVAL_LAT = Decimal('41.1080')
+FESTIVAL_LNG = Decimal('28.9680')
+
+# ── Event 1: CHECK-IN READY (Scene 2 — 24h lockdown window open) ──────────
+# scheduled_time = 30 min from now → inside lockdown, before start
+demo_fest_checkin = Service.objects.create(
+    user=zeynep,
+    title=FESTIVAL_TITLE,
+    description=FESTIVAL_DESC,
+    type='Event',
+    duration=Decimal('3.00'),
+    location_type='In-Person',
+    location_area='Eyüpsultan',
+    location_lat=FESTIVAL_LAT,
+    location_lng=FESTIVAL_LNG,
+    max_participants=20,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(minutes=30),
+    schedule_details='At the wide grassy area in the middle of the park, 14:00',
+    status='Active',
+    created_at=now - timedelta(days=8),
+)
+demo_fest_checkin.tags.set([education_tag, sports_tag])
+ServiceMedia.objects.create(
+    service=demo_fest_checkin, media_type='image',
+    file_url=FESTIVAL_IMG, display_order=0,
+)
+# Ayse, Burak, Cem joined
+for participant in [ayse, burak, cem]:
+    h = EventHandshakeService.join_event(demo_fest_checkin, participant)
+    Handshake.objects.filter(pk=h.pk).update(
+        created_at=now - timedelta(days=5),
+        updated_at=now - timedelta(days=5),
+    )
+# Group chat messages (imece conversation)
+add_group_chat_messages(demo_fest_checkin, [
+    (ayse, "I will bring the face painting supplies — I can paint the kids' faces!"),
+    (burak, "Great, I am coming with my car. I will get the sack race and tug-of-war materials from the warehouse."),
+    (cem, "We will take care of tea and plastic cups for everyone on our way."),
+    (zeynep, "Wonderful teamwork! See you at the wide grassy area in the middle of the park at 14:00."),
+], now - timedelta(days=4))
+print(f"  Created: {demo_fest_checkin.title} (check-in ready, 30 min from now)")
+
+# ── Event 2: READY TO CLOSE (Scene 4 — event happened, organizer can close) ─
+# scheduled_time = 3h ago → event happened, Ayse+Burak checked in, Cem did not
+demo_fest_close = Service.objects.create(
+    user=zeynep,
+    title=FESTIVAL_TITLE,
+    description=FESTIVAL_DESC,
+    type='Event',
+    duration=Decimal('3.00'),
+    location_type='In-Person',
+    location_area='Eyüpsultan',
+    location_lat=FESTIVAL_LAT,
+    location_lng=FESTIVAL_LNG,
+    max_participants=20,
+    schedule_type='One-Time',
+    scheduled_time=now - timedelta(hours=3),
+    schedule_details='At the wide grassy area in the middle of the park, 14:00',
+    status='Active',
+    created_at=now - timedelta(days=8),
+)
+demo_fest_close.tags.set([education_tag, sports_tag])
+ServiceMedia.objects.create(
+    service=demo_fest_close, media_type='image',
+    file_url=FESTIVAL_IMG, display_order=0,
+)
+# Directly create handshakes (bypassing join_event since scheduled_time is past)
+for participant in [ayse, burak, cem]:
+    Handshake.objects.create(
+        service=demo_fest_close, requester=participant,
+        status='accepted', provisioned_hours=0,
+        scheduled_time=demo_fest_close.scheduled_time,
+        created_at=now - timedelta(days=5),
+        updated_at=now - timedelta(days=5),
+    )
+for participant in [ayse, burak]:
+    Handshake.objects.filter(
+        service=demo_fest_close, requester=participant,
+    ).update(status='checked_in', updated_at=now - timedelta(hours=4))
+# Group chat with Cem's apology
+add_group_chat_messages(demo_fest_close, [
+    (ayse, "I will bring the face painting supplies — I can paint the kids' faces!"),
+    (burak, "Great, I am coming with my car. I will get the sack race and tug-of-war materials from the warehouse."),
+    (cem, "We will take care of tea and plastic cups for everyone on our way."),
+    (zeynep, "Wonderful teamwork! See you at the wide grassy area in the middle of the park at 14:00."),
+    (cem, "I am so sorry everyone. My son got a fever last night, we will not be able to make it to the park tomorrow. Happy holidays!"),
+    (zeynep, "Get well soon Cem, health comes first."),
+], now - timedelta(days=4))
+print(f"  Created: {demo_fest_close.title} (ready to close, Ayse+Burak checked in, Cem not)")
+
+# ── Event 3: COMPLETED (Scene 5 — event completed, evaluation window open) ───
+demo_fest_done = Service.objects.create(
+    user=zeynep,
+    title=FESTIVAL_TITLE,
+    description=FESTIVAL_DESC,
+    type='Event',
+    duration=Decimal('3.00'),
+    location_type='In-Person',
+    location_area='Eyüpsultan',
+    location_lat=FESTIVAL_LAT,
+    location_lng=FESTIVAL_LNG,
+    max_participants=20,
+    schedule_type='One-Time',
+    scheduled_time=now - timedelta(hours=4),
+    schedule_details='At the wide grassy area in the middle of the park, 14:00',
+    status='Active',
+    created_at=now - timedelta(days=8),
+)
+demo_fest_done.tags.set([education_tag, sports_tag])
+ServiceMedia.objects.create(
+    service=demo_fest_done, media_type='image',
+    file_url=FESTIVAL_IMG, display_order=0,
+)
+# Directly create handshakes and set final states (bypassing service layer)
+for participant in [ayse, burak, cem]:
+    Handshake.objects.create(
+        service=demo_fest_done, requester=participant,
+        status='accepted', provisioned_hours=0,
+        scheduled_time=demo_fest_done.scheduled_time,
+        created_at=now - timedelta(days=5),
+        updated_at=now - timedelta(days=5),
+    )
+# Mark Ayse + Burak as attended
+Handshake.objects.filter(
+    service=demo_fest_done, requester__in=[ayse, burak],
+).update(status='attended', updated_at=now - timedelta(minutes=30))
+# Mark Cem as no_show
+Handshake.objects.filter(
+    service=demo_fest_done, requester=cem,
+).update(status='no_show', updated_at=now - timedelta(minutes=30))
+# Complete the event and set evaluation windows
+completion_time = now - timedelta(minutes=30)
+window_end = completion_time + timedelta(hours=48)
+Service.objects.filter(pk=demo_fest_done.pk).update(
+    status='Completed', event_completed_at=completion_time,
+)
+Handshake.objects.filter(
+    service=demo_fest_done, status='attended',
+).update(
+    evaluation_window_starts_at=completion_time,
+    evaluation_window_ends_at=window_end,
+    evaluation_window_closed_at=None,
+)
+demo_fest_done.refresh_from_db()
+# Group chat
+add_group_chat_messages(demo_fest_done, [
+    (ayse, "I will bring the face painting supplies — I can paint the kids' faces!"),
+    (burak, "Great, I am coming with my car. I will get the sack race and tug-of-war materials from the warehouse."),
+    (cem, "We will take care of tea and plastic cups for everyone on our way."),
+    (zeynep, "Wonderful teamwork! See you at the wide grassy area in the middle of the park at 14:00."),
+    (cem, "I am so sorry everyone. My son got a fever last night, we will not be able to make it to the park tomorrow. Happy holidays!"),
+    (zeynep, "Get well soon Cem, health comes first."),
+], now - timedelta(days=4))
+print(f"  Created: {demo_fest_done.title} (completed, Ayse+Burak attended, Cem no-show, evaluation window open)")
 
 print("\n" + "=" * 60)
 print("Demo setup complete!")

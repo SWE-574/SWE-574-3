@@ -793,6 +793,16 @@ class ServiceSerializer(serializers.ModelSerializer):
         _, c_lng = _fuzzy_coords(str(obj.id) + '_c', lat, lng)
         return round(c_lng, 6)
 
+    def _is_event_participant(self, instance, user):
+        """Check whether the user has an active RSVP for this event."""
+        if instance.type != 'Event' or user is None:
+            return False
+        return Handshake.objects.filter(
+            service=instance,
+            requester=user,
+            status__in=['accepted', 'checked_in', 'attended'],
+        ).exists()
+
     def to_representation(self, instance):
         """Replace exact coordinates with a ~1 km privacy-fuzzed version before sending."""
         data = super().to_representation(instance)
@@ -803,12 +813,19 @@ class ServiceSerializer(serializers.ModelSerializer):
             and getattr(request_user, 'is_authenticated', False)
             and str(getattr(request_user, 'id', '')) == str(instance.user_id)
         )
-        if not is_owner:
+        is_joined_event = (
+            not is_owner
+            and request_user
+            and getattr(request_user, 'is_authenticated', False)
+            and self._is_event_participant(instance, request_user)
+        )
+        show_exact = is_owner or is_joined_event
+        if not show_exact:
             data.pop('session_exact_location', None)
             data.pop('session_exact_location_lat', None)
             data.pop('session_exact_location_lng', None)
             data.pop('session_location_guide', None)
-        if instance.location_type == 'In-Person' and not is_owner:
+        if instance.location_type == 'In-Person' and not show_exact:
             lat, lng = self._real_coords(instance)
             if lat is not None:
                 fuzzy_lat, fuzzy_lng = _fuzzy_coords(str(instance.id), lat, lng)

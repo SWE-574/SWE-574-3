@@ -65,6 +65,21 @@ export function timeUntilEvent(scheduledTime: string | null | undefined): string
   return `${days}d away`
 }
 
+/**
+ * Label for the event "Time until" summary tile: distinguishes upcoming events,
+ * active listings whose start time has passed (RSVPs closed), and finished events.
+ */
+export function eventCountdownSummary(
+  scheduledTime: string | null | undefined,
+  status: string | null | undefined,
+): string {
+  if (!scheduledTime) return 'Event started'
+  if (isFutureEvent(scheduledTime)) return timeUntilEvent(scheduledTime)
+  if (status === 'Completed') return 'Ended'
+  if (status === 'Cancelled') return 'Cancelled'
+  return 'RSVPs closed'
+}
+
 /** Returns true if the user is currently under an event-participation ban */
 export function isEventBanned(bannedUntil: string | null | undefined): boolean {
   if (!bannedUntil) return false

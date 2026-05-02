@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -789,6 +790,8 @@ export default function ServiceWizard({
           placeholder="Describe what participants can expect — schedule, materials, skill level…"
           placeholderTextColor={colors.GRAY400}
           multiline
+          blurOnSubmit={false}
+          scrollEnabled={false}
           style={[styles.input, styles.textarea]}
         />
       </InputLabel>
@@ -1237,7 +1240,8 @@ export default function ServiceWizard({
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
       <View style={styles.progressWrap}>
         {STEPS.map((item, index) => (
@@ -1265,6 +1269,8 @@ export default function ServiceWizard({
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
       >
         {renderStep()}
       </ScrollView>
@@ -1305,13 +1311,38 @@ export default function ServiceWizard({
       </View>
 
       {pickerMode ? (
-        <DateTimePicker
-          value={scheduledAt ?? new Date()}
-          mode={pickerMode}
-          minimumDate={pickerMode === "date" ? new Date() : undefined}
-          is24Hour
-          onChange={onDateTimeChange}
-        />
+        Platform.OS === "ios" ? (
+          <Modal transparent animationType="slide">
+            <View style={styles.pickerOverlay}>
+              <View style={styles.pickerSheet}>
+                <View style={styles.pickerSheetHeader}>
+                  <Text style={styles.pickerSheetTitle}>
+                    {pickerMode === "date" ? "Select date" : "Select time"}
+                  </Text>
+                  <Pressable onPress={() => setPickerMode(null)}>
+                    <Text style={styles.pickerSheetDone}>Done</Text>
+                  </Pressable>
+                </View>
+                <DateTimePicker
+                  value={scheduledAt ?? new Date()}
+                  mode={pickerMode}
+                  display="spinner"
+                  minimumDate={pickerMode === "date" ? new Date() : undefined}
+                  is24Hour
+                  onChange={onDateTimeChange}
+                />
+              </View>
+            </View>
+          </Modal>
+        ) : (
+          <DateTimePicker
+            value={scheduledAt ?? new Date()}
+            mode={pickerMode}
+            minimumDate={pickerMode === "date" ? new Date() : undefined}
+            is24Hour
+            onChange={onDateTimeChange}
+          />
+        )
       ) : null}
 
       <LeafletLocationPickerModal
@@ -1543,7 +1574,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 40,
   },
   sectionCard: {
     backgroundColor: colors.WHITE,
@@ -1941,6 +1972,36 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: colors.GRAY900,
     fontWeight: "600",
+  },
+  pickerOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
+  pickerSheet: {
+    backgroundColor: colors.WHITE,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 32,
+  },
+  pickerSheetHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.GRAY200,
+  },
+  pickerSheetTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: colors.GRAY800,
+  },
+  pickerSheetDone: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.GREEN,
   },
   footer: {
     flexDirection: "row",

@@ -97,7 +97,9 @@ export default function EventDetailModal({
   if (!isOpen) return null
 
   const countdownLabel = isFutureEvent(service.scheduled_time) ? timeUntilEvent(service.scheduled_time) : 'Event started'
-  const locationLabel = service.location_type === 'Online' ? 'Online' : service.location_area ?? 'In-Person'
+  const locationLabel = service.location_type === 'Online'
+    ? 'Online'
+    : service.location_area ?? 'In-Person'
   const spotLabel = service.max_participants > 0
     ? `${service.participant_count ?? 0}/${service.max_participants} joined · ${spotsLeft(service.max_participants, service.participant_count ?? 0)} spots left`
     : `${service.participant_count ?? 0} joined`
