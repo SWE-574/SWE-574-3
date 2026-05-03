@@ -1,16 +1,20 @@
 """
 Hot score ranking algorithm for services.
 
-Formula: Score = (P - N + C) / (T + 2)^1.5
+Phase 2 formula: Score = Quality x Activity x CapacityMultiplier
 
 Where:
-- P = Positive reputation count (service owner's total: is_punctual + is_helpful + is_kind)
-- N = Negative reputation count (service owner's total: is_late + is_unhelpful + is_rude)
-- C = Comment count on the service
-- T = Hours since service creation
+- Quality = wilson_score_lower_bound(positive_reps, positive_reps + negative_reps)
+- Activity = log2(2 + HoursExchanged) + 0.5 * log2(2 + comment_count)
+- CapacityMultiplier = 1.5 if 0.75 <= accepted/max_participants < 1.0 (events
+  and group offers only), 1.0 otherwise
 """
 from __future__ import annotations
 
+import math
+import random
+from datetime import timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from django.db.models import Count, Q, Sum
@@ -21,192 +25,413 @@ if TYPE_CHECKING:
     from .models import Service
 
 
-def calculate_hot_score(service: Service) -> float:
-    """
-    Calculate the hot score for a service based on the ranking algorithm.
-    
-    Higher scores indicate more "hot" or trending services.
-    New services with positive reputation and engagement get higher scores.
-    """
-    from .models import ReputationRep, NegativeRep, Comment
-    
-    user = service.user
-    
-    # P: Positive reputation count (sum of all positive traits)
-    positive_stats = ReputationRep.objects.filter(
-        receiver=user,
-        handshake__service__type__in=['Offer', 'Need'],
-    ).aggregate(
-        punctual=Coalesce(Count('id', filter=Q(is_punctual=True)), 0),
-        helpful=Coalesce(Count('id', filter=Q(is_helpful=True)), 0),
-        kind=Coalesce(Count('id', filter=Q(is_kind=True)), 0),
-    )
-    positive_count = (
-        positive_stats['punctual'] + 
-        positive_stats['helpful'] + 
-        positive_stats['kind']
-    )
-    
-    # N: Negative reputation count (sum of all negative traits)
-    negative_stats = NegativeRep.objects.filter(
-        receiver=user,
-        handshake__service__type__in=['Offer', 'Need'],
-    ).aggregate(
-        late=Coalesce(Count('id', filter=Q(is_late=True)), 0),
-        unhelpful=Coalesce(Count('id', filter=Q(is_unhelpful=True)), 0),
-        rude=Coalesce(Count('id', filter=Q(is_rude=True)), 0),
-    )
-    negative_count = (
-        negative_stats['late'] + 
-        negative_stats['unhelpful'] + 
-        negative_stats['rude']
-    )
-    
-    # C: Comment count on this service (excluding deleted)
-    comment_count = Comment.objects.filter(
-        service=service,
-        is_deleted=False
-    ).count()
-    
-    # T: Hours since service creation
-    time_delta = timezone.now() - service.created_at
-    hours_since_creation = time_delta.total_seconds() / 3600
-    
-    # Apply the formula: Score = (P - N + C) / (T + 2)^1.5
-    # Clamp to minimum of 0 to avoid complex numbers from negative bases
-    # (can happen with future timestamps due to clock skew or testing)
-    numerator = positive_count - negative_count + comment_count
-    base = max(hours_since_creation + 2, 0)
-    denominator = base ** 1.5
-    
-    # Prevent division by zero
-    if denominator == 0:
-        return 0.0
-    
-    score = numerator / denominator
+FORMULA_VERSION = "v2-2026-05"
 
-    # "Filling the Gap" multiplier (FR-RANK-03):
-    # Events and Group Offers (Offers with max_participants > 1) between 75% and
-    # 99% full get a 1.5× boost to surface them before they sell out.
-    is_group_listing = (
+
+def wilson_score_lower_bound(positives: int, total: int, z: float = 1.96) -> float:
+    """
+    Wilson score lower bound for the positive rate of a Bernoulli sample.
+
+    FR-17j (issue #317): a provider with 3/3 positives must NOT outrank one with
+    95/100 just because the small sample happened to be perfect. The Wilson
+    lower bound at z=1.96 (95% confidence) penalises small samples.
+
+    Returns 0.0 for zero total — no observations means no signal.
+    """
+    if total <= 0:
+        return 0.0
+    p_hat = positives / total
+    z2 = z * z
+    denom = 1.0 + z2 / total
+    centre = p_hat + z2 / (2.0 * total)
+    margin = z * math.sqrt((p_hat * (1.0 - p_hat) + z2 / (4.0 * total)) / total)
+    return max(0.0, (centre - margin) / denom)
+
+
+# Why no time decay: an earlier draft used exp(-days_since_last_engagement / 14)
+# as a freshness multiplier. Customer feedback rejected this -- well-established
+# services with quiet weeks were being buried with no path back. Rotation of
+# old-but-good listings is now Phase 3's job (Thompson Sampling exploration
+# bucket explicitly samples from under-shown quality items), not Phase 2's.
+#
+# Why Wilson lower bound on Quality: a provider with 3/3 positives shouldn't
+# outrank one with 95/100 on luck. Wilson at z=1.96 (95% confidence) gives
+# small samples a fair but honest score. See FR-17j / issue #317.
+#
+# Why log on Activity: prevents the "rich get richer" runaway that ^1.5 caused
+# in the HiveMind-faithful draft. log2(2+100) ~ 6.7 vs log2(2+10) ~ 3.6 --
+# a 10x volume difference is a 2x score difference, not 30x.
+#
+# Why HoursExchanged not hours_since_creation: see FR-17b / issue #302.
+def _compute_service_factors(service: Service) -> dict:
+    """Return the factor breakdown for a service (Phase 2a). Used by both
+    calculate_hot_score and the audit-log writer (Task 5 / NFR-17c / #308).
+    Single source of truth for the service-formula math.
+    """
+    from .models import ReputationRep, NegativeRep, Comment, Handshake
+
+    user = service.user
+    pos = ReputationRep.objects.filter(
+        receiver=user, handshake__service__type__in=['Offer', 'Need'],
+    ).aggregate(
+        c=Coalesce(Count('id', filter=Q(is_punctual=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_helpful=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_kind=True)), 0),
+    )['c']
+    neg = NegativeRep.objects.filter(
+        receiver=user, handshake__service__type__in=['Offer', 'Need'],
+    ).aggregate(
+        c=Coalesce(Count('id', filter=Q(is_late=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_unhelpful=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_rude=True)), 0),
+    )['c']
+    comments = Comment.objects.filter(service=service, is_deleted=False).count()
+    hours = Handshake.objects.filter(
+        service=service, status='completed',
+    ).aggregate(total=Coalesce(Sum('provisioned_hours'), Decimal('0')))['total']
+
+    quality = wilson_score_lower_bound(pos, pos + neg)
+    activity = math.log2(2 + float(hours)) + 0.5 * math.log2(2 + comments)
+
+    # Capacity multiplier scope (FR-17e / #304):
+    # Applies to Events AND group Offers (Offer with max_participants > 1).
+    # Solo Offers/Needs (max_participants <= 1) are not capacitated; no boost.
+    capacity_multiplier = 1.0
+    if service.max_participants and service.max_participants > 0 and (
         service.type == 'Event'
         or (service.type == 'Offer' and service.max_participants > 1)
-    )
-    if is_group_listing and service.max_participants > 0:
-        from .models import Handshake as _Handshake
-        accepted_count = _Handshake.objects.filter(
+    ):
+        accepted = Handshake.objects.filter(
             service=service,
             status__in=['accepted', 'checked_in', 'attended', 'no_show'],
         ).count()
-        capacity_ratio = accepted_count / service.max_participants
-        if 0.75 <= capacity_ratio < 1.0:
-            score *= 1.5
+        ratio = accepted / service.max_participants
+        if 0.75 <= ratio < 1.0:
+            capacity_multiplier = 1.5
 
-    return round(score, 6)
+    final = round(quality * activity * capacity_multiplier, 6)
+    return {
+        'positive_rep_count': pos,
+        'negative_rep_count': neg,
+        'comment_count': comments,
+        'hours_exchanged': hours,
+        'quality': quality,
+        'activity': activity,
+        'capacity_multiplier': capacity_multiplier,
+        'final_score': final,
+    }
+
+
+def calculate_hot_score(service: Service) -> float:
+    """Phase 2 Service Hot Score -- delegates to _compute_service_factors.
+
+    Closes FR-17b (#302) and FR-17j (#317). For Events, callers should use
+    calculate_event_hot_score (the batch updater routes Events automatically).
+
+    The rationale comment block lives on _compute_service_factors above; keeping
+    the docstring here brief avoids duplication.
+    """
+    return _compute_service_factors(service)['final_score']
+
+
+def _compute_event_factors(event: Service) -> dict:
+    """Return the factor breakdown for an event (Phase 2b). Sister helper to
+    _compute_service_factors used by both calculate_event_hot_score and the
+    audit-log writer (Task 5 / NFR-17c / #308).
+
+    Why this and not the service formula: events have a hard date and short
+    relevance window. Lifetime hours is the wrong signal -- RSVP velocity in
+    the past 7 days is. OrganiserQuality is event-scoped because someone who
+    runs great events doesn't necessarily run great offers, and vice versa.
+    """
+    from .models import Handshake, ReputationRep, NegativeRep
+
+    organiser = event.user
+    seven_days_ago = timezone.now() - timedelta(days=7)
+
+    rsvps_last_7d = Handshake.objects.filter(
+        service=event,
+        status__in=['accepted', 'checked_in', 'attended'],
+        created_at__gte=seven_days_ago,
+    ).count()
+
+    pos = ReputationRep.objects.filter(
+        receiver=organiser, handshake__service__type='Event',
+    ).aggregate(
+        c=Coalesce(Count('id', filter=Q(is_punctual=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_helpful=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_kind=True)), 0),
+    )['c']
+    neg = NegativeRep.objects.filter(
+        receiver=organiser, handshake__service__type='Event',
+    ).aggregate(
+        c=Coalesce(Count('id', filter=Q(is_late=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_unhelpful=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_rude=True)), 0),
+    )['c']
+
+    # Pure Wilson, no Laplace prior -- consistent with the service formula.
+    # A brand-new organiser scores 0 here; rotation for cold-start providers is
+    # Phase 3's job (Thompson Sampling exploration bucket explicitly samples
+    # from organisers below the lifetime threshold).
+    organiser_quality = wilson_score_lower_bound(pos, pos + neg)
+    velocity = math.log2(2 + rsvps_last_7d)
+
+    # Capacity multiplier scope (FR-17e / #304): same rule as the service
+    # formula -- 1.5x at 75-99% fill.
+    capacity_multiplier = 1.0
+    if event.max_participants and event.max_participants > 0:
+        accepted_count = Handshake.objects.filter(
+            service=event,
+            status__in=['accepted', 'checked_in', 'attended', 'no_show'],
+        ).count()
+        ratio = accepted_count / event.max_participants
+        if 0.75 <= ratio < 1.0:
+            capacity_multiplier = 1.5
+
+    final = round(velocity * organiser_quality * capacity_multiplier, 6)
+    return {
+        'positive_rep_count': pos,
+        'negative_rep_count': neg,
+        'rsvps_last_7d': rsvps_last_7d,
+        'organiser_quality': organiser_quality,
+        'velocity': velocity,
+        'capacity_multiplier': capacity_multiplier,
+        'final_score': final,
+    }
+
+
+def calculate_event_hot_score(event: Service) -> float:
+    """Phase 2 Event Hot Score (FR-RANK-02 / #303) -- delegates to
+    _compute_event_factors. Symmetric with calculate_hot_score.
+    """
+    return _compute_event_factors(event)['final_score']
 
 
 def calculate_hot_scores_batch(services) -> dict:
     """
-    Calculate hot scores for multiple services efficiently using batch queries.
-    
-    Returns a dict mapping service_id -> hot_score
+    Batch version of calculate_hot_score. Returns {service_id: float}.
+
+    Uses one-shot aggregate queries per signal so this stays O(1) DB round-trips
+    regardless of len(services).
     """
-    from .models import ReputationRep, NegativeRep, Comment
-    
+    from .models import ReputationRep, NegativeRep, Comment, Handshake
+
     if not services:
         return {}
-    
-    # Get all unique user IDs
-    user_ids = set(s.user_id for s in services)
-    
-    # Batch query for positive reputation counts per user
-    positive_by_user = {}
-    positive_stats = ReputationRep.objects.filter(
-        receiver_id__in=user_ids,
-        handshake__service__type__in=['Offer', 'Need'],
-    ).values('receiver_id').annotate(
-        punctual=Count('id', filter=Q(is_punctual=True)),
-        helpful=Count('id', filter=Q(is_helpful=True)),
-        kind=Count('id', filter=Q(is_kind=True)),
-    )
-    for stat in positive_stats:
-        positive_by_user[stat['receiver_id']] = (
-            stat['punctual'] + stat['helpful'] + stat['kind']
-        )
-    
-    # Batch query for negative reputation counts per user
-    negative_by_user = {}
-    negative_stats = NegativeRep.objects.filter(
-        receiver_id__in=user_ids,
-        handshake__service__type__in=['Offer', 'Need'],
-    ).values('receiver_id').annotate(
-        late=Count('id', filter=Q(is_late=True)),
-        unhelpful=Count('id', filter=Q(is_unhelpful=True)),
-        rude=Count('id', filter=Q(is_rude=True)),
-    )
-    for stat in negative_stats:
-        negative_by_user[stat['receiver_id']] = (
-            stat['late'] + stat['unhelpful'] + stat['rude']
-        )
-    
-    # Batch query for comment counts per service
+
+    user_ids = list({s.user_id for s in services})
     service_ids = [s.id for s in services]
-    comment_counts = {}
-    comment_stats = Comment.objects.filter(
-        service_id__in=service_ids,
-        is_deleted=False
-    ).values('service_id').annotate(count=Count('id'))
-    for stat in comment_stats:
-        comment_counts[stat['service_id']] = stat['count']
-    
-    # Batch query for capacity ratios — Events and Group Offers (FR-RANK-03)
-    group_service_ids = [
+
+    # Per-owner positive rep count, owner-by-type (Offer/Need only).
+    pos_by_user: dict = {}
+    for row in ReputationRep.objects.filter(
+        receiver_id__in=user_ids,
+        handshake__service__type__in=['Offer', 'Need'],
+    ).values('receiver_id').annotate(
+        c=Coalesce(Count('id', filter=Q(is_punctual=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_helpful=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_kind=True)), 0),
+    ):
+        pos_by_user[row['receiver_id']] = row['c']
+
+    neg_by_user: dict = {}
+    for row in NegativeRep.objects.filter(
+        receiver_id__in=user_ids,
+        handshake__service__type__in=['Offer', 'Need'],
+    ).values('receiver_id').annotate(
+        c=Coalesce(Count('id', filter=Q(is_late=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_unhelpful=True)), 0)
+        + Coalesce(Count('id', filter=Q(is_rude=True)), 0),
+    ):
+        neg_by_user[row['receiver_id']] = row['c']
+
+    comments_by_service = {
+        row['service_id']: row['c']
+        for row in Comment.objects.filter(
+            service_id__in=service_ids, is_deleted=False,
+        ).values('service_id').annotate(c=Count('id'))
+    }
+
+    hours_by_service = {
+        row['service_id']: (row['total'] or Decimal('0'))
+        for row in Handshake.objects.filter(
+            service_id__in=service_ids, status='completed',
+        ).values('service_id').annotate(total=Sum('provisioned_hours'))
+    }
+
+    # Capacity-relevant accepted counts (only for capacitated services)
+    capacitated_ids = [
         s.id for s in services
-        if s.max_participants > 0
-        and (s.type == 'Event' or (s.type == 'Offer' and s.max_participants > 1))
-    ]
-    group_accepted_counts: dict = {}
-    if group_service_ids:
-        from .models import Handshake as _Handshake
-        accepted_stats = _Handshake.objects.filter(
-            service_id__in=group_service_ids,
-            status__in=['accepted', 'checked_in', 'attended', 'no_show'],
-        ).values('service_id').annotate(count=Count('id'))
-        group_accepted_counts = {row['service_id']: row['count'] for row in accepted_stats}
-
-    # Calculate scores
-    now = timezone.now()
-    scores = {}
-    
-    for service in services:
-        positive_count = positive_by_user.get(service.user_id, 0)
-        negative_count = negative_by_user.get(service.user_id, 0)
-        comment_count = comment_counts.get(service.id, 0)
-        
-        time_delta = now - service.created_at
-        hours_since_creation = time_delta.total_seconds() / 3600
-        
-        numerator = positive_count - negative_count + comment_count
-        # Clamp to minimum of 0 to avoid complex numbers from negative bases
-        base = max(hours_since_creation + 2, 0)
-        denominator = base ** 1.5
-        
-        if denominator == 0:
-            score = 0.0
-        else:
-            score = numerator / denominator
-
-        # "Filling the Gap" multiplier — Events and Group Offers (FR-RANK-03)
-        is_group_listing = (
-            service.type == 'Event'
-            or (service.type == 'Offer' and service.max_participants > 1)
+        if s.max_participants and s.max_participants > 0 and (
+            s.type == 'Event'
+            or (s.type == 'Offer' and s.max_participants > 1)
         )
-        if is_group_listing and service.max_participants > 0:
-            accepted_count = group_accepted_counts.get(service.id, 0)
-            capacity_ratio = accepted_count / service.max_participants
-            if 0.75 <= capacity_ratio < 1.0:
-                score *= 1.5
+    ]
+    accepted_by_service: dict = {}
+    if capacitated_ids:
+        accepted_by_service = {
+            row['service_id']: row['c']
+            for row in Handshake.objects.filter(
+                service_id__in=capacitated_ids,
+                status__in=['accepted', 'checked_in', 'attended', 'no_show'],
+            ).values('service_id').annotate(c=Count('id'))
+        }
 
-        scores[service.id] = round(score, 6)
-    
+    scores: dict = {}
+    for service in services:
+        if service.type == 'Event':
+            scores[service.id] = calculate_event_hot_score(service)
+            continue
+        pos = pos_by_user.get(service.user_id, 0)
+        neg = neg_by_user.get(service.user_id, 0)
+        comments = comments_by_service.get(service.id, 0)
+        hours = hours_by_service.get(service.id, Decimal('0'))
+
+        quality = wilson_score_lower_bound(pos, pos + neg)
+        activity = math.log2(2 + float(hours)) + 0.5 * math.log2(2 + comments)
+
+        # accepted_by_service is already pre-filtered to capacitated services
+        # (see capacitated_ids above), so membership IS the capacity check.
+        capacity_multiplier = 1.0
+        if service.id in accepted_by_service:
+            ratio = accepted_by_service[service.id] / service.max_participants
+            if 0.75 <= ratio < 1.0:
+                capacity_multiplier = 1.5
+
+        scores[service.id] = round(quality * activity * capacity_multiplier, 6)
+
     return scores
+
+
+class RankingPipeline:
+    """
+    Three-phase ranking pipeline (HiveMind-style):
+      Phase 1 — filter_candidates: liquidity (status, proximity, capacity, type)
+      Phase 2 — score_candidates: trust + discovery (Quality × Activity × Capacity)
+      Phase 3 — rerank: fairness (Thompson Sampling exploration mixing)
+
+    Each phase is a method to keep responsibilities crisp; ServiceViewSet calls
+    .run(queryset) which orchestrates all three. The request is held on the
+    instance because Phase 3 (`rerank`) needs it for the per-request
+    exploration coin flip.
+    """
+
+    def __init__(self, request):
+        self.request = request
+
+    def filter_candidates(self, queryset):
+        """Phase 1 — restrict to listings the requester can act on. (Wired in Task 12.)"""
+        return queryset
+
+    def score_candidates(self, services):
+        """Phase 2 — return [(service, score)] sorted by score desc. (Formula updates land in Tasks 2 and 3.)"""
+        scores = calculate_hot_scores_batch(services)
+        return sorted(
+            ((s, scores.get(s.id, 0.0)) for s in services),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+
+    def rerank(self, scored):
+        """Phase 3 -- inject exploration slot per Thompson Sampling (#316)."""
+        from django.conf import settings
+        if not should_explore(self.request):
+            return scored
+        candidates = [pair[0] for pair in scored]
+        viewer = getattr(self.request, 'user', None)
+        explore = select_exploration_candidate(candidates, viewer)
+        if explore is None:
+            return scored
+        slot = getattr(settings, 'RANKING_EXPLORATION_SLOT_INDEX', 5)
+        explore_score = next((p[1] for p in scored if p[0].id == explore.id), 0.0)
+        return inject_exploration_slot(scored, (explore, explore_score), slot_index=slot)
+
+    def run(self, queryset):
+        candidates = list(self.filter_candidates(queryset))
+        scored = self.score_candidates(candidates)
+        return self.rerank(scored)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 -- Thompson Sampling exploration helpers (FR-17i / #316)
+# ---------------------------------------------------------------------------
+
+def should_explore(request) -> bool:
+    """Per-request randomisation. Returns True with probability
+    settings.RANKING_EXPLORATION_RATE. Per-request, NOT per-session, so admins
+    can't predict which requests will be explored."""
+    from django.conf import settings
+    return random.random() < getattr(settings, 'RANKING_EXPLORATION_RATE', 0.20)
+
+
+def _eligible_exploration(candidates):
+    """Returns (cold_start, under_shown, stale_recurring) lists from candidates.
+
+    Cold-start: provider with fewer than RANKING_COLDSTART_THRESHOLD lifetime
+    completed handshakes (across all their services).
+
+    Under-shown quality: service with quality >= RANKING_UNDERSHOWN_QUALITY_THRESHOLD
+    and no completed handshake in the last RANKING_UNDERSHOWN_STALE_DAYS days.
+    Computed via _compute_service_factors; events skipped because their formula
+    uses different signals.
+
+    Stale recurring: service.is_stale_recurring=True (set by check_recurring_growth).
+    """
+    from django.conf import settings
+    from .models import Handshake
+
+    cold_threshold = getattr(settings, 'RANKING_COLDSTART_THRESHOLD', 5)
+    quality_threshold = getattr(settings, 'RANKING_UNDERSHOWN_QUALITY_THRESHOLD', 0.4)
+    stale_days = getattr(settings, 'RANKING_UNDERSHOWN_STALE_DAYS', 14)
+    cutoff = timezone.now() - timedelta(days=stale_days)
+
+    candidate_ids = [c.id for c in candidates]
+    user_ids = {c.user_id for c in candidates}
+
+    lifetime = dict(
+        Handshake.objects.filter(
+            service__user_id__in=user_ids, status='completed',
+        ).values('service__user_id').annotate(c=Count('id')).values_list('service__user_id', 'c')
+    )
+
+    recent_active = set(
+        Handshake.objects.filter(
+            service_id__in=candidate_ids, status='completed', updated_at__gte=cutoff,
+        ).values_list('service_id', flat=True)
+    )
+
+    cold, undershown, stale = [], [], []
+    for c in candidates:
+        if lifetime.get(c.user_id, 0) < cold_threshold:
+            cold.append(c)
+            continue
+        if c.type != 'Event':
+            f = _compute_service_factors(c)
+            if f['quality'] >= quality_threshold and c.id not in recent_active:
+                undershown.append(c)
+                continue
+        if getattr(c, 'is_stale_recurring', False):
+            stale.append(c)
+    return cold, undershown, stale
+
+
+def select_exploration_candidate(candidates, viewer):
+    """Uniform sampling across the three eligible sub-buckets. Returns None if
+    all three are empty -- caller should leave the ranked list unchanged."""
+    cold, undershown, stale = _eligible_exploration(candidates)
+    pools = [p for p in (cold, undershown, stale) if p]
+    if not pools:
+        return None
+    chosen_pool = random.choice(pools)
+    return random.choice(chosen_pool)
+
+
+def inject_exploration_slot(ordered, explore_item, slot_index=5):
+    """Replace the item at slot_index with explore_item. If the list is shorter
+    than slot_index, append at the end. None explore_item returns ordered as-is."""
+    if explore_item is None:
+        return ordered
+    if slot_index >= len(ordered):
+        return list(ordered) + [explore_item]
+    return list(ordered[:slot_index]) + [explore_item] + list(ordered[slot_index + 1:])

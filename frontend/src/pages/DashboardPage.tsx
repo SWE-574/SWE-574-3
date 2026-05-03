@@ -27,7 +27,6 @@ import {
   FiX,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
-import RecommendationDebugBar from '@/components/RecommendationDebugBar'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -404,7 +403,6 @@ const DashboardPage = () => {
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
   const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
-  const [rankingDebugAvailable, setRankingDebugAvailable] = useState(false)
 
   const searchTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -421,24 +419,10 @@ const DashboardPage = () => {
     return () => { if (distanceTimer.current) clearTimeout(distanceTimer.current) }
   }, [distanceKm])
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setRankingDebugAvailable(false)
-      return
-    }
-
-    const controller = new AbortController()
-    serviceAPI.getRankingDebugAvailability(controller.signal)
-      .then((response) => {
-        setRankingDebugAvailable(response.enabled)
-      })
-      .catch((error) => {
-        if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') return
-        setRankingDebugAvailable(false)
-      })
-
-    return () => controller.abort()
-  }, [isAuthenticated, user?.id])
+  // Per #371 the ranking debug panel is admin-only and lives in the admin
+  // dashboard. The floating launcher and getRankingDebugAvailability poll
+  // were removed from the regular dashboard; non-admin clients no longer
+  // need to know whether the debug panel exists.
 
   const fetchServices = useCallback(async (signal: AbortSignal) => {
     let raw: typeof services
@@ -544,7 +528,6 @@ const DashboardPage = () => {
   const acceptedHs         = myServices.length
   const completedHs        = ownServiceHandshakes.filter((h) => h.status === 'completed').length
   const distanceLabel      = distanceKm <= 5 ? 'Nearby' : distanceKm <= 15 ? 'Local' : distanceKm <= 30 ? 'Wider' : 'City-wide'
-  const showRankingDebug   = rankingDebugAvailable
 
   const sidebarProps = {
     pendingHs, acceptedHs, completedHs,
@@ -566,18 +549,6 @@ const DashboardPage = () => {
         overflow="hidden"
         position="relative"
       >
-        {showRankingDebug ? (
-          <RecommendationDebugBar
-            services={displayServices}
-            hoveredServiceId={hoveredServiceId}
-            activeFilter={activeFilter}
-            search={debouncedSearch}
-            lat={locationEnabled ? userLocation?.lat : undefined}
-            lng={locationEnabled ? userLocation?.lng : undefined}
-            distance={locationEnabled ? debouncedDistance : undefined}
-          />
-        ) : null}
-
         {/* ── Sidebar (desktop always visible; mobile: overlay) ───────────── */}
         <Box
           display={{ base: sidebarOpen ? 'flex' : 'none', lg: 'flex' }}
