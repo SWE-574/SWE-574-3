@@ -550,7 +550,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
-            'is_visible', 'is_pinned', 'media', 'participant_count', 'event_evaluation_summary',
+            'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
         ]
         read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
 
