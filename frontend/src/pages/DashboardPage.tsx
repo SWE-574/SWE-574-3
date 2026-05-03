@@ -402,7 +402,6 @@ const DashboardPage = () => {
 
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
-  const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
 
   const searchTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -758,7 +757,6 @@ const DashboardPage = () => {
                       incomingCount={aCount}
                       pendingCount={pCount}
                       onClick={() => navigate(`/service-detail/${service.id}`)}
-                      onHover={() => setHoveredServiceId(service.id)}
                     />
                   )
                 })}
