@@ -37,6 +37,65 @@ class TestExpressInterestView:
             requester=requester,
             status='pending'
         ).exists()
+
+    # ── Email verification gate for express-interest ────────────────────
+    # Applicants must be verified to request an Offer or offer help on a Need.
+    # The same gate is enforced on /api/handshakes/services/<id>/interest/.
+
+    def test_express_interest_blocked_for_unverified_user(self):
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(
+            timebank_balance=Decimal('3.00'), is_verified=False
+        )
+        service = ServiceFactory(
+            user=provider, type='Offer', duration=Decimal('2.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+
+        response = client.post(f'/api/services/{service.id}/interest/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Handshake.objects.filter(
+            service=service, requester=requester
+        ).exists()
+
+    def test_express_interest_blocked_for_unverified_user_on_need(self):
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(
+            timebank_balance=Decimal('3.00'), is_verified=False
+        )
+        need = ServiceFactory(
+            user=provider, type='Need', duration=Decimal('1.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+
+        response = client.post(f'/api/services/{need.id}/interest/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Handshake.objects.filter(
+            service=need, requester=requester
+        ).exists()
+
+    def test_express_interest_router_action_blocked_for_unverified_user(self):
+        """The /handshakes/services/<id>/interest/ alias must apply the same gate."""
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(
+            timebank_balance=Decimal('3.00'), is_verified=False
+        )
+        service = ServiceFactory(
+            user=provider, type='Offer', duration=Decimal('2.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+
+        response = client.post(f'/api/handshakes/services/{service.id}/interest/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
     
     def test_express_interest_insufficient_balance(self):
         """Test expressing interest with insufficient balance"""
@@ -1060,6 +1119,28 @@ class TestEventHandshakeEndpoints:
         handshake = Handshake.objects.get(id=response.data['id'])
         assert handshake.status == 'accepted'
         assert handshake.provisioned_hours == Decimal('0.00')
+
+    def test_join_event_blocked_for_unverified_user(self):
+        """Unverified users may not RSVP to an Event."""
+        organizer = UserFactory()
+        participant = UserFactory(is_verified=False)
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(days=2),
+            max_participants=3,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.post(f'/api/handshakes/services/{service.id}/join-event/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Handshake.objects.filter(
+            service=service, requester=participant
+        ).exists()
 
     def test_checkin_after_start_returns_invalid_state(self):
         organizer = UserFactory()

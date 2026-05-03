@@ -128,6 +128,35 @@ def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
 
 
+def _indefinite_article(noun: str) -> str:
+    """Return 'a' or 'an' for the given noun (used in user-facing error copy)."""
+    if not noun:
+        return 'a'
+    return 'an' if noun[0].lower() in 'aeiou' else 'a'
+
+
+def _require_verified_email(request, action_clause: str = 'to continue'):
+    """Return a 403 error response when the user's email is not verified.
+
+    Returns ``None`` when the user is verified, so callers can early-return:
+
+        err = _require_verified_email(request, 'before requesting this service')
+        if err:
+            return err
+
+    The error response carries ``code=EMAIL_NOT_VERIFIED`` so the frontend
+    can route the user to the resend / verification flow consistently.
+    """
+    if getattr(request.user, 'is_verified', False):
+        return None
+    return create_error_response(
+        f'Please verify your email address {action_clause}. '
+        'Check your inbox for the verification link, or request a new one.',
+        code=ErrorCodes.EMAIL_NOT_VERIFIED,
+        status_code=status.HTTP_403_FORBIDDEN,
+    )
+
+
 # Roles that may access admin / moderation endpoints.
 # Keep in sync with User.ROLE_CHOICES and the frontend AdminProtectedRoute.
 ADMIN_ROLES = frozenset(('admin', 'super_admin', 'moderator'))
@@ -2079,6 +2108,18 @@ class ServiceViewSet(viewsets.ModelViewSet):
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
+        # Email verification gate: only verified users may publish any
+        # service (Offer / Need / Event). Backend is the source of truth;
+        # the frontend has matching guards on /post-offer, /post-need and
+        # /post-event so users see a clear CTA before they fill the form.
+        if service_type in ('Offer', 'Need', 'Event'):
+            verification_error = _require_verified_email(
+                request,
+                f'before posting {_indefinite_article(service_type)} {service_type}',
+            )
+            if verification_error:
+                return verification_error
+
         if service_type == 'Offer':
             if not can_user_post_offer(request.user):
                 return create_error_response(
@@ -2689,6 +2730,14 @@ class ExpressInterestView(APIView):
 
     @track_performance
     def post(self, request, service_id):
+        # Email verification gate: applicants must be verified to request /
+        # offer help on any service.
+        verification_error = _require_verified_email(
+            request, 'before requesting this service'
+        )
+        if verification_error:
+            return verification_error
+
         try:
             service = Service.objects.select_related('user').get(id=service_id, status='Active')
         except Service.DoesNotExist:
@@ -2865,6 +2914,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path=r'services/(?P<service_id>[^/.]+)/interest', permission_classes=[permissions.IsAuthenticated])
     @track_performance
     def express_interest(self, request, service_id=None):
+        verification_error = _require_verified_email(
+            request, 'before requesting this service'
+        )
+        if verification_error:
+            return verification_error
+
         try:
             service = Service.objects.select_related('user').get(id=service_id, status='Active')
         except Service.DoesNotExist:
@@ -3212,6 +3267,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
 
         POST /api/handshakes/services/{service_id}/join-event/
         """
+        verification_error = _require_verified_email(
+            request, 'before joining this event'
+        )
+        if verification_error:
+            return verification_error
+
         try:
             service = Service.objects.select_related('user').get(
                 id=service_id, type='Event', status='Active'

@@ -52,7 +52,7 @@ class TestServiceViewSet:
     
     def test_create_service(self):
         """Test creating a service"""
-        user = UserFactory()
+        user = UserFactory(is_verified=True)
         tag = TagFactory()
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
@@ -78,7 +78,7 @@ class TestServiceViewSet:
 
     def test_create_service_with_video_media(self):
         """Test creating a service with a video URL media item"""
-        user = UserFactory()
+        user = UserFactory(is_verified=True)
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
 
@@ -115,6 +115,111 @@ class TestServiceViewSet:
             'description': 'Test'
         })
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    # ── Email verification gate for service creation ────────────────────
+    # Offers, Needs and Events all require a verified email address.
+    # Verified users can still create any of the three types as before.
+
+    def _offer_payload(self):
+        return {
+            'title': 'Verified Only Offer',
+            'description': 'Should only be creatable by verified users.',
+            'type': 'Offer',
+            'duration': 1.0,
+            'location_type': 'Online',
+            'max_participants': 1,
+            'schedule_type': 'One-Time',
+            'status': 'Active',
+        }
+
+    def _need_payload(self):
+        return {
+            'title': 'Help moving a sofa',
+            'description': 'Need an extra hand on Saturday.',
+            'type': 'Need',
+            'duration': 1.0,
+            'location_type': 'In-Person',
+            'location_area': 'Beşiktaş',
+            'location_lat': 41.0422,
+            'location_lng': 29.0089,
+            'max_participants': 1,
+            'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=2)).isoformat(),
+            'status': 'Active',
+        }
+
+    def _event_payload(self):
+        return {
+            'title': 'Community picnic',
+            'description': 'Open to all neighbours.',
+            'type': 'Event',
+            'duration': 2.0,
+            'location_type': 'In-Person',
+            'location_area': 'Maçka Park',
+            'location_lat': 41.0463,
+            'location_lng': 28.9956,
+            'max_participants': 20,
+            'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=5)).isoformat(),
+            'status': 'Active',
+        }
+
+    def test_unverified_user_cannot_create_offer(self):
+        user = UserFactory(is_verified=False)
+        client = AuthenticatedAPIClient().authenticate_user(user)
+
+        response = client.post('/api/services/', self._offer_payload())
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Service.objects.filter(title='Verified Only Offer').exists()
+
+    def test_unverified_user_cannot_create_need(self):
+        user = UserFactory(is_verified=False)
+        client = AuthenticatedAPIClient().authenticate_user(user)
+
+        response = client.post('/api/services/', self._need_payload())
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Service.objects.filter(title='Help moving a sofa').exists()
+
+    def test_unverified_user_cannot_create_event(self):
+        user = UserFactory(is_verified=False)
+        client = AuthenticatedAPIClient().authenticate_user(user)
+
+        response = client.post('/api/services/', self._event_payload())
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Service.objects.filter(title='Community picnic').exists()
+
+    def test_verified_user_can_create_offer(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient().authenticate_user(user)
+
+        response = client.post('/api/services/', self._offer_payload())
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Service.objects.filter(id=response.data['id'], type='Offer').exists()
+
+    def test_verified_user_can_create_need(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient().authenticate_user(user)
+
+        response = client.post('/api/services/', self._need_payload())
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Service.objects.filter(id=response.data['id'], type='Need').exists()
+
+    def test_verified_user_can_create_event(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient().authenticate_user(user)
+
+        response = client.post('/api/services/', self._event_payload())
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Service.objects.filter(id=response.data['id'], type='Event').exists()
     
     def test_retrieve_service(self):
         """Test retrieving a single service"""
@@ -650,7 +755,7 @@ class TestServiceRetrieveStatusVisibility:
 
     def test_offer_service_respects_max_participants(self):
         """Creating an Offer service must keep the requested max_participants value."""
-        user = UserFactory()
+        user = UserFactory(is_verified=True)
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
 
@@ -671,7 +776,7 @@ class TestServiceRetrieveStatusVisibility:
 
     def test_group_offer_requires_future_schedule_and_exact_location(self):
         """One-time group offers must include fixed meeting details."""
-        user = UserFactory()
+        user = UserFactory(is_verified=True)
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
 
@@ -690,7 +795,7 @@ class TestServiceRetrieveStatusVisibility:
 
     def test_group_offer_create_persists_exact_location_coords_and_guide(self):
         """One-time in-person group offers should persist exact session details for later handshakes."""
-        user = UserFactory()
+        user = UserFactory(is_verified=True)
         client = AuthenticatedAPIClient()
         client.authenticate_user(user)
 

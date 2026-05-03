@@ -194,7 +194,8 @@ class TagWithWikidataTests(APITestCase):
             password='testpass123',
             first_name='Test',
             last_name='User',
-            timebank_balance=Decimal('10.00')
+            timebank_balance=Decimal('10.00'),
+            is_verified=True,
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)

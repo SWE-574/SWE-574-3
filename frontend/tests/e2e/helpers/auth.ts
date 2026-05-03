@@ -24,7 +24,16 @@ export type DemoUser = (typeof USERS)[keyof typeof USERS]
  * This prevents the "Loading…" spinner from blocking the test when
  * multiple workers are hitting the backend simultaneously.
  */
-export async function loginAs(page: Page, user: DemoUser): Promise<void> {
+export async function loginAs(
+  page: Page,
+  user: DemoUser,
+  /**
+   * Optional overrides merged into the intercepted /users/me/ payload.
+   * Use this to simulate non-default auth states (e.g. `is_verified: false`)
+   * without needing a separate fixture user.
+   */
+  userOverrides: Record<string, unknown> = {},
+): Promise<void> {
   // 1. Load a page on the app origin so cookies can be set.
   await page.goto('/login', { waitUntil: 'commit' })
 
@@ -52,6 +61,7 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
     is_admin: false,
     is_active: true,
     is_verified: true,
+    ...userOverrides,
   }
 
   // 4. Intercept ALL /users/me/ GET calls so checkAuth() always resolves
