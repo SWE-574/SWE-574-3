@@ -140,6 +140,25 @@ export function cancelEvent(serviceId: string): Promise<void> {
   return apiRequest<void>(`/services/${serviceId}/cancel-event/`, { method: 'POST' });
 }
 
+// ─── QR attendance token ─────────────────────────────────────────────────
+
+export interface QRTokenResponse {
+  id: string;
+  token: string;
+  attendance_code: string;
+  created_at: string;
+  expires_at: string;
+  qr_payload: string;
+}
+
+export function generateQRToken(serviceId: string): Promise<QRTokenResponse> {
+  return apiRequest<QRTokenResponse>(`/services/${serviceId}/generate-qr-token/`, { method: 'POST' });
+}
+
+export function getQRToken(serviceId: string): Promise<QRTokenResponse> {
+  return apiRequest<QRTokenResponse>(`/services/${serviceId}/qr-token/`);
+}
+
 export function pinEvent(serviceId: string): Promise<Service> {
   return apiRequest<Service>(`/services/${serviceId}/pin-event/`, { method: 'POST' }).then(
     normalizeService,

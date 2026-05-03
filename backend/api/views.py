@@ -2332,6 +2332,95 @@ class ServiceViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(service)
         return Response(serializer.data)
 
+    # ── QR attendance token endpoints ──────────────────────────────────
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='generate-qr-token',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def generate_qr_token(self, request, pk=None):
+        """Generate (or rotate) a QR attendance token for an event.
+
+        POST /api/services/{id}/generate-qr-token/
+
+        Returns the token, short attendance code, expiry, and a QR payload
+        string suitable for encoding into a QR image.
+        """
+        import json
+        service = self.get_object()
+        try:
+            token_obj = EventHandshakeService.generate_qr_token(
+                service, request.user,
+            )
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        qr_payload = json.dumps({
+            'event_id': str(service.pk),
+            'token': token_obj.token,
+        })
+        return Response({
+            'id': str(token_obj.pk),
+            'token': token_obj.token,
+            'attendance_code': token_obj.attendance_code,
+            'created_at': token_obj.created_at.isoformat(),
+            'expires_at': token_obj.expires_at.isoformat(),
+            'qr_payload': qr_payload,
+        })
+
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='qr-token',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def get_qr_token(self, request, pk=None):
+        """Get the current active QR token for an event (organizer only).
+
+        GET /api/services/{id}/qr-token/
+        """
+        import json
+        service = self.get_object()
+        if service.user_id != request.user.pk:
+            return create_error_response(
+                'Only the event organizer can view the QR token.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        from .models import EventQRToken
+        try:
+            token_obj = EventQRToken.objects.get(
+                service=service,
+                expires_at__gt=timezone.now(),
+            )
+        except EventQRToken.DoesNotExist:
+            return create_error_response(
+                'No active QR token found. Generate one first.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        qr_payload = json.dumps({
+            'event_id': str(service.pk),
+            'token': token_obj.token,
+        })
+        return Response({
+            'id': str(token_obj.pk),
+            'token': token_obj.token,
+            'attendance_code': token_obj.attendance_code,
+            'created_at': token_obj.created_at.isoformat(),
+            'expires_at': token_obj.expires_at.isoformat(),
+            'qr_payload': qr_payload,
+        })
+
     @action(
         detail=False,
         methods=['get'],
@@ -3190,10 +3279,19 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         """Participant checks in to an Event during the lockdown window.
 
         POST /api/handshakes/{id}/checkin/
+
+        If the event requires QR check-in, pass ``qr_token`` in the request
+        body (the full token from the QR code or the short attendance code).
         """
         handshake = self.get_object()
+        qr_token = request.data.get('qr_token')
         try:
-            EventHandshakeService.checkin(handshake, request.user)
+            if qr_token:
+                EventHandshakeService.checkin_with_qr(
+                    handshake, request.user, qr_token=qr_token,
+                )
+            else:
+                EventHandshakeService.checkin(handshake, request.user)
         except PermissionError as e:
             return create_error_response(
                 str(e), code=ErrorCodes.PERMISSION_DENIED,

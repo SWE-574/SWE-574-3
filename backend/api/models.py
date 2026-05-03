@@ -264,6 +264,10 @@ class Service(models.Model):
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
     is_visible = models.BooleanField(default=True, help_text='Admin can hide inappropriate services')
     is_pinned = models.BooleanField(default=False, help_text='Admin can pin events to the top of the feed')
+    requires_qr_checkin = models.BooleanField(
+        default=False,
+        help_text='Require QR code scan or attendance code for attendance verification (Events only)',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -385,6 +389,40 @@ class Service(models.Model):
                 name='service_max_participants_positive',
             ),
         ]
+
+class EventQRToken(models.Model):
+    """Short-lived, event-scoped QR token for attendance verification."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.OneToOneField(
+        Service,
+        on_delete=models.CASCADE,
+        related_name='qr_token',
+        limit_choices_to={'type': 'Event'},
+    )
+    token = models.CharField(max_length=64, unique=True, db_index=True,
+                             help_text='Full token encoded in QR code')
+    attendance_code = models.CharField(max_length=6, unique=True, db_index=True,
+                                       help_text='Short 6-char code for manual entry on web')
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_by = models.ManyToManyField(
+        'Handshake',
+        blank=True,
+        related_name='qr_token_uses',
+        help_text='Handshakes that have checked in with this token',
+    )
+
+    class Meta:
+        verbose_name = 'Event QR Token'
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return timezone.now() >= self.expires_at
+
+    def __str__(self):
+        return f'QRToken for {self.service_id} (code={self.attendance_code})'
+
 
 class Handshake(models.Model):  # noqa: E302
     STATUS_CHOICES = (

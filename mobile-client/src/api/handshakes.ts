@@ -148,8 +148,10 @@ export function leaveEvent(id: string): Promise<Handshake> {
   return apiRequest<Handshake>(`/handshakes/${id}/leave-event/`, { method: 'POST', body: {} });
 }
 
-export function checkinEvent(id: string): Promise<Handshake> {
-  return apiRequest<Handshake>(`/handshakes/${id}/checkin/`, { method: 'POST', body: {} });
+export function checkinEvent(id: string, qrToken?: string): Promise<Handshake> {
+  const body: Record<string, string> = {};
+  if (qrToken) body.qr_token = qrToken;
+  return apiRequest<Handshake>(`/handshakes/${id}/checkin/`, { method: 'POST', body });
 }
 
 export function markAttended(id: string): Promise<Handshake> {
