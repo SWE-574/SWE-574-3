@@ -1,13 +1,15 @@
 """
 Hot score ranking algorithm for services.
 
-Phase 2 formula: Score = Quality x Activity x CapacityMultiplier
+Phase 2 formula: Score = Quality x Activity x CapacityMultiplier x NewcomerBoost
 
 Where:
 - Quality = wilson_score_lower_bound(positive_reps, positive_reps + negative_reps)
 - Activity = log2(2 + HoursExchanged) + 0.5 * log2(2 + comment_count)
 - CapacityMultiplier = 1.5 if 0.75 <= accepted/max_participants < 1.0 (events
   and group offers only), 1.0 otherwise
+- NewcomerBoost = settings.RANKING_NEWCOMER_BOOST (default 1.2) if the owner's
+  account is younger than 30 days, 1.0 otherwise
 """
 from __future__ import annotations
 
@@ -17,15 +19,18 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from django.conf import settings
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+
+from .achievement_utils import is_newcomer
 
 if TYPE_CHECKING:
     from .models import Service
 
 
-FORMULA_VERSION = "v2-2026-05"
+FORMULA_VERSION = "v2.1-2026-05"
 
 
 def wilson_score_lower_bound(positives: int, total: int, z: float = 1.96) -> float:
@@ -109,7 +114,9 @@ def _compute_service_factors(service: Service) -> dict:
         if 0.75 <= ratio < 1.0:
             capacity_multiplier = 1.5
 
-    final = round(quality * activity * capacity_multiplier, 6)
+    newcomer_boost = settings.RANKING_NEWCOMER_BOOST if is_newcomer(user) else 1.0
+
+    final = round(quality * activity * capacity_multiplier * newcomer_boost, 6)
     return {
         'positive_rep_count': pos,
         'negative_rep_count': neg,
@@ -118,6 +125,7 @@ def _compute_service_factors(service: Service) -> dict:
         'quality': quality,
         'activity': activity,
         'capacity_multiplier': capacity_multiplier,
+        'newcomer_boost': newcomer_boost,
         'final_score': final,
     }
 
@@ -189,7 +197,9 @@ def _compute_event_factors(event: Service) -> dict:
         if 0.75 <= ratio < 1.0:
             capacity_multiplier = 1.5
 
-    final = round(velocity * organiser_quality * capacity_multiplier, 6)
+    newcomer_boost = settings.RANKING_NEWCOMER_BOOST if is_newcomer(organiser) else 1.0
+
+    final = round(velocity * organiser_quality * capacity_multiplier * newcomer_boost, 6)
     return {
         'positive_rep_count': pos,
         'negative_rep_count': neg,
@@ -197,6 +207,7 @@ def _compute_event_factors(event: Service) -> dict:
         'organiser_quality': organiser_quality,
         'velocity': velocity,
         'capacity_multiplier': capacity_multiplier,
+        'newcomer_boost': newcomer_boost,
         'final_score': final,
     }
 
@@ -215,13 +226,21 @@ def calculate_hot_scores_batch(services) -> dict:
     Uses one-shot aggregate queries per signal so this stays O(1) DB round-trips
     regardless of len(services).
     """
-    from .models import ReputationRep, NegativeRep, Comment, Handshake
+    from .models import ReputationRep, NegativeRep, Comment, Handshake, User
 
     if not services:
         return {}
 
     user_ids = list({s.user_id for s in services})
     service_ids = [s.id for s in services]
+
+    # Newcomer set (account age < 30 days). Single round-trip; mirrors the
+    # per-service is_newcomer() check used in _compute_service_factors.
+    thirty_days_ago = timezone.now() - timedelta(days=30)
+    newcomer_user_ids = set(
+        User.objects.filter(id__in=user_ids, date_joined__gte=thirty_days_ago)
+        .values_list('id', flat=True)
+    )
 
     # Per-owner positive rep count, owner-by-type (Offer/Need only).
     pos_by_user: dict = {}
@@ -299,7 +318,14 @@ def calculate_hot_scores_batch(services) -> dict:
             if 0.75 <= ratio < 1.0:
                 capacity_multiplier = 1.5
 
-        scores[service.id] = round(quality * activity * capacity_multiplier, 6)
+        newcomer_boost = (
+            settings.RANKING_NEWCOMER_BOOST
+            if service.user_id in newcomer_user_ids else 1.0
+        )
+
+        scores[service.id] = round(
+            quality * activity * capacity_multiplier * newcomer_boost, 6
+        )
 
     return scores
 

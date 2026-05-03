@@ -860,3 +860,7 @@ RANKING_UNDERSHOWN_QUALITY_THRESHOLD = float(os.environ.get('RANKING_UNDERSHOWN_
 RANKING_UNDERSHOWN_STALE_DAYS = int(os.environ.get('RANKING_UNDERSHOWN_STALE_DAYS', '14'))
 RANKING_FEED_SLA_SECONDS = float(os.environ.get('RANKING_FEED_SLA_SECONDS', '1.0'))
 RANKING_FEED_E2E_SLA_SECONDS = float(os.environ.get('RANKING_FEED_E2E_SLA_SECONDS', '2.0'))
+# Newcomer boost: services owned by users registered < 30 days ago receive a
+# multiplicative bump in Phase 2 score so brand-new members surface before
+# their reputation accumulates. Customer request, May 2026.
+RANKING_NEWCOMER_BOOST = float(os.environ.get('RANKING_NEWCOMER_BOOST', '1.2'))

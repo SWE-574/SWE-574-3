@@ -1249,6 +1249,7 @@ class ScoreAuditLog(models.Model):
     quality = models.FloatField(default=0.0)
     activity = models.FloatField(default=0.0)
     capacity_multiplier = models.FloatField(default=1.0)
+    newcomer_boost = models.FloatField(default=1.0)
     final_score = models.FloatField(default=0.0)
     formula_version = models.CharField(max_length=20)
     formula_kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=SERVICE)

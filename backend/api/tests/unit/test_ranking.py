@@ -934,3 +934,124 @@ class TestCheckRecurringGrowth:
         self._run()
         svc.refresh_from_db()
         assert svc.last_growth_check_at == first_check
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestNewcomerBoost:
+    """Customer-requested 1.2x boost for services owned by newcomer accounts
+    (date_joined < 30 days). Multiplicative; stacks with capacity multiplier."""
+
+    BOOST = 1.2
+
+    def _seed_quality(self, owner):
+        """Give `owner` one positive rep on an Offer so Wilson > 0."""
+        from api.models import ReputationRep
+        svc = ServiceFactory(user=owner, type='Offer', status='Active')
+        giver = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+        hs = HandshakeFactory(service=svc, requester=giver, status='completed')
+        ReputationRepFactory(
+            handshake=hs, giver=giver, receiver=owner, is_punctual=True,
+        )
+        return svc
+
+    def test_newcomer_owner_gets_boost_on_service(self):
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+        newcomer = UserFactory(date_joined=timezone.now() - timedelta(days=10))
+        veteran_svc = self._seed_quality(veteran)
+        newcomer_svc = self._seed_quality(newcomer)
+
+        veteran_score = calculate_hot_score(veteran_svc)
+        newcomer_score = calculate_hot_score(newcomer_svc)
+
+        assert veteran_score > 0
+        assert newcomer_score == pytest.approx(veteran_score * self.BOOST, rel=1e-5)
+
+    def test_non_newcomer_no_boost(self):
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=31))
+        svc = self._seed_quality(veteran)
+        # 31 days old: just past the cutoff, so no boost.
+        assert calculate_hot_score(svc) > 0  # has reputation
+        # Compare against the explicit factor breakdown
+        from api.ranking import _compute_service_factors
+        factors = _compute_service_factors(svc)
+        assert factors['newcomer_boost'] == 1.0
+
+    def test_newcomer_event_organiser_gets_boost(self):
+        from api.ranking import calculate_event_hot_score
+        from api.models import ReputationRep
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+        newcomer = UserFactory(date_joined=timezone.now() - timedelta(days=5))
+
+        def _seed_event(organiser):
+            ev = ServiceFactory(
+                user=organiser, type='Event', status='Active',
+                scheduled_time=timezone.now() + timedelta(days=3),
+            )
+            # Velocity: at least one RSVP in the last 7 days so velocity > log2(2).
+            HandshakeFactory(service=ev, status='accepted')
+            # Quality on Events requires an Event-typed completed handshake + rep.
+            qual_event = ServiceFactory(
+                user=organiser, type='Event', status='Active',
+                scheduled_time=timezone.now() - timedelta(days=10),
+            )
+            giver = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+            hs = HandshakeFactory(service=qual_event, requester=giver, status='completed')
+            ReputationRepFactory(
+                handshake=hs, giver=giver, receiver=organiser, is_punctual=True,
+            )
+            return ev
+
+        veteran_event = _seed_event(veteran)
+        newcomer_event = _seed_event(newcomer)
+        veteran_score = calculate_event_hot_score(veteran_event)
+        newcomer_score = calculate_event_hot_score(newcomer_event)
+
+        assert veteran_score > 0
+        assert newcomer_score == pytest.approx(veteran_score * self.BOOST, rel=1e-5)
+
+    def test_batch_matches_single_for_mixed_owners(self):
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+        newcomer = UserFactory(date_joined=timezone.now() - timedelta(days=3))
+        veteran_svc = self._seed_quality(veteran)
+        newcomer_svc = self._seed_quality(newcomer)
+
+        single = {
+            veteran_svc.id: calculate_hot_score(veteran_svc),
+            newcomer_svc.id: calculate_hot_score(newcomer_svc),
+        }
+        batch = calculate_hot_scores_batch([veteran_svc, newcomer_svc])
+
+        assert batch[veteran_svc.id] == pytest.approx(single[veteran_svc.id], rel=1e-5)
+        assert batch[newcomer_svc.id] == pytest.approx(single[newcomer_svc.id], rel=1e-5)
+
+    def test_newcomer_boost_stacks_with_capacity(self):
+        """Newcomer owner of a 75%-full group offer should get 1.5 x 1.2 = 1.8x."""
+        from api.models import ReputationRep
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+        newcomer = UserFactory(date_joined=timezone.now() - timedelta(days=7))
+
+        def _seed_group_offer(owner):
+            svc = ServiceFactory(
+                user=owner, type='Offer', status='Active', max_participants=4,
+            )
+            # Quality
+            giver = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+            hs = HandshakeFactory(service=svc, requester=giver, status='completed')
+            ReputationRepFactory(
+                handshake=hs, giver=giver, receiver=owner, is_punctual=True,
+            )
+            # Capacity fill: 3 of 4 = 75%
+            for _ in range(3):
+                HandshakeFactory(service=svc, status='accepted')
+            return svc
+
+        veteran_svc = _seed_group_offer(veteran)
+        newcomer_svc = _seed_group_offer(newcomer)
+
+        veteran_score = calculate_hot_score(veteran_svc)
+        newcomer_score = calculate_hot_score(newcomer_svc)
+
+        # Veteran gets capacity 1.5x only; newcomer gets 1.5 * 1.2 = 1.8x
+        # Ratio newcomer/veteran should be exactly the boost.
+        assert newcomer_score == pytest.approx(veteran_score * self.BOOST, rel=1e-5)
