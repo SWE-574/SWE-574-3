@@ -378,40 +378,41 @@ def complete_timebank_transfer(handshake: Handshake) -> bool:
 
 def cancel_timebank_transfer(handshake: Handshake) -> bool:
     """Refund escrowed hours when a handshake is cancelled.
+
+    Need services reserve time at the listing level. Cancelling an accepted
+    helper agreement should reopen/keep the Need with its reservation intact;
+    the reserved hours are returned only when the Need listing itself is
+    cancelled/deleted via release_timebank_for_need_service().
     
     Note: Caller must wrap in transaction.atomic() for atomicity.
     """
     # Refund for accepted, reported, or paused handshakes (all have escrowed hours)
     if handshake.status in ("accepted", "reported", "paused"):
         service = Service.objects.select_for_update().get(id=handshake.service.id)
-        _, receiver = get_provider_and_receiver(handshake)
-        receiver = User.objects.select_for_update().get(id=receiver.id)
-        if service.type == 'Need' and service.reserved_timebank_hours > 0:
-            hours = Decimal(service.reserved_timebank_hours)
-            service.reserved_timebank_hours = Decimal('0.00')
-            service.save(update_fields=["reserved_timebank_hours"])
-        else:
+        provider, receiver = get_provider_and_receiver(handshake)
+
+        if service.type != 'Need':
+            receiver = User.objects.select_for_update().get(id=receiver.id)
             hours = handshake.provisioned_hours
-        
-        # Use F() expression for atomic balance update
-        receiver.timebank_balance = F("timebank_balance") + hours
-        receiver.save(update_fields=["timebank_balance"])
-        
-        # Refresh to get the actual balance value after atomic update
-        receiver.refresh_from_db(fields=["timebank_balance"])
-        
-        # Record transaction history
-        TransactionHistory.objects.create(
-            user=receiver,
-            transaction_type='refund',
-            amount=hours,  # Positive for refund
-            balance_after=receiver.timebank_balance,
-            service=handshake.service,
-            handshake=handshake,
-            description=f"Refund for cancelled service '{handshake.service.title}' ({hours} hours refunded)"
-        )
-        
-        provider, _ = get_provider_and_receiver(handshake)
+
+            # Use F() expression for atomic balance update
+            receiver.timebank_balance = F("timebank_balance") + hours
+            receiver.save(update_fields=["timebank_balance"])
+
+            # Refresh to get the actual balance value after atomic update
+            receiver.refresh_from_db(fields=["timebank_balance"])
+
+            # Record transaction history
+            TransactionHistory.objects.create(
+                user=receiver,
+                transaction_type='refund',
+                amount=hours,  # Positive for refund
+                balance_after=receiver.timebank_balance,
+                service=handshake.service,
+                handshake=handshake,
+                description=f"Refund for cancelled service '{handshake.service.title}' ({hours} hours refunded)"
+            )
+
         invalidate_conversations(str(receiver.id))
         invalidate_conversations(str(provider.id))
         invalidate_transactions(str(receiver.id))

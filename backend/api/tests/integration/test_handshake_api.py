@@ -13,7 +13,7 @@ from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Handshake, ChatMessage
+from api.models import Handshake, ChatMessage, TransactionHistory
 
 
 @pytest.mark.django_db
@@ -474,6 +474,49 @@ class TestHandshakeViewSet:
         
         requester.refresh_from_db()
         assert requester.timebank_balance == Decimal('3.00')
+
+    def test_need_approved_cancellation_keeps_service_reservation(self):
+        """Cancelling a Need agreement must not return hours unless the Need is cancelled."""
+        owner = UserFactory(timebank_balance=Decimal('1.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('2.00'),
+            reserved_timebank_hours=Decimal('2.00'),
+            status='Agreed',
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='accepted',
+            provisioned_hours=Decimal('2.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
+            'reason': 'Cannot help anymore',
+        })
+        assert request_response.status_code == status.HTTP_200_OK
+
+        client.authenticate_user(owner)
+        response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
+        assert response.status_code == status.HTTP_200_OK
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+        handshake.refresh_from_db()
+        assert handshake.status == 'cancelled'
+        assert service.status == 'Active'
+        assert owner.timebank_balance == Decimal('1.00')
+        assert service.reserved_timebank_hours == Decimal('2.00')
+        assert not TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=handshake,
+            transaction_type='refund',
+        ).exists()
 
     def test_reject_cancellation_request_keeps_handshake_active(self):
         provider = UserFactory()

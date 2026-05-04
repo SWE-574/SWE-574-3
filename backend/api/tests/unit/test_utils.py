@@ -285,8 +285,8 @@ class TestCancelTimebankTransfer:
             transaction_type='refund',
         ).exists()
 
-    def test_cancel_timebank_transfer_refunds_need_service_reservation(self):
-        """Cancelling an accepted Need refunds the original service-level reservation."""
+    def test_cancel_timebank_transfer_keeps_need_service_reservation(self):
+        """Cancelling an accepted Need agreement keeps the listing reservation."""
         owner = UserFactory(timebank_balance=Decimal('1.00'))
         helper = UserFactory(timebank_balance=Decimal('5.00'))
         service = ServiceFactory(
@@ -307,8 +307,16 @@ class TestCancelTimebankTransfer:
 
         owner.refresh_from_db()
         service.refresh_from_db()
-        assert owner.timebank_balance == Decimal('3.00')
-        assert service.reserved_timebank_hours == Decimal('0.00')
+        handshake.refresh_from_db()
+        assert owner.timebank_balance == Decimal('1.00')
+        assert service.reserved_timebank_hours == Decimal('2.00')
+        assert handshake.status == 'cancelled'
+        assert not TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=handshake,
+            transaction_type='refund',
+        ).exists()
 
 
 @pytest.mark.django_db
