@@ -223,6 +223,12 @@ function activeHandshakeLabel(status: Handshake['status']): string {
   return 'Session Confirmed'
 }
 
+function handshakeRequesterId(requester: Handshake['requester']): string {
+  return typeof requester === 'object' && requester !== null
+    ? String(requester.id ?? '')
+    : String(requester ?? '')
+}
+
 function toExpectedAgreement(handshake: Handshake, currentUser?: User | null): ExpectedAgreement | null {
   const hours = Number(handshake.provisioned_hours ?? 0)
   const isEvent = handshake.service_type === 'Event'
@@ -233,8 +239,9 @@ function toExpectedAgreement(handshake: Handshake, currentUser?: User | null): E
     : undefined
   const counterpartName = handshakeCounterpartName(handshake, currentUserName)
   const counterpartEmail = handshake.counterpart?.email ?? ''
+  const requesterId = handshakeRequesterId(handshake.requester)
   const isProvider = isEvent
-    ? String(handshake.requester) !== String(currentUser?.id ?? '')
+    ? requesterId !== String(currentUser?.id ?? '')
     : handshake.is_current_user_provider === true
   const expectedDelta = isProvider ? hours : 0
   const reservedDelta = isProvider ? 0 : -hours
@@ -389,7 +396,7 @@ const TransactionHistoryPage = () => {
   const toggleActiveAgreementSection = useCallback((sectionType: string) => {
     setOpenActiveAgreementSections((prev) => ({
       ...prev,
-      [sectionType]: prev[sectionType] === false,
+      [sectionType]: !prev[sectionType],
     }))
   }, [])
   const activeAgreementDelta = useMemo(

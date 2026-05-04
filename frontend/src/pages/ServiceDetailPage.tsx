@@ -626,23 +626,27 @@ export default function ServiceDetailPage() {
   const reportedParticipantIds = new Set(
     incoming
       .filter((h) => h.status === 'reported')
-      .map((h) => h.requester),
+      .map((h) => exId(h.requester))
+      .filter((id): id is string => Boolean(id)),
   )
   const eventIncomingParticipants = isEvent
     ? Array.from(
       incoming
         .filter((h) => ['accepted', 'checked_in', 'attended', 'no_show', 'reported'].includes(h.status))
         .reduce((acc, h) => {
-          const existing = acc.get(h.requester)
+          const requesterId = exId(h.requester)
+          if (!requesterId) return acc
+
+          const existing = acc.get(requesterId)
           if (!existing) {
-            acc.set(h.requester, h)
+            acc.set(requesterId, h)
             return acc
           }
 
           const existingPriority = EVENT_PARTICIPANT_STATUS_PRIORITY[existing.status] ?? -1
           const candidatePriority = EVENT_PARTICIPANT_STATUS_PRIORITY[h.status] ?? -1
           if (candidatePriority > existingPriority) {
-            acc.set(h.requester, h)
+            acc.set(requesterId, h)
             return acc
           }
 
@@ -650,7 +654,7 @@ export default function ServiceDetailPage() {
             const existingTs = new Date(existing.updated_at ?? existing.created_at).getTime()
             const candidateTs = new Date(h.updated_at ?? h.created_at).getTime()
             if (candidateTs > existingTs) {
-              acc.set(h.requester, h)
+              acc.set(requesterId, h)
             }
           }
 
@@ -846,13 +850,14 @@ export default function ServiceDetailPage() {
 
   const handleReportParticipantBehavior = (participantHandshake: Handshake) => {
     if (reportingEventIssue) return
-    if (reportedParticipantIds.has(participantHandshake.requester)) {
+    const participantRequesterId = exId(participantHandshake.requester)
+    if (participantRequesterId && reportedParticipantIds.has(participantRequesterId)) {
       toast.info('You already reported this participant for this event.')
       return
     }
     openEventReportModal({
       handshakeId: participantHandshake.id,
-      reportedUserId: participantHandshake.requester,
+      reportedUserId: participantRequesterId,
       targetLabel: participantHandshake.requester_name,
     })
   }
@@ -872,7 +877,7 @@ export default function ServiceDetailPage() {
         toast.info('You already reported this participant for this event.')
         return
       }
-      const targetHandshake = eventIncomingParticipants.find((h) => h.requester === targetUserId)
+      const targetHandshake = eventIncomingParticipants.find((h) => exId(h.requester) === targetUserId)
       if (!targetHandshake) {
         toast.error('Could not find an active event participant to report.')
         return
@@ -1497,7 +1502,7 @@ export default function ServiceDetailPage() {
                       <Stack gap={2} maxH="200px" overflowY="auto">
                         {eventIncomingParticipants.map((h) => {
                           // Event reports should not alter owner-facing attendance/status display.
-                          const alreadyReportedParticipant = reportedParticipantIds.has(h.requester)
+                          const alreadyReportedParticipant = reportedParticipantIds.has(exId(h.requester) ?? '')
                           const displayStatus = h.status === 'reported' ? 'accepted' : h.status
                           const cfg = HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 }
                           return (
