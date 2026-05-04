@@ -413,9 +413,11 @@ const DashboardPage = () => {
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
   const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
   const [rankingDebugAvailable, setRankingDebugAvailable] = useState(false)
+  const [typeDropdownOpen, setTypeDropdownOpen]           = useState(false)
 
-  const searchTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const distanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const typeDropdownRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -539,6 +541,17 @@ const DashboardPage = () => {
       return next
     })
   }, [])
+
+  useEffect(() => {
+    if (!typeDropdownOpen) return
+    function handler(e: MouseEvent) {
+      if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target as Node)) {
+        setTypeDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [typeDropdownOpen])
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const ownServiceHandshakes = useMemo(() => Array.from(incomingMap.values()).flat(), [incomingMap])
@@ -694,6 +707,54 @@ const DashboardPage = () => {
                     <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
                   </Box>
                 ))}
+                {/* Divider */}
+                <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
+                {/* Type filter icon button + dropdown */}
+                <Box position="relative" ref={typeDropdownRef as never}>
+                  <Box
+                    as="button"
+                    onClick={() => setTypeDropdownOpen((v) => !v)}
+                    px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
+                    fontSize="12px" fontWeight={activeTypes.size > 0 ? 700 : 500}
+                    bg={activeTypes.size > 0 ? GREEN : 'transparent'}
+                    color={activeTypes.size > 0 ? WHITE : GRAY500}
+                    boxShadow={activeTypes.size > 0 ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                    cursor="pointer" transition="all 0.12s"
+                    display="flex" alignItems="center" gap="4px"
+                  >
+                    <FiLayers size={12} />
+                    {activeTypes.size > 0 && (
+                      <Box as="span" fontSize="10px" fontWeight={700}>{activeTypes.size}</Box>
+                    )}
+                  </Box>
+                  {typeDropdownOpen && (
+                    <Box
+                      position="absolute" top="calc(100% + 6px)" right={0}
+                      bg={WHITE} borderRadius="10px" border={`1px solid ${GRAY200}`}
+                      boxShadow="0 4px 16px rgba(0,0,0,0.10)"
+                      p="4px" zIndex={100} minW="120px"
+                    >
+                      {TYPE_FILTERS.map((tf) => {
+                        const isActive = activeTypes.has(tf.id)
+                        return (
+                          <Box
+                            key={tf.id} as="button"
+                            onClick={() => toggleType(tf.id)}
+                            px="10px" py="6px" borderRadius="7px" w="full"
+                            fontSize="12px" fontWeight={isActive ? 700 : 500}
+                            bg={isActive ? tf.activeBg : 'transparent'}
+                            color={isActive ? tf.activeColor : GRAY600}
+                            cursor="pointer" transition="all 0.12s"
+                            display="flex" alignItems="center" gap="6px"
+                          >
+                            <Box w="7px" h="7px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                            {tf.label}
+                          </Box>
+                        )
+                      })}
+                    </Box>
+                  )}
+                </Box>
               </Flex>
 
               {/* Map toggle */}
@@ -713,66 +774,10 @@ const DashboardPage = () => {
               </Box>
             </Flex>
 
-            {/* Type filter row — desktop */}
-            <Flex
-              display={{ base: 'none', sm: 'flex' }}
-              align="center" gap="6px" mt="8px"
-            >
-              <Box color={GRAY400} flexShrink={0} display="flex" alignItems="center"><FiLayers size={13} /></Box>
-              <Flex gap="3px" bg={GRAY100} p="3px" borderRadius="10px" align="center">
-                {TYPE_FILTERS.map((tf) => {
-                  const isActive = activeTypes.has(tf.id)
-                  return (
-                    <Box
-                      key={tf.id} as="button"
-                      onClick={() => toggleType(tf.id)}
-                      px="10px" py="5px" borderRadius="7px"
-                      fontSize="12px" fontWeight={isActive ? 700 : 500}
-                      bg={isActive ? tf.activeBg : 'transparent'}
-                      color={isActive ? tf.activeColor : GRAY500}
-                      boxShadow={isActive ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
-                      cursor="pointer" transition="all 0.12s"
-                      display="flex" alignItems="center" gap="4px"
-                    >
-                      <Box w="6px" h="6px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
-                      {tf.label}
-                    </Box>
-                  )
-                })}
-              </Flex>
-            </Flex>
-
-            {/* Type filter row — mobile */}
+            {/* Filter + type chips row — mobile only */}
             <Flex
               display={{ base: 'flex', sm: 'none' }}
               gap="5px" mt="8px" overflowX="auto" align="center"
-              style={{ scrollbarWidth: 'none' }}
-            >
-              {TYPE_FILTERS.map((tf) => {
-                const isActive = activeTypes.has(tf.id)
-                return (
-                  <Box
-                    key={tf.id} as="button" flexShrink={0}
-                    onClick={() => toggleType(tf.id)}
-                    px="10px" py="5px" borderRadius="20px"
-                    fontSize="12px" fontWeight={isActive ? 700 : 500}
-                    bg={isActive ? tf.activeBg : WHITE}
-                    color={isActive ? tf.activeColor : GRAY600}
-                    border={`1px solid ${isActive ? tf.activeBg : GRAY200}`}
-                    cursor="pointer" transition="all 0.12s"
-                    display="flex" alignItems="center" gap="4px"
-                  >
-                    <Box w="6px" h="6px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
-                    {tf.label}
-                  </Box>
-                )
-              })}
-            </Flex>
-
-            {/* Filter chips row — mobile */}
-            <Flex
-              display={{ base: 'flex', sm: 'none' }}
-              gap="5px" mt="5px" overflowX="auto" align="center"
               style={{ scrollbarWidth: 'none' }}
             >
               {FILTERS.map((f) => (
@@ -791,6 +796,25 @@ const DashboardPage = () => {
                   {f.label}
                 </Box>
               ))}
+              {/* Divider */}
+              <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
+              {/* Type filter icon button — shares the same dropdown ref as desktop */}
+              <Box
+                as="button" flexShrink={0}
+                onClick={() => setTypeDropdownOpen((v) => !v)}
+                px="10px" py="5px" borderRadius="20px"
+                fontSize="12px" fontWeight={activeTypes.size > 0 ? 700 : 500}
+                bg={activeTypes.size > 0 ? GREEN : WHITE}
+                color={activeTypes.size > 0 ? WHITE : GRAY600}
+                border={`1px solid ${activeTypes.size > 0 ? GREEN : GRAY200}`}
+                cursor="pointer" transition="all 0.12s"
+                display="flex" alignItems="center" gap="4px"
+              >
+                <FiLayers size={12} />
+                {activeTypes.size > 0 && (
+                  <Box as="span" fontSize="10px" fontWeight={700}>{activeTypes.size}</Box>
+                )}
+              </Box>
             </Flex>
           </Box>
 
