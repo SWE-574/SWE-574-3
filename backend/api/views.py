@@ -128,6 +128,35 @@ def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
 
 
+def _indefinite_article(noun: str) -> str:
+    """Return 'a' or 'an' for the given noun (used in user-facing error copy)."""
+    if not noun:
+        return 'a'
+    return 'an' if noun[0].lower() in 'aeiou' else 'a'
+
+
+def _require_verified_email(request, action_clause: str = 'to continue'):
+    """Return a 403 error response when the user's email is not verified.
+
+    Returns ``None`` when the user is verified, so callers can early-return:
+
+        err = _require_verified_email(request, 'before requesting this service')
+        if err:
+            return err
+
+    The error response carries ``code=EMAIL_NOT_VERIFIED`` so the frontend
+    can route the user to the resend / verification flow consistently.
+    """
+    if getattr(request.user, 'is_verified', False):
+        return None
+    return create_error_response(
+        f'Please verify your email address {action_clause}. '
+        'Check your inbox for the verification link, or request a new one.',
+        code=ErrorCodes.EMAIL_NOT_VERIFIED,
+        status_code=status.HTTP_403_FORBIDDEN,
+    )
+
+
 # Roles that may access admin / moderation endpoints.
 # Keep in sync with User.ROLE_CHOICES and the frontend AdminProtectedRoute.
 ADMIN_ROLES = frozenset(('admin', 'super_admin', 'moderator'))
@@ -2084,6 +2113,18 @@ class ServiceViewSet(viewsets.ModelViewSet):
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
+        # Email verification gate: only verified users may publish any
+        # service (Offer / Need / Event). Backend is the source of truth;
+        # the frontend has matching guards on /post-offer, /post-need and
+        # /post-event so users see a clear CTA before they fill the form.
+        if service_type in ('Offer', 'Need', 'Event'):
+            verification_error = _require_verified_email(
+                request,
+                f'before posting {_indefinite_article(service_type)} {service_type}',
+            )
+            if verification_error:
+                return verification_error
+
         if service_type == 'Offer':
             if not can_user_post_offer(request.user):
                 return create_error_response(
@@ -2343,6 +2384,95 @@ class ServiceViewSet(viewsets.ModelViewSet):
         invalidate_service_lists()
         serializer = self.get_serializer(service)
         return Response(serializer.data)
+
+    # ── QR attendance token endpoints ──────────────────────────────────
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='generate-qr-token',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def generate_qr_token(self, request, pk=None):
+        """Generate (or rotate) a QR attendance token for an event.
+
+        POST /api/services/{id}/generate-qr-token/
+
+        Returns the token, short attendance code, expiry, and a QR payload
+        string suitable for encoding into a QR image.
+        """
+        import json
+        service = self.get_object()
+        try:
+            token_obj = EventHandshakeService.generate_qr_token(
+                service, request.user,
+            )
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        qr_payload = json.dumps({
+            'event_id': str(service.pk),
+            'token': token_obj.token,
+        })
+        return Response({
+            'id': str(token_obj.pk),
+            'token': token_obj.token,
+            'attendance_code': token_obj.attendance_code,
+            'created_at': token_obj.created_at.isoformat(),
+            'expires_at': token_obj.expires_at.isoformat(),
+            'qr_payload': qr_payload,
+        })
+
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='qr-token',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def get_qr_token(self, request, pk=None):
+        """Get the current active QR token for an event (organizer only).
+
+        GET /api/services/{id}/qr-token/
+        """
+        import json
+        service = self.get_object()
+        if service.user_id != request.user.pk:
+            return create_error_response(
+                'Only the event organizer can view the QR token.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        from .models import EventQRToken
+        try:
+            token_obj = EventQRToken.objects.get(
+                service=service,
+                expires_at__gt=timezone.now(),
+            )
+        except EventQRToken.DoesNotExist:
+            return create_error_response(
+                'No active QR token found. Generate one first.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        qr_payload = json.dumps({
+            'event_id': str(service.pk),
+            'token': token_obj.token,
+        })
+        return Response({
+            'id': str(token_obj.pk),
+            'token': token_obj.token,
+            'attendance_code': token_obj.attendance_code,
+            'created_at': token_obj.created_at.isoformat(),
+            'expires_at': token_obj.expires_at.isoformat(),
+            'qr_payload': qr_payload,
+        })
 
     @action(
         detail=False,
@@ -2612,6 +2742,14 @@ class ExpressInterestView(APIView):
 
     @track_performance
     def post(self, request, service_id):
+        # Email verification gate: applicants must be verified to request /
+        # offer help on any service.
+        verification_error = _require_verified_email(
+            request, 'before requesting this service'
+        )
+        if verification_error:
+            return verification_error
+
         try:
             service = Service.objects.select_related('user').get(id=service_id, status='Active')
         except Service.DoesNotExist:
@@ -2788,6 +2926,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path=r'services/(?P<service_id>[^/.]+)/interest', permission_classes=[permissions.IsAuthenticated])
     @track_performance
     def express_interest(self, request, service_id=None):
+        verification_error = _require_verified_email(
+            request, 'before requesting this service'
+        )
+        if verification_error:
+            return verification_error
+
         try:
             service = Service.objects.select_related('user').get(id=service_id, status='Active')
         except Service.DoesNotExist:
@@ -3135,6 +3279,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
 
         POST /api/handshakes/services/{service_id}/join-event/
         """
+        verification_error = _require_verified_email(
+            request, 'before joining this event'
+        )
+        if verification_error:
+            return verification_error
+
         try:
             service = Service.objects.select_related('user').get(
                 id=service_id, type='Event', status='Active'
@@ -3202,10 +3352,19 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         """Participant checks in to an Event during the lockdown window.
 
         POST /api/handshakes/{id}/checkin/
+
+        If the event requires QR check-in, pass ``qr_token`` in the request
+        body (the full token from the QR code or the short attendance code).
         """
         handshake = self.get_object()
+        qr_token = request.data.get('qr_token')
         try:
-            EventHandshakeService.checkin(handshake, request.user)
+            if qr_token:
+                EventHandshakeService.checkin_with_qr(
+                    handshake, request.user, qr_token=qr_token,
+                )
+            else:
+                EventHandshakeService.checkin(handshake, request.user)
         except PermissionError as e:
             return create_error_response(
                 str(e), code=ErrorCodes.PERMISSION_DENIED,

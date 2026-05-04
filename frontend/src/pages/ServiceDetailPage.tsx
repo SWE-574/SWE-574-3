@@ -17,6 +17,7 @@ import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDe
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import ReportModal, { type ReportOption } from '@/components/ReportModal'
 import { AdminConfirmModal, ModalBackdrop, ModalCard, ModalHeader, ModalFooter, ModalFieldLabel } from '@/components/AdminModals'
+import VerificationRequiredModal from '@/components/VerificationRequiredModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
   spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
@@ -511,6 +512,8 @@ export default function ServiceDetailPage() {
   const [joinLoading, setJoinLoading]       = useState(false)
   const [leaveLoading, setLeaveLoading]     = useState(false)
   const [checkinLoading, setCheckinLoading] = useState(false)
+  const [qrCodeModalOpen, setQrCodeModalOpen] = useState(false)
+  const [attendanceCode, setAttendanceCode]   = useState('')
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [removeLoading, setRemoveLoading]   = useState(false)
   const [showCancelModal, setShowCancelModal] = useState(false)
@@ -685,9 +688,35 @@ export default function ServiceDetailPage() {
       )
     : undefined
 
+  // ── Email-verification gate for join/request actions ───────────────
+  // Backend already rejects unverified users (HTTP 403, EMAIL_NOT_VERIFIED)
+  // on /services/<id>/interest/ and /handshakes/services/<id>/join-event/.
+  // We block in the UI too so the user understands *why* and can resend the
+  // verification email without leaving the page.
+  const [verificationGate, setVerificationGate] = useState<{
+    open: boolean
+    actionLabel: string
+  }>({ open: false, actionLabel: 'continue' })
+
+  const isUnverified = user?.is_verified === false
+
+  const promptVerification = (actionLabel: string) => {
+    setVerificationGate({ open: true, actionLabel })
+  }
+
+  const closeVerificationGate = () => {
+    setVerificationGate((prev) => ({ ...prev, open: false }))
+  }
+
   const handleExpressInterest = async () => {
     if (!service) return
     if (!isAuthenticated) { navigate('/login'); return }
+    if (isUnverified) {
+      promptVerification(
+        service.type === 'Need' ? 'offer help on a Need' : 'request this service',
+      )
+      return
+    }
     setInterestLoading(true)
     try {
       await serviceAPI.expressInterest(service.id)
@@ -699,6 +728,11 @@ export default function ServiceDetailPage() {
       const detail = err.response?.data?.detail
       if (code === 'ALREADY_EXISTS') { toast.info('You already have an active request.'); handshakeAPI.list().then(setHandshakes).catch(() => {}) }
       else if (code === 'INSUFFICIENT_BALANCE') toast.error(detail ?? 'Insufficient TimeBank balance.')
+      else if (code === 'EMAIL_NOT_VERIFIED') {
+        promptVerification(
+          service.type === 'Need' ? 'offer help on a Need' : 'request this service',
+        )
+      }
       else toast.error(detail ?? 'Could not express interest. Please try again.')
     } finally { setInterestLoading(false) }
   }
@@ -739,6 +773,10 @@ export default function ServiceDetailPage() {
 
   const handleJoinEvent = async () => {
     if (!service || !isAuthenticated) { navigate('/login'); return }
+    if (isUnverified) {
+      promptVerification('join this event')
+      return
+    }
     if (service.status !== 'Active') {
       toast.error('This event is no longer open for joining.')
       return
@@ -749,8 +787,12 @@ export default function ServiceDetailPage() {
       toast.success('You\'ve joined the event!')
       setHandshakes(await handshakeAPI.list())
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail ?? 'Could not join event.')
+      const err = e as { response?: { data?: { detail?: string; code?: string } } }
+      if (err.response?.data?.code === 'EMAIL_NOT_VERIFIED') {
+        promptVerification('join this event')
+      } else {
+        toast.error(err.response?.data?.detail ?? 'Could not join event.')
+      }
     } finally { setJoinLoading(false) }
   }
 
@@ -767,12 +809,18 @@ export default function ServiceDetailPage() {
     } finally { setLeaveLoading(false) }
   }
 
-  const handleCheckin = async () => {
+  const handleCheckin = async (qrToken?: string) => {
     if (!myEventHandshake) return
     setCheckinLoading(true)
     try {
-      await handshakeAPI.checkin(myEventHandshake.id)
-      toast.success('Checked in! See you there.')
+      await handshakeAPI.checkin(myEventHandshake.id, qrToken)
+      if (qrToken) {
+        toast.success('Attendance confirmed!')
+        setQrCodeModalOpen(false)
+        setAttendanceCode('')
+      } else {
+        toast.success('Checked in! See you there.')
+      }
       setHandshakes(await handshakeAPI.list())
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
@@ -1652,20 +1700,36 @@ export default function ServiceDetailPage() {
                         <Text fontSize="13px" fontWeight={700} color={GRAY800}>You're registered ✓</Text>
                         <Text fontSize="12px" color={GRAY500} mt="2px">
                           {isWithinLockdownWindow(service.scheduled_time)
-                            ? 'Check-in is now open!'
-                            : 'Check-in opens 24 h before the event.'}
+                            ? (service.requires_qr_checkin
+                                ? 'Scan the QR code or enter the attendance code from the organizer.'
+                                : 'Check-in is now open!')
+                            : (service.requires_qr_checkin
+                                ? 'Attendance verification opens 24 h before the event.'
+                                : 'Check-in opens 24 h before the event.')}
                         </Text>
                       </Box>
                       {isWithinLockdownWindow(service.scheduled_time) ? (
-                        <Box as="button" w="full" py="12px" borderRadius="11px"
-                          bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
-                          display="flex" alignItems="center" justifyContent="center" gap="7px"
-                          onClick={handleCheckin}
-                          style={{ border: 'none', cursor: checkinLoading ? 'not-allowed' : 'pointer', opacity: checkinLoading ? 0.7 : 1, transition: 'opacity 0.15s' }}
-                        >
-                          <FiCheckCircle size={15} />
-                          {checkinLoading ? 'Checking in…' : 'Check In'}
-                        </Box>
+                        service.requires_qr_checkin ? (
+                          <Box as="button" w="full" py="12px" borderRadius="11px"
+                            bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+                            display="flex" alignItems="center" justifyContent="center" gap="7px"
+                            onClick={() => setQrCodeModalOpen(true)}
+                            style={{ border: 'none', cursor: 'pointer', transition: 'opacity 0.15s' }}
+                          >
+                            <FiCheckCircle size={15} />
+                            Enter Attendance Code
+                          </Box>
+                        ) : (
+                          <Box as="button" w="full" py="12px" borderRadius="11px"
+                            bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+                            display="flex" alignItems="center" justifyContent="center" gap="7px"
+                            onClick={() => handleCheckin()}
+                            style={{ border: 'none', cursor: checkinLoading ? 'not-allowed' : 'pointer', opacity: checkinLoading ? 0.7 : 1, transition: 'opacity 0.15s' }}
+                          >
+                            <FiCheckCircle size={15} />
+                            {checkinLoading ? 'Checking in…' : 'Check In'}
+                          </Box>
+                        )
                       ) : (
                         <Box as="button" w="full" py="12px" borderRadius="11px"
                           bg={RED_LT} color={RED} fontSize="14px" fontWeight={700}
@@ -2279,6 +2343,76 @@ export default function ServiceDetailPage() {
           completing={completing}
           isOwner={isOwn}
         />
+      )}
+
+      <VerificationRequiredModal
+        isOpen={verificationGate.open}
+        onClose={closeVerificationGate}
+        actionLabel={verificationGate.actionLabel}
+        email={user?.email}
+      />
+      {/* ── Attendance code entry modal (QR events) ── */}
+      {qrCodeModalOpen && (
+        <Box
+          position="fixed" inset={0} zIndex={1100}
+          bg="rgba(0,0,0,0.55)"
+          display="flex" alignItems="center" justifyContent="center"
+          p={4}
+          onClick={() => { setQrCodeModalOpen(false); setAttendanceCode('') }}
+        >
+          <Box
+            bg={WHITE} borderRadius="20px" w="100%" maxW="380px" p={8}
+            boxShadow="0 20px 60px rgba(0,0,0,0.2)"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
+            <Text fontSize="lg" fontWeight={700} color={GRAY800} mb={1} textAlign="center">
+              Enter Attendance Code
+            </Text>
+            <Text fontSize="13px" color={GRAY500} mb={5} textAlign="center">
+              Ask the organizer for the 6-character code
+            </Text>
+            <input
+              type="text"
+              maxLength={6}
+              value={attendanceCode}
+              onChange={(e) => setAttendanceCode(e.target.value.toUpperCase())}
+              placeholder="ABC123"
+              autoFocus
+              style={{
+                width: '100%',
+                textAlign: 'center',
+                fontSize: '28px',
+                fontWeight: 800,
+                letterSpacing: '0.2em',
+                fontFamily: 'monospace',
+                padding: '14px',
+                border: `2px solid ${GRAY200}`,
+                borderRadius: '12px',
+                outline: 'none',
+              }}
+              onFocus={(e) => { e.target.style.borderColor = GREEN }}
+              onBlur={(e) => { e.target.style.borderColor = GRAY200 }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && attendanceCode.length >= 4) handleCheckin(attendanceCode)
+              }}
+            />
+            <Box
+              as="button" w="100%" mt={4} py="12px" borderRadius="11px"
+              bg={attendanceCode.length >= 4 ? GREEN : GRAY200}
+              color={attendanceCode.length >= 4 ? WHITE : GRAY500}
+              fontSize="14px" fontWeight={700}
+              onClick={() => attendanceCode.length >= 4 && handleCheckin(attendanceCode)}
+              style={{
+                border: 'none',
+                cursor: attendanceCode.length >= 4 && !checkinLoading ? 'pointer' : 'not-allowed',
+                opacity: checkinLoading ? 0.7 : 1,
+                transition: 'background 0.15s, opacity 0.15s',
+              }}
+            >
+              {checkinLoading ? 'Verifying…' : 'Confirm Attendance'}
+            </Box>
+          </Box>
+        </Box>
       )}
 
     </Box>

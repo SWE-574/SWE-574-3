@@ -119,6 +119,30 @@ export const serviceAPI = {
     await apiClient.post(`/services/${serviceId}/cancel-event/`, { reason })
   },
 
+  generateQRToken: async (serviceId: string) => {
+    const res = await apiClient.post<{
+      id: string
+      token: string
+      attendance_code: string
+      created_at: string
+      expires_at: string
+      qr_payload: string
+    }>(`/services/${serviceId}/generate-qr-token/`)
+    return res.data
+  },
+
+  getQRToken: async (serviceId: string) => {
+    const res = await apiClient.get<{
+      id: string
+      token: string
+      attendance_code: string
+      created_at: string
+      expires_at: string
+      qr_payload: string
+    }>(`/services/${serviceId}/qr-token/`)
+    return res.data
+  },
+
   setPrimaryMedia: async (serviceId: string, mediaId: string): Promise<Service> => {
     const res = await apiClient.patch<Service>(`/services/${serviceId}/set-primary-media/`, { media_id: mediaId })
     return res.data

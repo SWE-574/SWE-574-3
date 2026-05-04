@@ -76,6 +76,10 @@ import ReportModal, {
   type ReportModalRequest,
   type ReportOption,
 } from "../components/ReportModal";
+import {
+  QRScannerModal,
+  QRDisplayModal,
+} from "../components/service/QRAttendanceModal";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const SLIDER_WIDTH = SCREEN_WIDTH;
@@ -283,6 +287,8 @@ export default function ServiceDetailScreen() {
     useState<EventDetailModalTab>("details");
   const [eventActionLoading, setEventActionLoading] = useState(false);
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null);
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
+  const [qrDisplayOpen, setQrDisplayOpen] = useState(false);
 
   const sliderRef = useRef<FlatList<MediaItem>>(null);
 
@@ -602,12 +608,17 @@ export default function ServiceDetailScreen() {
     ]);
   };
 
-  const handleCheckin = async () => {
+  const handleCheckin = async (qrToken?: string) => {
     if (!myEventHandshake) return;
     setEventActionLoading(true);
     try {
-      await checkinEvent(myEventHandshake.id);
-      Alert.alert("Checked in!", "See you there.");
+      await checkinEvent(myEventHandshake.id, qrToken);
+      if (qrToken) {
+        setQrScannerOpen(false);
+        Alert.alert("Attendance confirmed!", "You're marked as attended.");
+      } else {
+        Alert.alert("Checked in!", "See you there.");
+      }
       const handshakes = await loadHandshakes(service);
       await loadReportState(service, handshakes);
     } catch (e) {
@@ -1698,7 +1709,9 @@ export default function ServiceDetailScreen() {
           }}
           onJoinEvent={handleJoinEvent}
           onLeaveEvent={handleLeaveEvent}
-          onCheckinEvent={handleCheckin}
+          onCheckinEvent={() => handleCheckin()}
+          onOpenQRScanner={() => setQrScannerOpen(true)}
+          onShowQRCode={() => setQrDisplayOpen(true)}
           onEditEvent={handleEditService}
           onCancelEvent={handleCancelEvent}
           onTogglePinEvent={handleTogglePinEvent}
@@ -1725,6 +1738,22 @@ export default function ServiceDetailScreen() {
           onCompleteEvent={handleCompleteEvent}
         />
       ) : null}
+
+      {service && (
+        <>
+          <QRScannerModal
+            visible={qrScannerOpen}
+            onClose={() => setQrScannerOpen(false)}
+            onSubmit={(code) => handleCheckin(code)}
+            loading={eventActionLoading}
+          />
+          <QRDisplayModal
+            visible={qrDisplayOpen}
+            onClose={() => setQrDisplayOpen(false)}
+            serviceId={service.id}
+          />
+        </>
+      )}
 
       <ReportModal
         visible={showListingReportModal}

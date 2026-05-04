@@ -29,6 +29,8 @@ type Props = {
   onJoinEvent: () => void;
   onLeaveEvent: () => void;
   onCheckinEvent: () => void;
+  onOpenQRScanner?: () => void;
+  onShowQRCode?: () => void;
   onEditEvent: () => void;
   onCancelEvent: () => void;
   onTogglePinEvent: () => void;
@@ -132,6 +134,8 @@ export default function EventDetailModal({
   onJoinEvent,
   onLeaveEvent,
   onCheckinEvent,
+  onOpenQRScanner,
+  onShowQRCode,
   onEditEvent,
   onCancelEvent,
   onTogglePinEvent,
@@ -444,25 +448,47 @@ export default function EventDetailModal({
                       </View>
 
                       {participantLockdown ? (
-                        <TouchableOpacity
-                          style={styles.joinButton}
-                          onPress={onCheckinEvent}
-                          disabled={participantActionLoading}
-                          activeOpacity={0.88}
-                        >
-                          {participantActionLoading ? (
-                            <ActivityIndicator size="small" color={colors.WHITE} />
-                          ) : (
-                            <>
-                              <Ionicons
-                                name="log-in-outline"
-                                size={16}
-                                color={colors.WHITE}
-                              />
-                              <Text style={styles.joinButtonText}>Check In</Text>
-                            </>
-                          )}
-                        </TouchableOpacity>
+                        service.requires_qr_checkin ? (
+                          <TouchableOpacity
+                            style={styles.joinButton}
+                            onPress={onOpenQRScanner}
+                            disabled={participantActionLoading}
+                            activeOpacity={0.88}
+                          >
+                            {participantActionLoading ? (
+                              <ActivityIndicator size="small" color={colors.WHITE} />
+                            ) : (
+                              <>
+                                <Ionicons
+                                  name="qr-code-outline"
+                                  size={16}
+                                  color={colors.WHITE}
+                                />
+                                <Text style={styles.joinButtonText}>Scan QR / Enter Code</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.joinButton}
+                            onPress={onCheckinEvent}
+                            disabled={participantActionLoading}
+                            activeOpacity={0.88}
+                          >
+                            {participantActionLoading ? (
+                              <ActivityIndicator size="small" color={colors.WHITE} />
+                            ) : (
+                              <>
+                                <Ionicons
+                                  name="log-in-outline"
+                                  size={16}
+                                  color={colors.WHITE}
+                                />
+                                <Text style={styles.joinButtonText}>Check In</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        )
                       ) : (
                         <TouchableOpacity
                           style={styles.leaveButton}
@@ -603,7 +629,7 @@ export default function EventDetailModal({
                           </View>
                         </View>
 
-                        {status === "checked_in" ? (
+                        {(status === "checked_in" || (service.requires_qr_checkin && status === "accepted")) ? (
                           <TouchableOpacity
                             style={styles.markButton}
                             onPress={() => onMarkAttended(handshake.id)}
@@ -635,6 +661,17 @@ export default function EventDetailModal({
                   );
                 })
               )}
+
+              {service.requires_qr_checkin && service.status === "Active" && isOwner ? (
+                <TouchableOpacity
+                  style={[styles.completeButton, { backgroundColor: colors.AMBER, marginBottom: 10 }]}
+                  onPress={onShowQRCode}
+                  activeOpacity={0.88}
+                >
+                  <Ionicons name="qr-code-outline" size={16} color={colors.WHITE} />
+                  <Text style={styles.completeButtonText}>Show Attendance QR</Text>
+                </TouchableOpacity>
+              ) : null}
 
               {(service.status === "Active" || service.status === "Agreed") ? (
                 <TouchableOpacity
