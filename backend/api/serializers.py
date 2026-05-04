@@ -1396,6 +1396,7 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
     video_intro_url = serializers.CharField(allow_blank=True, required=False, allow_null=True)
     portfolio_images = serializers.JSONField(required=False, default=list)
     show_history = serializers.BooleanField(required=False, default=True)
+    notification_preferences = serializers.JSONField(required=False, default=dict)
     video_intro_file_url = serializers.SerializerMethodField()
 
     # Skills: read as tag objects, write as list of tag IDs or new tag names
@@ -1412,7 +1413,7 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
             'created_events', 'joined_events', 'invited_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file', 'video_intro_file_url',
-            'portfolio_images', 'show_history', 'featured_achievement_id',
+            'portfolio_images', 'show_history', 'notification_preferences', 'featured_achievement_id',
             'is_onboarded', 'is_verified',
             'skills', 'skill_ids',
             'followers_count', 'following_count', 'is_following',

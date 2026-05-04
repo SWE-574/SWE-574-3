@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useNotificationSocket } from "../hooks/useNotificationSocket";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import BottomTabNavigator from "./BottomTabNavigator";
+import InAppNotificationToast from "../presentation/components/InAppNotificationToast";
 
 export default function RootNavigator() {
   const { isLoading } = useAuth();
@@ -20,10 +21,18 @@ export default function RootNavigator() {
     );
   }
 
-  return <BottomTabNavigator />;
+  return (
+    <View style={styles.container}>
+      <BottomTabNavigator />
+      <InAppNotificationToast />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
   loading: {
     flex: 1,
     justifyContent: "center",

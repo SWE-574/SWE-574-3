@@ -72,6 +72,14 @@ class User(AbstractUser):
         blank=True,
         help_text='Array of portfolio image URLs/paths (max 5)'
     )
+    # Notification preferences (#370). Empty / None means all categories ON.
+    # Keys are NOTIFICATION_CATEGORY_* values; the master "push" key controls
+    # the entire push channel without losing per-category state.
+    notification_preferences = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Per-category notification opt-outs; {"push": false} disables all push notifications.',
+    )
     show_history = models.BooleanField(
         default=True,
         help_text='Whether to show transaction history publicly'

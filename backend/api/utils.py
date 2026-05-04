@@ -326,8 +326,50 @@ def _broadcast_notification(notification: Notification) -> None:
     _send_push_notification(notification)
 
 
+# Map specific Notification.type values to user-facing preference categories.
+# Keys absent from this map fall under 'system' so users can mute moderation
+# pings without losing essential transactional ones.
+NOTIFICATION_CATEGORY_MAP: dict[str, str] = {
+    'handshake_request': 'handshakes',
+    'handshake_accepted': 'handshakes',
+    'handshake_denied': 'handshakes',
+    'handshake_cancellation_requested': 'handshakes',
+    'handshake_cancellation_rejected': 'handshakes',
+    'handshake_cancelled': 'handshakes',
+    'service_updated': 'services',
+    'service_reminder': 'services',
+    'service_confirmation': 'services',
+    'chat_message': 'chat',
+    'positive_rep': 'reputation',
+    'admin_warning': 'system',
+    'dispute_resolved': 'system',
+    'report_received': 'reports',
+    'report_resolved': 'reports',
+    'report_dismissed': 'reports',
+}
+
+
+def user_wants_push(user: User, notification_type: str) -> bool:
+    """Check the user's notification preferences before delivering a push (#370).
+
+    Defaults to True (deliver) when the user has no preferences set or when
+    a category is missing — opt-out, not opt-in. Two switches matter:
+
+      - prefs.get('push') == False   -> master push off; nothing delivered.
+      - prefs.get(category) == False -> category muted; this push is skipped.
+    """
+    prefs = getattr(user, 'notification_preferences', None) or {}
+    if prefs.get('push') is False:
+        return False
+    category = NOTIFICATION_CATEGORY_MAP.get(notification_type, 'system')
+    return prefs.get(category) is not False
+
+
 def _send_push_notification(notification: Notification) -> None:
     """Send an Expo push notification to all active devices for the user."""
+    if not user_wants_push(notification.user, notification.type):
+        return
+
     try:
         from exponent_server_sdk import (
             DeviceNotRegisteredError,
