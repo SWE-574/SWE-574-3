@@ -1,209 +1,153 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useAuthStore } from '@/store/useAuthStore'
-import { Box, Flex, Text, Button, VStack, HStack, Grid } from '@chakra-ui/react'
-import { FiClock, FiArrowRight } from 'react-icons/fi'
-import { MapView } from '@/components/MapView'
-import { serviceAPI } from '@/services/serviceAPI'
-import type { Service } from '@/types'
-import { GREEN, GREEN_LT, YELLOW, GRAY50, GRAY100, GRAY200, GRAY500, GRAY600, GRAY800, GRAY900, WHITE } from '@/theme/tokens'
+import { useEffect, useState } from 'react'
+import { Navigate, useNavigate } from 'react-router-dom'
+import { Box, Button, Flex, Grid, HStack, Text, VStack } from '@chakra-ui/react'
+import { FiArrowRight, FiClock, FiMapPin, FiRepeat, FiUsers } from 'react-icons/fi'
+
 import { Logo } from '@/components/Logo'
+import { serviceAPI, type PublicFeaturedResponse, type PublicFeaturedService } from '@/services/serviceAPI'
+import { useAuthStore } from '@/store/useAuthStore'
+import {
+  AMBER, AMBER_LT, BLUE, BLUE_LT, GREEN, GREEN_LT, GRAY50, GRAY100, GRAY200,
+  GRAY400, GRAY500, GRAY600, GRAY700, GRAY800, GRAY900, WHITE,
+} from '@/theme/tokens'
 
-// ─── Animated Hero SVG ────────────────────────────────────────────────────────
-// Recreated with ultra-smooth CSS keyframes and an elegant design matching the
-// "Calm Confidence" UX guidelines and the provided reference screenshot.
-function AnimatedHeroSVG() {
+// FR-457 — public landing page. Targets anonymous visitors only; authenticated
+// users are redirected to /dashboard at the top of the component.
+
+const HOW_IT_WORKS: { icon: React.ReactNode; title: string; body: string }[] = [
+  {
+    icon: <FiUsers size={20} />,
+    title: '1. Join the bank',
+    body: 'Sign up with an email. You start with 3 hours of credit so you can request help on day one.',
+  },
+  {
+    icon: <FiRepeat size={20} />,
+    title: '2. Earn or spend hours',
+    body: 'Offer something you can do — pet-sit, fix a bike, teach Python — and earn an hour for every hour you give.',
+  },
+  {
+    icon: <FiClock size={20} />,
+    title: '3. Spend on what you need',
+    body: 'Use your hours on offers from other members. One hour given equals one hour received, regardless of skill.',
+  },
+]
+
+function useDocumentMeta() {
+  // The base index.html only carries a generic title; per-page metadata is set
+  // here so search engines and link unfurlers see something specific to the
+  // landing page (issue #457 acceptance criterion).
+  useEffect(() => {
+    const previousTitle = document.title
+    document.title = 'The Hive — A community time-bank where 1 hour = 1 hour'
+
+    function setMeta(selector: string, attr: 'name' | 'property', value: string, content: string) {
+      let tag = document.head.querySelector<HTMLMetaElement>(selector)
+      if (!tag) {
+        tag = document.createElement('meta')
+        tag.setAttribute(attr, value)
+        document.head.appendChild(tag)
+      }
+      tag.setAttribute('content', content)
+    }
+
+    const description =
+      'Trade time, not money. The Hive is a neighbourhood time-bank where every member starts with 3 hours of credit and one hour given equals one hour received.'
+
+    setMeta('meta[name="description"]', 'name', 'description', description)
+    setMeta('meta[property="og:title"]', 'property', 'og:title', 'The Hive — A community time-bank')
+    setMeta('meta[property="og:description"]', 'property', 'og:description', description)
+    setMeta('meta[property="og:type"]', 'property', 'og:type', 'website')
+
+    return () => {
+      document.title = previousTitle
+    }
+  }, [])
+}
+
+function FeaturedCard({ service, onClick }: { service: PublicFeaturedService; onClick: () => void }) {
+  const tone =
+    service.type === 'Need' ? { fg: BLUE, bg: BLUE_LT } :
+    service.type === 'Event' ? { fg: AMBER, bg: AMBER_LT } :
+    { fg: GREEN, bg: GREEN_LT }
+
   return (
-    <Box position="relative" w="100%" h="460px" borderRadius="16px" overflow="hidden" bg="#FAFAFA" border={`1px solid ${GRAY200}`}>
-      <svg width="100%" height="100%" viewBox="0 0 800 460" xmlns="http://www.w3.org/2000/svg">
-        <style>
-          {`
-            @keyframes hive-float-1 { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-12px); } }
-            @keyframes hive-float-2 { 0%, 100% { transform: translateY(0px) translateX(0px); } 50% { transform: translateY(8px) translateX(-2px); } }
-            @keyframes hive-float-3 { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
-            @keyframes hive-float-conn { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(6px); } }
-            
-            .smooth-card-1 { animation: hive-float-1 10s ease-in-out infinite; }
-            .smooth-card-2 { animation: hive-float-2 12s ease-in-out infinite; }
-            .smooth-card-3 { animation: hive-float-3 14s ease-in-out infinite; }
-            .smooth-conn { animation: hive-float-conn 9s ease-in-out infinite; }
-          `}
-        </style>
-        
-        <defs>
-          <filter id="heroShadow" x="-10%" y="-10%" width="120%" height="120%">
-            <feDropShadow dx="0" dy="8" stdDeviation="16" floodOpacity="0.04" />
-            <feDropShadow dx="0" dy="2" stdDeviation="4" floodOpacity="0.02" />
-          </filter>
-          <filter id="connShadow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="4" stdDeviation="8" floodOpacity="0.05" />
-          </filter>
-        </defs>
-
-        {/* Soft curving ground/horizon */}
-        <ellipse cx="400" cy="560" rx="800" ry="200" fill="#F3F4F6" opacity="0.4" />
-
-        {/* Background Hexagonal grid */}
-        <g stroke="#E5E7EB" strokeWidth="1" fill="none" opacity="0.6" transform="translate(100, 60)">
-          <path d="M 60 20 L 100 40 L 100 80 L 60 100 L 20 80 L 20 40 Z" />
-          <path d="M 100 80 L 140 100 L 140 140 L 100 160 L 60 140 L 60 100 Z" />
-          <path d="M 140 20 L 180 40 L 180 80 L 140 100 L 100 80 L 100 40 Z" />
-          <path d="M 180 80 L 220 100 L 220 140 L 180 160 L 140 140 L 140 100 Z" />
-        </g>
-
-        {/* Card 2: Need (Left) */}
-        <g className="smooth-card-2">
-          <rect x="250" y="200" width="180" height="130" rx="12" fill="#FFFFFF" filter="url(#heroShadow)" />
-          <rect x="265" y="215" width="36" height="36" rx="8" fill="#EFF6FF" />
-          <circle cx="283" cy="233" r="7" fill="#3B82F6" />
-          
-          <rect x="315" y="222" width="60" height="6" rx="3" fill="#E5E7EB" />
-          <rect x="315" y="236" width="45" height="6" rx="3" fill="#E5E7EB" />
-
-          <rect x="265" y="265" width="145" height="6" rx="3" fill="#374151" />
-          <rect x="265" y="280" width="100" height="6" rx="3" fill="#9CA3AF" />
-
-          <rect x="265" y="300" width="145" height="14" rx="7" fill="#F3F4F6" />
-        </g>
-
-        {/* Card 3: Earn/Offer (Right Bottom) */}
-        <g className="smooth-card-3">
-          <rect x="520" y="230" width="190" height="120" rx="12" fill="#FFFFFF" filter="url(#heroShadow)" />
-          
-          <rect x="535" y="245" width="160" height="55" rx="8" fill="#FFFBEB" />
-          <circle cx="615" cy="272" r="14" stroke="#F59E0B" strokeWidth="6" fill="none" opacity="0.8" />
-
-          <rect x="535" y="315" width="110" height="8" rx="4" fill="#374151" />
-          <rect x="535" y="330" width="70" height="6" rx="3" fill="#9CA3AF" />
-        </g>
-
-        {/* Central Connector / Avatar */}
-        <g className="smooth-conn">
-          <circle cx="455" cy="215" r="24" fill="#FFFFFF" filter="url(#connShadow)" />
-          <circle cx="455" cy="215" r="18" fill="#D1FAE5" />
-          {/* Abstract person */}
-          <circle cx="455" cy="210" r="5" fill="#166534" />
-          <path d="M444 223 C444 216 466 216 466 223" fill="none" stroke="#166534" strokeWidth="3" strokeLinecap="round" />
-        </g>
-
-        {/* Card 1: Check/Confirm (Top Right) */}
-        <g className="smooth-card-1">
-          <rect x="425" y="80" width="190" height="90" rx="12" fill="#FFFFFF" filter="url(#heroShadow)" />
-          <rect x="440" y="95" width="40" height="40" rx="8" fill="#F0FDF4" />
-          <path d="M452 115 L458 120 L468 108" fill="none" stroke="#166534" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          
-          <rect x="495" y="102" width="80" height="8" rx="4" fill="#374151" />
-          <rect x="495" y="120" width="55" height="8" rx="4" fill="#9CA3AF" />
-          
-          <rect x="440" y="150" width="160" height="6" rx="3" fill="#E5E7EB" />
-        </g>
-      </svg>
+    <Box
+      as="button"
+      onClick={onClick}
+      textAlign="left"
+      p={5}
+      borderRadius="14px"
+      style={{
+        background: WHITE,
+        border: `1px solid ${GRAY200}`,
+        cursor: 'pointer',
+        transition: 'transform 0.15s, box-shadow 0.15s',
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLElement
+        el.style.transform = 'translateY(-2px)'
+        el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)'
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLElement
+        el.style.transform = 'translateY(0)'
+        el.style.boxShadow = 'none'
+      }}
+    >
+      <Flex align="center" gap={2} mb={3}>
+        <Box
+          px="9px" py="3px" borderRadius="full"
+          fontSize="10px" fontWeight={700}
+          textTransform="uppercase" letterSpacing="0.04em"
+          style={{ background: tone.bg, color: tone.fg }}
+        >
+          {service.type}
+        </Box>
+        {service.location_area && (
+          <Flex align="center" gap={1} fontSize="11px" color={GRAY500}>
+            <FiMapPin size={11} />
+            <Text>{service.location_area}</Text>
+          </Flex>
+        )}
+      </Flex>
+      <Text fontSize="15px" fontWeight={700} color={GRAY900} mb={1} lineHeight={1.3}>
+        {service.title}
+      </Text>
+      <Text fontSize="12px" color={GRAY500}>
+        Offered by {service.user.first_name} {service.user.last_name?.[0] ?? ''}.
+      </Text>
     </Box>
   )
 }
 
-// ─── Custom SVG Icons for "How it works" ──────────────────────────────────────
-function CommunityIcon() {
-  return (
-    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <style>
-         {`
-           @keyframes orb1 { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-           @keyframes orb2 { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
-           .orb-1 { animation: orb1 4s ease-in-out infinite; }
-           .orb-2 { animation: orb2 5s ease-in-out infinite; }
-         `}
-      </style>
-      <defs>
-         <linearGradient id="iconGradient1" x1="0" y1="0" x2="40" y2="40">
-            <stop stopColor={YELLOW} />
-            <stop offset="1" stopColor="#D97706" />
-         </linearGradient>
-      </defs>
-      <circle cx="20" cy="20" r="20" fill="#FFFBEB" />
-      <circle cx="20" cy="15" r="5" fill="url(#iconGradient1)" />
-      <path d="M12 30C12 25 16 22 20 22C24 22 28 25 28 30" stroke="url(#iconGradient1)" strokeWidth="3" strokeLinecap="round" />
-      
-      <g className="orb-1">
-        <circle cx="10" cy="16" r="3" fill={YELLOW} opacity="0.6" />
-        <path d="M6 28C6 24 9 22 12 22" stroke={YELLOW} strokeWidth="2" strokeLinecap="round" opacity="0.6" />
-      </g>
-      
-      <g className="orb-2">
-        <circle cx="30" cy="18" r="3" fill={YELLOW} opacity="0.6" />
-        <path d="M34 28C34 24 31 22 28 22" stroke={YELLOW} strokeWidth="2" strokeLinecap="round" opacity="0.6" />
-      </g>
-    </svg>
-  )
-}
-
-function TimeIcon() {
-  return (
-    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <style>
-         {`
-           @keyframes clockSpin { 100% { transform: rotate(360deg); } }
-           .clock-hand { transform-origin: 20px 20px; animation: clockSpin 12s linear infinite; }
-         `}
-      </style>
-      <circle cx="20" cy="20" r="20" fill={GREEN_LT} />
-      <circle cx="20" cy="20" r="12" stroke={GREEN} strokeWidth="2.5" />
-      <path className="clock-hand" d="M20 12V20L25 25" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function TrustIcon() {
-  return (
-    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-       <style>
-          {`
-            @keyframes shieldPulse { 0%, 100% { opacity: 0.1; } 50% { opacity: 0.25; } }
-            @keyframes dotPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.2); } }
-            .shield-glow { animation: shieldPulse 4s ease-in-out infinite; }
-            .trust-dot { transform-origin: 20px 20px; animation: dotPulse 3s ease-in-out infinite; }
-          `}
-       </style>
-       <circle cx="20" cy="20" r="20" fill="#EFF6FF" />
-       
-       <path className="shield-glow" d="M20 32L10 25V15L20 8L30 15V25L20 32Z" fill="#1D4ED8" stroke="#1D4ED8" strokeWidth="1.5" strokeLinejoin="round" />
-       <path d="M20 28L13 23V17L20 12L27 17V23L20 28Z" fill="#1D4ED8" stroke="#1D4ED8" strokeWidth="1.5" strokeLinejoin="round"/>
-       <circle className="trust-dot" cx="20" cy="20" r="3" fill="#FFFFFF" />
-    </svg>
-  )
-}
-
-// ─── Steps data ───────────────────────────────────────────────────────────────
-const HOW_IT_WORKS = [
-  {
-    icon: <CommunityIcon />,
-    title: 'Join the Community',
-    body: 'Sign up and receive 3 TimeBank hours to get started. Browse services or post what you can offer to the community.',
-  },
-  {
-    icon: <TimeIcon />,
-    title: 'Share Your Time',
-    body: 'Connect with others, negotiate schedules, and exchange services. Every hour you give earns you an hour to receive.',
-  },
-  {
-    icon: <TrustIcon />,
-    title: 'Build Connections',
-    body: 'Grow your network, learn new skills, and contribute to a thriving community built on mutual support and trust.',
-  },
-]
-
-// ─── Component ────────────────────────────────────────────────────────────────
 const HomePage = () => {
   const navigate = useNavigate()
   const { isAuthenticated } = useAuthStore()
-  const [services, setServices] = useState<Service[]>([])
+  const [featured, setFeatured] = useState<PublicFeaturedResponse | null>(null)
+
+  useDocumentMeta()
 
   useEffect(() => {
+    if (isAuthenticated) return
+    const ac = new AbortController()
     serviceAPI
-      .list()
-      .then((data) => setServices(data.slice(0, 20)))
-      .catch(() => {})
-  }, [])
+      .getPublicFeatured(ac.signal)
+      .then(setFeatured)
+      .catch(() => {
+        // Fall back to empty state — the page must work even if the
+        // featured endpoint is empty or unreachable (#457 AC).
+        setFeatured({ trending: [], top_providers: [] })
+      })
+    return () => ac.abort()
+  }, [isAuthenticated])
+
+  // Authenticated users have no use for the marketing page — bounce to the app.
+  // Done after the meta hook so SSR-style flashes don't leak the wrong title.
+  if (isAuthenticated) {
+    return <Navigate to="/dashboard" replace />
+  }
+
+  const trending = featured?.trending ?? []
 
   return (
     <Box minH="100vh" bg={GRAY50}>
@@ -211,359 +155,303 @@ const HomePage = () => {
       <Box
         as="header"
         borderBottom={`1px solid ${GRAY200}`}
-        bg="rgba(255,255,255,0.9)"
+        bg="rgba(255,255,255,0.92)"
         css={{ backdropFilter: 'blur(10px)' }}
         position="sticky"
         top={0}
         zIndex={50}
       >
-        <Flex maxW="1440px" mx="auto" px={8} py={4} align="center" justify="space-between">
+        <Flex maxW="1200px" mx="auto" px={{ base: 4, md: 8 }} py={4} align="center" justify="space-between">
           <Flex align="center" gap={3}>
             <Logo size={32} />
-            <Text fontWeight="700" fontSize="xl" color={GRAY900} letterSpacing="-0.3px">
+            <Text fontWeight={800} fontSize="18px" color={GRAY900} letterSpacing="-0.3px">
               The Hive
             </Text>
           </Flex>
-          <HStack gap={4}>
-            {isAuthenticated ? (
-              <Button
-                size="sm"
-                onClick={() => navigate('/dashboard')}
-                bg={GREEN}
-                color={WHITE}
-                borderRadius="8px"
-                px={5}
-                _hover={{ bg: '#254C40', transform: 'translateY(-1px)', boxShadow: '0 2px 8px rgba(45,92,78,0.2)' }}
-                transition="all 0.2s"
-                fontWeight="medium"
-              >
-                Go to App →
-              </Button>
-            ) : (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => navigate('/login')}
-                  color={GRAY800}
-                  _hover={{ bg: GRAY100 }}
-                  fontWeight="medium"
-                >
-                  Log In
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => navigate('/register')}
-                  bg={GREEN}
-                  color={WHITE}
-                  borderRadius="8px"
-                  px={5}
-                  _hover={{ bg: '#254C40', transform: 'translateY(-1px)', boxShadow: '0 2px 8px rgba(45,92,78,0.2)' }}
-                  transition="all 0.2s"
-                  fontWeight="medium"
-                >
-                  Sign Up
-                </Button>
-              </>
-            )}
+          <HStack gap={3}>
+            <Button
+              variant="ghost" size="sm"
+              onClick={() => navigate('/login')}
+              color={GRAY800} _hover={{ bg: GRAY100 }}
+              fontWeight={500}
+            >
+              Log in
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => navigate('/register')}
+              bg={GREEN} color={WHITE} borderRadius="8px" px={5}
+              _hover={{ bg: '#254C40', transform: 'translateY(-1px)' }}
+              transition="all 0.15s"
+              fontWeight={600}
+            >
+              Sign up free
+            </Button>
           </HStack>
         </Flex>
       </Box>
 
       {/* ── Hero ────────────────────────────────────────────────────────────── */}
-      <Box as="section" maxW="1440px" mx="auto" px={8} py={{ base: 12, md: 24 }}>
-        <Grid templateColumns={{ base: '1fr', lg: '1fr 1fr' }} gap={16} alignItems="center">
-          {/* Left */}
-          <VStack align="flex-start" gap={6}>
+      <Box as="section" maxW="1200px" mx="auto" px={{ base: 4, md: 8 }} py={{ base: 12, md: 20 }}>
+        <Grid templateColumns={{ base: '1fr', lg: '1.1fr 1fr' }} gap={{ base: 10, lg: 16 }} alignItems="center">
+          <VStack align="flex-start" gap={5}>
             <Flex
-              align="center"
-              gap={2}
-              px={4}
-              py={2}
-              bg={WHITE}
+              align="center" gap={2}
+              px={3} py={1.5}
+              bg={GREEN_LT} color={GREEN}
               borderRadius="full"
-              border={`1px solid ${GRAY200}`}
-              boxShadow="0 1px 4px rgba(0,0,0,0.06)"
+              border={`1px solid ${GREEN}33`}
             >
-              <Logo size={18} />
-              <Text fontSize="sm" color={GRAY800} fontWeight="600">
-                Community Time-Bank Platform
+              <FiClock size={13} />
+              <Text fontSize="12px" fontWeight={700} letterSpacing="0.02em">
+                3 hours free when you join
               </Text>
             </Flex>
 
             <Text
               as="h1"
-              fontSize={{ base: '4xl', lg: '5xl', xl: '6xl' }}
-              fontWeight="800"
+              fontSize={{ base: '34px', md: '46px', lg: '54px' }}
+              fontWeight={800}
               color={GRAY900}
-              lineHeight="1.15"
+              lineHeight={1.1}
               letterSpacing="-0.02em"
             >
-              Connecting communities,
+              Trade time, not money.
               <br />
-              <Text as="span" color={GREEN}>
-                sharing time
-              </Text>
+              <Text as="span" color={GREEN}>One hour given = one hour received.</Text>
             </Text>
 
-            <Text color={GRAY600} maxW="520px" fontSize="lg" lineHeight="1.6">
-              Join a structured, intuitive platform where time is the true currency. 
-              Share your skills, discover local needs, and build trust through a calm, 
-              community-driven economy.
+            <Text color={GRAY700} maxW="540px" fontSize="17px" lineHeight={1.55}>
+              The Hive is a neighbourhood time-bank. Post what you can do, browse what
+              your neighbours need, and exchange in hours. Start with three hours of
+              credit so you can ask for help on your very first day.
             </Text>
 
-            <HStack gap={4} pt={4}>
-              {isAuthenticated ? (
-                <>
-                  <Button
-                    size="lg"
-                    onClick={() => navigate('/dashboard')}
-                    bg={GREEN}
-                    color={WHITE}
-                    borderRadius="8px"
-                    px={8}
-                    display="inline-flex"
-                    alignItems="center"
-                    gap={2}
-                    _hover={{ bg: '#254C40', transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(45,92,78,0.2)' }}
-                    transition="all 0.2s"
-                    fontWeight="600"
-                  >
-                    Go to App <FiArrowRight />
-                  </Button>
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    onClick={() => navigate('/dashboard')}
-                    borderRadius="8px"
-                    px={8}
-                    borderColor={GRAY200}
-                    color={GRAY800}
-                    bg={WHITE}
-                    _hover={{ bg: GRAY50, transform: 'translateY(-2px)' }}
-                    transition="all 0.2s"
-                    fontWeight="600"
-                  >
-                    Browse Services
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    size="lg"
-                    onClick={() => navigate('/register')}
-                    bg={GREEN}
-                    color={WHITE}
-                    borderRadius="8px"
-                    px={8}
-                    display="inline-flex"
-                    alignItems="center"
-                    gap={2}
-                    _hover={{ bg: '#254C40', transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(45,92,78,0.2)' }}
-                    transition="all 0.2s"
-                    fontWeight="600"
-                  >
-                    Get Started <FiArrowRight />
-                  </Button>
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    onClick={() => navigate('/dashboard')}
-                    borderRadius="8px"
-                    px={8}
-                    borderColor={GRAY200}
-                    color={GRAY800}
-                    bg={WHITE}
-                    _hover={{ bg: GRAY50, transform: 'translateY(-2px)' }}
-                    transition="all 0.2s"
-                    fontWeight="600"
-                  >
-                    Explore
-                  </Button>
-                </>
-              )}
+            <HStack gap={3} pt={2} flexWrap="wrap">
+              <Button
+                size="lg"
+                onClick={() => navigate('/register')}
+                bg={GREEN} color={WHITE} borderRadius="10px" px={7}
+                display="inline-flex" alignItems="center" gap={2}
+                _hover={{ bg: '#254C40', transform: 'translateY(-2px)', boxShadow: '0 6px 18px rgba(45,92,78,0.22)' }}
+                transition="all 0.18s"
+                fontWeight={700}
+              >
+                Get my 3 hours <FiArrowRight />
+              </Button>
+              <Button
+                size="lg" variant="outline"
+                onClick={() => {
+                  document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })
+                }}
+                borderRadius="10px" px={7}
+                borderColor={GRAY200} color={GRAY800} bg={WHITE}
+                _hover={{ bg: GRAY50, transform: 'translateY(-2px)' }}
+                transition="all 0.18s"
+                fontWeight={600}
+              >
+                How it works
+              </Button>
             </HStack>
           </VStack>
 
-          {/* Right — animated hero svg */}
-          <Box position="relative">
-            <AnimatedHeroSVG />
-            
-            {/* Floating stat card */}
-            <Box
-              position="absolute"
-              bottom="-24px"
-              left="-24px"
-              bg={WHITE}
-              borderRadius="12px"
-              boxShadow="0 4px 16px rgba(0,0,0,0.10)"
-              p={5}
-              border={`1px solid ${GRAY200}`}
-              animation="float 6s ease-in-out infinite"
-              css={{
-                '@keyframes float': {
-                  '0%': { transform: 'translateY(0px)' },
-                  '50%': { transform: 'translateY(-10px)' },
-                  '100%': { transform: 'translateY(0px)' }
-                }
-              }}
-            >
-              <Flex align="center" gap={4}>
-                <Box
-                  w="48px"
-                  h="48px"
-                  borderRadius="8px"
-                  bg={GREEN_LT}
-                  display="flex"
-                  alignItems="center"
-                  justifyContent="center"
-                  border={`1px solid ${GRAY200}`}
-                >
-                  <FiClock size={24} color={GREEN} />
-                </Box>
-                <Box>
-                  <Text fontWeight="700" color={GRAY900} fontSize="lg">
-                    1,247 Hours
+          <Box
+            position="relative"
+            borderRadius="22px"
+            overflow="hidden"
+            boxShadow="0 18px 40px rgba(15, 30, 40, 0.10)"
+            bg={WHITE}
+            border={`1px solid ${GRAY200}`}
+          >
+            {/* Lightweight illustrative card stack — replaces the previous
+                100-line inline SVG. A real product screenshot is the right
+                long-term move; this is a clean placeholder until then. */}
+            <Box bg={`linear-gradient(135deg, ${GREEN_LT} 0%, ${WHITE} 65%)`} p={{ base: 6, md: 8 }} minH={{ base: '320px', md: '380px' }}>
+              <VStack align="stretch" gap={4}>
+                <Box bg={WHITE} borderRadius="14px" p={4} boxShadow="0 4px 14px rgba(0,0,0,0.06)" border={`1px solid ${GRAY100}`}>
+                  <Flex align="center" gap={2} mb={2}>
+                    <Box w="32px" h="32px" borderRadius="full" bg={GREEN} />
+                    <Box>
+                      <Text fontSize="13px" fontWeight={700} color={GRAY900}>Elif K.</Text>
+                      <Text fontSize="11px" color={GRAY500}>offers · Beşiktaş</Text>
+                    </Box>
+                  </Flex>
+                  <Text fontSize="14px" fontWeight={600} color={GRAY900}>
+                    Help moving boxes, half a day
                   </Text>
-                  <Text fontSize="sm" color={GRAY500}>
-                    Shared This Month
-                  </Text>
+                  <Flex justify="space-between" mt={2}>
+                    <Text fontSize="11px" color={GRAY500}>4h exchange</Text>
+                    <Text fontSize="11px" color={GREEN} fontWeight={700}>4h ⟶</Text>
+                  </Flex>
                 </Box>
-              </Flex>
+
+                <Box bg={WHITE} borderRadius="14px" p={4} boxShadow="0 4px 14px rgba(0,0,0,0.06)" border={`1px solid ${GRAY100}`} ml={6}>
+                  <Flex align="center" gap={2} mb={2}>
+                    <Box w="32px" h="32px" borderRadius="full" bg={BLUE} />
+                    <Box>
+                      <Text fontSize="13px" fontWeight={700} color={GRAY900}>Mehmet Y.</Text>
+                      <Text fontSize="11px" color={GRAY500}>needs · Kadıköy</Text>
+                    </Box>
+                  </Flex>
+                  <Text fontSize="14px" fontWeight={600} color={GRAY900}>
+                    Looking for someone to teach me sourdough
+                  </Text>
+                  <Flex justify="space-between" mt={2}>
+                    <Text fontSize="11px" color={GRAY500}>2h workshop</Text>
+                    <Text fontSize="11px" color={BLUE} fontWeight={700}>⟵ 2h</Text>
+                  </Flex>
+                </Box>
+
+                <Box bg={WHITE} borderRadius="14px" p={4} boxShadow="0 4px 14px rgba(0,0,0,0.06)" border={`1px solid ${GRAY100}`} ml={2}>
+                  <Flex align="center" gap={2} mb={2}>
+                    <Box w="32px" h="32px" borderRadius="full" bg={AMBER} />
+                    <Box>
+                      <Text fontSize="13px" fontWeight={700} color={GRAY900}>Selim G.</Text>
+                      <Text fontSize="11px" color={GRAY500}>event · Üsküdar</Text>
+                    </Box>
+                  </Flex>
+                  <Text fontSize="14px" fontWeight={600} color={GRAY900}>
+                    Group walk and bird-watching, Sat 9am
+                  </Text>
+                  <Flex justify="space-between" mt={2}>
+                    <Text fontSize="11px" color={GRAY500}>12 spots</Text>
+                    <Text fontSize="11px" color={AMBER} fontWeight={700}>Free RSVP</Text>
+                  </Flex>
+                </Box>
+              </VStack>
             </Box>
           </Box>
         </Grid>
       </Box>
 
-      {/* ── How It Works ────────────────────────────────────────────────────── */}
-      <Box as="section" bg={WHITE} py={24} borderY={`1px solid ${GRAY200}`}>
-        <Box maxW="1440px" mx="auto" px={8}>
-          <VStack gap={4} mb={16} textAlign="center">
-            <Text as="h2" fontSize="3xl" fontWeight="700" color={GRAY800}>
-              A structure for sharing
-            </Text>
-            <Text color={GRAY600} maxW="2xl" fontSize="lg">
-              The Hive is designed around a calm, clear model where time equals value. 
-              No complicated pricing, just connection.
-            </Text>
-          </VStack>
+      {/* ── What is a TimeBank ─────────────────────────────────────────────── */}
+      <Box as="section" id="how-it-works" bg={WHITE} borderTop={`1px solid ${GRAY200}`} borderBottom={`1px solid ${GRAY200}`}>
+        <Box maxW="1100px" mx="auto" px={{ base: 4, md: 8 }} py={{ base: 12, md: 16 }}>
+          <Text
+            as="h2"
+            fontSize={{ base: '26px', md: '32px' }}
+            fontWeight={700}
+            color={GRAY900}
+            mb={2}
+            letterSpacing="-0.01em"
+          >
+            What is a time-bank?
+          </Text>
+          <Text fontSize="15px" color={GRAY600} maxW="640px" mb={8}>
+            A time-bank is a community where people exchange skills using time as the only currency.
+            An hour of dog-walking is worth the same as an hour of legal advice — every hour counts equally.
+          </Text>
 
-          <Grid templateColumns={{ base: '1fr', md: 'repeat(3, 1fr)' }} gap={12}>
+          <Grid templateColumns={{ base: '1fr', md: 'repeat(3, 1fr)' }} gap={5}>
             {HOW_IT_WORKS.map((step) => (
-              <Box 
-                key={step.title} 
-                bg={WHITE} 
-                p={8} 
-                borderRadius="16px" 
-                border={`1px solid ${GRAY200}`}
-                boxShadow="0 1px 4px rgba(0,0,0,0.06)"
-                transition="transform 0.15s, box-shadow 0.15s"
-                _hover={{ transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(0,0,0,0.10)' }}
+              <Box
+                key={step.title}
+                p={5}
+                borderRadius="14px"
+                style={{ background: GRAY50, border: `1px solid ${GRAY100}` }}
               >
-                <VStack gap={5} textAlign="left" align="flex-start">
-                  <Box display="flex" alignItems="center" justifyContent="center">
-                    {step.icon}
-                  </Box>
-                  <Box>
-                    <Text as="h3" fontSize="xl" fontWeight="600" color={GRAY800} mb={3}>
-                      {step.title}
-                    </Text>
-                    <Text color={GRAY600} lineHeight="1.6" fontSize="sm">
-                      {step.body}
-                    </Text>
-                  </Box>
-                </VStack>
+                <Flex
+                  align="center" justify="center"
+                  w="40px" h="40px" borderRadius="10px"
+                  bg={WHITE} color={GREEN}
+                  border={`1px solid ${GRAY200}`}
+                  mb={4}
+                >
+                  {step.icon}
+                </Flex>
+                <Text fontSize="15px" fontWeight={700} color={GRAY900} mb={2}>
+                  {step.title}
+                </Text>
+                <Text fontSize="13px" color={GRAY600} lineHeight={1.55}>
+                  {step.body}
+                </Text>
               </Box>
             ))}
           </Grid>
         </Box>
       </Box>
 
-      {/* ── Map Section ─────────────────────────────────────────────────────── */}
-      <Box as="section" bg={GRAY50} py={24}>
-        <Box maxW="1440px" mx="auto" px={8}>
-          <VStack gap={4} mb={12} textAlign="center">
-            <Text as="h2" fontSize="3xl" fontWeight="700" color={GRAY800}>
-              Local needs, visualised
-            </Text>
-            <Text color={GRAY600} maxW="2xl" fontSize="lg">
-              Explore offerings in your area. Our calm approach to data respects privacy 
-              while keeping the community visible.
-            </Text>
-          </VStack>
-
-          <Box 
-            bg={WHITE} 
-            borderRadius="16px" 
-            p={2} 
-            border={`1px solid ${GRAY200}`} 
-            boxShadow="0 4px 24px rgba(0,0,0,0.08)"
-          >
-            <MapView
-              services={services}
-              height="480px"
-              onServiceClick={(id) => navigate(`/service-detail/${id}`)}
-            />
-          </Box>
-        </Box>
-      </Box>
-
-      {/* ── CTA banner ──────────────────────────────────────────────────────── */}
-      <Box as="section" maxW="1440px" mx="auto" px={8} py={20}>
-        <Box
-          bg={GREEN}
-          borderRadius="16px"
-          p={16}
-          textAlign="center"
-          position="relative"
-          overflow="hidden"
-          boxShadow="0 4px 24px rgba(45,92,78,0.2)"
-        >
-          {/* Subtle SVG BG effect for CTA */}
-          <svg
-            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0.05, pointerEvents: 'none' }}
-          >
-            <pattern id="pattern-circles" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
-              <circle cx="20" cy="20" r="2" fill={WHITE}></circle>
-            </pattern>
-            <rect x="0" y="0" width="100%" height="100%" fill="url(#pattern-circles)"></rect>
-          </svg>
-
-          <VStack position="relative" zIndex={1} gap={6}>
-            <Text as="h2" fontSize="3xl" fontWeight="700" color={WHITE}>
-              Ready to structure your skills?
-            </Text>
-            <Text fontSize="lg" color="whiteAlpha.800" maxW="2xl" mx="auto">
-              Join the calm, purposeful network where time is valued above all.
-            </Text>
+      {/* ── Featured services (live data) ─────────────────────────────────── */}
+      {trending.length > 0 && (
+        <Box as="section" maxW="1200px" mx="auto" px={{ base: 4, md: 8 }} py={{ base: 12, md: 16 }}>
+          <Flex justify="space-between" align="flex-end" mb={6} flexWrap="wrap" gap={3}>
+            <Box>
+              <Text
+                as="h2"
+                fontSize={{ base: '24px', md: '28px' }}
+                fontWeight={700}
+                color={GRAY900}
+                letterSpacing="-0.01em"
+                mb={1}
+              >
+                What's happening on The Hive
+              </Text>
+              <Text fontSize="14px" color={GRAY500}>
+                A live look at popular offers, needs, and events.
+              </Text>
+            </Box>
             <Button
-              size="lg"
+              variant="ghost" size="sm"
               onClick={() => navigate('/register')}
-              bg={YELLOW}
-              color={GRAY900}
-              borderRadius="8px"
-              px={8}
-              fontWeight="600"
-              display="inline-flex"
-              alignItems="center"
-              gap={2}
-              _hover={{ bg: '#FFE58A', transform: 'translateY(-2px)' }}
-              transition="all 0.2s"
-              mt={4}
+              color={GREEN} _hover={{ bg: GREEN_LT }}
+              fontWeight={600}
             >
-              Create Account <FiArrowRight />
+              Join to see all <FiArrowRight />
             </Button>
-          </VStack>
+          </Flex>
+
+          <Grid templateColumns={{ base: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' }} gap={4}>
+            {trending.slice(0, 6).map((service) => (
+              <FeaturedCard
+                key={service.id}
+                service={service}
+                onClick={() => navigate(`/service-detail/${service.id}`)}
+              />
+            ))}
+          </Grid>
+        </Box>
+      )}
+
+      {/* ── Final CTA ─────────────────────────────────────────────────────── */}
+      <Box as="section" bg={GREEN} color={WHITE}>
+        <Box maxW="900px" mx="auto" px={{ base: 4, md: 8 }} py={{ base: 12, md: 16 }} textAlign="center">
+          <Text fontSize={{ base: '24px', md: '32px' }} fontWeight={700} mb={3} letterSpacing="-0.01em">
+            Three hours of credit are waiting.
+          </Text>
+          <Text fontSize="15px" color="rgba(255,255,255,0.85)" mb={6} maxW="600px" mx="auto">
+            Sign up takes a minute. Browse, exchange, and meet your neighbours — with time as the currency.
+          </Text>
+          <Button
+            size="lg"
+            onClick={() => navigate('/register')}
+            bg={WHITE} color={GREEN} borderRadius="10px" px={8}
+            display="inline-flex" alignItems="center" gap={2}
+            _hover={{ bg: GRAY50, transform: 'translateY(-2px)' }}
+            transition="all 0.18s"
+            fontWeight={700}
+          >
+            Create my account <FiArrowRight />
+          </Button>
         </Box>
       </Box>
 
-      {/* ── Footer ──────────────────────────────────────────────────────────── */}
-      <Box as="footer" borderTop={`1px solid ${GRAY200}`} bg={WHITE} py={10}>
-        <Box maxW="1440px" mx="auto" px={8} textAlign="center">
-          <Text fontSize="sm" color={GRAY500}>
-            © {new Date().getFullYear()} The Hive. A structured time economy.
+      <Box as="footer" bg={GRAY50} borderTop={`1px solid ${GRAY200}`}>
+        <Flex
+          maxW="1200px" mx="auto"
+          px={{ base: 4, md: 8 }} py={6}
+          align="center" justify="space-between"
+          flexWrap="wrap" gap={3}
+        >
+          <Flex align="center" gap={2}>
+            <Logo size={20} />
+            <Text fontSize="12px" color={GRAY500}>
+              The Hive · A community time-bank
+            </Text>
+          </Flex>
+          <Text fontSize="11px" color={GRAY400}>
+            Hours, not invoices.
           </Text>
-        </Box>
+        </Flex>
       </Box>
     </Box>
   )
