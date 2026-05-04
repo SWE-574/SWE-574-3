@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { usePolling } from '@/hooks/usePolling'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -25,6 +25,7 @@ import {
   FiWifi,
   FiMenu,
   FiX,
+  FiLayers,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
 import RecommendationDebugBar from '@/components/RecommendationDebugBar'
@@ -540,12 +541,15 @@ const DashboardPage = () => {
   }, [])
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const ownServiceHandshakes = Array.from(incomingMap.values()).flat()
-  const myServices         = allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id })
+  const ownServiceHandshakes = useMemo(() => Array.from(incomingMap.values()).flat(), [incomingMap])
+  const myServices = useMemo(
+    () => allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id }),
+    [allActiveServices, user],
+  )
 
   // Hide events from the browse feed where the logged-in user was removed
   // (i.e. their handshake was cancelled by an admin after a report).
-  const displayServices = (isAuthenticated
+  const displayServices = useMemo(() => (isAuthenticated
     ? services.filter((s) => {
         if (s.type !== 'Event') return true
         const hs = handshakeMap.get(s.id)
@@ -562,7 +566,7 @@ const DashboardPage = () => {
       const bInactive = ['denied', 'cancelled'].includes(handshakeMap.get(b.id)?.status ?? '')
       if (aInactive === bInactive) return 0
       return aInactive ? 1 : -1
-    })
+    }), [services, isAuthenticated, handshakeMap, activeTypes])
   const pendingHs          = myServices.filter((service) => {
     const incoming = incomingMap.get(service.id) ?? []
     return incoming.some((h) => h.status === 'pending')
@@ -690,28 +694,6 @@ const DashboardPage = () => {
                     <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
                   </Box>
                 ))}
-                {/* Divider */}
-                <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
-                {/* Type chips */}
-                {TYPE_FILTERS.map((tf) => {
-                  const isActive = activeTypes.has(tf.id)
-                  return (
-                    <Box
-                      key={tf.id} as="button"
-                      onClick={() => toggleType(tf.id)}
-                      px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
-                      fontSize="12px" fontWeight={isActive ? 700 : 500}
-                      bg={isActive ? tf.activeBg : 'transparent'}
-                      color={isActive ? tf.activeColor : GRAY500}
-                      boxShadow={isActive ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
-                      cursor="pointer" transition="all 0.12s"
-                      display="flex" alignItems="center" gap="4px"
-                    >
-                      <Box w="6px" h="6px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
-                      <Box display={{ base: 'none', md: 'block' }}>{tf.label}</Box>
-                    </Box>
-                  )
-                })}
               </Flex>
 
               {/* Map toggle */}
@@ -731,31 +713,41 @@ const DashboardPage = () => {
               </Box>
             </Flex>
 
-            {/* Filter pills row on mobile (below search bar) */}
+            {/* Type filter row — desktop */}
+            <Flex
+              display={{ base: 'none', sm: 'flex' }}
+              align="center" gap="6px" mt="8px"
+            >
+              <Box color={GRAY400} flexShrink={0} display="flex" alignItems="center"><FiLayers size={13} /></Box>
+              <Flex gap="3px" bg={GRAY100} p="3px" borderRadius="10px" align="center">
+                {TYPE_FILTERS.map((tf) => {
+                  const isActive = activeTypes.has(tf.id)
+                  return (
+                    <Box
+                      key={tf.id} as="button"
+                      onClick={() => toggleType(tf.id)}
+                      px="10px" py="5px" borderRadius="7px"
+                      fontSize="12px" fontWeight={isActive ? 700 : 500}
+                      bg={isActive ? tf.activeBg : 'transparent'}
+                      color={isActive ? tf.activeColor : GRAY500}
+                      boxShadow={isActive ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                      cursor="pointer" transition="all 0.12s"
+                      display="flex" alignItems="center" gap="4px"
+                    >
+                      <Box w="6px" h="6px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                      {tf.label}
+                    </Box>
+                  )
+                })}
+              </Flex>
+            </Flex>
+
+            {/* Type filter row — mobile */}
             <Flex
               display={{ base: 'flex', sm: 'none' }}
               gap="5px" mt="8px" overflowX="auto" align="center"
               style={{ scrollbarWidth: 'none' }}
             >
-              {FILTERS.map((f) => (
-                <Box
-                  key={f.id} as="button" flexShrink={0}
-                  onClick={() => setActiveFilter(f.id)}
-                  px="10px" py="5px" borderRadius="20px"
-                  fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
-                  bg={activeFilter === f.id ? GREEN : WHITE}
-                  color={activeFilter === f.id ? WHITE : GRAY600}
-                  border={`1px solid ${activeFilter === f.id ? GREEN : GRAY200}`}
-                  cursor="pointer" transition="all 0.12s"
-                  display="flex" alignItems="center" gap="4px"
-                >
-                  <Box color={activeFilter === f.id ? WHITE : GRAY400}>{f.icon}</Box>
-                  {f.label}
-                </Box>
-              ))}
-              {/* Divider */}
-              <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
-              {/* Type chips */}
               {TYPE_FILTERS.map((tf) => {
                 const isActive = activeTypes.has(tf.id)
                 return (
@@ -775,6 +767,30 @@ const DashboardPage = () => {
                   </Box>
                 )
               })}
+            </Flex>
+
+            {/* Filter chips row — mobile */}
+            <Flex
+              display={{ base: 'flex', sm: 'none' }}
+              gap="5px" mt="5px" overflowX="auto" align="center"
+              style={{ scrollbarWidth: 'none' }}
+            >
+              {FILTERS.map((f) => (
+                <Box
+                  key={f.id} as="button" flexShrink={0}
+                  onClick={() => setActiveFilter(f.id)}
+                  px="10px" py="5px" borderRadius="20px"
+                  fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
+                  bg={activeFilter === f.id ? GREEN : WHITE}
+                  color={activeFilter === f.id ? WHITE : GRAY600}
+                  border={`1px solid ${activeFilter === f.id ? GREEN : GRAY200}`}
+                  cursor="pointer" transition="all 0.12s"
+                  display="flex" alignItems="center" gap="4px"
+                >
+                  <Box color={activeFilter === f.id ? WHITE : GRAY400}>{f.icon}</Box>
+                  {f.label}
+                </Box>
+              ))}
             </Flex>
           </Box>
 

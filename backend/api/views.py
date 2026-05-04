@@ -2321,7 +2321,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
         POST /api/services/{id}/cancel-event/
         """
         service = self.get_object()
-        reason = request.data.get('reason', '')
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return create_error_response(
+                'A cancellation reason is required.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             EventHandshakeService.cancel_event(service, request.user, reason=reason)
         except PermissionError as e:
