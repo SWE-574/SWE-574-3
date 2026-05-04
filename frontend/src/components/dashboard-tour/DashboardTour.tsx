@@ -8,18 +8,14 @@ import {
   type Step,
 } from 'react-joyride'
 import { useTourStore } from '@/store/useTourStore'
-import { GREEN, GRAY800 } from '@/theme/tokens'
+import { GREEN, GRAY600, GRAY800 } from '@/theme/tokens'
 
 /* ────────────────────────────────────────────────────────────────────────────
- * 12-step guided tour for the Dashboard.
+ * Dashboard guided tour (~12 steps).
  *
- * - English copy, professional tone — explains the purpose of each area,
- *   not just "this is a button".
- * - Manually triggered: opens only when the user clicks the help icon in
- *   the navbar. No auto-open on first visit.
- * - Anchors via [data-tour="…"] selectors so we don't depend on internal
- *   class names; if a target is missing (e.g. empty feed), the step is
- *   skipped gracefully.
+ * Tone: clear and human, community-minded, suitable for a serious product —
+ * welcoming without slang or corporate jargon.
+ * Opens from the navbar help icon only. Targets use [data-tour="…"].
  * ──────────────────────────────────────────────────────────────────────── */
 
 interface TourStep extends Step {
@@ -38,8 +34,9 @@ const ALL_STEPS: TourStep[] = [
     title: 'Welcome to The Hive',
     content: (
       <p>
-        The Hive is a community where neighbours trade time and skills, and
-        host events together. Take a quick tour to see how it works.
+        People here exchange skills, small favors, and local know-how. Take a
+        moment to look around — then consider posting an offer, a need, or an
+        event. Active feeds help everyone discover what&apos;s possible nearby.
       </p>
     ),
   },
@@ -50,8 +47,8 @@ const ALL_STEPS: TourStep[] = [
     title: 'Your profile',
     content: (
       <p>
-        Your avatar, name, and membership badge live here. Use the menu in
-        the top-right to edit your profile or sign out.
+        A short, honest profile makes it easier for others to trust you and join
+        what you share. Update it as your skills or interests change.
       </p>
     ),
   },
@@ -59,12 +56,12 @@ const ALL_STEPS: TourStep[] = [
     id: 'time-balance',
     target: '[data-tour="time-balance"]',
     placement: 'right',
-    title: 'Your time balance',
+    title: 'Your hours',
     content: (
       <p>
-        These are the hours you can spend. New members start with
-        <strong> 3 hours</strong>. When you book a service, your hours are
-        reserved until both sides confirm. Your karma score appears here too.
+        You start with hours you can use when you request help from others. You
+        earn more by contributing your own time when someone needs you — it
+        keeps give and take in balance.
       </p>
     ),
   },
@@ -75,9 +72,9 @@ const ALL_STEPS: TourStep[] = [
     title: 'Your activity',
     content: (
       <p>
-        <strong>Pending</strong>, <strong>Active</strong>, <strong>Done</strong>,
-        and <strong>Achievements</strong> show where each of your interactions
-        stands.
+        See what you&apos;ve opened, what&apos;s still in progress, and what
+        you&apos;ve completed. It&apos;s a simple view of how you&apos;re taking
+        part in the community.
       </p>
     ),
   },
@@ -87,22 +84,47 @@ const ALL_STEPS: TourStep[] = [
     placement: 'right',
     title: 'Share with the community',
     content: (
-      <ul style={{ paddingLeft: 18, marginTop: 0, lineHeight: 1.5 }}>
-        <li><strong>Offer</strong> — share something you can give.</li>
-        <li><strong>Need</strong> — request help (hours are reserved when accepted).</li>
-        <li><strong>Event</strong> — host a community gathering.</li>
-      </ul>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <p style={{ margin: 0 }}>
+          Choose a type, add a bit of detail, and you&apos;re easier to find:
+        </p>
+        <ul
+          style={{
+            margin: 0,
+            paddingLeft: 18,
+            lineHeight: 1.45,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <li>
+            <strong>Offer</strong> — what you&apos;re good at or happy to share;
+            say it clearly so the right people respond.
+          </li>
+          <li>
+            <strong>Need</strong> — when you&apos;re looking for support.
+          </li>
+          <li>
+            <strong>Event</strong> — when you want to bring people together.
+          </li>
+        </ul>
+        <p style={{ margin: 0, color: GRAY600, fontSize: 13 }}>
+          Posting is how others find you.
+        </p>
+      </div>
     ),
   },
   {
     id: 'location',
     target: '[data-tour="location"]',
     placement: 'right',
-    title: "Find what's nearby",
+    title: 'Location',
     content: (
       <p>
-        Enable location to see listings near you. Exact addresses stay
-        private until both members agree to meet.
+        Sharing your general area helps surface relevant listings nearby. Your
+        exact position isn&apos;t shown publicly until you choose to meet or
+        share more in a conversation.
       </p>
     ),
   },
@@ -110,11 +132,11 @@ const ALL_STEPS: TourStep[] = [
     id: 'my-listings',
     target: '[data-tour="my-listings"]',
     placement: 'right',
-    title: 'Your listings',
+    title: 'Your posts',
     content: (
       <p>
-        Everything you&apos;ve posted, along with the people interested in
-        each one.
+        All of your listings appear here, along with interest from others. Use
+        it to manage what you&apos;ve published and follow up with participants.
       </p>
     ),
     optional: true,
@@ -125,7 +147,10 @@ const ALL_STEPS: TourStep[] = [
     placement: 'bottom',
     title: 'Search',
     content: (
-      <p>Find services, skills, or tags in seconds.</p>
+      <p>
+        Search by skill, topic, or keyword to find offers, needs, and events that
+        match what you&apos;re looking for — or what you can contribute.
+      </p>
     ),
   },
   {
@@ -135,9 +160,11 @@ const ALL_STEPS: TourStep[] = [
     title: 'Filters',
     content: (
       <p>
-        Narrow the feed by <strong>All</strong>, <strong>New</strong>,
-        <strong> Online</strong>, <strong>Recurrent</strong>, or
-        <strong> Weekend</strong>.
+        Use the pills next to search: <strong>All</strong> for the main ranked
+        feed, <strong>New</strong> for the latest posts first,{' '}
+        <strong>Online</strong> for remote-friendly listings,{' '}
+        <strong>Recurrent</strong> for ongoing or repeating offers, and{' '}
+        <strong>Weekend</strong> when details mention a weekend time.
       </p>
     ),
   },
@@ -148,8 +175,8 @@ const ALL_STEPS: TourStep[] = [
     title: 'Map view',
     content: (
       <p>
-        Toggle the map to see listings around you. Orange pins are
-        <strong> offers</strong>, blue pins are <strong>requests</strong>.
+        Switch to the map to see listings in context. Orange markers indicate
+        offers; blue markers indicate requests for help.
       </p>
     ),
   },
@@ -157,11 +184,11 @@ const ALL_STEPS: TourStep[] = [
     id: 'listing-card',
     target: '[data-tour="listing-card"]',
     placement: 'top',
-    title: 'Listing card',
+    title: 'Listing details',
     content: (
       <p>
-        Each card shows the title, host, duration, location, and tags. Tap
-        a card to open the details.
+        Each card summarizes the title, host, duration, area, and tags. Open a
+        card for full details and next steps.
       </p>
     ),
     optional: true,
@@ -170,20 +197,14 @@ const ALL_STEPS: TourStep[] = [
     id: 'top-nav',
     target: '[data-tour="top-nav"]',
     placement: 'bottom',
-    title: 'Browse, Forum, Messages',
+    title: 'Explore the app',
     content: (
-      <>
-        <p>
-          <strong>Browse</strong> is your discovery feed.
-          <strong> Forum</strong> is for community discussions.
-          <strong> Messages</strong> keeps your active conversations — a
-          chat opens automatically when a service request begins.
-        </p>
-        <p style={{ marginTop: 6 }}>
-          You&apos;re all set. Click the question mark in the top-right any
-          time to replay this tour.
-        </p>
-      </>
+      <p>
+        Use <strong>Browse</strong> for the main feed, <strong>Forum</strong>{' '}
+        for longer discussions, and <strong>Messages</strong> for private
+        coordination. When you&apos;re ready, post or reply — that&apos;s how the
+        community grows.
+      </p>
     ),
   },
 ]
