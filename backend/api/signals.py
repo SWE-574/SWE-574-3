@@ -1,3 +1,6 @@
+import logging
+
+from django.contrib.auth.signals import user_logged_in, user_login_failed
 from django.db.models.signals import post_save, post_delete, pre_delete
 from django.dispatch import receiver
 from django.db import transaction
@@ -13,6 +16,36 @@ from .cache_utils import (
     invalidate_hot_services
 )
 from .ranking import calculate_hot_score
+
+security_logger = logging.getLogger('api.security')
+
+
+def _client_ip(request) -> str:
+    if request is None:
+        return 'unknown'
+    forwarded = request.META.get('HTTP_X_FORWARDED_FOR') if hasattr(request, 'META') else None
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', 'unknown') if hasattr(request, 'META') else 'unknown'
+
+
+@receiver(user_logged_in)
+def log_user_logged_in(sender, request, user, **kwargs):
+    security_logger.info(
+        'auth.login.success user_id=%s email=%s ip=%s',
+        getattr(user, 'id', None), getattr(user, 'email', None), _client_ip(request),
+    )
+
+
+@receiver(user_login_failed)
+def log_user_login_failed(sender, credentials, request=None, **kwargs):
+    # `credentials` may include the email but never the password thanks to
+    # Django stripping it before dispatching the signal. Still, only log the
+    # email key to avoid accidental exposure if Django's behaviour changes.
+    email = (credentials or {}).get('email') or (credentials or {}).get('username')
+    security_logger.warning(
+        'auth.login.failed email=%s ip=%s', email, _client_ip(request),
+    )
 
 
 @receiver(post_save, sender=Service)

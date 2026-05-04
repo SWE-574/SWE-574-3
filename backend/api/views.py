@@ -402,6 +402,15 @@ class RegistrationThrottle(AnonRateThrottle):
     rate = '20/hour'
 
 
+class LoginThrottle(AnonRateThrottle):
+    """Per-IP throttle for /api/auth/login/ — sits in front of the per-account
+    lockout in CustomTokenObtainPairView so a single attacker cannot fan out
+    across many usernames from one IP.
+    """
+    scope = 'login'
+    rate = '30/hour'
+
+
 def _validate_event_feedback_window(service: Service) -> tuple[bool, str | None]:
     """Validate fixed feedback window after event completion."""
     if service.type != 'Event':
@@ -567,8 +576,11 @@ class CustomTokenRefreshView(TokenRefreshView):
 class CustomTokenObtainPairView(TokenObtainPairView):
     MAX_FAILED_ATTEMPTS = 5
     LOCKOUT_DURATION_MINUTES = 30
-    
+    throttle_classes = [LoginThrottle]
+
     def post(self, request, *args, **kwargs):
+        from django.contrib.auth.signals import user_logged_in, user_login_failed
+
         email = request.data.get('email')
         
         # Check for account lockout before attempting authentication
@@ -621,13 +633,19 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 except User.DoesNotExist:
                     pass  # Don't reveal if user exists
             
+            user_login_failed.send(
+                sender=self.__class__,
+                credentials={'email': email},
+                request=request,
+            )
             return Response(
                 {'detail': 'No active account found with the given credentials'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
-        
+
         user = serializer.user
-        
+        user_logged_in.send(sender=self.__class__, request=request, user=user)
+
         # Reset failed login attempts on successful login
         if user.failed_login_attempts > 0 or user.locked_until:
             user.failed_login_attempts = 0
