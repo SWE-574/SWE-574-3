@@ -6,6 +6,7 @@ GET /api/transactions/{id}/   - retrieve single transaction
 """
 import pytest
 from decimal import Decimal
+from django.core.cache import cache
 from rest_framework import status
 
 from api.tests.helpers.factories import (
@@ -145,6 +146,8 @@ class TestTransactionHistoryDirectionFilter:
         self.user = UserFactory()
         self.credit_tx = _make_tx(self.user, 'transfer', Decimal('3.00'))
         self.debit_tx = _make_tx(self.user, 'provision', Decimal('-2.00'))
+        self.refund_tx = _make_tx(self.user, 'refund', Decimal('2.00'))
+        self.adjustment_tx = _make_tx(self.user, 'adjustment', Decimal('1.00'))
         self.client = AuthenticatedAPIClient().authenticate_user(self.user)
 
     def test_filter_credit(self):
@@ -165,6 +168,15 @@ class TestTransactionHistoryDirectionFilter:
         response_all = self.client.get('/api/transactions/?direction=all')
         response_default = self.client.get('/api/transactions/')
         assert len(response_all.data['results']) == len(response_default.data['results'])
+
+    def test_filter_reservation(self):
+        response = self.client.get('/api/transactions/?direction=reservation')
+        assert response.status_code == status.HTTP_200_OK
+        ids = {r['id'] for r in response.data['results']}
+        assert str(self.debit_tx.id) in ids
+        assert str(self.refund_tx.id) in ids
+        assert str(self.credit_tx.id) not in ids
+        assert str(self.adjustment_tx.id) not in ids
 
     def test_invalid_direction_falls_back_to_all(self):
         response = self.client.get('/api/transactions/?direction=bogus')
@@ -211,6 +223,26 @@ class TestTransactionHistoryPagination:
         ids_p1 = {r['id'] for r in response_p1.data['results']}
         ids_p2 = {r['id'] for r in response_p2.data['results']}
         assert ids_p1.isdisjoint(ids_p2), "Pages should not overlap"
+
+    def test_cache_keeps_different_page_sizes_separate(self):
+        """A cached default page must not truncate larger insight/page_size requests."""
+        cache.clear()
+        user = UserFactory()
+        TransactionHistoryFactory.create_batch(
+            30,
+            user=user,
+            amount=Decimal('1.00'),
+            balance_after=Decimal('5.00'),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        response_default = client.get('/api/transactions/?page=1&page_size=20&direction=all')
+        response_large = client.get('/api/transactions/?page=1&page_size=100&direction=all')
+
+        assert response_default.status_code == status.HTTP_200_OK
+        assert response_large.status_code == status.HTTP_200_OK
+        assert len(response_default.data['results']) == 20
+        assert len(response_large.data['results']) == 30
 
 
 # ---------------------------------------------------------------------------

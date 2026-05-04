@@ -98,9 +98,9 @@ class TestExpressInterestView:
         assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
     
     def test_express_interest_insufficient_balance(self):
-        """Test expressing interest with insufficient balance"""
+        """Test expressing interest is blocked only past the -10h debt floor."""
         provider = UserFactory()
-        requester = UserFactory(timebank_balance=Decimal('1.00'))
+        requester = UserFactory(timebank_balance=Decimal('-9.00'))
         service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
         
         client = AuthenticatedAPIClient()
@@ -764,6 +764,39 @@ class TestInitiateApproveServiceOwnerModel:
         assert resp.status_code == status.HTTP_200_OK
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
+
+    def test_need_approve_reuses_existing_request_reservation(self):
+        """Approving a Need must not deduct again when creation already reserved hours."""
+        service_owner = UserFactory(timebank_balance=Decimal('2.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=service_owner,
+            type='Need',
+            duration=Decimal('1.00'),
+            reserved_timebank_hours=Decimal('1.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='pending',
+            provider_initiated=True,
+            exact_location='Need Location',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+            provisioned_hours=Decimal('1.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_200_OK
+
+        service_owner.refresh_from_db()
+        service.refresh_from_db()
+        handshake.refresh_from_db()
+        assert handshake.status == 'accepted'
+        assert service_owner.timebank_balance == Decimal('2.00')
+        assert service.reserved_timebank_hours == Decimal('1.00')
 
     def test_confirm_rejects_fractional_hours_adjustment(self):
         """Completion confirmation must reject fractional hour adjustments."""
