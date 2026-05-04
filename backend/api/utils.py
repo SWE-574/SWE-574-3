@@ -12,7 +12,7 @@ from django.db.models import F, Q
 from .models import DevicePushToken, Handshake, Notification, Service, User, TransactionHistory
 
 logger = logging.getLogger(__name__)
-from .cache_utils import invalidate_conversations, invalidate_transactions
+from .cache_utils import invalidate_conversations, invalidate_transactions, invalidate_user_profile
 
 
 def can_user_post_offer(user: User) -> bool:
@@ -111,6 +111,7 @@ def provision_timebank(handshake: Handshake) -> bool:
             transaction_type='provision',
             amount=-hours,  # Negative for debit
             balance_after=receiver.timebank_balance,
+            service=handshake.service,
             handshake=handshake,
             description=f"Hours escrowed for service '{handshake.service.title}' (provisioned {hours} hours)"
         )
@@ -119,7 +120,145 @@ def provision_timebank(handshake: Handshake) -> bool:
         invalidate_conversations(str(receiver.id))
         invalidate_conversations(str(provider.id))
         invalidate_transactions(str(receiver.id))
+        invalidate_user_profile(str(receiver.id))
         
+        return True
+
+
+def reserve_timebank_for_need_service(service: Service) -> bool:
+    """Reserve hours immediately when a Need service is created."""
+    with transaction.atomic():
+        service = Service.objects.select_for_update().select_related('user').get(id=service.id)
+        if service.type != 'Need':
+            return False
+
+        hours = Decimal(service.duration)
+        if service.reserved_timebank_hours > 0:
+            return True
+
+        receiver = User.objects.select_for_update().get(id=service.user_id)
+        projected_balance = receiver.timebank_balance - hours
+        if projected_balance < Decimal("-10.00"):
+            raise ValueError("Transaction would exceed maximum debt limit of 10 hours")
+
+        receiver.timebank_balance = F("timebank_balance") - hours
+        receiver.save(update_fields=["timebank_balance"])
+        receiver.refresh_from_db(fields=["timebank_balance"])
+
+        service.reserved_timebank_hours = hours
+        service.save(update_fields=["reserved_timebank_hours"])
+
+        TransactionHistory.objects.create(
+            user=receiver,
+            transaction_type='provision',
+            amount=-hours,
+            balance_after=receiver.timebank_balance,
+            service=service,
+            description=f"Hours reserved for request '{service.title}' ({hours} hours reserved)",
+        )
+
+        invalidate_transactions(str(receiver.id))
+        invalidate_user_profile(str(receiver.id))
+        return True
+
+
+def release_timebank_for_need_service(service: Service) -> bool:
+    """Release a Need service's upfront reservation when it is cancelled."""
+    with transaction.atomic():
+        service = Service.objects.select_for_update().select_related('user').get(id=service.id)
+        if service.type != 'Need':
+            return False
+
+        hours = Decimal(service.reserved_timebank_hours or Decimal('0.00'))
+        if hours <= 0:
+            return False
+
+        receiver = User.objects.select_for_update().get(id=service.user_id)
+        receiver.timebank_balance = F("timebank_balance") + hours
+        receiver.save(update_fields=["timebank_balance"])
+        receiver.refresh_from_db(fields=["timebank_balance"])
+
+        service.reserved_timebank_hours = Decimal('0.00')
+        service.save(update_fields=["reserved_timebank_hours"])
+
+        TransactionHistory.objects.create(
+            user=receiver,
+            transaction_type='refund',
+            amount=hours,
+            balance_after=receiver.timebank_balance,
+            service=service,
+            description=f"Refund for cancelled request '{service.title}' ({hours} hours refunded)",
+        )
+
+        invalidate_transactions(str(receiver.id))
+        invalidate_user_profile(str(receiver.id))
+        return True
+
+
+def ensure_accepted_handshake_reservation(handshake: Handshake) -> bool:
+    """Provision accepted handshakes without double-debiting Need services."""
+    with transaction.atomic():
+        handshake = Handshake.objects.select_for_update().select_related(
+            'service',
+            'service__user',
+            'requester',
+        ).get(id=handshake.id)
+        service = Service.objects.select_for_update().get(id=handshake.service.id)
+
+        if service.type != 'Need' or service.reserved_timebank_hours <= 0:
+            return provision_timebank(handshake)
+
+        receiver = User.objects.select_for_update().get(id=service.user_id)
+        reserved_hours = Decimal(service.reserved_timebank_hours)
+        target_hours = Decimal(handshake.provisioned_hours)
+        difference = target_hours - reserved_hours
+
+        if difference > 0:
+            projected_balance = receiver.timebank_balance - difference
+            if projected_balance < Decimal("-10.00"):
+                raise ValueError("Transaction would exceed maximum debt limit of 10 hours")
+
+            receiver.timebank_balance = F("timebank_balance") - difference
+            receiver.save(update_fields=["timebank_balance"])
+            receiver.refresh_from_db(fields=["timebank_balance"])
+
+            TransactionHistory.objects.create(
+                user=receiver,
+                transaction_type='provision',
+                amount=-difference,
+                balance_after=receiver.timebank_balance,
+                service=service,
+                handshake=handshake,
+                description=(
+                    f"Additional hours reserved for request '{service.title}' "
+                    f"(adjusted from {reserved_hours} to {target_hours} hours)"
+                ),
+            )
+        elif difference < 0:
+            refund_amount = abs(difference)
+            receiver.timebank_balance = F("timebank_balance") + refund_amount
+            receiver.save(update_fields=["timebank_balance"])
+            receiver.refresh_from_db(fields=["timebank_balance"])
+
+            TransactionHistory.objects.create(
+                user=receiver,
+                transaction_type='refund',
+                amount=refund_amount,
+                balance_after=receiver.timebank_balance,
+                service=service,
+                handshake=handshake,
+                description=(
+                    f"Reserved request hours adjusted for '{service.title}' "
+                    f"(refunded {refund_amount} hours, changed from {reserved_hours} to {target_hours} hours)"
+                ),
+            )
+
+        if difference != 0:
+            service.reserved_timebank_hours = target_hours
+            service.save(update_fields=["reserved_timebank_hours"])
+
+        invalidate_transactions(str(receiver.id))
+        invalidate_user_profile(str(receiver.id))
         return True
 
 def _is_group_one_time_service(service: Service) -> bool:
@@ -163,6 +302,7 @@ def complete_timebank_transfer(handshake: Handshake) -> bool:
                 transaction_type='transfer',
                 amount=hours,
                 balance_after=provider.timebank_balance,
+                service=service,
                 handshake=handshake,
                 description=f"Service completed: '{handshake.service.title}' ({hours} hours transferred)"
             )
@@ -171,10 +311,15 @@ def complete_timebank_transfer(handshake: Handshake) -> bool:
             provider.save(update_fields=["karma_score"])
             provider.refresh_from_db(fields=["karma_score"])
 
+        if service.type == 'Need' and service.reserved_timebank_hours > 0:
+            service.reserved_timebank_hours = Decimal('0.00')
+            service.save(update_fields=["reserved_timebank_hours"])
+
         def invalidate_after_commit() -> None:
             for user_id in impacted_user_ids:
                 invalidate_conversations(user_id)
                 invalidate_transactions(user_id)
+                invalidate_user_profile(user_id)
 
         transaction.on_commit(invalidate_after_commit)
 
@@ -216,6 +361,7 @@ def complete_timebank_transfer(handshake: Handshake) -> bool:
                         transaction_type='transfer',
                         amount=hours,
                         balance_after=provider.timebank_balance,
+                        service=service,
                         handshake=handshake,
                         description=(
                             f"Group service completed: '{service.title}' "
@@ -237,9 +383,15 @@ def cancel_timebank_transfer(handshake: Handshake) -> bool:
     """
     # Refund for accepted, reported, or paused handshakes (all have escrowed hours)
     if handshake.status in ("accepted", "reported", "paused"):
+        service = Service.objects.select_for_update().get(id=handshake.service.id)
         _, receiver = get_provider_and_receiver(handshake)
         receiver = User.objects.select_for_update().get(id=receiver.id)
-        hours = handshake.provisioned_hours
+        if service.type == 'Need' and service.reserved_timebank_hours > 0:
+            hours = Decimal(service.reserved_timebank_hours)
+            service.reserved_timebank_hours = Decimal('0.00')
+            service.save(update_fields=["reserved_timebank_hours"])
+        else:
+            hours = handshake.provisioned_hours
         
         # Use F() expression for atomic balance update
         receiver.timebank_balance = F("timebank_balance") + hours
@@ -254,6 +406,7 @@ def cancel_timebank_transfer(handshake: Handshake) -> bool:
             transaction_type='refund',
             amount=hours,  # Positive for refund
             balance_after=receiver.timebank_balance,
+            service=handshake.service,
             handshake=handshake,
             description=f"Refund for cancelled service '{handshake.service.title}' ({hours} hours refunded)"
         )
@@ -263,6 +416,7 @@ def cancel_timebank_transfer(handshake: Handshake) -> bool:
         invalidate_conversations(str(provider.id))
         invalidate_transactions(str(receiver.id))
         invalidate_transactions(str(provider.id))
+        invalidate_user_profile(str(receiver.id))
 
     handshake.status = "cancelled"
     handshake.save(update_fields=["status"])
