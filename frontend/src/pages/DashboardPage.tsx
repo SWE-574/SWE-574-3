@@ -299,7 +299,7 @@ function ServiceCard({
               </Flex>
             )}
             <Pill
-              label={isOffer ? 'Offer' : service.type === 'Event' ? 'Event' : 'Want'}
+              label={isOffer ? 'Offer' : service.type === 'Event' ? 'Event' : 'Need'}
               bg={isOffer ? GREEN_LT : service.type === 'Event' ? AMBER_LT : BLUE_LT}
               color={isOffer ? GREEN : service.type === 'Event' ? AMBER : BLUE}
             />
@@ -715,7 +715,7 @@ const DashboardPage = () => {
                 <Text fontSize="12px" fontWeight={600} color={GRAY700}>Map View</Text>
                 <HStack gap={3} fontSize="11px" color={GRAY500}>
                   <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={GREEN} />Offers</Flex>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={BLUE} />Wants</Flex>
+                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={BLUE} />Needs</Flex>
                 </HStack>
                 {isLoading && services.length > 0 && (
                   <Flex align="center" gap="5px" ml="auto">

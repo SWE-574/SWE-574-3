@@ -488,7 +488,7 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
 export default function ServiceDetailPage() {
   const { id }     = useParams<{ id: string }>()
   const navigate   = useNavigate()
-  const { isAuthenticated, user } = useAuthStore()
+  const { isAuthenticated, user, refreshUser, updateUserOptimistically } = useAuthStore()
 
   const [service, setService]           = useState<Service | null>(null)
   const [loading, setLoading]           = useState(true)
@@ -978,6 +978,13 @@ export default function ServiceDetailPage() {
     setRemoveLoading(true)
     try {
       await serviceAPI.delete(service.id)
+      if (service.type === 'Need') {
+        const currentBalance = Number(user?.timebank_balance ?? 0)
+        updateUserOptimistically({
+          timebank_balance: currentBalance + Number(service.duration),
+        })
+        await refreshUser()
+      }
       toast.success('Listing removed.')
       navigate('/dashboard')
     } catch (e: unknown) {
@@ -1085,7 +1092,7 @@ export default function ServiceDetailPage() {
                       bg="rgba(255,255,255,0.2)" color={WHITE}
                       style={{ backdropFilter: 'blur(8px)' }}
                     >
-                      {isOffer ? 'Offer' : isEvent ? 'Event' : 'Want'}
+                      {isOffer ? 'Offer' : isEvent ? 'Event' : 'Need'}
                     </Box>
                     {isRecurr && !isEvent && (
                       <Box px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
