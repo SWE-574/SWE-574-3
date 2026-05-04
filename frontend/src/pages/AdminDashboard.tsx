@@ -6,6 +6,7 @@ import {
   FiCheck, FiX, FiLink2, FiAlertCircle, FiSlash, FiMapPin, FiClock,
   FiCalendar, FiTrash2, FiPauseCircle, FiArrowUpRight, FiLock, FiUserX,
   FiUnlock, FiBookmark, FiRefreshCw, FiMessageCircle as FiCommentIcon, FiSettings,
+  FiCheckCircle, FiXCircle,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { adminAPI, type AuditTargetFilter, type CommentStatusFilter, type ReportResolveAction, type ReportStatusFilter } from '@/services/adminAPI'
@@ -581,6 +582,8 @@ const AdminDashboard = () => {
       confirm_no_show: { title: 'Confirm No-Show', desc: 'Mark this as a no-show incident and resolve the report.', label: 'Confirm no-show', accent: GREEN, accentLt: GREEN_LT },
       dismiss:         { title: 'Dismiss Report',  desc: 'Dismiss this report. The reported content will remain visible.', label: 'Dismiss', accent: BLUE, accentLt: BLUE_LT },
       remove_from_event: { title: 'Remove From Event', desc: 'Remove the reported participant from this event and resolve the report.', label: 'Remove participant', accent: RED, accentLt: RED_LT },
+      mark_resolved:   { title: 'Mark as Resolved', desc: 'Close this report as resolved without affecting any TimeBank transfer.', label: 'Mark resolved', accent: GREEN, accentLt: GREEN_LT },
+      mark_dismissed:  { title: 'Mark as Dismissed', desc: 'Close this report as dismissed without affecting any TimeBank transfer.', label: 'Mark dismissed', accent: BLUE, accentLt: BLUE_LT },
     }
     const meta = labelMap[action] ?? { title: `Action: ${action}`, desc: 'Confirm this moderation action.', label: 'Confirm', accent: GREEN, accentLt: GREEN_LT }
     setConfirmModal({
@@ -1977,6 +1980,8 @@ const AdminDashboard = () => {
                   const isServiceReport = !!openReport.reported_service
                   const canCloseServiceFromReport = canCloseReportedService(openReport)
                   const isServiceAlreadyClosed = openReport.reported_service_status === 'Cancelled' || openReportService?.status === 'Cancelled'
+                  const reportedServiceStatus = openReport.reported_service_status || openReportService?.status
+                  const isReportedServiceTerminal = reportedServiceStatus === 'Cancelled' || reportedServiceStatus === 'Completed'
                   const forumTopicPath = openReport.reported_forum_topic ? `/forum/topic/${openReport.reported_forum_topic}` : null
                   const hasHandshakeInfo = !!(openReport.related_handshake || openReport.handshake_status || openReport.handshake_scheduled_time || openReport.handshake_hours != null)
 
@@ -2231,13 +2236,24 @@ const AdminDashboard = () => {
                           <Box style={{ borderTop: `1px solid ${GRAY100}` }} pt={3}>
                             <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb={2}>Actions</Text>
                             <Flex gap={2} wrap="wrap">
+                              {openReport.status === 'pending' && (
+                                <PanelActionBtn label="Mark as resolved" icon={<FiCheckCircle size={11} />} accent={GREEN} accentLt={GREEN_LT}
+                                  onClick={() => resolveOpenReport('mark_resolved')}
+                                  disabled={openReportActionLoading} />
+                              )}
+                              {openReport.status === 'pending' && (
+                                <PanelActionBtn label="Mark as dismissed" icon={<FiXCircle size={11} />} accent={BLUE} accentLt={BLUE_LT}
+                                  onClick={() => resolveOpenReport('mark_dismissed')}
+                                  disabled={openReportActionLoading} />
+                              )}
                               {!isForumReport && (
                                 <PanelActionBtn label="Confirm no-show" icon={<FiCheck size={11} />} accent={GREEN} accentLt={GREEN_LT}
                                   onClick={() => resolveOpenReport('confirm_no_show')}
-                                  disabled={openReportActionLoading || !openReport.related_handshake || hasPendingLinkedHandshake(openReport) || isEventNotStartedForNoShow(openReport)} />
+                                  disabled={openReportActionLoading || !openReport.related_handshake || hasPendingLinkedHandshake(openReport) || isEventNotStartedForNoShow(openReport) || isReportedServiceTerminal} />
                               )}
                               <PanelActionBtn label="Dismiss" icon={<FiX size={11} />} accent={BLUE} accentLt={BLUE_LT}
-                                onClick={() => resolveOpenReport('dismiss')} disabled={openReportActionLoading} />
+                                onClick={() => resolveOpenReport('dismiss')}
+                                disabled={openReportActionLoading || isReportedServiceTerminal} />
                               <PanelActionBtn label="Remove from event" icon={<FiUserX size={11} />} accent={RED} accentLt={RED_LT}
                                 onClick={() => resolveOpenReport('remove_from_event')}
                                 disabled={openReportActionLoading || !canRemoveReportedUserFromEvent(openReport)} />
@@ -2273,6 +2289,11 @@ const AdminDashboard = () => {
                             )}
                             {!isForumReport && isEventNotStartedForNoShow(openReport) && (
                               <Text fontSize="11px" color={GRAY400} mt={2}>Event not started — no-show confirm disabled.</Text>
+                            )}
+                            {!isForumReport && isReportedServiceTerminal && (
+                              <Text fontSize="11px" color={GRAY400} mt={2}>
+                                Linked service is {String(reportedServiceStatus).toLowerCase()} — TimeBank actions are unavailable. Use Mark as resolved/dismissed to close the case.
+                              </Text>
                             )}
                           </Box>
                         </Box>

@@ -2200,10 +2200,78 @@ class ReportSerializer(serializers.ModelSerializer):
         """
         if not obj.related_handshake or not obj.reported_user:
             return None
-        
+
         from .utils import get_provider_and_receiver
         _, receiver = get_provider_and_receiver(obj.related_handshake)
         return obj.reported_user.id == receiver.id
+
+
+class MyReportSerializer(serializers.ModelSerializer):
+    """Reporter-facing serializer — no moderator PII or admin-only fields.
+
+    Used by GET /api/users/me/reports/ so a user can see what they've submitted
+    and the moderation outcome without learning the moderator's identity.
+    """
+    type_display = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    target_summary = serializers.SerializerMethodField()
+    target_kind = serializers.SerializerMethodField()
+    target_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Report
+        fields = [
+            'id', 'type', 'type_display', 'status', 'status_display',
+            'description', 'target_kind', 'target_id', 'target_summary',
+            'created_at', 'resolved_at',
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_type_display(self, obj):
+        return obj.get_type_display()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_kind(self, obj):
+        if obj.reported_forum_post_id:
+            return 'forum_post'
+        if obj.reported_forum_topic_id:
+            return 'forum_topic'
+        if obj.reported_service_id:
+            return 'service'
+        if obj.reported_user_id:
+            return 'user'
+        return 'other'
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_id(self, obj):
+        for fk in (
+            obj.reported_forum_post_id,
+            obj.reported_forum_topic_id,
+            obj.reported_service_id,
+            obj.reported_user_id,
+        ):
+            if fk:
+                return str(fk)
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_summary(self, obj):
+        if obj.reported_forum_post_id and obj.reported_forum_topic:
+            return f"Reply in '{obj.reported_forum_topic.title}'"
+        if obj.reported_forum_topic:
+            return obj.reported_forum_topic.title
+        if obj.reported_service:
+            return obj.reported_service.title
+        if obj.reported_user:
+            full = f"{obj.reported_user.first_name} {obj.reported_user.last_name}".strip()
+            return full or obj.reported_user.email
+        return None
+
 
 # Transaction History Serializer
 @extend_schema_serializer(
