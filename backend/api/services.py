@@ -1854,7 +1854,7 @@ class EventHandshakeService:
                 )
 
     @staticmethod
-    def cancel_event(service: Service, organizer: User) -> None:
+    def cancel_event(service: Service, organizer: User, reason: str = '') -> None:
         """
         Organizer cancels an Event.
 
@@ -1895,7 +1895,7 @@ class EventHandshakeService:
             participant_ids = list(
                 active_participants_qs.values_list('requester_id', flat=True)
             )
-            active_participants_qs.update(status='cancelled', updated_at=timezone.now())
+            active_participants_qs.update(status='cancelled', cancellation_reason=reason, updated_at=timezone.now())
 
             for user_id in participant_ids:
                 participant = User.objects.get(pk=user_id)

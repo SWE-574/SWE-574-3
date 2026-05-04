@@ -69,9 +69,12 @@ class TestLocationBlurDeterminism:
 
         assert lat is not None
         assert lng is not None
-        assert float(lat) != pytest.approx(float(real_lat), abs=1e-4), (
-            "Non-owner received exact latitude — blur not applied."
-        )
+        # Check combined 2D offset — individual lat/lng components can be near zero
+        # when the blur angle is ~0 or ~π (all offset goes to lng or lat respectively).
+        # The blur guarantees total_offset == R == 0.0045°; 1e-3 is safely below that.
+        import math
+        total_offset = math.sqrt((float(lat) - float(real_lat)) ** 2 + (float(lng) - float(real_lng)) ** 2)
+        assert total_offset > 1e-3, "Non-owner received exact coordinates — blur not applied."
 
     def test_blur_is_consistent_across_requests(self):
         """Same non-owner querying the same service twice must get identical fuzzed coords."""

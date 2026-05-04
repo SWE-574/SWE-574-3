@@ -16,6 +16,7 @@ import { MapView } from '@/components/MapView'
 import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import ReportModal, { type ReportOption } from '@/components/ReportModal'
+import { AdminConfirmModal, ModalBackdrop, ModalCard, ModalHeader, ModalFooter, ModalFieldLabel } from '@/components/AdminModals'
 import VerificationRequiredModal from '@/components/VerificationRequiredModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
@@ -515,6 +516,9 @@ export default function ServiceDetailPage() {
   const [attendanceCode, setAttendanceCode]   = useState('')
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [removeLoading, setRemoveLoading]   = useState(false)
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [showRemoveModal, setShowRemoveModal] = useState(false)
+  const [cancelReason, setCancelReason]     = useState('')
   const [commentRefreshKey, setCommentRefreshKey] = useState(0)
   const [isEventDetailModalOpen, setIsEventDetailModalOpen] = useState(false)
   const [eventDetailModalTab, setEventDetailModalTab] = useState<EventDetailModalTab>('details')
@@ -954,16 +958,11 @@ export default function ServiceDetailPage() {
   }
 
   const handleCancelEvent = async () => {
-    if (!service) return
-    const inLockdown = isWithinLockdownWindow(service.scheduled_time)
-    const hasParticipants = (service.participant_count ?? 0) > 0
-    const confirmMsg = inLockdown && hasParticipants
-      ? 'You are in the 24h lockdown window. Cancelling now will apply a 30-day event creation ban. Continue?'
-      : 'Are you sure you want to cancel this event? All participants will be notified.'
-    if (!window.confirm(confirmMsg)) return
+    if (!service || !cancelReason.trim()) return
     setCancelLoading(true)
+    setShowCancelModal(false)
     try {
-      await serviceAPI.cancelEvent(service.id)
+      await serviceAPI.cancelEvent(service.id, cancelReason.trim())
       toast.success('Event cancelled.')
       navigate('/dashboard')
     } catch (e: unknown) {
@@ -974,8 +973,8 @@ export default function ServiceDetailPage() {
 
   const handleRemoveListing = async () => {
     if (!service || !isOwn) return
-    if (!window.confirm('Are you sure you want to remove this listing? This cannot be undone.')) return
     setRemoveLoading(true)
+    setShowRemoveModal(false)
     try {
       await serviceAPI.delete(service.id)
       if (service.type === 'Need') {
@@ -1024,6 +1023,7 @@ export default function ServiceDetailPage() {
     ? Math.min(100, ((service.participant_count ?? 0) / service.max_participants) * 100) : 0
 
   return (
+    <>
     <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto"
       py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
       <Box maxW="1440px" mx="auto" py={{ base: 4, md: 5 }} px={{ base: 4, md: 5 }}>
@@ -1592,7 +1592,7 @@ export default function ServiceDetailPage() {
                         <Box as="button" w="full" py="10px" borderRadius="10px"
                           bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
                           display="flex" alignItems="center" justifyContent="center" gap="6px"
-                          onClick={handleCancelEvent}
+                          onClick={() => { setCancelReason(''); setShowCancelModal(true) }}
                           style={{ border: `1px solid ${RED}30`, cursor: cancelLoading ? 'not-allowed' : 'pointer', opacity: cancelLoading ? 0.65 : 1 }}
                         >
                           {cancelLoading ? 'Cancelling…' : 'Cancel Event'}
@@ -1954,7 +1954,7 @@ export default function ServiceDetailPage() {
                         <Box as="button" w="full" py="10px" borderRadius="10px"
                           bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
                           display="flex" alignItems="center" justifyContent="center" gap="6px"
-                          onClick={handleRemoveListing}
+                          onClick={() => setShowRemoveModal(true)}
                           style={{ border: `1px solid ${RED}30`, cursor: removeLoading ? 'not-allowed' : 'pointer', opacity: removeLoading ? 0.65 : 1 }}
                         >
                           {removeLoading ? 'Removing…' : 'Remove Listing'}
@@ -2423,5 +2423,69 @@ export default function ServiceDetailPage() {
       )}
 
     </Box>
+
+    {/* ── Remove Listing confirmation modal (BUG-02) ─────────────────────── */}
+    <AdminConfirmModal
+      isOpen={showRemoveModal}
+      title="Remove Listing"
+      description="Are you sure you want to remove this listing?"
+      confirmLabel="Remove"
+      accent={RED} accentLt={RED_LT}
+      loading={removeLoading}
+      onConfirm={handleRemoveListing}
+      onClose={() => setShowRemoveModal(false)}
+    />
+
+    {/* ── Cancel Event modal with required reason (BUG-03) ───────────────── */}
+    {showCancelModal && service && (() => {
+      const inLockdown = isWithinLockdownWindow(service.scheduled_time)
+      const hasParticipants = (service.participant_count ?? 0) > 0
+      const canConfirm = cancelReason.trim().length > 0
+      return (
+        <ModalBackdrop onClick={() => setShowCancelModal(false)}>
+          <ModalCard onClick={(e) => e.stopPropagation()}>
+            <ModalHeader
+              icon={<FiAlertTriangle size={15} />}
+              iconBg={RED_LT} iconColor={RED}
+              title="Cancel Event"
+              subtitle="This will notify all participants and cannot be undone."
+            />
+            <Box px={5} py={4}>
+              {inLockdown && hasParticipants && (
+                <Box bg="#FFF7ED" borderRadius="10px" p={3} mb={4} border="1px solid #FDBA74">
+                  <Text fontSize="12px" fontWeight={700} color="#C2410C">30-day ban applies</Text>
+                  <Text fontSize="12px" color="#92400E" mt="2px">
+                    You are within the 24-hour lockdown window with active participants. Cancelling will apply a 30-day event creation ban.
+                  </Text>
+                </Box>
+              )}
+              <ModalFieldLabel>Reason for cancellation (required)</ModalFieldLabel>
+              <textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                rows={4}
+                placeholder="Let participants know why this event is being cancelled…"
+                style={{
+                  width: '100%', resize: 'vertical', padding: '10px 12px',
+                  borderRadius: '10px', border: `1px solid ${GRAY200}`,
+                  background: GRAY50, fontSize: '13px', color: GRAY800,
+                  outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <Text fontSize="11px" color={GRAY400} mt="4px">{cancelReason.trim().length} chars</Text>
+            </Box>
+            <ModalFooter
+              onClose={() => setShowCancelModal(false)}
+              confirmLabel="Cancel Event"
+              accent={RED} accentLt={RED_LT}
+              onConfirm={handleCancelEvent}
+              loading={cancelLoading}
+              disabled={!canConfirm}
+            />
+          </ModalCard>
+        </ModalBackdrop>
+      )
+    })()}
+    </>
   )
 }
