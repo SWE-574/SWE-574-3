@@ -142,16 +142,16 @@ class TextStrategy(SearchStrategy):
 
 class TypeStrategy(SearchStrategy):
     """
-    Filter services by type (Offer or Need).
+    Filter services by type (Offer, Need, or Event).
 
     Parameters:
-        - type: 'Offer' or 'Need'
+        - type: 'Offer', 'Need', or 'Event'
     """
 
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         service_type = params.get('type')
 
-        if service_type and service_type in ['Offer', 'Need']:
+        if service_type and service_type in ['Offer', 'Need', 'Event']:
             queryset = queryset.filter(type=service_type)
 
         return queryset
