@@ -2232,6 +2232,8 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
     service_type = serializers.SerializerMethodField()
     schedule_type = serializers.SerializerMethodField()
     max_participants = serializers.SerializerMethodField()
+    handshake_status = serializers.SerializerMethodField()
+    service_status = serializers.SerializerMethodField()
     is_current_user_provider = serializers.SerializerMethodField()
     counterpart = serializers.SerializerMethodField()
 
@@ -2240,10 +2242,15 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'handshake_id', 'service_id', 'transaction_type', 'transaction_type_display',
             'amount', 'balance_after', 'description', 'service_title', 'service_type',
-            'schedule_type', 'max_participants', 'is_current_user_provider',
+            'schedule_type', 'max_participants', 'handshake_status', 'service_status', 'is_current_user_provider',
             'counterpart', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
+
+    def _context_service(self, obj):
+        if obj.handshake and obj.handshake.service:
+            return obj.handshake.service
+        return obj.service
 
     @extend_schema_field(OpenApiTypes.UUID)
     def get_handshake_id(self, obj):
@@ -2253,41 +2260,62 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.UUID)
     def get_service_id(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return str(obj.handshake.service.id)
+        service = self._context_service(obj)
+        if service:
+            return str(service.id)
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_service_title(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.title
+        service = self._context_service(obj)
+        if service:
+            return service.title
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_service_type(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.type
+        service = self._context_service(obj)
+        if service:
+            return service.type
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_schedule_type(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.schedule_type
+        service = self._context_service(obj)
+        if service:
+            return service.schedule_type
         return None
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_max_participants(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.max_participants
+        service = self._context_service(obj)
+        if service:
+            return service.max_participants
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_handshake_status(self, obj):
+        if obj.handshake:
+            return obj.handshake.status
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_service_status(self, obj):
+        service = self._context_service(obj)
+        if service:
+            return service.status
         return None
 
     @extend_schema_field(serializers.BooleanField())
     def get_is_current_user_provider(self, obj):
         handshake = obj.handshake
-        if not handshake or not handshake.service:
+        service = self._context_service(obj)
+        if not service:
             return False
 
-        service = handshake.service
+        if handshake is None:
+            return service.type == 'Offer' and str(service.user_id) == str(obj.user_id)
+
         if service.type == 'Offer':
             provider = service.user
         else:
@@ -2298,18 +2326,34 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_counterpart(self, obj):
         handshake = obj.handshake
-        if not handshake or not handshake.service:
+        service = self._context_service(obj)
+        if not service:
             return None
 
-        service = handshake.service
-        if service.type == 'Offer':
+        if handshake is None:
+            if service.type == 'Need' and service.status == 'Completed':
+                completed_handshake = (
+                    Handshake.objects
+                    .filter(service=service, status='completed')
+                    .select_related('requester')
+                    .order_by('-updated_at')
+                    .first()
+                )
+                counterpart = completed_handshake.requester if completed_handshake else service.user
+            else:
+                # Service-level reservations/refunds (for Need creation/deletion)
+                # do not have a handshake counterpart yet. Surface the service owner
+                # so clients can show who reserved the hours instead of "System".
+                counterpart = service.user
+        elif service.type == 'Offer':
             provider = service.user
             receiver = handshake.requester
+            counterpart = receiver if str(provider.id) == str(obj.user_id) else provider
         else:
             provider = handshake.requester
             receiver = service.user
+            counterpart = receiver if str(provider.id) == str(obj.user_id) else provider
 
-        counterpart = receiver if str(provider.id) == str(obj.user_id) else provider
         if not counterpart:
             return None
 
