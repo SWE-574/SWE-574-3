@@ -29,6 +29,7 @@ const ChatPage               = lazy(() => import('@/pages/ChatPage'))
 const UserProfile            = lazy(() => import('@/pages/UserProfile'))
 const PublicProfile          = lazy(() => import('@/pages/PublicProfile'))
 const TransactionHistoryPage = lazy(() => import('@/pages/TransactionHistoryPage'))
+const EventsPage             = lazy(() => import('@/pages/EventsPage'))
 const NotificationsPage      = lazy(() => import('@/pages/NotificationsPage'))
 const AdminDashboard         = lazy(() => import('@/pages/AdminDashboard'))
 const AdminUserDetailPage    = lazy(() => import('@/pages/AdminUserDetailPage'))
@@ -247,6 +248,7 @@ function App() {
           <Route path="/verify-email"    element={<VerifyEmailPage />} />
           <Route path="/verify-email-sent" element={<VerifyEmailSentPage />} />
           <Route path="/dashboard"      element={<DashboardPage />} />
+          <Route path="/events"         element={<EventsPage />} />
           <Route path="/service-detail/:id" element={<ServiceDetailPage />} />
           <Route path="/public-profile/:userId" element={<PublicProfile />} />
 

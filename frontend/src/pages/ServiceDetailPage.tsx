@@ -612,12 +612,17 @@ export default function ServiceDetailPage() {
   })()
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
-  const eventEditLocked = isEvent && isWithinLockdownWindow(service?.scheduled_time)
+  // FR-11f / FR-11n: prefer the backend-canonical edit_locked flag when the
+  // server provided it (#267). Fall back to client-side math only for the
+  // brief window where an older API hasn't shipped the new field yet.
+  const eventEditLocked = isEvent && (
+    service?.edit_locked ?? isWithinLockdownWindow(service?.scheduled_time)
+  )
   const hasActiveApprovedSession = incoming.some((h) => ['accepted', 'reported', 'paused'].includes(h.status))
   const activeApprovedSessionEditLocked = !isEvent && !isRecurr && hasActiveApprovedSession
   const ownerEditLocked = isOwn && ((isEvent && eventEditLocked) || activeApprovedSessionEditLocked)
   const ownerEditLockReason = isEvent
-    ? 'Editing is locked during the final 24 hours before event start.'
+    ? (service?.edit_lock_reason || 'Editing is locked during the final 24 hours before event start.')
     : 'Editing is locked while an approved session is still active.'
   const reportedParticipantIds = new Set(
     incoming
@@ -955,7 +960,9 @@ export default function ServiceDetailPage() {
 
   const handleCancelEvent = async () => {
     if (!service) return
-    const inLockdown = isWithinLockdownWindow(service.scheduled_time)
+    // Prefer the API-provided edit_locked; fall back to client-side math
+    // when an older payload doesn't include the field yet (#267).
+    const inLockdown = service.edit_locked ?? isWithinLockdownWindow(service.scheduled_time)
     const hasParticipants = (service.participant_count ?? 0) > 0
     const confirmMsg = inLockdown && hasParticipants
       ? 'You are in the 24h lockdown window. Cancelling now will apply a 30-day event creation ban. Continue?'
@@ -1033,6 +1040,27 @@ export default function ServiceDetailPage() {
         >
           <FiArrowLeft size={15} /> Back to Browse
         </Box>
+
+        {/* FR-12g — cancellation banner above the fold for any cancelled service.
+            Detail-area inline messages still appear below as fallback context. */}
+        {service.status === 'Cancelled' && (
+          <Box
+            mb={4} p={4} borderRadius="12px"
+            bg={RED_LT}
+            border={`1px solid ${RED}40`}
+            display="flex" alignItems="center" gap={3}
+          >
+            <FiAlertTriangle size={18} color={RED} />
+            <Box>
+              <Text fontSize="14px" fontWeight={700} color={RED}>
+                {service.type === 'Event' ? 'This event was cancelled' : 'This listing was cancelled'}
+              </Text>
+              <Text fontSize="12px" color="#991B1B" mt="2px">
+                Joining, checking in, and evaluation are no longer available.
+              </Text>
+            </Box>
+          </Box>
+        )}
 
         <Grid templateColumns={{ base: '1fr', lg: '1fr 360px' }} gap={5} alignItems="start">
 

@@ -541,6 +541,8 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    edit_locked = serializers.BooleanField(read_only=True)
+    edit_lock_reason = serializers.CharField(read_only=True, allow_null=True)
 
     class Meta:
         model = Service
@@ -551,8 +553,9 @@ class ServiceSerializer(serializers.ModelSerializer):
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
+            'edit_locked', 'edit_lock_reason',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
+        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned', 'edit_locked', 'edit_lock_reason']
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):

@@ -284,6 +284,33 @@ class Service(models.Model):
         from datetime import timedelta
         return timezone.now() >= self.scheduled_time - timedelta(hours=24)
 
+    @property
+    def edit_lock_reason(self) -> str | None:
+        """Human-readable reason the service is currently edit-locked, or None.
+
+        Canonical rule (#267, FR-11f / FR-11n):
+          - Terminal status (Completed / Cancelled): locked, no further edits.
+          - Event within 24h of scheduled_time and beyond: locked.
+          - Anything else: not locked.
+
+        Frontend should consume `edit_locked` / `edit_lock_reason` from the
+        service payload directly; do NOT reimplement the date math client-side.
+        """
+        if self.status in ('Completed', 'Cancelled'):
+            return f"Service is {self.status.lower()} — no further edits allowed."
+        if self.type == 'Event' and self.scheduled_time:
+            from django.utils import timezone
+            now = timezone.now()
+            if now >= self.scheduled_time:
+                return 'Event has started — edits are locked.'
+            if self.is_in_lockdown_window:
+                return 'Event is within the 24-hour lockdown window — edits are locked.'
+        return None
+
+    @property
+    def edit_locked(self) -> bool:
+        return self.edit_lock_reason is not None
+
     def save(self, *args, **kwargs):
         """
         Auto-populate PointField from lat/lng for geospatial queries.
