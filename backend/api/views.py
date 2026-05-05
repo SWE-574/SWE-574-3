@@ -92,7 +92,7 @@ from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max, Subquery
 from django.db.models.functions import Coalesce
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
@@ -1886,7 +1886,42 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 capacity_handshakes_prefetch,
             )
         )
-        
+
+        # Save / Endorse list-time annotations (#483) so the serializer's
+        # is_saved / is_endorsed / endorsement_count fields don't fire one
+        # query per service in list responses. Detail view uses the per-row
+        # fallback in the serializer (one query is fine there).
+        from .models import Endorsement, SavedService
+        if self.request.user.is_authenticated:
+            queryset = queryset.annotate(
+                is_saved_anno=Exists(
+                    SavedService.objects.filter(
+                        user=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_endorsed_anno=Exists(
+                    Endorsement.objects.filter(
+                        endorser=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+            )
+        endorsement_count_subquery = (
+            Endorsement.objects
+            .filter(service=OuterRef('pk'))
+            .order_by()
+            .values('service')
+            .annotate(c=Count('id'))
+            .values('c')
+        )
+        from django.db.models import IntegerField
+        from django.db.models.functions import Coalesce
+        queryset = queryset.annotate(
+            endorsement_count_anno=Coalesce(
+                Subquery(endorsement_count_subquery, output_field=IntegerField()),
+                Value(0, output_field=IntegerField()),
+            ),
+        )
+
         # Filter by visibility - admins can see all, others only visible
         if not (self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES):
             queryset = queryset.filter(is_visible=True)

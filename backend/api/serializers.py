@@ -562,7 +562,14 @@ class ServiceSerializer(serializers.ModelSerializer):
         ]
 
     def get_is_saved(self, obj):
-        """True when the current viewer has saved this service (#483)."""
+        """True when the current viewer has saved this service (#483).
+        Reads the is_saved_anno annotation set by ServiceViewSet.get_queryset
+        when present so list responses don't fire one query per service.
+        Falls back to a per-row query for detail views.
+        """
+        annotated = getattr(obj, 'is_saved_anno', None)
+        if annotated is not None:
+            return bool(annotated)
         request = self.context.get('request') if hasattr(self, 'context') else None
         viewer = getattr(request, 'user', None) if request else None
         if viewer is None or not viewer.is_authenticated:
@@ -571,7 +578,12 @@ class ServiceSerializer(serializers.ModelSerializer):
         return SavedService.objects.filter(user=viewer, service=obj).exists()
 
     def get_is_endorsed(self, obj):
-        """True when the current viewer has endorsed this service (#483)."""
+        """True when the current viewer has endorsed this service (#483).
+        Annotation-aware; same fallback pattern as get_is_saved.
+        """
+        annotated = getattr(obj, 'is_endorsed_anno', None)
+        if annotated is not None:
+            return bool(annotated)
         request = self.context.get('request') if hasattr(self, 'context') else None
         viewer = getattr(request, 'user', None) if request else None
         if viewer is None or not viewer.is_authenticated:
@@ -580,7 +592,12 @@ class ServiceSerializer(serializers.ModelSerializer):
         return Endorsement.objects.filter(endorser=viewer, service=obj).exists()
 
     def get_endorsement_count(self, obj):
-        """Public endorsement count for the service (#483)."""
+        """Public endorsement count for the service (#483).
+        Annotation-aware; falls back to a per-row count for detail views.
+        """
+        annotated = getattr(obj, 'endorsement_count_anno', None)
+        if annotated is not None:
+            return int(annotated)
         from .models import Endorsement
         return Endorsement.objects.filter(service=obj).count()
 

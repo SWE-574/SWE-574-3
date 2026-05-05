@@ -93,6 +93,46 @@ class TestSaveService:
 
 @pytest.mark.django_db
 @pytest.mark.integration
+class TestSaveEndorseListPerformance:
+    """Regression guard for the per-card N+1 that the first version of the
+    save/endorse serializer fields introduced. The list response should
+    issue O(1) queries for the save/endorse fields, not O(N).
+    """
+
+    def test_list_query_count_does_not_scale_with_service_count(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        viewer = UserFactory()
+        for _ in range(5):
+            ServiceFactory(type='Offer', status='Active')
+
+        client = APIClient()
+        client.force_authenticate(user=viewer)
+        with CaptureQueriesContext(connection) as ctx_5:
+            resp = client.get('/api/services/')
+            assert resp.status_code == 200
+        small = len(ctx_5)
+
+        for _ in range(15):
+            ServiceFactory(type='Offer', status='Active')
+
+        with CaptureQueriesContext(connection) as ctx_20:
+            resp = client.get('/api/services/')
+            assert resp.status_code == 200
+        large = len(ctx_20)
+
+        # Allow some growth from prefetch sub-queries that scale with row
+        # count, but per-card save/endorse queries would balloon by 3 per
+        # extra service (15 * 3 = +45). Cap the diff comfortably under that.
+        assert large - small < 30, (
+            f'list query count grew from {small} to {large} for 5 -> 20 '
+            f'services; per-card N+1 likely back'
+        )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
 class TestEndorseService:
     def test_endorse_creates_row_and_returns_count(self):
         from api.models import Endorsement
