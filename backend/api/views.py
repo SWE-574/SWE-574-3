@@ -1827,29 +1827,48 @@ class ServiceViewSet(viewsets.ModelViewSet):
         
         sort_param = request.query_params.get('sort', 'latest')
         # Don't cache location-based queries (results vary by user location).
-        # Also skip cache for hot-sort by authenticated users — social boost is per-user.
+        # Also skip cache for hot-sort by authenticated users -- social boost is per-user.
+        # And skip cache when sort=hot AND exploration is enabled, since Phase 3
+        # mixing is per-request randomised (#316) and caching would defeat it.
+        from .ranking import should_explore, select_exploration_candidate, inject_exploration_slot
+        from django.conf import settings as _ranking_settings
+        explore_enabled = (
+            sort_param == 'hot'
+            and getattr(_ranking_settings, 'RANKING_EXPLORATION_RATE', 0.0) > 0
+        )
         use_cache = not (
             (request.query_params.get('lat') and request.query_params.get('lng'))
             or (sort_param == 'hot' and request.user.is_authenticated)
+            or explore_enabled
         )
-        
+
         if use_cache:
             cached_result = get_cached_service_list(cache_key_params)
             if cached_result is not None:
                 return Response(cached_result)
-        
+
         queryset = self.filter_queryset(self.get_queryset())
         paginator = self.pagination_class()
-        
+
         page = paginator.paginate_queryset(queryset, request)
-        
+
+        # Phase 3 (FR-17i / #316): mix in an exploration candidate at the
+        # configured slot for hot-sorted requests. The candidate is drawn from
+        # cold-start, under-shown-quality, and stale-recurring sub-buckets.
+        if page is not None and explore_enabled and should_explore(request):
+            explore_pool = list(queryset[:200])  # cap pool size for the eligibility query
+            explore = select_exploration_candidate(explore_pool, request.user if request.user.is_authenticated else None)
+            if explore is not None and explore not in page:
+                slot = getattr(_ranking_settings, 'RANKING_EXPLORATION_SLOT_INDEX', 5)
+                page = inject_exploration_slot(page, explore, slot_index=slot)
+
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = paginator.get_paginated_response(serializer.data)
             if use_cache:
                 cache_service_list(cache_key_params, response.data, ttl=CACHE_TTL_SHORT)
             return response
-        
+
         serializer = self.get_serializer(queryset[:100], many=True)
         response_data = serializer.data
         if use_cache:
@@ -1909,11 +1928,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
         # Filter by owner user (for profile pages)
         if user_param:
             queryset = queryset.filter(user_id=user_param)
-        else:
+        elif self.action == 'list':
             queryset = queryset.exclude(
                 type='Offer',
                 schedule_type='One-Time',
                 max_participants__gt=1,
+                scheduled_time__isnull=False,
+                scheduled_time__lte=timezone.now(),
+            )
+            queryset = queryset.exclude(
+                type='Event',
                 scheduled_time__isnull=False,
                 scheduled_time__lte=timezone.now(),
             )
@@ -2375,8 +2399,15 @@ class ServiceViewSet(viewsets.ModelViewSet):
         POST /api/services/{id}/cancel-event/
         """
         service = self.get_object()
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return create_error_response(
+                'A cancellation reason is required.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            EventHandshakeService.cancel_event(service, request.user)
+            EventHandshakeService.cancel_event(service, request.user, reason=reason)
         except PermissionError as e:
             return create_error_response(
                 str(e), code=ErrorCodes.PERMISSION_DENIED,
@@ -2484,9 +2515,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['get'],
         url_path='debug-ranking-availability',
-        permission_classes=[permissions.IsAuthenticated],
+        permission_classes=[permissions.IsAdminUser],
     )
     def debug_ranking_availability(self, request):
+        # Admin-only per #371. The PlatformSetting flag remains as a master
+        # on/off but is now redundant with the IsAdminUser gate; left for
+        # backwards compatibility with the existing admin UI toggle.
         platform_settings = PlatformSetting.get_solo()
         return Response({'enabled': platform_settings.ranking_debug_enabled})
 
@@ -2494,9 +2528,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['post'],
         url_path='debug-ranking',
-        permission_classes=[permissions.IsAuthenticated],
+        permission_classes=[permissions.IsAdminUser],
     )
     def debug_ranking(self, request):
+        # Admin-only per #371. Optional simulated_user_id lets an admin compute
+        # the payload from another user's perspective (read-only -- no access to
+        # the simulated user's messages, settings, or other private state).
         platform_settings = PlatformSetting.get_solo()
         if not platform_settings.ranking_debug_enabled:
             return create_error_response(
@@ -2523,10 +2560,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             except (TypeError, ValueError):
                 return None
 
+        simulated_user_id = request.data.get('simulated_user_id')
+
         payload = build_service_debug_payload(
             service_ids=service_ids,
             selected_service_id=request.data.get('selected_service_id'),
             request_user=request.user,
+            simulated_user_id=str(simulated_user_id) if simulated_user_id else None,
             search=(request.data.get('search') or '').strip(),
             tag_ids=[str(tag_id) for tag_id in (request.data.get('tags') or []) if tag_id],
             lat=_to_float(request.data.get('lat')),
@@ -2534,7 +2574,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
             distance=_to_float(request.data.get('distance')),
             active_filter=(request.data.get('active_filter') or 'all').strip() or 'all',
         )
-        return Response(payload)
+        response = Response(payload)
+        response['X-Ranking-Debug-Debounce'] = '300'
+        return response
 
     @action(
         detail=True,
