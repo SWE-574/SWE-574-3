@@ -200,6 +200,9 @@ export interface Service {
   comment_count?: number
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
+  is_saved?: boolean
+  is_endorsed?: boolean
+  endorsement_count?: number
 }
 
 export interface EventEvaluationSummary {

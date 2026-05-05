@@ -1260,3 +1260,64 @@ class ScoreAuditLog(models.Model):
 
     def __str__(self):
         return f'Audit({self.service_id}, {self.recorded_at}, {self.final_score:.4f})'
+
+
+class SavedService(models.Model):
+    """Private user-curated bookmark of a service (#483 Save).
+
+    Visible only to the owning user; not exposed to anyone else and not
+    factored into ranking (a save is a personal bookmark, not a public signal).
+    """
+    user = models.ForeignKey(
+        'User', on_delete=models.CASCADE, related_name='saved_services',
+    )
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='savers',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'service'], name='saved_service_unique',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'SavedService({self.user_id}, {self.service_id})'
+
+
+class Endorsement(models.Model):
+    """Public endorsement of a service's provider (#483 Endorse).
+
+    A viewer can endorse a service to publicly say 'I vouch for this provider'.
+    Counts are visible on the service card; integration into ranking
+    (Wilson quality / Phase 2 factor) is a planned follow-up so this PR keeps
+    the ranking math untouched.
+    """
+    endorser = models.ForeignKey(
+        'User', on_delete=models.CASCADE, related_name='endorsements_given',
+    )
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='endorsements',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['endorser', 'service'], name='endorsement_unique',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['service', '-created_at']),
+            models.Index(fields=['endorser', '-created_at']),
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Endorsement({self.endorser_id}, {self.service_id})'

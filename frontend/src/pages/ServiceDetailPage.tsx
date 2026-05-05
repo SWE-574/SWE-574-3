@@ -13,6 +13,7 @@ import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { MapView } from '@/components/MapView'
+import SaveEndorseControls from '@/components/SaveEndorseControls'
 import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import ReportModal, { type ReportOption } from '@/components/ReportModal'
@@ -1143,6 +1144,12 @@ export default function ServiceDetailPage() {
                     </Box>
                   )}
                 </Flex>
+
+                <SaveEndorseControls
+                  service={service}
+                  isOwn={isOwn}
+                  onChange={(patch) => setService((prev) => (prev ? { ...prev, ...patch } : prev))}
+                />
 
                 {/* Info tiles */}
                 <Grid templateColumns={{ base: '1fr 1fr', md: 'repeat(4, 1fr)' }} gap={3} mb={6}>

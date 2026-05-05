@@ -91,6 +91,36 @@ export const serviceAPI = {
     return res.data
   },
 
+  setSaved: async (serviceId: string, saved: boolean): Promise<{ is_saved: boolean }> => {
+    const res = saved
+      ? await apiClient.post<{ is_saved: boolean }>(`/services/${serviceId}/save/`)
+      : await apiClient.delete<{ is_saved: boolean }>(`/services/${serviceId}/save/`)
+    return res.data
+  },
+
+  listSaved: async (signal?: AbortSignal): Promise<Service[]> => {
+    const res = await apiClient.get<Service[] | { results: Service[] }>(
+      '/services/saved/',
+      { signal },
+    )
+    const data = res.data
+    return Array.isArray(data) ? data : (data.results ?? [])
+  },
+
+  setEndorsed: async (
+    serviceId: string,
+    endorsed: boolean,
+  ): Promise<{ is_endorsed: boolean; endorsement_count: number }> => {
+    const res = endorsed
+      ? await apiClient.post<{ is_endorsed: boolean; endorsement_count: number }>(
+          `/services/${serviceId}/endorse/`,
+        )
+      : await apiClient.delete<{ is_endorsed: boolean; endorsement_count: number }>(
+          `/services/${serviceId}/endorse/`,
+        )
+    return res.data
+  },
+
   report: async (
     serviceId: string,
     issueType: 'inappropriate_content' | 'spam' | 'service_issue' | 'scam' | 'harassment' | 'other',
