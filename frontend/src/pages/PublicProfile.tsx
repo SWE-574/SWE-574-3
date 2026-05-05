@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Box, Button, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
 import {
-  FiArrowLeft, FiClock, FiMapPin, FiCalendar,
+  FiArrowLeft, FiClock,
   FiStar, FiCheckCircle, FiThumbsUp, FiUser, FiAlertCircle,
-  FiZap, FiLayers, FiRepeat, FiAward, FiUserPlus,
+  FiUserPlus, FiMessageSquare,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -15,122 +15,27 @@ import type { User, Service, BadgeProgress, ProfileReview } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
 import { groupHistoryItems, isOwnHistoryItem, type GroupedHistoryEntry } from '@/utils/historyGrouping'
 import {
-  GREEN, GREEN_LT, GREEN_DARK,
+  GREEN, GREEN_LT,
   AMBER, AMBER_LT,
   BLUE, BLUE_LT, TEAL, ORANGE,
-  PURPLE, PURPLE_LT,
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 import FollowListModal from '@/components/FollowListModal'
+import SectionCard from '@/components/ui/SectionCard'
+import ProfileHero from '@/components/profile/ProfileHero'
+import { TabBtn } from '@/components/ui/TabBtn'
+import { ServiceCard } from '@/components/profile/ServiceCard'
+import { ProfileReviewRow } from '@/components/profile/ProfileReviewRow'
 
-const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, TEAL, ORANGE]
-const avatarBg    = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
+type PublicProfileTab = 'services' | 'history' | 'reviews'
+
+const AVATAR_PALETTE = [GREEN, BLUE, TEAL, AMBER, '#0D9488', ORANGE]
 const AVATAR_IMAGE_BG = `linear-gradient(180deg, ${WHITE} 0%, ${GRAY100} 100%)`
-const getInitials = (f: string, l: string, e: string) =>
-  f && l ? `${f[0]}${l[0]}`.toUpperCase() : (f || l || e || 'U')[0].toUpperCase()
-const joinedYear  = (d?: string) => d ? new Date(d).getFullYear() : null
 const fmtDate     = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 const fmtDur      = (d: number | string) => `${Number(d)}h`
-const timeAgo    = (d: string) => {
-  const sec = (Date.now() - new Date(d).getTime()) / 1000
-  if (sec < 60) return 'just now'
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  if (sec < 2592000) return `${Math.floor(sec / 86400)}d ago`
-  return fmtDate(d)
-}
 
-// ── Profile review row ───────────────────────────────────────────────────────
-function ProfileReviewRow({ review }: { review: ProfileReview }) {
-  const col = AVATAR_PALETTE[review.user_name.charCodeAt(0) % AVATAR_PALETTE.length]
-  const ini = review.user_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() || '?'
-  return (
-    <Flex gap={3} py="10px" borderBottom={`1px solid ${GRAY100}`}>
-      {review.user_avatar_url ? (
-        <Box w="32px" h="32px" borderRadius="full" flexShrink={0} overflow="hidden"
-          style={{ background: AVATAR_IMAGE_BG }}>
-          <img
-            src={review.user_avatar_url}
-            alt={review.user_name}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
-        </Box>
-      ) : (
-        <Flex w="32px" h="32px" borderRadius="full" flexShrink={0} align="center" justify="center" style={{ background: col, color: WHITE, fontSize: '11px', fontWeight: 700 }}>{ini}</Flex>
-      )}
-      <Box flex={1} minW={0}>
-        <Flex align="center" gap={2} flexWrap="wrap" mb="4px">
-          <Text fontSize="13px" fontWeight={600} color={GRAY800}>{review.user_name}</Text>
-          <Box px="6px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700} style={{ background: GREEN_LT, color: GREEN }}><FiCheckCircle size={9} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />Verified</Box>
-          {review.handshake_hours != null && (
-            <Box px="6px" py="2px" borderRadius="full" fontSize="10px" fontWeight={600} style={{ background: AMBER_LT, color: AMBER }}>{fmtDur(review.handshake_hours)} exchange</Box>
-          )}
-          <Text fontSize="11px" color={GRAY400}>{timeAgo(review.created_at)}</Text>
-        </Flex>
-        {review.service_title && <Text fontSize="11px" color={GRAY500} mb="4px">{review.service_title}</Text>}
-        <Text fontSize="13px" color={GRAY700} lineHeight={1.55}>{review.body}</Text>
-      </Box>
-    </Flex>
-  )
-}
-
-// ── Shared primitives ─────────────────────────────────────────────────────────
-const SectionCard = ({ children, mb = 5 }: { children: React.ReactNode; mb?: number }) => (
-  <Box bg={WHITE} borderRadius="12px" border={`1px solid ${GRAY200}`} overflow="hidden" mb={mb}
-    style={{ boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
-    {children}
-  </Box>
-)
-const SectionHead = ({ label, right }: { label: string; right?: React.ReactNode }) => (
-  <Flex px={4} py="10px" borderBottom={`1px solid ${GRAY100}`} bg={GRAY50}
-    align="center" justify="space-between">
-    <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em">{label}</Text>
-    {right}
-  </Flex>
-)
-
-// ── Service mini card ─────────────────────────────────────────────────────────
-function ServiceCard({ service, onNav }: { service: Service; onNav: () => void }) {
-  const isOffer = service.type === 'Offer'
-  const isNeed  = service.type === 'Need'
-  const typeColor = isOffer ? GREEN : isNeed ? BLUE : AMBER
-  const typeBg    = isOffer ? GREEN_LT : isNeed ? BLUE_LT : AMBER_LT
-  const cardBg    = isOffer ? `${GREEN}08` : isNeed ? `${BLUE}08` : `${AMBER}08`
-  const borderCol = isOffer ? `${GREEN}30` : isNeed ? `${BLUE}30` : `${AMBER}30`
-  return (
-    <Box border={`1px solid ${borderCol}`} borderRadius="12px" p="12px 14px" bg={cardBg}
-      onClick={onNav} style={{ cursor: 'pointer', transition: 'background 0.12s, box-shadow 0.12s' }}
-      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = isOffer ? `${GREEN}14` : isNeed ? `${BLUE}14` : `${AMBER}14`; (e.currentTarget as HTMLElement).style.boxShadow = '0 2px 10px rgba(0,0,0,0.07)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = cardBg; (e.currentTarget as HTMLElement).style.boxShadow = 'none' }}>
-      <Flex align="center" mb="8px">
-        <Box px="7px" py="2px" borderRadius="6px" fontSize="10px" fontWeight={700}
-          style={{ background: typeBg, color: typeColor }}>{service.type}</Box>
-      </Flex>
-      <Text fontSize="14px" fontWeight={700} color={GRAY800} mb="5px" lineHeight={1.3}
-        style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-        {service.title}
-      </Text>
-      {service.description && (
-        <Text fontSize="12px" color={GRAY500} mb="8px" lineHeight={1.5}
-          style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-          {service.description}
-        </Text>
-      )}
-      <Flex gap="10px" wrap="wrap">
-        <Flex align="center" gap="3px" fontSize="11px" color={GRAY500} fontWeight={500}>
-          <FiClock size={10} />{fmtDur(service.duration)}
-        </Flex>
-        {service.location_type && (
-          <Flex align="center" gap="3px" fontSize="11px" color={GRAY500} fontWeight={500}>
-            <FiMapPin size={10} />{service.location_area || service.location_type}
-          </Flex>
-        )}
-      </Flex>
-    </Box>
-  )
-}
 
 // ── History row ───────────────────────────────────────────────────────────────
 function HistoryRow({
@@ -241,6 +146,8 @@ const PublicProfile = () => {
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
   const [followActionLoading, setFollowActionLoading] = useState(false)
   const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
+  const [_reportModalOpen, setReportModalOpen] = useState(false)
+  const [activePublicTab, setActivePublicTab] = useState<PublicProfileTab>('services')
 
   useEffect(() => {
     if (!userId) return
@@ -287,11 +194,7 @@ const PublicProfile = () => {
   const ownHistory = history.filter(isOwnHistoryItem)
   const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
 
-  const showFollowButton =
-    isAuthenticated &&
-    currentUser &&
-    userId &&
-    currentUser.id !== userId
+  const showFollowButton = isAuthenticated && currentUser && userId && currentUser.id !== userId
 
   const handleFollowToggle = async () => {
     if (!userId || !profileUser || followActionLoading) return
@@ -318,317 +221,259 @@ const PublicProfile = () => {
   }
   if (notFound || !profileUser) return <NotFoundState onBack={() => navigate(-1)} />
 
-  const displayName = `${profileUser.first_name} ${profileUser.last_name}`.trim() || profileUser.email
-  const ini         = getInitials(profileUser.first_name, profileUser.last_name, profileUser.email)
-  const bgColor     = avatarBg(displayName)
-  const bannerBg = profileUser.banner_url
-    ? { backgroundImage: `url(${profileUser.banner_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : { background: `linear-gradient(135deg, ${GREEN} 0%, ${GREEN_DARK} 60%, ${AMBER}60 100%)` }
-
-  const offersCount = services.filter(s => s.type === 'Offer').length
-  const needsCount  = services.filter(s => s.type === 'Need').length
-  const earnedBadges = badges.filter(b => b.earned)
-  const punctual    = profileUser.punctual_count ?? 0
-  const helpful     = profileUser.helpful_count  ?? 0
-  const kind        = profileUser.kind_count     ?? 0
-  const hasRep      = punctual + helpful + kind > 0
+  const earnedBadges  = badges.filter(b => b.earned)
+  const punctual      = profileUser.punctual_count ?? 0
+  const helpful       = profileUser.helpful_count  ?? 0
+  const kind          = profileUser.kind_count     ?? 0
+  const hasRep        = punctual + helpful + kind > 0
 
   return (
-    /* Outer grey wrapper — matches Dashboard */
     <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto" className="no-scrollbar"
       py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
 
-      {/* ── Dashboard-style card ──────────────────────────────────────────── */}
       <Box maxW="1440px" mx="auto" bg={WHITE}
         borderRadius={{ base: 0, md: '20px' }}
         border={{ base: 'none', md: `1px solid ${GRAY200}` }}
         boxShadow={{ base: 'none', md: '0 4px 24px rgba(0,0,0,0.08)' }}
-        overflow="hidden">
+        overflow="hidden"
+        p={{ base: 4, md: 6 }}>
 
-        {/* ── Banner — Back button floated inside ──────────────────────────── */}
-        <Box position="relative" h="180px"
-          style={bannerBg}>
-          <Box as="button" position="absolute" top="12px" left="20px"
-            px="10px" py="6px" borderRadius="8px" fontSize="12px" fontWeight={500}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: '5px',
-              cursor: 'pointer',
-              background: 'rgba(0,0,0,0.28)',
-              border: '1px solid rgba(255,255,255,0.25)',
-              color: WHITE,
-              backdropFilter: 'blur(4px)',
-            }}
-            onClick={() => navigate(-1)}>
-            <FiArrowLeft size={13} />Back
-          </Box>
+        {/* Back button */}
+        <Box
+          as="button"
+          onClick={() => navigate(-1)}
+          mb={4}
+          px="10px"
+          py="6px"
+          borderRadius="999px"
+          fontSize="12px"
+          fontWeight={600}
+          style={{ background: GRAY100, color: GRAY700, border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+        >
+          <FiArrowLeft size={13} /> Back
         </Box>
 
-        {/* ── Page content ─────────────────────────────────────────────────── */}
-        <Box px={{ base: 4, md: 6 }}>
+        {/* ── ProfileHero ───────────────────────────────────────────────────── */}
+        <ProfileHero
+          user={profileUser}
+          mode="public"
+          featuredBadges={profileUser.featured_badges_detail ?? []}
+          onMessageClick={() => {
+            if (!isAuthenticated) {
+              toast.info('Sign in to message this user.')
+              return
+            }
+            toast.info('Messaging coming soon.')
+          }}
+          onReportClick={() => setReportModalOpen(true)}
+          onFollowersClick={() => {
+            if (!isAuthenticated) { toast.info('Sign in to see followers.'); return }
+            setFollowListModal('followers')
+          }}
+          onFollowingClick={() => {
+            if (!isAuthenticated) { toast.info('Sign in to see following.'); return }
+            setFollowListModal('following')
+          }}
+          completedExchanges={groupedOwnHistory.length}
+          reputationScore={hasRep ? Math.round(((punctual + helpful + kind) / 3) * 10) / 10 : undefined}
+        />
 
-          {/* ── Avatar row — overlaps banner ────────────────────────────────── */}
-          <Box mt="-44px" mb={2} position="relative" style={{ zIndex: 2 }}>
-            <Box w="88px" h="88px" borderRadius="full" display="inline-flex"
-              style={{
-                border: `3px solid ${WHITE}`,
-                overflow: 'hidden',
-                background: profileUser.avatar_url ? AVATAR_IMAGE_BG : bgColor,
-                alignItems: 'center', justifyContent: 'center',
-                color: WHITE, fontSize: '28px', fontWeight: 700,
-                boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
-              }}>
-              {profileUser.avatar_url
-                ? <img src={profileUser.avatar_url} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                : ini}
-            </Box>
-          </Box>
-
-          {/* ── Name + meta — fully below banner ────────────────────────────── */}
-          <Flex align="center" justify="space-between" gap={4} mb={5} wrap="wrap">
-            <Box minW={0}>
-              <Text fontSize="22px" fontWeight={800} color={GRAY800} lineHeight={1.25}
-                style={{ wordBreak: 'break-word' }}>
-                {displayName}
-              </Text>
-              <Flex gap={3} mt="4px" wrap="wrap" align="center">
-                {profileUser.location && (
-                  <Flex align="center" gap="4px" fontSize="12px" color={GRAY500}><FiMapPin size={11} />{profileUser.location}</Flex>
-                )}
-                {profileUser.date_joined && (
-                  <Flex align="center" gap="4px" fontSize="12px" color={GRAY500}><FiCalendar size={11} />Member since {joinedYear(profileUser.date_joined)}</Flex>
-                )}
-                <Flex align="center" gap="4px" fontSize="12px" color={GREEN} fontWeight={600}><FiStar size={11} />{profileUser.karma_score ?? 0} karma</Flex>
-                <Flex align="center" gap={1} fontSize="12px" color={GRAY500} flexWrap="wrap">
-                  <Box
-                    as="button"
-                    onClick={() => {
-                      if (!userId) return
-                      if (!isAuthenticated) {
-                        toast.info('Sign in to see who follows this user.')
-                        return
-                      }
-                      setFollowListModal('followers')
-                    }}
-                    title={isAuthenticated ? 'View followers' : undefined}
-                    style={{
-                      cursor: isAuthenticated ? 'pointer' : 'default',
-                      background: 'none',
-                      border: 'none',
-                      padding: 0,
-                      font: 'inherit',
-                      color: 'inherit',
-                      textDecoration: isAuthenticated ? 'underline' : 'none',
-                      textUnderlineOffset: '2px',
-                    }}
-                  >
-                    {profileUser.followers_count ?? 0} followers
-                  </Box>
-                  <Text as="span" color={GRAY400}>·</Text>
-                  <Box
-                    as="button"
-                    onClick={() => {
-                      if (!userId) return
-                      if (!isAuthenticated) {
-                        toast.info('Sign in to see who this user follows.')
-                        return
-                      }
-                      setFollowListModal('following')
-                    }}
-                    title={isAuthenticated ? 'View following' : undefined}
-                    style={{
-                      cursor: isAuthenticated ? 'pointer' : 'default',
-                      background: 'none',
-                      border: 'none',
-                      padding: 0,
-                      font: 'inherit',
-                      color: 'inherit',
-                      textDecoration: isAuthenticated ? 'underline' : 'none',
-                      textUnderlineOffset: '2px',
-                    }}
-                  >
-                    {profileUser.following_count ?? 0} following
-                  </Box>
+        {/* Follow button (separate from hero action row) */}
+        {showFollowButton && (
+          <Flex mb={4}>
+            {profileUser.is_following ? (
+              <Button
+                size="sm"
+                variant="outline"
+                borderRadius="10px"
+                borderColor={GRAY300}
+                color={GRAY700}
+                loading={followActionLoading}
+                disabled={followActionLoading}
+                onClick={handleFollowToggle}
+              >
+                <Flex as="span" align="center" gap={2}>
+                  <FiCheckCircle size={14} />
+                  Unfollow
                 </Flex>
-              </Flex>
-            </Box>
-            {showFollowButton && (
-              <Flex flexShrink={0} align="center">
-                {profileUser.is_following ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    borderRadius="10px"
-                    borderColor={GRAY300}
-                    color={GRAY700}
-                    loading={followActionLoading}
-                    disabled={followActionLoading}
-                    onClick={handleFollowToggle}
-                  >
-                    <Flex as="span" align="center" gap={2}>
-                      <FiCheckCircle size={14} />
-                      Unfollow
-                    </Flex>
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    bg={GREEN}
-                    color={WHITE}
-                    borderRadius="10px"
-                    loading={followActionLoading}
-                    disabled={followActionLoading}
-                    _hover={{ bg: GREEN_DARK }}
-                    onClick={handleFollowToggle}
-                  >
-                    <Flex as="span" align="center" gap={2}>
-                      <FiUserPlus size={14} />
-                      Follow
-                    </Flex>
-                  </Button>
-                )}
-              </Flex>
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                bg={GREEN}
+                color={WHITE}
+                borderRadius="10px"
+                loading={followActionLoading}
+                disabled={followActionLoading}
+                onClick={handleFollowToggle}
+              >
+                <Flex as="span" align="center" gap={2}>
+                  <FiUserPlus size={14} />
+                  Follow
+                </Flex>
+              </Button>
             )}
           </Flex>
+        )}
 
-          {/* ── Stats strip ──────────────────────────────────────────────────── */}
-          <Flex gap={3} mb={6} wrap="wrap">
-            {([
-              [offersCount,         'Offers',    GREEN,  GREEN_LT,  <FiZap    size={14} />],
-              [needsCount,          'Needs',     BLUE,   BLUE_LT,   <FiLayers size={14} />],
-              [groupedOwnHistory.length,   'Exchanges', AMBER,  AMBER_LT,  <FiRepeat size={14} />],
-              [earnedBadges.length, 'Badges',    PURPLE, PURPLE_LT, <FiAward  size={14} />],
-            ] as [number, string, string, string, React.ReactNode][]).map(([val, label, color, bg, icon]) => (
-              <Box key={label} bg={WHITE}
-                borderRadius="14px"
-                border={`1px solid ${GRAY200}`}
-                boxShadow="0 1px 6px rgba(0,0,0,0.06)"
-                overflow="hidden"
-                style={{ flex: '1 0 80px' }}
-              >
-                <Box h="3px" style={{ background: `linear-gradient(90deg, ${color}, ${color}99)` }} />
-                <Flex direction="column" align="center" px={4} py={3} gap="6px">
-                  <Flex w="30px" h="30px" borderRadius="9px" align="center" justify="center"
-                    style={{ background: bg, color }}>
-                    {icon}
-                  </Flex>
-                  <Text fontSize="22px" fontWeight={800} color={color} lineHeight={1}>{val}</Text>
-                  <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.07em">{label}</Text>
-                </Flex>
-              </Box>
-            ))}
-          </Flex>
+        {/* ── About (identity-level, above tabs) ───────────────────────────── */}
+        {profileUser.bio && (
+          <SectionCard label="About" mb={4}>
+            <Text fontSize="13px" color={GRAY600} lineHeight={1.7}>{profileUser.bio}</Text>
+          </SectionCard>
+        )}
 
-          {/* ── Two-column layout ─────────────────────────────────────────────── */}
-          <Flex gap={5} align="flex-start" direction={{ base: 'column', lg: 'row' }} pb={6}>
+        {/* ── Segmented tab control (spec §7) ───────────────────────────────── */}
+        <Box
+          role="tablist"
+          aria-label="Profile sections"
+          mb={4}
+          px="4px"
+          py="4px"
+          borderRadius="999px"
+          display="inline-flex"
+          overflowX="auto"
+          style={{ background: GREEN_LT, gap: '2px' }}
+        >
+          <TabBtn
+            tabKey="services"
+            active={activePublicTab === 'services'}
+            label="Services"
+            count={services.length}
+            onClick={() => setActivePublicTab('services')}
+          />
+          {profileUser.show_history && (
+            <TabBtn
+              tabKey="history"
+              active={activePublicTab === 'history'}
+              label="History"
+              count={groupedOwnHistory.length}
+              onClick={() => setActivePublicTab('history')}
+            />
+          )}
+          <TabBtn
+            tabKey="reviews"
+            active={activePublicTab === 'reviews'}
+            label="Reviews"
+            count={reviewsAsProvider.length + reviewsAsTaker.length}
+            onClick={() => setActivePublicTab('reviews')}
+            icon={<FiMessageSquare size={12} />}
+          />
+        </Box>
 
-            {/* Left column */}
-            <Box flex={1} minW={0}>
-              {profileUser.bio && (
-                <SectionCard>
-                  <SectionHead label="About" />
-                  <Box px={4} py={3}>
-                    <Text fontSize="13px" color={GRAY600} lineHeight={1.7}>{profileUser.bio}</Text>
-                  </Box>
-                </SectionCard>
-              )}
+        {/* ── Tab content + right sidebar ───────────────────────────────────── */}
+        <Flex gap={5} align="flex-start" direction={{ base: 'column', lg: 'row' }} pb={6}>
 
-              {services.length > 0 && (
-                <SectionCard>
-                  <SectionHead label={`Active Services (${services.length})`} />
-                  <Box p={3} display="grid"
-                    style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
-                    {services.map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
-                  </Box>
-                </SectionCard>
-              )}
+          {/* Left column — tab-switched content */}
+          <Box flex={1} minW={0}>
 
-              {profileUser.show_history && (
-                <SectionCard>
-                  <SectionHead label={`Time Activity (${groupedOwnHistory.length})`} />
-                  {groupedOwnHistory.length === 0 ? (
-                    <Flex py={8} direction="column" align="center" gap={2}>
-                      <FiCheckCircle size={18} color={GRAY300} />
-                      <Text fontSize="13px" color={GRAY400}>No time activity on this user&apos;s own services yet</Text>
-                    </Flex>
-                  ) : (
-                    <Box px={4}>
-                      {groupedOwnHistory.map((item) => (
-                        <HistoryRow
-                          key={item.key}
-                          item={item}
-                          canClick={!!currentUser}
-                          contextLabel="Own service with"
-                          onClick={() => navigate(`/public-profile/${item.partnerId}`)}
-                          onOpenDetails={() => setSelectedHistoryGroup(item)}
-                        />
-                      ))}
+            {/* services tab */}
+            <Box role="tabpanel" id="panel-services" aria-labelledby="tab-services" hidden={activePublicTab !== 'services'}>
+            {activePublicTab === 'services' && (
+              <>
+                {services.length > 0 ? (
+                  <SectionCard label={`Active Services (${services.length})`} mb={4}>
+                    <Box display="grid"
+                      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
+                      {services.map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} showStatus={false} />)}
                     </Box>
-                  )}
-                </SectionCard>
-              )}
+                  </SectionCard>
+                ) : (
+                  <Flex py={8} direction="column" align="center" gap={2}>
+                    <FiCheckCircle size={18} color={GRAY300} />
+                    <Text fontSize="13px" color={GRAY400}>No active services yet.</Text>
+                  </Flex>
+                )}
+              </>
+            )}
+            </Box>
 
-              <SectionCard mb={0}>
-                <SectionHead label="Reviews" />
+            {/* history tab */}
+            <Box role="tabpanel" id="panel-history" aria-labelledby="tab-history" hidden={activePublicTab !== 'history'}>
+            {activePublicTab === 'history' && profileUser.show_history && (
+              <SectionCard label={`Time Activity (${groupedOwnHistory.length})`} mb={4}>
+                {groupedOwnHistory.length === 0 ? (
+                  <Flex py={8} direction="column" align="center" gap={2}>
+                    <FiCheckCircle size={18} color={GRAY300} />
+                    <Text fontSize="13px" color={GRAY400}>No time activity on this user&apos;s own services yet</Text>
+                  </Flex>
+                ) : (
+                  <Box>
+                    {groupedOwnHistory.map((item) => (
+                      <HistoryRow
+                        key={item.key}
+                        item={item}
+                        canClick={!!currentUser}
+                        contextLabel="Own service with"
+                        onClick={() => navigate(`/public-profile/${item.partnerId}`)}
+                        onOpenDetails={() => setSelectedHistoryGroup(item)}
+                      />
+                    ))}
+                  </Box>
+                )}
+              </SectionCard>
+            )}
+            </Box>
+
+            {/* reviews tab */}
+            <Box role="tabpanel" id="panel-reviews" aria-labelledby="tab-reviews" hidden={activePublicTab !== 'reviews'}>
+            {activePublicTab === 'reviews' && (
+              <SectionCard label="Reviews" mb={0}>
                 {reviewsLoading ? (
                   <Flex py={8} justify="center"><Spinner color={GREEN} size="sm" /></Flex>
                 ) : (
-                  <Box px={4} py={3}>
+                  <Box>
                     <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb={2}>As a Provider</Text>
                     {reviewsAsProvider.length === 0 ? (
                       <Text fontSize="12px" color={GRAY400} py={3}>No reviews yet for exchanges where they provided the service.</Text>
                     ) : (
-                      <Box mb={4}>
-                        {reviewsAsProvider.map((r) => <ProfileReviewRow key={r.id} review={r} />)}
-                      </Box>
+                      <Box mb={4}>{reviewsAsProvider.map((r) => <ProfileReviewRow key={r.id} review={r} showMedia={false} />)}</Box>
                     )}
                     <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb={2} mt={4}>As a Taker</Text>
                     {reviewsAsTaker.length === 0 ? (
                       <Text fontSize="12px" color={GRAY400} py={3}>No reviews yet for exchanges where they received the service.</Text>
                     ) : (
-                      <Box>
-                        {reviewsAsTaker.map((r) => <ProfileReviewRow key={r.id} review={r} />)}
-                      </Box>
+                      <Box>{reviewsAsTaker.map((r) => <ProfileReviewRow key={r.id} review={r} showMedia={false} />)}</Box>
                     )}
                   </Box>
                 )}
               </SectionCard>
+            )}
             </Box>
+          </Box>
 
-            {/* Right column */}
-            <Box w={{ base: '100%', lg: '260px' }} flexShrink={0}>
-              {hasRep && (
-                <SectionCard>
-                  <SectionHead label="Community Reputation" />
-                  <Box px={4} pb={2} pt={1}>
-                    <RepRow icon={<FiClock size={13} />}     label="Punctual" count={punctual} color={GREEN} bg={GREEN_LT} />
-                    <RepRow icon={<FiThumbsUp size={13} />}  label="Helpful"  count={helpful}  color={BLUE}  bg={BLUE_LT} />
-                    <RepRow icon={<FiAlertCircle size={13} />} label="Kind"   count={kind}     color={AMBER} bg={AMBER_LT} />
-                  </Box>
-                </SectionCard>
-              )}
+          {/* Right column */}
+          <Box w={{ base: '100%', lg: '260px' }} flexShrink={0}>
+            {hasRep && (
+              <SectionCard label="Community Reputation" mb={4}>
+                <Box>
+                  <RepRow icon={<FiClock size={13} />}      label="Punctual" count={punctual} color={GREEN} bg={GREEN_LT} />
+                  <RepRow icon={<FiThumbsUp size={13} />}   label="Helpful"  count={helpful}  color={BLUE}  bg={BLUE_LT} />
+                  <RepRow icon={<FiAlertCircle size={13} />} label="Kind"    count={kind}     color={AMBER} bg={AMBER_LT} />
+                </Box>
+              </SectionCard>
+            )}
 
-              {earnedBadges.length > 0 && (
-                <SectionCard mb={0}>
-                  <SectionHead label="Badges" />
-                  <Stack gap={2} p={3}>
-                    {earnedBadges.slice(0, 6).map(b => <BadgeChip key={b.badge_type} badge={b} />)}
-                  </Stack>
-                </SectionCard>
-              )}
+            {earnedBadges.length > 0 && (
+              <SectionCard label="Badges" mb={0}>
+                <Stack gap={2}>
+                  {earnedBadges.slice(0, 6).map(b => <BadgeChip key={b.badge_type} badge={b} />)}
+                </Stack>
+              </SectionCard>
+            )}
 
-              {!hasRep && earnedBadges.length === 0 && (
-                <SectionCard mb={0}>
-                  <Box px={4} py={6} textAlign="center">
-                    <FiUser size={24} color={GRAY300} style={{ margin: '0 auto 8px' }} />
-                    <Text fontSize="12px" color={GRAY400}>
-                      Reputation and badges will appear here as this user completes exchanges.
-                    </Text>
-                  </Box>
-                </SectionCard>
-              )}
-            </Box>
-          </Flex>
-        </Box>
+            {!hasRep && earnedBadges.length === 0 && (
+              <SectionCard mb={0}>
+                <Flex direction="column" align="center" py={4} gap={2}>
+                  <FiUser size={24} color={GRAY300} />
+                  <Text fontSize="12px" color={GRAY400} textAlign="center">
+                    Reputation and badges will appear here as this user completes exchanges.
+                  </Text>
+                </Flex>
+              </SectionCard>
+            )}
+          </Box>
+        </Flex>
       </Box>
 
       <MultiUseDetailsModal

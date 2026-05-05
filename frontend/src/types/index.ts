@@ -50,6 +50,14 @@ export interface MeResponse {
 
 // ─── User Types ───────────────────────────────────────────────────────────────
 
+export interface BadgeDetail {
+  id: string
+  name: string
+  description: string
+  icon_url: string | null
+  earned_at: string
+}
+
 export const UserRole = {
   ANONYMOUS: 'anonymous',
   REGISTERED: 'registered',
@@ -69,7 +77,8 @@ export interface User {
   date_joined?: string
   timebank_balance?: number
   karma_score?: number
-  featured_badge?: string | null
+  featured_badges: string[]
+  featured_badges_detail: BadgeDetail[]
   featured_achievement_id?: string | null
   achievements?: string[]
   badges?: string[]
@@ -833,6 +842,68 @@ export interface TransactionSummary {
 
 export interface PaginatedTransactionResponse extends PaginatedResponse<Transaction> {
   summary: TransactionSummary
+}
+
+// ─── Calendar Types ───────────────────────────────────────────────────────────
+
+export type CalendarItemKind =
+  | 'service_session'
+  | 'event_organized'
+  | 'event_joined'
+  | 'scheduled_commitment'
+
+export type CalendarAccentToken = 'GREEN' | 'BLUE' | 'TEAL'
+export type CalendarLinkType = 'service' | 'event' | 'chat'
+
+/**
+ * Status values the backend can return in a CalendarItem (spec §6.1).
+ *
+ * Handshake-sourced items (service_session, event_joined):
+ *   'accepted' | 'checked_in' | 'attended'
+ *
+ * Service-sourced items (event_organized, scheduled_commitment — owner only,
+ *   derived from Service.status which uses STATUS_CHOICES Active/Agreed):
+ *   'Active' | 'Agreed'
+ *
+ * See backend/api/views.py MeCalendarView._serialize_interval and
+ *     backend/api/models.py Service.STATUS_CHOICES.
+ */
+export type CalendarItemStatus =
+  | 'accepted'
+  | 'checked_in'
+  | 'attended'
+  | 'Active'
+  | 'Agreed'
+
+export interface CalendarItem {
+  id: string
+  kind: CalendarItemKind
+  title: string
+  start: string
+  end: string
+  duration_hours: number
+  location_type: 'In-Person' | 'Online' | null
+  location_label: string | null
+  service_type: 'Offer' | 'Need' | 'Event' | null
+  service_id: string | null
+  handshake_id: string | null
+  chat_id: string | null
+  counterpart: { id: string; name: string; avatar_url: string | null } | null
+  is_owner: boolean
+  status: CalendarItemStatus
+  accent_token: CalendarAccentToken
+  link: { type: CalendarLinkType; id: string }
+}
+
+export interface CalendarConflict {
+  item_id: string
+  overlaps_with: string[]
+}
+
+export interface CalendarResponse {
+  items: CalendarItem[]
+  conflicts: CalendarConflict[]
+  range: { from: string; to: string }
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
