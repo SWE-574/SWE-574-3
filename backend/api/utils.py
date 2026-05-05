@@ -117,11 +117,21 @@ def provision_timebank(handshake: Handshake) -> bool:
         )
         
         provider, _ = get_provider_and_receiver(handshake)
-        invalidate_conversations(str(receiver.id))
-        invalidate_conversations(str(provider.id))
-        invalidate_transactions(str(receiver.id))
-        invalidate_user_profile(str(receiver.id))
-        
+        receiver_id = str(receiver.id)
+        provider_id = str(provider.id)
+
+        def _invalidate_after_commit() -> None:
+            invalidate_conversations(receiver_id)
+            invalidate_conversations(provider_id)
+            invalidate_transactions(receiver_id)
+            invalidate_user_profile(receiver_id)
+
+        # Defer Redis SCAN+DEL until after the row lock is released and the
+        # transaction has actually committed — running these inside the atomic
+        # block both stretches the lock window and risks invalidating cache
+        # for a transaction that ends up rolling back.
+        transaction.on_commit(_invalidate_after_commit)
+
         return True
 
 
@@ -422,11 +432,20 @@ def cancel_timebank_transfer(handshake: Handshake) -> bool:
                 description=f"Refund for cancelled service '{handshake.service.title}' ({hours} hours refunded)"
             )
 
-        invalidate_conversations(str(receiver.id))
-        invalidate_conversations(str(provider.id))
-        invalidate_transactions(str(receiver.id))
-        invalidate_transactions(str(provider.id))
-        invalidate_user_profile(str(receiver.id))
+        receiver_id = str(receiver.id)
+        provider_id = str(provider.id)
+
+        def _invalidate_after_commit() -> None:
+            invalidate_conversations(receiver_id)
+            invalidate_conversations(provider_id)
+            invalidate_transactions(receiver_id)
+            invalidate_transactions(provider_id)
+            invalidate_user_profile(receiver_id)
+
+        # Defer Redis SCAN+DEL until after commit — same reasoning as
+        # provision_timebank: keep the row lock short and avoid invalidating
+        # cache for a rolled-back transaction.
+        transaction.on_commit(_invalidate_after_commit)
 
     handshake.status = "cancelled"
     handshake.save(update_fields=["status"])

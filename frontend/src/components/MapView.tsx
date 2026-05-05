@@ -438,7 +438,7 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
       canvas.removeEventListener('webglcontextlost', onLost)
       canvas.removeEventListener('webglcontextrestored', onRestored)
     }
-  })
+  }, [])
 
   // Fly to user location only on the FIRST time it becomes available
   const didFlyToUser = useRef(false)

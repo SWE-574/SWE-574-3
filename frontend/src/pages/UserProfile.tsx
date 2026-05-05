@@ -387,11 +387,6 @@ const UserProfile = () => {
       setReviewsAsTaker(rTaker.results)
       setReviewsAsOrganizer(rOrganizer.results)
     }).catch(() => {}).finally(() => setReviewsLoading(false))
-    setEventsLoading(true)
-    handshakeAPI.list(ac.signal)
-      .then((list) => setEventHandshakes(list.filter((h) => h.service_type === 'Event')))
-      .catch(() => {})
-      .finally(() => setEventsLoading(false))
     return () => ac.abort()
   }, [user])
 
