@@ -1910,11 +1910,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
         # Filter by owner user (for profile pages)
         if user_param:
             queryset = queryset.filter(user_id=user_param)
-        else:
+        elif self.action == 'list':
             queryset = queryset.exclude(
                 type='Offer',
                 schedule_type='One-Time',
                 max_participants__gt=1,
+                scheduled_time__isnull=False,
+                scheduled_time__lte=timezone.now(),
+            )
+            queryset = queryset.exclude(
+                type='Event',
                 scheduled_time__isnull=False,
                 scheduled_time__lte=timezone.now(),
             )
@@ -2376,8 +2381,15 @@ class ServiceViewSet(viewsets.ModelViewSet):
         POST /api/services/{id}/cancel-event/
         """
         service = self.get_object()
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return create_error_response(
+                'A cancellation reason is required.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            EventHandshakeService.cancel_event(service, request.user)
+            EventHandshakeService.cancel_event(service, request.user, reason=reason)
         except PermissionError as e:
             return create_error_response(
                 str(e), code=ErrorCodes.PERMISSION_DENIED,
