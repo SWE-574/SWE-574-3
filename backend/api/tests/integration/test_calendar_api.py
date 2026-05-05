@@ -9,6 +9,7 @@ from django.core.cache import cache
 from rest_framework import status
 from unittest.mock import patch
 
+from api.models import Handshake, Service
 from api.tests.helpers.factories import UserFactory, ServiceFactory, HandshakeFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 
@@ -52,13 +53,13 @@ class TestMeCalendarResponseShape:
         assert 'from' in r
         assert 'to' in r
 
-    def test_default_window_is_today_plus_60_days(self):
+    def test_default_window_is_today_plus_one_year(self):
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get(CALENDAR_URL)
         r = response.json()['range']
         today = date.today().isoformat()
-        expected_to = (date.today() + timedelta(days=60)).isoformat()
+        expected_to = (date.today() + timedelta(days=365)).isoformat()
         assert r['from'] == today
         assert r['to'] == expected_to
 
@@ -77,16 +78,16 @@ class TestMeCalendarQueryParams:
         assert r['from'] == from_dt
         assert r['to'] == to_dt
 
-    def test_window_over_120_days_returns_400(self):
+    def test_window_over_max_days_returns_400(self):
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
-        from_dt = '2026-01-01'
-        to_dt = '2026-06-01'  # > 120 days
+        from_dt = '2020-01-01'
+        to_dt = '2048-01-01'  # > max window
         response = client.get(CALENDAR_URL, {'from': from_dt, 'to': to_dt})
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         data = response.json()
         assert 'max_days' in data
-        assert data['max_days'] == 120
+        assert data['max_days'] == 3650
 
     def test_invalid_from_date_returns_400(self):
         user = UserFactory()
@@ -135,7 +136,7 @@ class TestMeCalendarItems:
             service=svc, requester=requester, status='accepted',
             scheduled_time=scheduled, exact_duration=Decimal('2.00')
         )
-        client = AuthenticatedAPIClient().authenticate_user(requester)
+        client = AuthenticatedAPIClient().authenticate_user(provider)
         resp = client.get(CALENDAR_URL)
         assert resp.status_code == status.HTTP_200_OK
         items = resp.json()['items']
@@ -150,19 +151,132 @@ class TestMeCalendarItems:
         for k in required_keys:
             assert k in item, f"Missing key: {k}"
 
-    def test_excludes_completed_handshakes(self):
+    def test_group_offer_owner_calendar_deduplicates_participant_handshakes(self):
+        owner = UserFactory()
+        requester1 = UserFactory()
+        requester2 = UserFactory()
+        scheduled = timezone.now() + timedelta(hours=5)
+        svc = ServiceFactory(
+            user=owner,
+            type='Offer',
+            schedule_type='One-Time',
+            max_participants=3,
+            duration=Decimal('2.00'),
+            scheduled_time=scheduled,
+            status='Active',
+        )
+        HandshakeFactory(
+            service=svc, requester=requester1, status='accepted',
+            scheduled_time=scheduled, exact_duration=Decimal('2.00')
+        )
+        HandshakeFactory(
+            service=svc, requester=requester2, status='accepted',
+            scheduled_time=scheduled, exact_duration=Decimal('2.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+        resp = client.get(CALENDAR_URL)
+
+        assert resp.status_code == status.HTTP_200_OK
+        matching = [item for item in resp.json()['items'] if item['service_id'] == str(svc.id)]
+        assert len(matching) == 1
+        assert matching[0]['link'] == {'type': 'service', 'id': str(svc.id)}
+
+    def test_event_owner_calendar_deduplicates_participant_handshakes(self):
+        owner = UserFactory()
+        attendee1 = UserFactory()
+        attendee2 = UserFactory()
+        scheduled = timezone.now() + timedelta(hours=5)
+        svc = ServiceFactory(
+            user=owner,
+            type='Event',
+            schedule_type='One-Time',
+            max_participants=10,
+            duration=Decimal('2.00'),
+            scheduled_time=scheduled,
+            status='Active',
+        )
+        HandshakeFactory(
+            service=svc, requester=attendee1, status='accepted',
+            scheduled_time=scheduled, exact_duration=Decimal('0.00')
+        )
+        HandshakeFactory(
+            service=svc, requester=attendee2, status='checked_in',
+            scheduled_time=scheduled, exact_duration=Decimal('0.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+        resp = client.get(CALENDAR_URL)
+
+        assert resp.status_code == status.HTTP_200_OK
+        matching = [item for item in resp.json()['items'] if item['service_id'] == str(svc.id)]
+        assert len(matching) == 1
+        assert matching[0]['link'] == {'type': 'service', 'id': str(svc.id)}
+
+    def test_includes_completed_handshakes_for_history_calendar(self):
         provider = UserFactory()
         requester = UserFactory()
-        svc = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
-        scheduled = timezone.now() + timedelta(hours=5)
-        HandshakeFactory(
+        active_requester = UserFactory()
+        svc = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'), max_participants=3)
+        scheduled = timezone.now() + timedelta(days=5)
+        completed_at = timezone.now() - timedelta(days=10)
+        handshake = HandshakeFactory(
             service=svc, requester=requester, status='completed',
             scheduled_time=scheduled,
         )
+        HandshakeFactory(
+            service=svc, requester=active_requester, status='accepted',
+            scheduled_time=scheduled,
+        )
         client = AuthenticatedAPIClient().authenticate_user(requester)
-        resp = client.get(CALENDAR_URL)
+        Handshake.objects.filter(pk=handshake.pk).update(updated_at=completed_at)
+        resp = client.get(
+            CALENDAR_URL,
+            {
+                'from': (completed_at.date() - timedelta(days=1)).isoformat(),
+                'to': (completed_at.date() + timedelta(days=1)).isoformat(),
+            },
+        )
         items = resp.json()['items']
-        assert len(items) == 0
+        matching = [item for item in items if item['id'] == str(handshake.id)]
+        assert len(matching) == 1
+        assert matching[0]['start'].startswith(completed_at.date().isoformat())
+
+    def test_dedupes_completed_group_service_and_participant_handshake(self):
+        provider = UserFactory()
+        requester = UserFactory()
+        completed_at = timezone.now() - timedelta(days=3)
+        svc = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('2.00'),
+            max_participants=2,
+            status='Completed',
+        )
+        handshake = HandshakeFactory(
+            service=svc,
+            requester=requester,
+            status='completed',
+            scheduled_time=timezone.now() - timedelta(days=4),
+            exact_duration=Decimal('2.00'),
+        )
+        Service.objects.filter(pk=svc.pk).update(updated_at=completed_at)
+        Handshake.objects.filter(pk=handshake.pk).update(updated_at=completed_at + timedelta(seconds=2))
+
+        client = AuthenticatedAPIClient().authenticate_user(provider)
+        resp = client.get(
+            CALENDAR_URL,
+            {
+                'from': (completed_at.date() - timedelta(days=1)).isoformat(),
+                'to': (completed_at.date() + timedelta(days=1)).isoformat(),
+            },
+        )
+
+        assert resp.status_code == status.HTTP_200_OK
+        matching = [item for item in resp.json()['items'] if item['service_id'] == str(svc.id)]
+        assert len(matching) == 1
+        assert matching[0]['id'] == str(svc.id)
+
 
     def test_excludes_cancelled_handshakes(self):
         provider = UserFactory()

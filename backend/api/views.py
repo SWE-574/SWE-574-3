@@ -1229,7 +1229,7 @@ class MeCalendarView(APIView):
     GET /api/users/me/calendar/?from=YYYY-MM-DD&to=YYYY-MM-DD
 
     Returns the authenticated user's scheduled items within the given date window.
-    Defaults to today → today+60d. Window is capped at 120 days.
+    Defaults to today → today+365d. Window is capped at 3650 days.
 
     Response shape (contract for Teams B, C, D):
     {
@@ -1278,14 +1278,14 @@ class MeCalendarView(APIView):
             return Response({'detail': 'Invalid "from" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            to_date = date.fromisoformat(to_str) if to_str else today + timedelta(days=60)
+            to_date = date.fromisoformat(to_str) if to_str else today + timedelta(days=365)
         except (ValueError, TypeError):
             return Response({'detail': 'Invalid "to" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if to_date < from_date:
             return Response({'detail': '"to" must not be before "from".'}, status=status.HTTP_400_BAD_REQUEST)
 
-        max_days = 120
+        max_days = 3650
         if (to_date - from_date).days > max_days:
             return Response(
                 {'detail': f'Date window exceeds maximum of {max_days} days.', 'max_days': max_days},
@@ -1305,7 +1305,9 @@ class MeCalendarView(APIView):
         )
 
         user = request.user
-        intervals = list(_user_scheduled_intervals(user, window_start, window_end))
+        intervals = self._dedupe_calendar_intervals(
+            list(_user_scheduled_intervals(user, window_start, window_end))
+        )
         items = [self._serialize_interval(iv, user) for iv in intervals]
         conflicts = find_overlapping_pairs(intervals)
 
@@ -1324,6 +1326,47 @@ class MeCalendarView(APIView):
         # read-modify-write race on concurrent requests (H2 fix).
         register_calendar_cache_key(str(user.id), cache_key)
         return Response(response_data)
+
+    def _dedupe_calendar_intervals(self, intervals):
+        """
+        Collapse group/event participant rows into one visible calendar item.
+
+        Service owners can have one Service interval plus one accepted Handshake
+        interval per participant for the same fixed group offer or event. The
+        calendar should show the session once, not once per participant.
+        """
+        deduped = {}
+        passthrough = []
+
+        def service_for(iv):
+            source = iv.source_obj
+            return source.service if iv.source_kind == 'handshake' else source
+
+        def dedupe_key(iv):
+            svc = service_for(iv)
+            if svc.type != 'Event' and int(getattr(svc, 'max_participants', 1) or 1) <= 1:
+                return None
+            source_status = getattr(iv.source_obj, 'status', None)
+            if source_status in ('Completed', 'completed'):
+                return (str(svc.id), 'completed', iv.end.date())
+            return (str(svc.id), iv.start, iv.end)
+
+        def priority(iv):
+            return 0 if iv.source_kind == 'service' else 1
+
+        for iv in intervals:
+            key = dedupe_key(iv)
+            if key is None:
+                passthrough.append(iv)
+                continue
+            current = deduped.get(key)
+            if current is None or priority(iv) < priority(current):
+                deduped[key] = iv
+
+        return sorted(
+            [*passthrough, *deduped.values()],
+            key=lambda iv: (iv.start, iv.end, str(iv.source_obj.id)),
+        )
 
     def _serialize_interval(self, iv, user) -> dict:
         from .schedule_utils import ScheduledInterval
@@ -1360,10 +1403,10 @@ class MeCalendarView(APIView):
             else:
                 accent_token = 'GREEN'
 
-            # Link: prefer chat (via handshake's messages), then service/event
-            # Handshake-level chat is the ChatMessage thread. Use handshake id as chat id.
+            # Calendar cards should open the service/event detail page; chat stays
+            # available from detail/messages surfaces, not from the calendar.
             chat_id = handshake_id  # The chat channel is keyed by handshake id
-            link = {'type': 'chat', 'id': handshake_id}
+            link = {'type': 'service', 'id': service_id}
 
         else:
             svc = source
@@ -1380,7 +1423,7 @@ class MeCalendarView(APIView):
 
             if svc.type == 'Event':
                 accent_token = 'BLUE'
-                link = {'type': 'event', 'id': service_id}
+                link = {'type': 'service', 'id': service_id}
             else:
                 accent_token = 'TEAL'
                 link = {'type': 'service', 'id': service_id}

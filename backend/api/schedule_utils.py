@@ -49,7 +49,7 @@ class ScheduledInterval:
         }
 
 
-_ACCEPTED_HANDSHAKE_STATUSES = ('accepted', 'checked_in', 'attended')
+_ACTIVE_CALENDAR_HANDSHAKE_STATUSES = ('accepted', 'checked_in', 'attended')
 
 
 def _yield_service_intervals(qs, kind: str, window_start, window_end, owner_user_id):
@@ -83,12 +83,15 @@ def _user_scheduled_intervals(
     Yield ScheduledInterval for every commitment the user has in [window_start, window_end].
 
     Sources:
-    - Accepted handshakes (status in 'accepted', 'checked_in', 'attended') where
+    - Active handshakes where
       service.user == user OR requester == user, with a scheduled_time in the window.
+    - Completed handshakes where service.user == user OR requester == user, placed
+      on their completion timestamp instead of the original scheduled_time.
     - Service.type='Event' owned by user with scheduled_time in window and status
       in ('Active', 'Agreed').  (only when include_services=True)
     - Service.type in ('Offer', 'Need') owned by user with scheduled_time in window
       and status='Active'.  (only when include_services=True)
+    - Completed owned services, placed on event_completed_at or updated_at.
 
     Each interval's _owner_user_id is set to user.id so to_conflict_dict can resolve
     the 'other_user' correctly.
@@ -105,7 +108,7 @@ def _user_scheduled_intervals(
     hs_qs = (
         Handshake.objects
         .filter(
-            status__in=_ACCEPTED_HANDSHAKE_STATUSES,
+            status__in=_ACTIVE_CALENDAR_HANDSHAKE_STATUSES,
             scheduled_time__isnull=False,
             scheduled_time__gte=window_start - MAX_LOOKBACK,
             scheduled_time__lt=window_end,
@@ -133,6 +136,47 @@ def _user_scheduled_intervals(
             continue
 
         # Determine kind
+        service_type = h.service.type
+        is_requester = (h.requester_id == user.id)
+        if service_type == 'Event':
+            kind = 'event_joined' if is_requester else 'event_organized'
+        else:
+            kind = 'service_session'
+
+        yield ScheduledInterval(
+            start=h_start,
+            end=h_end,
+            kind=kind,
+            source_obj=h,
+            source_kind='handshake',
+            _owner_user_id=user.id,
+        )
+
+    completed_hs_qs = (
+        Handshake.objects
+        .filter(
+            status='completed',
+            updated_at__gte=window_start,
+            updated_at__lt=window_end,
+        )
+        .filter(
+            Q(service__user=user) | Q(requester=user)
+        )
+        .select_related('service', 'service__user', 'requester')
+    )
+    if exclude_handshake is not None:
+        completed_hs_qs = completed_hs_qs.exclude(id=exclude_handshake.id)
+
+    for h in completed_hs_qs:
+        raw = h.exact_duration or h.provisioned_hours
+        if float(raw) == 0 and h.service.type == 'Event':
+            raw = h.service.duration
+        duration = float(raw)
+        h_end = h.updated_at
+        h_start = h_end - timedelta(hours=duration)
+        if h_start >= window_end or h_end <= window_start:
+            continue
+
         service_type = h.service.type
         is_requester = (h.requester_id == user.id)
         if service_type == 'Event':
@@ -180,6 +224,32 @@ def _user_scheduled_intervals(
         )
     )
     yield from _yield_service_intervals(fixed_qs, 'scheduled_commitment', window_start, window_end, user.id)
+
+    completed_services = (
+        Service.objects
+        .filter(
+            user=user,
+            status='Completed',
+        )
+        .filter(
+            Q(event_completed_at__gte=window_start, event_completed_at__lt=window_end)
+            | Q(event_completed_at__isnull=True, updated_at__gte=window_start, updated_at__lt=window_end)
+        )
+    )
+    for svc in completed_services:
+        duration = float(svc.duration)
+        s_end = svc.event_completed_at or svc.updated_at
+        s_start = s_end - timedelta(hours=duration)
+        if s_start >= window_end or s_end <= window_start:
+            continue
+        yield ScheduledInterval(
+            start=s_start,
+            end=s_end,
+            kind='event_organized' if svc.type == 'Event' else 'scheduled_commitment',
+            source_obj=svc,
+            source_kind='service',
+            _owner_user_id=user.id,
+        )
 
 
 def find_overlapping_pairs(intervals: List[ScheduledInterval]) -> List[dict]:
