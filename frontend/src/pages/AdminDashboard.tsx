@@ -14,6 +14,7 @@ import { serviceAPI } from '@/services/serviceAPI'
 import AdminReauthBanner from '@/components/AdminReauthBanner'
 import AdminLayout from '@/components/AdminLayout'
 import AdminActivityFeed from '@/components/AdminActivityFeed'
+import RecommendationDebugBar from '@/components/RecommendationDebugBar'
 import { getErrorMessage } from '@/services/api'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { AdminAuditLog, AdminComment, AdminMetrics, AdminReport, AdminUserSummary, ForumTopic, PaginatedResponse, Service } from '@/types'
@@ -114,6 +115,10 @@ const AdminDashboard = () => {
 
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
+  // Sample of currently-hot services to feed the floating debug bar (#476).
+  // The bar is admin-only and lives at the bottom of every admin tab; the
+  // panel inside it fetches the per-service breakdown on demand.
+  const [debugServices, setDebugServices] = useState<Service[]>([])
   const [forumPostsCount, setForumPostsCount] = useState<number | null>(null)
   const [pendingReportsCount, setPendingReportsCount] = useState<number | null>(null)
   const [removedCommentsCount, setRemovedCommentsCount] = useState<number | null>(null)
@@ -311,6 +316,23 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (activeTab === 'dashboard') loadDashboard()
   }, [activeTab, loadDashboard])
+
+  // Seed the floating debug bar with the current top hot services so the
+  // panel has something to inspect when the admin opens it.
+  useEffect(() => {
+    let cancelled = false
+    serviceAPI
+      .list({ sort: 'hot', page_size: 20 })
+      .then(results => {
+        if (!cancelled) setDebugServices(results)
+      })
+      .catch(() => {
+        if (!cancelled) setDebugServices([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (activeTab === 'users') loadUsers()
@@ -2315,6 +2337,12 @@ const AdminDashboard = () => {
       userId={karmaModal.user?.id ?? ''}
       onDone={() => { setKarmaModal({ open: false, user: null }); loadUsers() }}
       onClose={() => setKarmaModal({ open: false, user: null })}
+    />
+    <RecommendationDebugBar
+      services={debugServices}
+      hoveredServiceId={null}
+      activeFilter="all"
+      search=""
     />
   </>
   )
