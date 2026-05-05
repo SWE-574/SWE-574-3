@@ -6,7 +6,7 @@ import type {
 } from '@/types'
 
 export interface ServiceListParams {
-  sort?: 'latest' | 'hot'
+  sort?: 'latest' | 'hot' | 'for_you'
   lat?: number
   lng?: number
   distance?: number

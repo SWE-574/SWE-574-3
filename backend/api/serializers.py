@@ -541,6 +541,8 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    source = serializers.SerializerMethodField()
+    for_you_signals = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
@@ -551,8 +553,19 @@ class ServiceSerializer(serializers.ModelSerializer):
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
+            'source', 'for_you_signals',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
+        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned', 'source', 'for_you_signals']
+
+    def get_source(self, obj):
+        """Set transiently by the For You list view (#481) and the onboarding
+        fallback (#478). None when the card came from the regular feed."""
+        return getattr(obj, 'source', None)
+
+    def get_for_you_signals(self, obj):
+        """Per-card breakdown of the four For You signals (#481). None for
+        cards not served by the For You feed."""
+        return getattr(obj, 'for_you_signals', None)
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):

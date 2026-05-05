@@ -41,7 +41,7 @@ export interface ServicesListParams {
   location_type?: string;
   /** Owner filter; matches web `serviceAPI.list` (`?user=`). */
   user?: string;
-  sort?: "latest" | "hot";
+  sort?: "latest" | "hot" | "for_you";
   lat?: number;
   lng?: number;
   distance?: number;

@@ -33,6 +33,7 @@ import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
+import ForYouCarousel from '@/components/ForYouCarousel'
 import type { Handshake } from '@/services/handshakeAPI'
 
 import {
@@ -823,6 +824,7 @@ const DashboardPage = () => {
 
           {/* Grid */}
           <Box flex={1} overflowY="auto" px={{ base: 3, md: 6 }} pt={2} pb={8}>
+            <ForYouCarousel />
             {isLoading && displayServices.length === 0 ? (
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
             ) : fetchError && displayServices.length === 0 ? (

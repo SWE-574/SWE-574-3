@@ -1260,3 +1260,111 @@ class ScoreAuditLog(models.Model):
 
     def __str__(self):
         return f'Audit({self.service_id}, {self.recorded_at}, {self.final_score:.4f})'
+
+
+class HandshakeCooccurrence(models.Model):
+    """Anonymized item-item cooccurrence matrix for the For You ranking signal.
+
+    A pair of services lands in this table when at least
+    settings.RANKING_COOCCUR_MIN_USERS distinct users have completed handshakes
+    on both. No user ids are stored; the table is k-anonymous by construction.
+    Rebuilt nightly by the build_handshake_cooccurrence management command.
+    """
+    service_a = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='cooccurrence_a',
+    )
+    service_b = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='cooccurrence_b',
+    )
+    count = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['service_a', 'service_b'], name='cooccur_pair_unique',
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(service_a=models.F('service_b')),
+                name='cooccur_pair_distinct',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['service_a', '-count']),
+            models.Index(fields=['service_b', '-count']),
+        ]
+
+    def __str__(self):
+        return f'Cooccur({self.service_a_id}, {self.service_b_id}, {self.count})'
+
+
+class ForYouEvent(models.Model):
+    """Append only log of For You feed engagement events.
+
+    impression: a service was returned in a For You response to viewer.
+    click: viewer opened the service detail page from a For You card
+           (?from=for_you).
+    handshake: viewer created a handshake on a service that was last clicked
+               from For You within the attribution window (default 1h).
+    Rolled up nightly into ForYouDailyMetric for the admin metrics endpoint.
+    """
+    IMPRESSION = 'impression'
+    CLICK = 'click'
+    HANDSHAKE = 'handshake'
+    KIND_CHOICES = [
+        (IMPRESSION, 'impression'),
+        (CLICK, 'click'),
+        (HANDSHAKE, 'handshake'),
+    ]
+
+    SOURCE_FOR_YOU = 'for_you'
+    SOURCE_HOT = 'hot'
+    SOURCE_CHOICES = [
+        (SOURCE_FOR_YOU, 'for_you'),
+        (SOURCE_HOT, 'hot'),
+    ]
+
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='for_you_events',
+    )
+    viewer = models.ForeignKey(
+        'User', on_delete=models.CASCADE, related_name='for_you_events',
+    )
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    source = models.CharField(
+        max_length=20, choices=SOURCE_CHOICES, default=SOURCE_FOR_YOU,
+    )
+    occurred_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['viewer', '-occurred_at']),
+            models.Index(fields=['service', '-occurred_at']),
+            models.Index(fields=['kind', '-occurred_at']),
+        ]
+        ordering = ['-occurred_at']
+
+
+class ForYouDailyMetric(models.Model):
+    """Daily aggregates from ForYouEvent. Cheap to read for the admin endpoint.
+
+    Roll up via the roll_up_for_you_metrics management command.
+    """
+    date = models.DateField(db_index=True)
+    kind = models.CharField(
+        max_length=20, choices=ForYouEvent.KIND_CHOICES,
+    )
+    source = models.CharField(
+        max_length=20, choices=ForYouEvent.SOURCE_CHOICES,
+        default=ForYouEvent.SOURCE_FOR_YOU,
+    )
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['date', 'kind', 'source'],
+                name='for_you_daily_metric_unique',
+            ),
+        ]
+        ordering = ['-date']
