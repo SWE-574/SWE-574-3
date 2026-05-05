@@ -512,7 +512,8 @@ const styles = StyleSheet.create({
     top: 16,
     right: 16,
     zIndex: 10,
-    maxWidth: 76,
+    width: 220,
+    alignItems: "flex-end",
   },
   // Avatar
   avatarWrapper: {

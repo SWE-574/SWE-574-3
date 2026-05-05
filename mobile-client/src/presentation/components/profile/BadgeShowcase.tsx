@@ -24,6 +24,10 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../../constants/colors";
 import type { BadgeDetail } from "../../../api/calendar";
+import {
+  formatBadgeEarnedDate,
+  getCompactBadgeTooltipText,
+} from "../../../utils/profileBadgeDisplay";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -62,25 +66,29 @@ export interface BadgeShowcaseProps {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function formatEarnedDate(dateStr?: string | null): string {
-  if (!dateStr) return "";
-  try {
-    const date = new Date(dateStr);
-    if (Number.isNaN(date.getTime())) return "";
-    return new Intl.DateTimeFormat("en-GB", {
-      month: "short",
-      year: "numeric",
-    }).format(date);
-  } catch {
-    return "";
-  }
-}
-
 // ── Compact mode ──────────────────────────────────────────────────────────
 
-function CompactBadge({ badge }: { badge: BadgeDetail }) {
+function CompactBadge({
+  badge,
+  active,
+  onPress,
+}: {
+  badge: BadgeDetail;
+  active: boolean;
+  onPress: () => void;
+}) {
   return (
-    <View style={compactStyles.badge}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        compactStyles.badge,
+        active && compactStyles.badgeActive,
+        pressed && { opacity: 0.82 },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={`${badge.name} achievement`}
+      accessibilityHint="Shows what this achievement means"
+    >
       <View style={compactStyles.iconWrapper}>
         {badge.icon_url ? (
           <Image
@@ -99,10 +107,10 @@ function CompactBadge({ badge }: { badge: BadgeDetail }) {
       </Text>
       {badge.earned_at ? (
         <Text style={compactStyles.earnedDate}>
-          {formatEarnedDate(badge.earned_at)}
+          {formatBadgeEarnedDate(badge.earned_at)}
         </Text>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -115,7 +123,9 @@ function CompactShowcase({
   mode?: "own" | "public";
   onPickerOpenRequest?: () => void;
 }) {
+  const [activeBadgeId, setActiveBadgeId] = useState<string | null>(null);
   const featured = badges.slice(0, 2);
+  const activeBadge = featured.find((badge) => badge.id === activeBadgeId);
 
   if (featured.length === 0) {
     if (mode === "public") return null;
@@ -144,10 +154,27 @@ function CompactShowcase({
   }
 
   return (
-    <View style={compactStyles.row}>
-      {featured.map((badge) => (
-        <CompactBadge key={badge.id} badge={badge} />
-      ))}
+    <View style={compactStyles.wrapper}>
+      <View style={compactStyles.row}>
+        {featured.map((badge) => (
+          <CompactBadge
+            key={badge.id}
+            badge={badge}
+            active={activeBadgeId === badge.id}
+            onPress={() =>
+              setActiveBadgeId((current) => (current === badge.id ? null : badge.id))
+            }
+          />
+        ))}
+      </View>
+      {activeBadge ? (
+        <View style={compactStyles.tooltip}>
+          <View style={compactStyles.tooltipArrow} />
+          <Text style={compactStyles.tooltipText}>
+            {getCompactBadgeTooltipText(activeBadge)}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -228,7 +255,7 @@ function PickerBadgeItem({
         </Text>
       ) : badge.earned_at ? (
         <Text style={pickerStyles.earnedDate}>
-          {formatEarnedDate(badge.earned_at)}
+          {formatBadgeEarnedDate(badge.earned_at)}
         </Text>
       ) : null}
     </Pressable>
@@ -351,6 +378,10 @@ export default function BadgeShowcase({
 // ── Styles ────────────────────────────────────────────────────────────────
 
 const compactStyles = StyleSheet.create({
+  wrapper: {
+    alignItems: "flex-end",
+    gap: 6,
+  },
   row: {
     flexDirection: "row",
     gap: 6,
@@ -363,6 +394,10 @@ const compactStyles = StyleSheet.create({
   badge: {
     alignItems: "center",
     maxWidth: 36,
+    borderRadius: 18,
+  },
+  badgeActive: {
+    transform: [{ scale: 1.04 }],
   },
   iconWrapper: {
     width: 34,
@@ -418,6 +453,31 @@ const compactStyles = StyleSheet.create({
   },
   emptyPlaceholderText: {
     display: "none",
+  },
+  tooltip: {
+    maxWidth: 220,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: "rgba(17,24,39,0.88)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+  tooltipArrow: {
+    position: "absolute",
+    top: -5,
+    right: 16,
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: "rgba(17,24,39,0.88)",
+    transform: [{ rotate: "45deg" }],
+  },
+  tooltipText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "700",
+    color: colors.WHITE,
   },
 });
 

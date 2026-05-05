@@ -5,6 +5,8 @@
  * We test module exports and the pure logic that drives compact vs picker behaviour.
  */
 
+import { getCompactBadgeTooltipText } from "../badgeDisplay";
+
 // ── Compact variant logic ─────────────────────────────────────────────────
 
 describe("BadgeShowcase compact logic", () => {
@@ -44,6 +46,20 @@ describe("BadgeShowcase compact logic", () => {
     }
     expect(shouldRenderNull("public", 0)).toBe(true);
     expect(shouldRenderNull("own", 0)).toBe(false);
+  });
+
+  it("builds a compact tooltip from badge name, description, and earned date", () => {
+    const tooltip = getCompactBadgeTooltipText({
+      id: "helper",
+      name: "Helpful Neighbor",
+      description: "Completed three helpful exchanges.",
+      icon_url: null,
+      earned_at: "2026-05-01T10:00:00Z",
+    });
+
+    expect(tooltip).toContain("Helpful Neighbor");
+    expect(tooltip).toContain("Completed three helpful exchanges.");
+    expect(tooltip).toContain("May 2026");
   });
 });
 
