@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import { Box, Flex, Spinner, Text } from '@chakra-ui/react'
 import { FiAlertCircle, FiCheckCircle, FiClock, FiXCircle } from 'react-icons/fi'
-import { userAPI, type MyReport, type MyReportStatus } from '@/services/userAPI'
+import { type MyReport, type MyReportStatus } from '@/services/userAPI'
+import { useMyReports } from '@/hooks/useMyReports'
 import {
   AMBER, AMBER_LT, BLUE, BLUE_LT, GRAY100, GRAY200, GRAY400,
   GRAY500, GRAY600, GRAY700, GRAY800, GRAY900, GREEN, GREEN_LT, WHITE,
@@ -188,26 +189,6 @@ export function MyReportsList({ reports, error }: MyReportsListProps) {
       </Flex>
     </>
   )
-}
-
-export function useMyReports() {
-  const [reports, setReports] = useState<MyReport[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const ac = new AbortController()
-    setError(null)
-    userAPI.getMyReports(ac.signal)
-      .then(setReports)
-      .catch((err) => {
-        if (ac.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'Failed to load reports')
-        setReports([])
-      })
-    return () => ac.abort()
-  }, [])
-
-  return { reports, error }
 }
 
 export default function MyReports() {

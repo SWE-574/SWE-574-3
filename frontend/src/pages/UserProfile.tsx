@@ -30,7 +30,8 @@ import { getErrorMessage } from '@/services/api'
 import ImageCropModal from '@/components/ImageCropModal'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 import FollowListModal from '@/components/FollowListModal'
-import { MyReportsList, useMyReports } from '@/pages/MyReports'
+import { MyReportsList } from '@/pages/MyReports'
+import { useMyReports } from '@/hooks/useMyReports'
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
 const avatarBg   = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
