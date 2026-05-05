@@ -10,6 +10,13 @@ export interface Handshake {
   max_participants?: number
   requester: string
   requester_name: string
+  requester_detail?: {
+    id: string
+    first_name: string
+    last_name: string
+    avatar_url: string | null
+    member_since: string
+  } | null
   provider_name: string
   counterpart?: {
     id: string
