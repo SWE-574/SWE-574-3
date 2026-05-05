@@ -442,6 +442,58 @@ def _eligible_exploration(candidates):
     return cold, undershown, stale
 
 
+def apply_onboarding_fallback(base_queryset, viewer, min_count):
+    """Filter the recommendation feed to the viewer's onboarding skills,
+    topping up with explore pool items when matches fall below min_count.
+
+    Returns (queryset, applied). When applied is True the queryset is
+    annotated with a `source` field of either 'tag_match' or
+    'explore_topup'. When applied is False the input queryset is returned
+    unchanged (anonymous viewer, viewer not onboarded, or viewer has no
+    declared skills).
+    """
+    from django.db.models import Case, CharField, Q, Value, When
+
+    if viewer is None or not getattr(viewer, 'is_authenticated', False):
+        return base_queryset, False
+    if not getattr(viewer, 'is_onboarded', False):
+        return base_queryset, False
+    skills_ids = list(viewer.skills.values_list('id', flat=True))
+    if not skills_ids:
+        return base_queryset, False
+
+    skills_filter = Q(tags__id__in=skills_ids) | Q(tags__parent_qid__in=skills_ids)
+    matched = base_queryset.filter(skills_filter).distinct()
+    matched_count = matched.count()
+    matched_ids = list(matched.values_list('id', flat=True))
+
+    if matched_count >= min_count:
+        return (
+            base_queryset.filter(id__in=matched_ids).annotate(
+                source=Value('tag_match', output_field=CharField()),
+            ),
+            True,
+        )
+
+    needed = min_count - matched_count
+    non_matched_sample = list(base_queryset.exclude(id__in=matched_ids)[:200])
+    cold, under, stale = _eligible_exploration(non_matched_sample)
+    explore_pool = cold + under + stale
+    topup_ids = [s.id for s in explore_pool[:needed]]
+
+    final_ids = list(matched_ids) + topup_ids
+    return (
+        base_queryset.filter(id__in=final_ids).annotate(
+            source=Case(
+                When(id__in=matched_ids, then=Value('tag_match')),
+                default=Value('explore_topup'),
+                output_field=CharField(),
+            ),
+        ),
+        True,
+    )
+
+
 def select_exploration_candidate(candidates, viewer):
     """Uniform sampling across the three eligible sub-buckets. Returns None if
     all three are empty -- caller should leave the ranked list unchanged."""

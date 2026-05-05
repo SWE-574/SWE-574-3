@@ -1906,6 +1906,22 @@ class ServiceViewSet(viewsets.ModelViewSet):
         
         queryset = search_engine.search(queryset, search_params)
 
+        # Onboarding tag fallback (#478): when an onboarded viewer with
+        # declared skills hits the feed without an explicit tag filter,
+        # prefer services tagged with their skills and top up from the
+        # explore pool when too few match. Annotates `source` for the UI.
+        explicit_tag = (
+            self.request.query_params.get('tag')
+            or self.request.query_params.getlist('tags')
+        )
+        if not explicit_tag:
+            from .ranking import apply_onboarding_fallback
+            queryset, _ = apply_onboarding_fallback(
+                queryset,
+                self.request.user,
+                getattr(settings, 'RANKING_ONBOARDING_MIN_RESULTS', 10),
+            )
+
         user_param = self.request.query_params.get('user')
         # Filter by owner user (for profile pages)
         if user_param:
