@@ -308,3 +308,51 @@ class TestCancelledEventVisibility:
 
         assert 'status' in response.data
         assert response.data['status'] == 'Cancelled'
+
+
+# ---------------------------------------------------------------------------
+# FR-11: Cancel event — server-side reason validation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestCancelEventReasonValidation:
+    """
+    The frontend modal gates Confirm on a non-empty reason, but the endpoint
+    must also reject blank reasons so curl/mobile clients cannot write empty
+    strings into participants' cancellation_reason fields.
+    """
+
+    def test_cancel_event_without_reason_returns_400(self):
+        organizer = UserFactory()
+        event = make_event(user=organizer, days_from_now=3)
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+
+        response = client.post(f'/api/services/{event.id}/cancel-event/', data={})
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_cancel_event_with_blank_reason_returns_400(self):
+        organizer = UserFactory()
+        event = make_event(user=organizer, days_from_now=3)
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+
+        response = client.post(
+            f'/api/services/{event.id}/cancel-event/',
+            data={'reason': '   '},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_cancel_event_with_reason_succeeds(self):
+        organizer = UserFactory()
+        event = make_event(user=organizer, days_from_now=3)
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+
+        response = client.post(
+            f'/api/services/{event.id}/cancel-event/',
+            data={'reason': 'Venue unavailable'},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        event.refresh_from_db()
+        assert event.status == 'Cancelled'

@@ -38,3 +38,35 @@ class TestServiceSignals:
         handshake = HandshakeFactory(service=service, requester=giver, status='completed')
         ReputationRepFactory(handshake=handshake, giver=giver, receiver=user)
         mock_update.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# #450 section 1a -- silent error swallowing in _update_service_hot_score
+# ---------------------------------------------------------------------------
+
+import logging
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestSilentErrorLogged:
+    """The hot_score updater must log on failure, not swallow."""
+
+    def test_calculate_failure_is_logged(self):
+        """Patch the logger directly -- pytest caplog can be stymied by Django's
+        LOGGING dictConfig (propagate=False on app loggers). Asserting the
+        logger.exception call directly is more robust and still verifies the
+        bare 'except: pass' is gone.
+        """
+        from api.signals import _update_service_hot_score
+        service = ServiceFactory(status='Active', type='Offer')
+
+        with patch(
+            'api.signals._compute_service_factors', side_effect=RuntimeError('boom'),
+        ), patch('api.signals.logger') as mock_logger:
+            _update_service_hot_score(service)
+
+        mock_logger.exception.assert_called_once()
+        call_args = mock_logger.exception.call_args
+        assert 'hot_score update failed' in call_args[0][0]
+        assert call_args[0][1] == service.pk

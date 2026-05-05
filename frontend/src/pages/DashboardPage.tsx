@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { usePolling } from '@/hooks/usePolling'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -25,9 +25,9 @@ import {
   FiWifi,
   FiMenu,
   FiX,
+  FiLayers,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
-import RecommendationDebugBar from '@/components/RecommendationDebugBar'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -60,6 +60,12 @@ const FILTERS = [
   { id: 'online',    label: 'Online',     icon: <FiWifi size={12} /> },
   { id: 'recurrent', label: 'Recurrent',  icon: <FiRefreshCw size={12} /> },
   { id: 'weekend',   label: 'Weekend',    icon: <FiCalendar size={12} /> },
+]
+
+const TYPE_FILTERS = [
+  { id: 'Offer' as const, label: 'Offers', activeBg: GREEN, activeColor: WHITE, dotColor: GREEN },
+  { id: 'Need'  as const, label: 'Needs',  activeBg: BLUE,  activeColor: WHITE, dotColor: BLUE  },
+  { id: 'Event' as const, label: 'Events', activeBg: AMBER, activeColor: WHITE, dotColor: AMBER },
 ]
 
 // ─── Handshake badge ──────────────────────────────────────────────────────────
@@ -386,6 +392,7 @@ const DashboardPage = () => {
   const { isAuthenticated, user } = useAuthStore()
 
   const [activeFilter, setActiveFilter]             = useState('all')
+  const [activeTypes, setActiveTypes]               = useState<Set<'Offer' | 'Need' | 'Event'>>(new Set())
   const [searchQuery, setSearchQuery]               = useState('')
   const [debouncedSearch, setDebouncedSearch]       = useState('')
   const [services, setServices]                     = useState<Service[]>([])
@@ -403,11 +410,11 @@ const DashboardPage = () => {
 
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
-  const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
-  const [rankingDebugAvailable, setRankingDebugAvailable] = useState(false)
+  const [typeDropdownOpen, setTypeDropdownOpen]           = useState(false)
 
-  const searchTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const distanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const typeDropdownRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -421,24 +428,10 @@ const DashboardPage = () => {
     return () => { if (distanceTimer.current) clearTimeout(distanceTimer.current) }
   }, [distanceKm])
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setRankingDebugAvailable(false)
-      return
-    }
-
-    const controller = new AbortController()
-    serviceAPI.getRankingDebugAvailability(controller.signal)
-      .then((response) => {
-        setRankingDebugAvailable(response.enabled)
-      })
-      .catch((error) => {
-        if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') return
-        setRankingDebugAvailable(false)
-      })
-
-    return () => controller.abort()
-  }, [isAuthenticated, user?.id])
+  // Per #371 the ranking debug panel is admin-only and lives in the admin
+  // dashboard. The floating launcher and getRankingDebugAvailability poll
+  // were removed from the regular dashboard; non-admin clients no longer
+  // need to know whether the debug panel exists.
 
   const fetchServices = useCallback(async (signal: AbortSignal) => {
     let raw: typeof services
@@ -524,19 +517,52 @@ const DashboardPage = () => {
     else { requestLocation() }
   }, [locationEnabled, userLocation, requestLocation])
 
+  const toggleType = useCallback((t: 'Offer' | 'Need' | 'Event') => {
+    setActiveTypes((prev) => {
+      const next = new Set(prev)
+      if (next.has(t)) next.delete(t); else next.add(t)
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!typeDropdownOpen) return
+    function handler(e: MouseEvent) {
+      if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target as Node)) {
+        setTypeDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [typeDropdownOpen])
+
   // ── Derived ───────────────────────────────────────────────────────────────
-  const ownServiceHandshakes = Array.from(incomingMap.values()).flat()
-  const myServices         = allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id })
+  const ownServiceHandshakes = useMemo(() => Array.from(incomingMap.values()).flat(), [incomingMap])
+  const myServices = useMemo(
+    () => allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id }),
+    [allActiveServices, user],
+  )
 
   // Hide events from the browse feed where the logged-in user was removed
   // (i.e. their handshake was cancelled by an admin after a report).
-  const displayServices = isAuthenticated
+  const displayServices = useMemo(() => (isAuthenticated
     ? services.filter((s) => {
         if (s.type !== 'Event') return true
         const hs = handshakeMap.get(s.id)
         return hs?.status !== 'cancelled'
       })
     : services
+  )
+    .filter((s) => {
+      if (s.type === 'Event' && s.scheduled_time && new Date(s.scheduled_time).getTime() <= Date.now()) return false
+      return activeTypes.size === 0 || activeTypes.has(s.type)
+    })
+    .sort((a, b) => {
+      const aInactive = ['denied', 'cancelled'].includes(handshakeMap.get(a.id)?.status ?? '')
+      const bInactive = ['denied', 'cancelled'].includes(handshakeMap.get(b.id)?.status ?? '')
+      if (aInactive === bInactive) return 0
+      return aInactive ? 1 : -1
+    }), [services, isAuthenticated, handshakeMap, activeTypes])
   const pendingHs          = myServices.filter((service) => {
     const incoming = incomingMap.get(service.id) ?? []
     return incoming.some((h) => h.status === 'pending')
@@ -544,7 +570,6 @@ const DashboardPage = () => {
   const acceptedHs         = myServices.length
   const completedHs        = ownServiceHandshakes.filter((h) => h.status === 'completed').length
   const distanceLabel      = distanceKm <= 5 ? 'Nearby' : distanceKm <= 15 ? 'Local' : distanceKm <= 30 ? 'Wider' : 'City-wide'
-  const showRankingDebug   = rankingDebugAvailable
 
   const sidebarProps = {
     pendingHs, acceptedHs, completedHs,
@@ -566,18 +591,6 @@ const DashboardPage = () => {
         overflow="hidden"
         position="relative"
       >
-        {showRankingDebug ? (
-          <RecommendationDebugBar
-            services={displayServices}
-            hoveredServiceId={hoveredServiceId}
-            activeFilter={activeFilter}
-            search={debouncedSearch}
-            lat={locationEnabled ? userLocation?.lat : undefined}
-            lng={locationEnabled ? userLocation?.lng : undefined}
-            distance={locationEnabled ? debouncedDistance : undefined}
-          />
-        ) : null}
-
         {/* ── Sidebar (desktop always visible; mobile: overlay) ───────────── */}
         <Box
           display={{ base: sidebarOpen ? 'flex' : 'none', lg: 'flex' }}
@@ -646,7 +659,7 @@ const DashboardPage = () => {
               <Flex
                 gap="3px" bg={GRAY100} p="3px" borderRadius="10px"
                 display={{ base: 'none', sm: 'flex' }}
-                flexShrink={0}
+                flexShrink={0} align="center"
               >
                 {FILTERS.map((f) => (
                   <Box
@@ -664,6 +677,54 @@ const DashboardPage = () => {
                     <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
                   </Box>
                 ))}
+                {/* Divider */}
+                <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
+                {/* Type filter icon button + dropdown */}
+                <Box position="relative" ref={typeDropdownRef as never}>
+                  <Box
+                    as="button"
+                    onClick={() => setTypeDropdownOpen((v) => !v)}
+                    px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
+                    fontSize="12px" fontWeight={activeTypes.size > 0 ? 700 : 500}
+                    bg={activeTypes.size > 0 ? GREEN : 'transparent'}
+                    color={activeTypes.size > 0 ? WHITE : GRAY500}
+                    boxShadow={activeTypes.size > 0 ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                    cursor="pointer" transition="all 0.12s"
+                    display="flex" alignItems="center" gap="4px"
+                  >
+                    <FiLayers size={12} />
+                    {activeTypes.size > 0 && (
+                      <Box as="span" fontSize="10px" fontWeight={700}>{activeTypes.size}</Box>
+                    )}
+                  </Box>
+                  {typeDropdownOpen && (
+                    <Box
+                      position="absolute" top="calc(100% + 6px)" right={0}
+                      bg={WHITE} borderRadius="10px" border={`1px solid ${GRAY200}`}
+                      boxShadow="0 4px 16px rgba(0,0,0,0.10)"
+                      p="4px" zIndex={100} minW="120px"
+                    >
+                      {TYPE_FILTERS.map((tf) => {
+                        const isActive = activeTypes.has(tf.id)
+                        return (
+                          <Box
+                            key={tf.id} as="button"
+                            onClick={() => toggleType(tf.id)}
+                            px="10px" py="6px" borderRadius="7px" w="full"
+                            fontSize="12px" fontWeight={isActive ? 700 : 500}
+                            bg={isActive ? tf.activeBg : 'transparent'}
+                            color={isActive ? tf.activeColor : GRAY600}
+                            cursor="pointer" transition="all 0.12s"
+                            display="flex" alignItems="center" gap="6px"
+                          >
+                            <Box w="7px" h="7px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                            {tf.label}
+                          </Box>
+                        )
+                      })}
+                    </Box>
+                  )}
+                </Box>
               </Flex>
 
               {/* Map toggle */}
@@ -683,10 +744,10 @@ const DashboardPage = () => {
               </Box>
             </Flex>
 
-            {/* Filter pills row on mobile (below search bar) */}
+            {/* Filter + type chips row — mobile only */}
             <Flex
               display={{ base: 'flex', sm: 'none' }}
-              gap="5px" mt="8px" overflowX="auto"
+              gap="5px" mt="8px" overflowX="auto" align="center"
               style={{ scrollbarWidth: 'none' }}
             >
               {FILTERS.map((f) => (
@@ -705,6 +766,25 @@ const DashboardPage = () => {
                   {f.label}
                 </Box>
               ))}
+              {/* Divider */}
+              <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
+              {/* Type filter icon button — shares the same dropdown ref as desktop */}
+              <Box
+                as="button" flexShrink={0}
+                onClick={() => setTypeDropdownOpen((v) => !v)}
+                px="10px" py="5px" borderRadius="20px"
+                fontSize="12px" fontWeight={activeTypes.size > 0 ? 700 : 500}
+                bg={activeTypes.size > 0 ? GREEN : WHITE}
+                color={activeTypes.size > 0 ? WHITE : GRAY600}
+                border={`1px solid ${activeTypes.size > 0 ? GREEN : GRAY200}`}
+                cursor="pointer" transition="all 0.12s"
+                display="flex" alignItems="center" gap="4px"
+              >
+                <FiLayers size={12} />
+                {activeTypes.size > 0 && (
+                  <Box as="span" fontSize="10px" fontWeight={700}>{activeTypes.size}</Box>
+                )}
+              </Box>
             </Flex>
           </Box>
 
@@ -716,6 +796,7 @@ const DashboardPage = () => {
                 <HStack gap={3} fontSize="11px" color={GRAY500}>
                   <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={GREEN} />Offers</Flex>
                   <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={BLUE} />Wants</Flex>
+                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={AMBER} />Events</Flex>
                 </HStack>
                 {isLoading && services.length > 0 && (
                   <Flex align="center" gap="5px" ml="auto">
@@ -787,7 +868,6 @@ const DashboardPage = () => {
                       incomingCount={aCount}
                       pendingCount={pCount}
                       onClick={() => navigate(`/service-detail/${service.id}`)}
-                      onHover={() => setHoveredServiceId(service.id)}
                     />
                   )
                 })}
