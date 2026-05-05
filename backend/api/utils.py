@@ -257,8 +257,17 @@ def ensure_accepted_handshake_reservation(handshake: Handshake) -> bool:
             service.reserved_timebank_hours = target_hours
             service.save(update_fields=["reserved_timebank_hours"])
 
-        invalidate_transactions(str(receiver.id))
-        invalidate_user_profile(str(receiver.id))
+        provider, _ = get_provider_and_receiver(handshake)
+        receiver_id = str(receiver.id)
+        provider_id = str(provider.id)
+
+        def _invalidate_after_commit() -> None:
+            invalidate_conversations(receiver_id)
+            invalidate_conversations(provider_id)
+            invalidate_transactions(receiver_id)
+            invalidate_user_profile(receiver_id)
+
+        transaction.on_commit(_invalidate_after_commit)
         return True
 
 def _is_group_one_time_service(service: Service) -> bool:

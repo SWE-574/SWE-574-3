@@ -162,6 +162,40 @@ class TestProvisionTimebank:
             transaction_type='provision',
         ).count() == 0
 
+    def test_accepted_need_reservation_invalidates_conversations(
+        self,
+        monkeypatch,
+        django_capture_on_commit_callbacks,
+    ):
+        """Approving a Need with an existing reservation refreshes both inboxes."""
+        invalidated_conversations: list[str] = []
+        monkeypatch.setattr(
+            'api.utils.invalidate_conversations',
+            lambda user_id: invalidated_conversations.append(user_id),
+        )
+        monkeypatch.setattr('api.utils.invalidate_transactions', lambda _user_id: None)
+        monkeypatch.setattr('api.utils.invalidate_user_profile', lambda _user_id: None)
+
+        owner = UserFactory(timebank_balance=Decimal('2.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('1.00'),
+            reserved_timebank_hours=Decimal('1.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='pending',
+            provisioned_hours=Decimal('1.00'),
+        )
+
+        with django_capture_on_commit_callbacks(execute=True):
+            ensure_accepted_handshake_reservation(handshake)
+
+        assert set(invalidated_conversations) == {str(owner.id), str(helper.id)}
+
 
 @pytest.mark.django_db
 @pytest.mark.unit
