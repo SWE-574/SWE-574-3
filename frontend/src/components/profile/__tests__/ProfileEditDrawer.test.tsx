@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { ChakraProvider } from '@chakra-ui/react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import system from '@/theme'
 import ProfileEditDrawer from '../ProfileEditDrawer'
@@ -208,15 +207,15 @@ describe('ProfileEditDrawer', () => {
   })
 
   it('ESC key on dirty drawer shows discard dialog exactly once (regression for double-fire)', async () => {
-    const user = userEvent.setup()
     renderDrawer()
 
     // Make the form dirty
     const input = screen.getByLabelText('First name') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'Changed' } })
 
-    // Press ESC — should show discard dialog exactly once
-    await user.keyboard('{Escape}')
+    // Press ESC from inside the focused modal field so the event bubbles through Dialog.Content.
+    input.focus()
+    fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' })
 
     // Dialog appears once
     await waitFor(() => {
