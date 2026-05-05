@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import UpcomingSchedule from '@/components/profile/UpcomingSchedule'
 import { useNavigate } from 'react-router-dom'
-import { Box, Flex, Text, Input, Spinner, Stack } from '@chakra-ui/react'
+import { Box, Flex, Grid, Text, Input, Spinner, Stack } from '@chakra-ui/react'
 import {
-  FiCalendar, FiClock, FiCheckCircle, FiChevronDown, FiChevronUp,
+  FiCalendar, FiCheckCircle, FiChevronDown, FiChevronUp,
   FiLayers, FiLock, FiMail, FiMessageSquare, FiPlus,
   FiRepeat, FiSettings, FiShield, FiStar, FiZap, FiEye, FiEyeOff,
-  FiArrowUpRight,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -147,8 +146,9 @@ const UserProfile = () => {
     void refreshUser()
   }, [refreshUser])
 
-  // ── Drawer state ─────────────────────────────────────────────────────────────
+  // ── Profile edit modal state ─────────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [editInitialTab, setEditInitialTab] = useState<'identity' | 'media' | 'skills' | 'showcase' | 'privacy'>('identity')
 
   // ── Data state ───────────────────────────────────────────────────────────────
   const [services, setServices]           = useState<Service[]>([])
@@ -167,6 +167,8 @@ const UserProfile = () => {
   const [activeTab, setActiveTab]         = useState<ServiceTab>('offers')
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
   const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
+  const heroCardRef = useRef<HTMLDivElement | null>(null)
+  const [heroCardHeight, setHeroCardHeight] = useState<number | null>(null)
 
   // ── Settings / password-change state ─────────────────────────────────────────
   const [pwCurrent, setPwCurrent]       = useState('')
@@ -257,6 +259,20 @@ const UserProfile = () => {
   const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
   const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
   const eventServices = services.filter(s => s.type === 'Event' && s.status === 'Active')
+
+  useEffect(() => {
+    const node = heroCardRef.current
+    if (!node || typeof ResizeObserver === 'undefined') return
+
+    const observer = new ResizeObserver(([entry]) => {
+      setHeroCardHeight(entry.contentRect.height)
+    })
+    observer.observe(node)
+    setHeroCardHeight(node.getBoundingClientRect().height)
+
+    return () => observer.disconnect()
+  }, [user, badges.length, groupedOwnHistory.length, offersTab.length, needsTab.length])
+
   const createdEventIds = new Set(eventServices.map((event) => String(event.id)))
   const nowTs = Date.now()
   const createdUpcoming = eventServices.filter((event) => event.status === 'Active' && ((eventTs(event.scheduled_time) ?? nowTs + 1) >= nowTs))
@@ -289,19 +305,31 @@ const UserProfile = () => {
         overflow="hidden"
         p={{ base: 4, md: 6 }}>
 
-        {/* ── ProfileHero ───────────────────────────────────────────────────── */}
-        <ProfileHero
-          user={user}
-          mode="own"
-          featuredBadges={user.featured_badges_detail ?? []}
-          onEditClick={() => setDrawerOpen(true)}
-          onAvatarClick={() => setDrawerOpen(true)}
-          onBadgePickerOpen={() => setDrawerOpen(true)}
-          onFollowersClick={() => setFollowListModal('followers')}
-          onFollowingClick={() => setFollowListModal('following')}
-          completedExchanges={groupedOwnHistory.length}
-          activeServicesCount={offersTab.length + needsTab.length}
-        />
+        {/* ── Profile hero + schedule ───────────────────────────────────────── */}
+        <Grid templateColumns={{ base: '1fr', xl: 'minmax(0, 0.95fr) minmax(360px, 0.8fr)' }} gap={4} alignItems="stretch" mb={4}>
+          <Box ref={heroCardRef} h="100%">
+            <ProfileHero
+              user={user}
+              mode="own"
+              compact
+              featuredBadges={user.featured_badges_detail ?? []}
+              onEditClick={() => { setEditInitialTab('identity'); setDrawerOpen(true) }}
+              onAvatarClick={() => { setEditInitialTab('media'); setDrawerOpen(true) }}
+              onBadgePickerOpen={() => { setEditInitialTab('showcase'); setDrawerOpen(true) }}
+              onFollowersClick={() => setFollowListModal('followers')}
+              onFollowingClick={() => setFollowListModal('following')}
+              completedExchanges={groupedOwnHistory.length}
+              activeServicesCount={offersTab.length + needsTab.length}
+            />
+          </Box>
+          <Box
+            h={{ base: 'auto', xl: heroCardHeight ? `${heroCardHeight}px` : 'auto' }}
+            minH={0}
+            overflow="hidden"
+          >
+            <UpcomingSchedule />
+          </Box>
+        </Grid>
 
         {/* ── Balance warning ───────────────────────────────────────────────── */}
         {balanceWarn && (
@@ -311,10 +339,7 @@ const UserProfile = () => {
           </Box>
         )}
 
-        {/* ── Upcoming Schedule (own profile only) ─────────────────────── */}
-        <UpcomingSchedule />
-
-        {/* ── Main two-column layout ────────────────────────────────────────── */}
+        {/* ── Main activity layout ──────────────────────────────────────────── */}
         <Flex gap={5} align="flex-start" direction={{ base: 'column', lg: 'row' }} pb={6}>
 
           {/* Left: Services + Tabs */}
@@ -522,10 +547,6 @@ const UserProfile = () => {
                         <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb="3px">Member Since</Text>
                         <Text fontSize="13px" fontWeight={500} color={GRAY800}>{user.date_joined ? new Date(user.date_joined).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</Text>
                       </Box>
-                      <Box flex={1} minW="140px" bg={GRAY50} borderRadius="10px" border={`1px solid ${GRAY200}`} px={3} py="10px">
-                        <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb="3px">TimeBank Balance</Text>
-                        <Text fontSize="13px" fontWeight={700} color={balanceWarn ? RED : GREEN}>{balance}h</Text>
-                      </Box>
                     </Flex>
                   </Box>
 
@@ -608,52 +629,8 @@ const UserProfile = () => {
             </SectionCard>
           </Box>
 
-          {/* Right: sidebar cards */}
-          <Box w={{ base: '100%', lg: '272px' }} flexShrink={0}>
-            <SectionCard mb={4} label="Your Time">
-              <Box textAlign="center">
-                <Flex align="center" justify="center" gap={2} mb={1}>
-                  <FiClock size={22} color={balanceWarn ? RED : GREEN} />
-                  <Text fontSize="36px" fontWeight={800} color={balanceWarn ? RED : GREEN} lineHeight={1}>{balance}</Text>
-                </Flex>
-                <Text fontSize="12px" color={GRAY500} mb={3}>hours available</Text>
-                <Flex justify="center" gap={2}>
-                  <Box as="button" px="10px" py="6px" borderRadius="7px" fontSize="11px" fontWeight={600}
-                    style={{ background: GRAY100, color: GRAY600, cursor: 'pointer' }}
-                    onClick={() => navigate('/transaction-history')}>View activity</Box>
-                  <Box as="button" px="10px" py="6px" borderRadius="7px" fontSize="11px" fontWeight={600}
-                    style={{ background: GREEN_LT, color: GREEN, border: `1px solid ${GREEN}40`, cursor: 'pointer' }}
-                    onClick={() => navigate('/post-offer')}>Offer a service</Box>
-                </Flex>
-              </Box>
-            </SectionCard>
-
-            <SectionCard mb={4} label="Quick Actions">
-              <Stack gap={0}>
-                {([
-                  ['Post an Offer',     '/post-offer',           GREEN,  GREEN_LT],
-                  ['Post a Need',       '/post-need',            BLUE,   BLUE_LT],
-                  ['Create an Event',   '/post-event',           AMBER,  AMBER_LT],
-                  ['View Achievements', '/achievements',         AMBER,  AMBER_LT],
-                  ['Time Activity',     '/transaction-history',  TEAL,   '#E0F2F1'],
-                ] as [string, string, string, string][]).map(([label, path, color, bg]) => (
-                  <Flex key={path} as="button" px={3} py="11px" align="center" justify="space-between"
-                    borderBottom={`1px solid ${GRAY200}`} fontSize="13px" fontWeight={600} color={GRAY800}
-                    style={{ cursor: 'pointer', background: 'none', border: 'none', borderBottom: `1px solid ${GRAY200}`, textAlign: 'left', width: '100%', transition: 'background 0.1s' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = bg }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '' }}
-                    onClick={() => navigate(path)}>
-                    <Flex align="center" gap={3}>
-                      <Box w="8px" h="8px" borderRadius="full" flexShrink={0} style={{ background: color, boxShadow: `0 0 0 2px ${color}30` }} />
-                      {label}
-                    </Flex>
-                    <FiArrowUpRight size={13} color={color} />
-                  </Flex>
-                ))}
-              </Stack>
-            </SectionCard>
-
-            {badges.length > 0 && (
+          {badges.length > 0 && (
+            <Box w={{ base: '100%', lg: '272px' }} flexShrink={0}>
               <SectionCard mb={0} label="Achievements" right={
                 <Box as="button" fontSize="11px" fontWeight={700}
                   px="10px" py="4px" borderRadius="999px"
@@ -664,8 +641,8 @@ const UserProfile = () => {
                   {badges.slice(0, 5).map(b => <BadgeChip key={b.badge_type} badge={b} />)}
                 </Stack>
               </SectionCard>
-            )}
-          </Box>
+            </Box>
+          )}
         </Flex>
       </Box>
 
@@ -675,9 +652,9 @@ const UserProfile = () => {
         onClose={() => setDrawerOpen(false)}
         user={user}
         badgeProgress={badges}
+        initialTab={editInitialTab}
         onSaved={(updated) => {
           updateUserOptimistically(updated)
-          void refreshUser()
         }}
       />
 

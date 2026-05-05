@@ -10,9 +10,11 @@ type Props = {
   children: React.ReactNode
   mb?: number | string
   overflow?: string
+  h?: number | string | object
+  maxH?: number | string | object
 }
 
-const SectionCard = ({ label, icon, right, children, mb = 5, overflow = 'hidden' }: Props) => {
+const SectionCard = ({ label, icon, right, children, mb = 5, overflow = 'hidden', h, maxH }: Props) => {
   return (
     <Box
       borderRadius="20px"
@@ -21,6 +23,8 @@ const SectionCard = ({ label, icon, right, children, mb = 5, overflow = 'hidden'
       p={{ base: 4, md: 5 }}
       mb={mb}
       overflow={overflow}
+      h={h}
+      maxH={maxH}
     >
       {(label || right) && (
         <Flex align="center" justify="space-between" mb={label ? 4 : 0}>

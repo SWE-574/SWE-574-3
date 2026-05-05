@@ -98,6 +98,29 @@ describe('ProfileHero — own mode', () => {
     )
     expect(screen.getByText('View Time Activity →')).toBeInTheDocument()
   })
+
+  it('shows the join month and year instead of a zero-month duration', () => {
+    render(
+      <Wrapper>
+        <ProfileHero user={{ ...baseUser, date_joined: '2026-05-01T10:00:00Z' }} mode="own" />
+      </Wrapper>,
+    )
+    expect(screen.getAllByText('May 2026').length).toBeGreaterThan(0)
+    expect(screen.queryByText('0m')).toBeNull()
+  })
+
+  it('labels follower and following counts clearly', () => {
+    render(
+      <Wrapper>
+        <ProfileHero
+          user={{ ...baseUser, followers_count: 9, following_count: 8 }}
+          mode="own"
+        />
+      </Wrapper>,
+    )
+    expect(screen.getByText('Followers')).toBeInTheDocument()
+    expect(screen.getByText('Following')).toBeInTheDocument()
+  })
 })
 
 describe('ProfileHero — public mode', () => {

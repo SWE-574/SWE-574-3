@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
-  Box, Dialog, Drawer, Flex, Portal, Text, Input, Textarea, Spinner,
+  Box, Dialog, Flex, Portal, Text, Input, Textarea, Spinner,
 } from '@chakra-ui/react'
 import { FiX, FiUser, FiAlertCircle, FiTag, FiImage } from 'react-icons/fi'
 import { toast } from 'sonner'
@@ -12,6 +11,7 @@ import { getErrorMessage } from '@/services/api'
 import ImageCropModal from '@/components/ImageCropModal'
 import WikidataTagAutocomplete from '@/components/WikidataTagAutocomplete'
 import BadgeShowcase from './BadgeShowcase'
+import ProfileLocationSearch from './ProfileLocationSearch'
 import {
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   GREEN, GREEN_LT,
@@ -19,15 +19,6 @@ import {
   RED, RED_LT,
   WHITE,
 } from '@/theme/tokens'
-
-// ── Accent color options ────────────────────────────────────────────────────────
-const ACCENT_COLORS = [
-  { name: 'Indigo',  value: '#4338CA' },
-  { name: 'Purple',  value: '#7C3AED' },
-  { name: 'Blue',    value: '#1D4ED8' },
-  { name: 'Green',   value: '#059669' },
-  { name: 'Amber',   value: '#D97706' },
-]
 
 // ── Form field label ─────────────────────────────────────────────────────────────
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -75,32 +66,65 @@ interface FormState {
   show_history: boolean
 }
 
+type EditTab = 'identity' | 'media' | 'skills' | 'showcase' | 'privacy'
+
 // ── Props ────────────────────────────────────────────────────────────────────────
 type Props = {
   isOpen: boolean
   onClose: () => void
   user: User
   badgeProgress: BadgeProgress[]
+  initialTab?: EditTab
   onSaved: (updated: User) => void
 }
 
-// ── Common IANA timezone list ─────────────────────────────────────────────────
-const TIMEZONES = [
-  'UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-  'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Istanbul', 'Europe/Moscow',
-  'Asia/Dubai', 'Asia/Kolkata', 'Asia/Dhaka', 'Asia/Bangkok', 'Asia/Singapore',
-  'Asia/Tokyo', 'Asia/Seoul', 'Australia/Sydney', 'Pacific/Auckland',
+const EDIT_TABS: Array<{ key: EditTab; label: string }> = [
+  { key: 'identity', label: 'Identity' },
+  { key: 'media', label: 'Photos' },
+  { key: 'skills', label: 'Skills' },
+  { key: 'showcase', label: 'Showcase' },
+  { key: 'privacy', label: 'Privacy' },
 ]
 
-// ── Language options ──────────────────────────────────────────────────────────
-const LANGUAGES = [
-  { value: 'en', label: 'English' },
-  { value: 'tr', label: 'Türkçe' },
-]
+function EditTabButton({
+  tabKey,
+  label,
+  active,
+  onClick,
+}: {
+  tabKey: EditTab
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <Box
+      as="button"
+      id={`profile-edit-tab-${tabKey}`}
+      role="tab"
+      aria-selected={active}
+      aria-controls={`profile-edit-panel-${tabKey}`}
+      onClick={onClick}
+      px="12px"
+      py="8px"
+      borderRadius="999px"
+      fontSize="12px"
+      fontWeight={800}
+      flexShrink={0}
+      style={{
+        background: active ? GREEN : 'transparent',
+        color: active ? WHITE : GRAY600,
+        border: active ? 'none' : `1px solid ${GRAY200}`,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </Box>
+  )
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
-const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Props) => {
-  const navigate = useNavigate()
+const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 'identity', onSaved }: Props) => {
   const initialForm = useCallback((): FormState => ({
     first_name: user.first_name || '',
     last_name: user.last_name || '',
@@ -114,9 +138,9 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
   const [form, setForm] = useState<FormState>(initialForm)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [bannerPreview, setBannerPreview] = useState<string | null>(null)
-  const [accentColor, setAccentColor] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [featuredBadgesError, setFeaturedBadgesError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<EditTab>(initialTab)
 
   // Crop modal
   const [cropSrc, setCropSrc] = useState<string | null>(null)
@@ -135,8 +159,9 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
       setBannerPreview(null)
       setFeaturedBadgesError(null)
       setConfirmDiscard(false)
+      setActiveTab(initialTab)
     }
-  }, [isOpen, initialForm])
+  }, [isOpen, initialForm, initialTab])
 
   const dirty = (() => {
     if (avatarPreview) return true
@@ -252,6 +277,7 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
       const raw = err as { response?: { data?: { featured_badges?: string[] } } }
       const badgeErrors = raw?.response?.data?.featured_badges
       if (badgeErrors && badgeErrors.length > 0) {
+        setActiveTab('showcase')
         setFeaturedBadgesError(badgeErrors.join(' '))
       } else {
         toast.error(getErrorMessage(err))
@@ -278,19 +304,6 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
         style={{ display: 'none' }}
         onChange={handleBannerFileChange}
       />
-
-      {/* Image crop modal */}
-      {cropSrc && (
-        <ImageCropModal
-          isOpen
-          imageSrc={cropSrc}
-          aspect={cropMode === 'banner' ? 3 : 1}
-          cropShape={cropMode === 'banner' ? 'rect' : 'round'}
-          title={cropMode === 'banner' ? 'Crop cover photo' : 'Crop avatar'}
-          onConfirm={handleCropConfirm}
-          onCancel={() => setCropSrc(null)}
-        />
-      )}
 
       {/* Discard confirmation dialog — uses Chakra Dialog for focus trap, ESC, and ARIA */}
       <Dialog.Root
@@ -362,41 +375,69 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
         </Portal>
       </Dialog.Root>
 
-      {/* Chakra v3 Drawer — provides focus trap, ESC dismissal, and ARIA roles (spec §5.4) */}
-      {/*
-        CRITICAL 2 fix: All close paths (ESC, backdrop click) funnel through onOpenChange.
-        The X button is a plain button (not Drawer.CloseTrigger) with onClick={handleClose},
-        so there is exactly ONE call site for handleClose regardless of how the drawer closes.
-      */}
-      <Drawer.Root
+      <Dialog.Root
         open={isOpen}
         onOpenChange={(e) => { if (!e.open) handleClose() }}
-        placement="end"
-        size="lg"
-        closeOnInteractOutside={false}
+        modal
       >
         <Portal>
-          <Drawer.Backdrop style={{ backdropFilter: 'blur(2px)' }} />
-          <Drawer.Positioner>
-            <Drawer.Content
+          <Dialog.Backdrop style={{ position: 'fixed', inset: 0, backdropFilter: 'blur(3px)', zIndex: 2400 }} />
+          <Dialog.Positioner
+            style={{
+              position: 'fixed',
+              inset: 0,
+              width: '100vw',
+              height: '100dvh',
+              zIndex: 2401,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '24px',
+              overflow: 'hidden',
+              overscrollBehavior: 'contain',
+            }}
+          >
+            <Dialog.Content
               bg={WHITE}
-              boxShadow="-8px 0 40px rgba(0,0,0,0.18)"
-              style={{ display: 'flex', flexDirection: 'column' }}
-              w={{ base: '100%', md: '640px' }}
-              maxW={{ base: '100%', md: '640px' }}
+              boxShadow="0 24px 80px rgba(0,0,0,0.24)"
+              style={{ display: 'flex', flexDirection: 'column', position: 'relative' }}
+              w={{ base: 'calc(100% - 24px)', md: '760px' }}
+              maxW="760px"
+              maxH="calc(100dvh - 48px)"
+              borderRadius="20px"
+              overflow="hidden"
+              mx="auto"
             >
-              {/* Drawer header */}
-              <Drawer.Header
+              {/* Keep crop modal inside the active edit dialog tree so Chakra's modal inert layer does not block clicks. */}
+              {cropSrc && (
+                <ImageCropModal
+                  isOpen
+                  imageSrc={cropSrc}
+                  aspect={cropMode === 'banner' ? 3 : 1}
+                  cropShape={cropMode === 'banner' ? 'rect' : 'round'}
+                  title={cropMode === 'banner' ? 'Crop cover photo' : 'Crop avatar'}
+                  onConfirm={handleCropConfirm}
+                  onCancel={() => setCropSrc(null)}
+                />
+              )}
+
+              <Dialog.Header
                 px={5}
                 py={4}
                 borderBottom={`1px solid ${GRAY200}`}
                 flexShrink={0}
+                bg={WHITE}
+                zIndex={2}
               >
                 <Flex align="center" justify="space-between">
-                  <Text fontSize="16px" fontWeight={800} color={GRAY800}>
-                    Edit profile
-                  </Text>
-                  {/* Plain button — NOT Drawer.CloseTrigger to avoid double-fire with onOpenChange */}
+                  <Box>
+                    <Dialog.Title fontSize="18px" fontWeight={900} color={GRAY800}>
+                      Edit profile
+                    </Dialog.Title>
+                    <Text fontSize="12px" color={GRAY500} mt="2px">
+                      Update the parts of your profile that are saved by the app.
+                    </Text>
+                  </Box>
                   <Box
                     as="button"
                     onClick={handleClose}
@@ -408,13 +449,38 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
                     <FiX size={18} />
                   </Box>
                 </Flex>
-              </Drawer.Header>
+              </Dialog.Header>
+
+              <Box
+                role="tablist"
+                aria-label="Profile edit sections"
+                px={5}
+                py={3}
+                borderBottom={`1px solid ${GRAY200}`}
+                flexShrink={0}
+                bg={WHITE}
+                zIndex={2}
+                style={{ overflowX: 'auto', scrollbarWidth: 'none' }}
+              >
+                <Flex gap={2} style={{ width: 'max-content' }}>
+                  {EDIT_TABS.map((tab) => (
+                    <EditTabButton
+                      key={tab.key}
+                      tabKey={tab.key}
+                      label={tab.label}
+                      active={activeTab === tab.key}
+                      onClick={() => setActiveTab(tab.key)}
+                    />
+                  ))}
+                </Flex>
+              </Box>
 
               {/* Scrollable body */}
-              <Drawer.Body flex={1} overflowY="auto" px={5} py={5}>
+              <Dialog.Body flex={1} minH={0} overflowY="auto" px={5} py={5}>
 
           {/* ── 1. Identity ──────────────────────────────────────────────── */}
-          <DrawerSection title="Identity">
+          <Box role="tabpanel" id="profile-edit-panel-identity" aria-labelledby="profile-edit-tab-identity" hidden={activeTab !== 'identity'}>
+          {activeTab === 'identity' && <DrawerSection title="Identity">
             <Flex gap={3} mb={3} direction={{ base: 'column', sm: 'row' }}>
               <Box flex={1}>
                 <FieldLabel>First name</FieldLabel>
@@ -442,7 +508,7 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
               </Box>
             </Flex>
             <Box mb={3}>
-              <FieldLabel>Username</FieldLabel>
+              <FieldLabel>Email username</FieldLabel>
               <Input
                 value={user.email.split('@')[0]}
                 readOnly
@@ -453,69 +519,24 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
                 color={GRAY500}
                 aria-label="Username (read only)"
               />
-              <Text fontSize="11px" color={GRAY400} mt="4px">Username cannot be changed.</Text>
+              <Text fontSize="11px" color={GRAY400} mt="4px">Email and username are managed by account settings.</Text>
             </Box>
             <Box mb={3}>
-              <FieldLabel>City / Location</FieldLabel>
-              <Input
+              <ProfileLocationSearch
                 value={form.location}
-                onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-                placeholder="City, Country"
-                bg={GRAY50}
-                borderColor={GRAY200}
-                borderRadius="8px"
-                fontSize="13px"
-                aria-label="City or location"
+                onChange={(location) => setForm((f) => ({ ...f, location }))}
+                id="profile-edit-location"
+                label="City / Location"
+                placeholder="Search city, district, or address"
+                helperText="Choose a Mapbox result so your public location stays consistent."
               />
             </Box>
-            <Flex gap={3} mb={3} direction={{ base: 'column', sm: 'row' }}>
-              <Box flex={1}>
-                {/* TODO: wire timezone to backend once user.timezone field is available */}
-                <FieldLabel>Timezone</FieldLabel>
-                <Box
-                  as="select"
-                  defaultValue="UTC"
-                  bg={GRAY50}
-                  borderColor={GRAY200}
-                  borderRadius="8px"
-                  fontSize="13px"
-                  px="10px"
-                  h="40px"
-                  w="100%"
-                  aria-label="Timezone"
-                  style={{ border: `1px solid ${GRAY200}`, color: GRAY700 }}
-                >
-                  {TIMEZONES.map((tz) => (
-                    <option key={tz} value={tz}>{tz}</option>
-                  ))}
-                </Box>
-              </Box>
-              <Box flex={1}>
-                {/* TODO: wire language to backend once user.language field is available */}
-                <FieldLabel>Language</FieldLabel>
-                <Box
-                  as="select"
-                  defaultValue="en"
-                  bg={GRAY50}
-                  borderColor={GRAY200}
-                  borderRadius="8px"
-                  fontSize="13px"
-                  px="10px"
-                  h="40px"
-                  w="100%"
-                  aria-label="Language"
-                  style={{ border: `1px solid ${GRAY200}`, color: GRAY700 }}
-                >
-                  {LANGUAGES.map((l) => (
-                    <option key={l.value} value={l.value}>{l.label}</option>
-                  ))}
-                </Box>
-              </Box>
-            </Flex>
-          </DrawerSection>
+          </DrawerSection>}
+          </Box>
 
           {/* ── 2. About you ─────────────────────────────────────────────── */}
-          <DrawerSection title="About you">
+          <Box role="tabpanel" id="profile-edit-panel-identity-about" hidden={activeTab !== 'identity'}>
+          {activeTab === 'identity' && <DrawerSection title="About you">
             <Box mb={3}>
               <Flex justify="space-between" mb="5px">
                 <FieldLabel>Bio</FieldLabel>
@@ -538,10 +559,12 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
               />
               <Text id="bio-counter" srOnly>{form.bio.length} of 280 characters used</Text>
             </Box>
-          </DrawerSection>
+          </DrawerSection>}
+          </Box>
 
           {/* ── 3. Avatar & accent ───────────────────────────────────────── */}
-          <DrawerSection title="Avatar & Accent">
+          <Box role="tabpanel" id="profile-edit-panel-media" aria-labelledby="profile-edit-tab-media" hidden={activeTab !== 'media'}>
+          {activeTab === 'media' && <DrawerSection title="Profile photos">
             <Flex align="center" gap={4} mb={4}>
               <Box
                 w="64px"
@@ -618,38 +641,12 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
               <Text fontSize="11px" color={GRAY500} mt="6px">JPG or PNG, recommended 3:1 ratio</Text>
             </Box>
 
-            {/* Accent color picker — TODO: persist to backend once field is added */}
-            <Box>
-              <FieldLabel>Accent color (UI preview only)</FieldLabel>
-              <Flex gap={2} flexWrap="wrap">
-                {ACCENT_COLORS.map((ac) => (
-                  <Box
-                    key={ac.value}
-                    as="button"
-                    w="32px"
-                    h="32px"
-                    borderRadius="full"
-                    onClick={() => setAccentColor(ac.value)}
-                    style={{
-                      background: ac.value,
-                      border: accentColor === ac.value ? `3px solid ${GRAY800}` : `2px solid ${GRAY200}`,
-                      cursor: 'pointer',
-                      transition: 'border 0.1s',
-                    }}
-                    aria-label={ac.name}
-                    title={ac.name}
-                  />
-                ))}
-              </Flex>
-              <Text fontSize="11px" color={GRAY400} mt="6px">
-                {/* TODO: wire accent color to backend when field is available */}
-                Accent color is currently cosmetic only.
-              </Text>
-            </Box>
-          </DrawerSection>
+          </DrawerSection>}
+          </Box>
 
           {/* ── 4. Skills & interests ────────────────────────────────────── */}
-          <DrawerSection title="Skills & Interests">
+          <Box role="tabpanel" id="profile-edit-panel-skills" aria-labelledby="profile-edit-tab-skills" hidden={activeTab !== 'skills'}>
+          {activeTab === 'skills' && <DrawerSection title="Skills & Interests">
             {form.skills.length > 0 && (
               <Flex wrap="wrap" gap="6px" mb="10px">
                 {form.skills.map((tag) => (
@@ -691,10 +688,12 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
               accent={GREEN}
             />
             <Text fontSize="11px" color={GRAY400} mt="4px">{form.skills.length}/15 tags</Text>
-          </DrawerSection>
+          </DrawerSection>}
+          </Box>
 
           {/* ── 5. Showcase badges ───────────────────────────────────────── */}
-          <DrawerSection title="Showcase badges">
+          <Box role="tabpanel" id="profile-edit-panel-showcase" aria-labelledby="profile-edit-tab-showcase" hidden={activeTab !== 'showcase'}>
+          {activeTab === 'showcase' && <DrawerSection title="Showcase badges">
             {featuredBadgesError && (
               <Flex
                 align="center"
@@ -716,10 +715,12 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
               selected={form.featured_badges}
               onChange={(ids) => setForm((f) => ({ ...f, featured_badges: ids }))}
             />
-          </DrawerSection>
+          </DrawerSection>}
+          </Box>
 
           {/* ── 6. Account & privacy ─────────────────────────────────────── */}
-          <DrawerSection title="Account & Privacy">
+          <Box role="tabpanel" id="profile-edit-panel-privacy" aria-labelledby="profile-edit-tab-privacy" hidden={activeTab !== 'privacy'}>
+          {activeTab === 'privacy' && <DrawerSection title="Privacy">
             {/* Show history toggle */}
             <Flex
               align="center"
@@ -751,28 +752,12 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
               </Box>
             </Flex>
 
-            {/* Account links */}
-            <Flex direction="column" gap={2}>
-              <a
-                href="/change-email"
-                style={{ fontSize: '13px', fontWeight: 600, color: GREEN, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-              >
-                Change email address →
-              </a>
-              {/* Change password: navigates to own profile settings tab where password change lives */}
-              <Box
-                as="button"
-                style={{ fontSize: '13px', fontWeight: 600, color: GREEN, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: 0, textAlign: 'left' }}
-                onClick={() => { onClose(); navigate('/profile') }}
-              >
-                Change password →
-              </Box>
-            </Flex>
-          </DrawerSection>
-              </Drawer.Body>
+          </DrawerSection>}
+          </Box>
+              </Dialog.Body>
 
               {/* Sticky footer */}
-              <Drawer.Footer
+              <Dialog.Footer
                 px={5}
                 py={4}
                 borderTop={`1px solid ${GRAY200}`}
@@ -817,11 +802,11 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, onSaved }: Pr
                     Save changes
                   </Box>
                 </Flex>
-              </Drawer.Footer>
-            </Drawer.Content>
-          </Drawer.Positioner>
+              </Dialog.Footer>
+            </Dialog.Content>
+          </Dialog.Positioner>
         </Portal>
-      </Drawer.Root>
+      </Dialog.Root>
     </>
   )
 }

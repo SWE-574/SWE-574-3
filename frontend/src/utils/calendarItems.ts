@@ -167,17 +167,6 @@ export function formatItemRange(item: CalendarItem): string {
 }
 
 export function itemLinkTo(item: CalendarItem): string {
-  switch (item.link.type) {
-    case 'service':
-      return `/services/${item.link.id}`
-    case 'event':
-      // Events are services too — backend emits 'event' for Event-type services
-      // (see MeCalendarView._serialize_interval, views.py:1383).
-      // Both share the same detail route.
-      return `/services/${item.link.id}`
-    case 'chat':
-      return `/messages/${item.link.id}`
-    default:
-      return `/services/${item.link.id}`
-  }
+  const serviceId = item.service_id ?? item.link.id
+  return `/service-detail/${serviceId}`
 }

@@ -1,6 +1,6 @@
 import React from 'react'
-import { Box, Flex, Grid, Text, useBreakpointValue } from '@chakra-ui/react'
-import { FiCamera, FiClock, FiEdit2, FiFlag, FiMessageSquare, FiStar } from 'react-icons/fi'
+import { Box, Flex, Grid, Text } from '@chakra-ui/react'
+import { FiCamera, FiClock, FiEdit2, FiFlag, FiMapPin, FiMessageSquare, FiStar } from 'react-icons/fi'
 import { Link } from 'react-router-dom'
 import type { User, BadgeDetail } from '@/types'
 import HeroSurface from '@/components/ui/HeroSurface'
@@ -28,13 +28,20 @@ const formatJoinDate = (d?: string) => {
   return new Date(d).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
 }
 
-const formatMemberSince = (d?: string) => {
-  if (!d) return '—'
-  const date = new Date(d)
-  const years = Math.floor((Date.now() - date.getTime()) / (365.25 * 24 * 3600 * 1000))
-  const months = Math.floor(((Date.now() - date.getTime()) % (365.25 * 24 * 3600 * 1000)) / (30.44 * 24 * 3600 * 1000))
-  if (years > 0) return `${years}y ${months}m`
-  return `${months}m`
+const formatHeroLocation = (location?: string) => {
+  if (!location) return null
+  const slashParts = location.split('/').map((part) => part.trim()).filter(Boolean)
+  if (slashParts.length >= 2) return `${slashParts[0]} / ${slashParts[1]}`
+
+  const commaParts = location
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part && !['Türkiye', 'Turkey'].includes(part))
+  if (commaParts.length >= 2) {
+    return `${commaParts[1]} / ${commaParts[0]}`
+  }
+
+  return location
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────────
@@ -43,6 +50,7 @@ type Mode = 'own' | 'public'
 type Props = {
   user: User
   mode: Mode
+  compact?: boolean
   featuredBadges?: BadgeDetail[]
   onEditClick?: () => void
   onMessageClick?: () => void
@@ -62,26 +70,77 @@ type Props = {
 // ── Stat tile ────────────────────────────────────────────────────────────────────
 function StatTile({ label, value, sub }: { label: string; value: React.ReactNode; sub?: React.ReactNode }) {
   return (
-    <Box p={3} borderRadius="14px" style={{ background: 'rgba(255,255,255,0.1)' }}>
+    <Box
+      py={2}
+      style={{
+        borderBottom: '1px solid rgba(255,255,255,0.1)',
+      }}
+    >
       <Text
-        fontSize="11px"
+        fontSize="10px"
         fontWeight={800}
         letterSpacing="0.12em"
         textTransform="uppercase"
-        mb={1}
+        mb="4px"
         style={{ color: 'rgba(255,255,255,0.65)' }}
       >
         {label}
       </Text>
-      <Text fontSize="22px" fontWeight={900} lineHeight={1} style={{ color: WHITE }}>
+      <Box fontSize="20px" fontWeight={900} lineHeight={1.05} style={{ color: WHITE }}>
         {value}
-      </Text>
+      </Box>
       {sub && (
         <Text fontSize="11px" fontWeight={600} mt="3px" style={{ color: 'rgba(255,255,255,0.6)' }}>
           {sub}
         </Text>
       )}
     </Box>
+  )
+}
+
+function CommunityStatValue({
+  followers,
+  following,
+  onFollowersClick,
+  onFollowingClick,
+}: {
+  followers?: number
+  following?: number
+  onFollowersClick?: () => void
+  onFollowingClick?: () => void
+}) {
+  if (followers == null && following == null) return '—'
+
+  const items = [
+    { label: 'Followers', value: followers ?? 0, onClick: onFollowersClick },
+    { label: 'Following', value: following ?? 0, onClick: onFollowingClick },
+  ]
+
+  return (
+    <Flex gap={2} align="center" wrap="wrap">
+      {items.map((item) => (
+        <Box
+          key={item.label}
+          as="button"
+          onClick={item.onClick}
+          textAlign="left"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: WHITE,
+            cursor: item.onClick ? 'pointer' : 'default',
+            padding: 0,
+          }}
+        >
+          <Text as="span" fontSize="15px" fontWeight={900} lineHeight={1} mr="3px" style={{ color: WHITE }}>
+            {item.value}
+          </Text>
+          <Text as="span" fontSize="9px" fontWeight={800} lineHeight={1.2} textTransform="uppercase" letterSpacing="0.06em" style={{ color: 'rgba(255,255,255,0.66)' }}>
+            {item.label}
+          </Text>
+        </Box>
+      ))}
+    </Flex>
   )
 }
 
@@ -103,11 +162,11 @@ function HeroBtn({
       onClick={onClick}
       display="inline-flex"
       alignItems="center"
-      gap="6px"
-      px="14px"
-      py="8px"
+      gap="5px"
+      px="12px"
+      py="6px"
       borderRadius="999px"
-      fontSize="12px"
+      fontSize="11px"
       fontWeight={700}
       style={{
         background: primary ? WHITE : 'rgba(255,255,255,0.2)',
@@ -128,6 +187,7 @@ function HeroBtn({
 const ProfileHero = ({
   user,
   mode,
+  compact = false,
   featuredBadges = [],
   onEditClick,
   onMessageClick,
@@ -145,31 +205,25 @@ const ProfileHero = ({
   const initials = getInitials(user.first_name, user.last_name, user.email)
   const bg = avatarBg(displayName)
   const joinDate = formatJoinDate(user.date_joined)
-  const memberSince = formatMemberSince(user.date_joined)
+  const memberSince = joinDate ?? '—'
   const followers = followStats?.followers ?? user.followers_count
   const following = followStats?.following ?? user.following_count
+  const heroLocation = formatHeroLocation(user.location)
 
-  // Bio truncation: single node, responsive via useBreakpointValue (IMPORTANT 1 — a11y fix)
-  // SSR/hydration: ?? 140 keeps desktop default until breakpoint resolves
-  const bioMax = useBreakpointValue({ base: 80, md: 140 }) ?? 140
-  const bio = user.bio
-    ? user.bio.length > bioMax
-      ? `${user.bio.slice(0, bioMax)}…`
-      : user.bio
-    : null
-
-  // Identity meta strip items — no username/handle per user direction
-  const metaParts = [
-    joinDate ? `Joined ${joinDate}` : null,
-    user.location || null,
-  ].filter(Boolean)
+  const bio = user.bio?.trim() || null
 
   return (
-    <Box mb={5}>
+    <Box
+      mb={compact ? 0 : 4}
+      borderRadius={user.banner_url ? '16px' : '22px'}
+      style={{
+        boxShadow: '0 20px 52px rgba(15, 23, 42, 0.24), 0 2px 10px rgba(15, 23, 42, 0.08)',
+      }}
+    >
       {/* ── Cover photo (banner_url) ──────────────────────────────────────── */}
       {user.banner_url && (
         <Box
-          h="130px"
+          h={compact ? { base: '68px', md: '76px' } : { base: '88px', md: '108px' }}
           borderRadius="16px 16px 0 0"
           overflow="hidden"
           style={{ marginBottom: '-1px' }}
@@ -184,19 +238,36 @@ const ProfileHero = ({
     <HeroSurface
       gradient={HERO_GRADIENT}
       borderRadius={user.banner_url ? '0 0 16px 16px' : undefined}
+      boxShadow="none"
+      p={compact ? { base: 3.5, md: 4 } : { base: 4, md: 5 }}
     >
+      <Box
+        position="absolute"
+        top={{ base: '12px', md: '14px' }}
+        right={{ base: '12px', md: '16px' }}
+        style={{ zIndex: 2 }}
+      >
+        <BadgeShowcase
+          variant="compact"
+          mode={mode}
+          badges={featuredBadges}
+          onPickerOpenRequest={onBadgePickerOpen}
+          onHeroSurface
+        />
+      </Box>
+
       <Grid
-        templateColumns={{ base: '1fr', md: '1.4fr 1fr' }}
-        gap={{ base: 5, md: 6 }}
+        templateColumns={compact ? '1fr' : { base: '1fr', md: '1.35fr 0.95fr' }}
+        gap={compact ? 3 : { base: 4, md: 5 }}
         alignItems="start"
       >
         {/* ── Left column: identity ────────────────────────────────────────── */}
         <Box>
           {/* Avatar */}
-          <Box position="relative" display="inline-block" mb={3}>
+          <Box position="relative" display="inline-block" mb={compact ? 2 : 2}>
             <Box
-              w={{ base: '72px', md: '96px' }}
-              h={{ base: '72px', md: '96px' }}
+              w={compact ? { base: '78px', md: '90px' } : { base: '70px', md: '84px' }}
+              h={compact ? { base: '78px', md: '90px' } : { base: '70px', md: '84px' }}
               borderRadius="full"
               overflow="hidden"
               style={{
@@ -206,9 +277,9 @@ const ProfileHero = ({
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: WHITE,
-                fontSize: '28px',
+                fontSize: compact ? '30px' : '26px',
                 fontWeight: 700,
-                boxShadow: '0 4px 16px rgba(0,0,0,0.22)',
+                boxShadow: '0 12px 30px rgba(0,0,0,0.24)',
                 flexShrink: 0,
               }}
             >
@@ -219,7 +290,7 @@ const ProfileHero = ({
                   style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                 />
               ) : (
-                <Text fontSize={{ base: '24px', md: '32px' }} fontWeight={700} style={{ color: WHITE }}>
+                <Text fontSize={compact ? { base: '28px', md: '32px' } : { base: '22px', md: '26px' }} fontWeight={700} style={{ color: WHITE }}>
                   {initials}
                 </Text>
               )}
@@ -230,8 +301,8 @@ const ProfileHero = ({
                 position="absolute"
                 bottom={0}
                 right={0}
-                w="28px"
-                h="28px"
+                w="32px"
+                h="32px"
                 borderRadius="full"
                 display="flex"
                 alignItems="center"
@@ -245,35 +316,38 @@ const ProfileHero = ({
                   color: GREEN,
                 }}
               >
-                <FiCamera size={13} />
+                <FiCamera size={15} />
               </Box>
             )}
           </Box>
 
           {/* Name */}
           <Text
-            fontSize={{ base: '40px', md: '52px' }}
+            fontSize={compact ? { base: '32px', md: '38px' } : { base: '34px', md: '40px' }}
             fontWeight={900}
             lineHeight={1}
-            mb={2}
+            mb={1.5}
             style={{ color: WHITE }}
           >
             {displayName}
           </Text>
 
-          {/* Identity meta strip */}
-          {metaParts.length > 0 && (
-            <Text fontSize="12px" fontWeight={600} mb={2} style={{ color: 'rgba(255,255,255,0.7)' }}>
-              {metaParts.join(' · ')}
-            </Text>
+          {/* Location meta strip */}
+          {heroLocation && (
+            <Flex align="center" gap="5px" mb={compact ? 1.5 : 2} style={{ color: 'rgba(255,255,255,0.72)' }}>
+              <FiMapPin size={12} />
+              <Text fontSize="11px" fontWeight={600}>
+                {heroLocation}
+              </Text>
+            </Flex>
           )}
 
           {/* Bio — single DOM node via useBreakpointValue (eliminates duplicate SR read) */}
           {bio && (
             <Text
               fontSize="13px"
-              lineHeight={1.55}
-              mb={4}
+              lineHeight={compact ? 1.35 : 1.45}
+              mb={compact ? 2 : 3}
               style={{ color: 'rgba(255,255,255,0.82)' }}
             >
               {bio}
@@ -299,14 +373,14 @@ const ProfileHero = ({
           </Flex>
         </Box>
 
-        {/* ── Right column: stats glass card ───────────────────────────────── */}
+        {/* ── Stats strip ───────────────────────────────── */}
         <Box
-          borderRadius="16px"
-          p={4}
+          borderRadius="18px"
+          p={compact ? 3 : 3}
           style={{
-            background: 'rgba(255,255,255,0.15)',
-            border: '1px solid rgba(255,255,255,0.25)',
-            backdropFilter: 'blur(8px)',
+            background: 'linear-gradient(135deg, rgba(255,255,255,0.11), rgba(255,255,255,0.04))',
+            border: '1px solid rgba(255,255,255,0.12)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
           }}
         >
           <EyebrowLabel tone="light" icon={<FiStar size={14} />}>
@@ -314,9 +388,19 @@ const ProfileHero = ({
           </EyebrowLabel>
 
           {/* Stat grid */}
-          <Grid templateColumns="1fr 1fr" gap={2} mt={3} mb={3}>
+          <Grid
+            templateColumns={compact ? { base: '1fr 1fr', md: 'repeat(3, 1fr)' } : '1fr 1fr'}
+            columnGap={compact ? 5 : 4}
+            rowGap={0}
+            mt={compact ? 1 : 1.5}
+            mb={compact ? 2 : 2.5}
+          >
             {mode === 'own' ? (
               <>
+                <StatTile
+                  label="Karma"
+                  value={user.karma_score != null ? user.karma_score : '—'}
+                />
                 <StatTile
                   label="Exchanges"
                   value={completedExchanges != null ? completedExchanges : '—'}
@@ -327,32 +411,7 @@ const ProfileHero = ({
                 />
                 <StatTile
                   label="Community"
-                  value={
-                    followers != null || following != null ? (
-                      <Flex align="center" gap="5px" style={{ flexWrap: 'nowrap' }}>
-                        <Box
-                          as="button"
-                          style={{ background: 'none', border: 'none', cursor: onFollowersClick ? 'pointer' : 'default', padding: 0, color: WHITE, fontWeight: 900, fontSize: '20px' }}
-                          onClick={onFollowersClick}
-                        >
-                          {followers ?? 0}
-                        </Box>
-                        <Text fontSize="13px" style={{ color: 'rgba(255,255,255,0.6)' }}>·</Text>
-                        <Box
-                          as="button"
-                          style={{ background: 'none', border: 'none', cursor: onFollowingClick ? 'pointer' : 'default', padding: 0, color: WHITE, fontWeight: 900, fontSize: '20px' }}
-                          onClick={onFollowingClick}
-                        >
-                          {following ?? 0}
-                        </Box>
-                      </Flex>
-                    ) : '—'
-                  }
-                  sub={
-                    followers != null && following != null
-                      ? `${followers ?? 0} followers · ${following ?? 0} following`
-                      : undefined
-                  }
+                  value={<CommunityStatValue followers={followers} following={following} onFollowersClick={onFollowersClick} onFollowingClick={onFollowingClick} />}
                 />
                 <StatTile label="Member since" value={memberSince} />
               </>
@@ -361,6 +420,10 @@ const ProfileHero = ({
                 <StatTile
                   label="Exchanges"
                   value={completedExchanges != null ? completedExchanges : '—'}
+                />
+                <StatTile
+                  label="Karma"
+                  value={user.karma_score != null ? user.karma_score : '—'}
                 />
                 <StatTile
                   label="Reputation"
@@ -377,32 +440,7 @@ const ProfileHero = ({
                 />
                 <StatTile
                   label="Community"
-                  value={
-                    followers != null || following != null ? (
-                      <Flex align="center" gap="5px" style={{ flexWrap: 'nowrap' }}>
-                        <Box
-                          as="button"
-                          style={{ background: 'none', border: 'none', cursor: onFollowersClick ? 'pointer' : 'default', padding: 0, color: WHITE, fontWeight: 900, fontSize: '20px' }}
-                          onClick={onFollowersClick}
-                        >
-                          {followers ?? 0}
-                        </Box>
-                        <Text fontSize="13px" style={{ color: 'rgba(255,255,255,0.6)' }}>·</Text>
-                        <Box
-                          as="button"
-                          style={{ background: 'none', border: 'none', cursor: onFollowingClick ? 'pointer' : 'default', padding: 0, color: WHITE, fontWeight: 900, fontSize: '20px' }}
-                          onClick={onFollowingClick}
-                        >
-                          {following ?? 0}
-                        </Box>
-                      </Flex>
-                    ) : '—'
-                  }
-                  sub={
-                    followers != null && following != null
-                      ? `${followers ?? 0} followers · ${following ?? 0} following`
-                      : undefined
-                  }
+                  value={<CommunityStatValue followers={followers} following={following} onFollowersClick={onFollowersClick} onFollowingClick={onFollowingClick} />}
                 />
                 <StatTile label="Member since" value={memberSince} />
               </>
@@ -410,7 +448,7 @@ const ProfileHero = ({
           </Grid>
 
           {/* View Time Activity link */}
-          <Box mb={3}>
+          <Box mb={2}>
             <Link
               to="/transaction-history"
               style={{ textDecoration: 'none' }}
@@ -438,19 +476,6 @@ const ProfileHero = ({
             </Link>
           </Box>
 
-          {/* Badge showcase row */}
-          <Box borderTop="1px solid rgba(255,255,255,0.2)" pt={3}>
-            <Text fontSize="10px" fontWeight={700} textTransform="uppercase" letterSpacing="0.12em" mb={2} style={{ color: 'rgba(255,255,255,0.6)' }}>
-              Showcase
-            </Text>
-            <BadgeShowcase
-              variant="compact"
-              mode={mode}
-              badges={featuredBadges}
-              onPickerOpenRequest={onBadgePickerOpen}
-              onHeroSurface
-            />
-          </Box>
         </Box>
       </Grid>
     </HeroSurface>

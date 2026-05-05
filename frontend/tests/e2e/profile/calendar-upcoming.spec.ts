@@ -22,7 +22,7 @@ test.describe('UpcomingSchedule — calendar view (#446)', () => {
     ).toBeVisible({ timeout: 20_000 })
   })
 
-  test('empty calendar state renders the empty message', async ({ page }) => {
+  test('empty calendar state renders the empty message', async () => {
     /**
      * This test checks the empty state. If elif has calendar items seeded,
      * the empty state won't show — skip it with a note.
@@ -166,7 +166,7 @@ test.describe('UpcomingSchedule — calendar view (#446)', () => {
     await expect(monthLabel).toBeVisible()
   })
 
-  test('conflict overlay renders when two items overlap (unit-level fallback)', async ({ page }) => {
+  test('conflict overlay renders when two items overlap (unit-level fallback)', async () => {
     /**
      * Testing conflict overlay in E2E requires seeding two overlapping
      * calendar items. This is not trivially done with the existing demo data.

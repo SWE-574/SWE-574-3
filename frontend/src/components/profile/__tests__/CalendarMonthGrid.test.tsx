@@ -125,6 +125,27 @@ describe('CalendarMonthGrid', () => {
     expect(onSelectDate.mock.calls[0][0]).toBeInstanceOf(Date)
   })
 
+  it('keeps the selected day active when clicking it again', () => {
+    const onSelectDate = vi.fn()
+    const selectedDate = new Date(2026, 4, 15)
+    render(
+      <Wrapper>
+        <CalendarMonthGrid
+          items={[]}
+          conflicts={[]}
+          selectedDate={selectedDate}
+          onSelectDate={onSelectDate}
+          initialMonth={MAY_2026}
+        />
+      </Wrapper>,
+    )
+
+    fireEvent.click(screen.getByLabelText('15 May 2026'))
+
+    expect(onSelectDate).toHaveBeenCalledTimes(1)
+    expect(onSelectDate.mock.calls[0][0]).toBeInstanceOf(Date)
+  })
+
   it('renders the Today button and clicking it goes to current month', () => {
     render(
       <Wrapper>
@@ -261,7 +282,7 @@ describe('CalendarMonthGrid', () => {
     expect(document.activeElement).toBe(may19)
   })
 
-  it('renders conflict amber dot when conflicts are present', () => {
+  it('does not add an extra dot for conflicts', () => {
     const item = makeItem({ id: 'item-a', start: '2026-05-20T10:00:00+00:00' })
     const item2 = makeItem({ id: 'item-b', start: '2026-05-20T09:30:00+00:00', accent_token: 'BLUE' })
     const conflict: CalendarConflict = { item_id: 'item-a', overlaps_with: ['item-b'] }
@@ -276,9 +297,7 @@ describe('CalendarMonthGrid', () => {
         />
       </Wrapper>,
     )
-    // The 20th cell should have an amber dot (conflict indicator)
     const may20 = screen.getByLabelText('20 May 2026')
-    // It should have children (dots)
-    expect(may20.childElementCount).toBeGreaterThan(0)
+    expect(may20.querySelectorAll('[data-testid="calendar-item-dot"]')).toHaveLength(2)
   })
 })

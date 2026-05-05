@@ -48,7 +48,7 @@ describe('SectionCard', () => {
   })
 
   it('does not render header row when no label and no right', () => {
-    const { container } = render(
+    render(
       <Wrapper>
         <SectionCard>Just content</SectionCard>
       </Wrapper>,

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { ChakraProvider } from '@chakra-ui/react'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import system from '@/theme'
@@ -86,6 +86,67 @@ describe('AgendaList', () => {
     expect(screen.getByText('Tomorrow meeting')).toBeInTheDocument()
   })
 
+  it('paginates upcoming grouped items three cards at a time', () => {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const thisWeek = new Date()
+    thisWeek.setDate(thisWeek.getDate() + 3)
+    const later = new Date()
+    later.setDate(later.getDate() + 9)
+    const later2 = new Date()
+    later2.setDate(later2.getDate() + 10)
+    const later3 = new Date()
+    later3.setDate(later3.getDate() + 11)
+
+    const item1 = makeItem({
+      id: 'upcoming-1',
+      title: 'Tomorrow first',
+      start: tomorrow.toISOString(),
+    })
+    const item2 = makeItem({
+      id: 'upcoming-2',
+      title: 'This week second',
+      start: thisWeek.toISOString(),
+    })
+    const item3 = makeItem({
+      id: 'upcoming-3',
+      title: 'Later third',
+      start: later.toISOString(),
+    })
+    const item4 = makeItem({
+      id: 'upcoming-4',
+      title: 'Later fourth',
+      start: later2.toISOString(),
+    })
+    const item5 = makeItem({
+      id: 'upcoming-5',
+      title: 'Later fifth',
+      start: later3.toISOString(),
+    })
+
+    render(
+      <Wrapper>
+        <AgendaList items={[item1, item2, item3, item4, item5]} conflicts={[]} selectedDate={null} />
+      </Wrapper>,
+    )
+
+    expect(screen.getByText('Tomorrow first')).toBeInTheDocument()
+    expect(screen.getByText('This week second')).toBeInTheDocument()
+    expect(screen.getByText('Later third')).toBeInTheDocument()
+    expect(screen.queryByText('Later fourth')).not.toBeInTheDocument()
+    expect(screen.queryByText('Later fifth')).not.toBeInTheDocument()
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('Next upcoming page'))
+
+    expect(screen.queryByText('Tomorrow first')).not.toBeInTheDocument()
+    expect(screen.queryByText('This week second')).not.toBeInTheDocument()
+    expect(screen.queryByText('Later third')).not.toBeInTheDocument()
+    expect(screen.getByText('Later fourth')).toBeInTheDocument()
+    expect(screen.getByText('Later fifth')).toBeInTheDocument()
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+  })
+
   it('renders a conflict item with amber conflict indicator', () => {
     const now = new Date()
     const itemA = makeItem({ id: 'item-a', title: 'Session A', start: now.toISOString() })
@@ -103,17 +164,18 @@ describe('AgendaList', () => {
       </Wrapper>,
     )
 
-    // The conflict indicator text should appear
-    const conflictTexts = screen.getAllByText('Schedule conflict')
+    // The compact conflict chip should appear
+    const conflictTexts = screen.getAllByText('Conflict')
     expect(conflictTexts.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('renders link to chat URL for item with link.type=chat', () => {
+  it('renders calendar items with chat links to their service detail URL', () => {
     const now = new Date()
     const item = makeItem({
       id: 'chat-item',
       title: 'Chat session',
       start: now.toISOString(),
+      service_id: 'svc-from-chat-item',
       link: { type: 'chat', id: 'hs-abc' },
     })
     render(
@@ -122,15 +184,16 @@ describe('AgendaList', () => {
       </Wrapper>,
     )
     const link = screen.getByText('Chat session').closest('a')
-    expect(link).toHaveAttribute('href', '/messages/hs-abc')
+    expect(link).toHaveAttribute('href', '/service-detail/svc-from-chat-item')
   })
 
-  it('renders link to service URL for item with link.type=service', () => {
+  it('renders link to service detail URL for item with link.type=service', () => {
     const now = new Date()
     const item = makeItem({
       id: 'svc-item',
       title: 'Service session',
       start: now.toISOString(),
+      service_id: 'svc-xyz',
       link: { type: 'service', id: 'svc-xyz' },
     })
     render(
@@ -139,7 +202,7 @@ describe('AgendaList', () => {
       </Wrapper>,
     )
     const link = screen.getByText('Service session').closest('a')
-    expect(link).toHaveAttribute('href', '/services/svc-xyz')
+    expect(link).toHaveAttribute('href', '/service-detail/svc-xyz')
   })
 
   it('when selectedDate is set, shows only items on that day', () => {
@@ -171,6 +234,47 @@ describe('AgendaList', () => {
 
     expect(screen.getByText('Today only')).toBeInTheDocument()
     expect(screen.queryByText('Tomorrow only')).not.toBeInTheDocument()
+  })
+
+  it('paginates selected-day items two cards at a time', () => {
+    const selectedDate = new Date(2026, 4, 11, 10, 0, 0, 0)
+    const item1 = makeItem({
+      id: 'day-item-1',
+      title: 'First selected item',
+      start: selectedDate.toISOString(),
+    })
+    const item2 = makeItem({
+      id: 'day-item-2',
+      title: 'Second selected item',
+      start: new Date(selectedDate.getTime() + 60 * 60 * 1000).toISOString(),
+    })
+    const item3 = makeItem({
+      id: 'day-item-3',
+      title: 'Third selected item',
+      start: new Date(selectedDate.getTime() + 2 * 60 * 60 * 1000).toISOString(),
+    })
+
+    render(
+      <Wrapper>
+        <AgendaList
+          items={[item1, item2, item3]}
+          conflicts={[]}
+          selectedDate={selectedDate}
+        />
+      </Wrapper>,
+    )
+
+    expect(screen.getByText('First selected item')).toBeInTheDocument()
+    expect(screen.getByText('Second selected item')).toBeInTheDocument()
+    expect(screen.queryByText('Third selected item')).not.toBeInTheDocument()
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('Next schedule page'))
+
+    expect(screen.queryByText('First selected item')).not.toBeInTheDocument()
+    expect(screen.queryByText('Second selected item')).not.toBeInTheDocument()
+    expect(screen.getByText('Third selected item')).toBeInTheDocument()
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
   })
 
   it('when selectedDate is set with no items, shows "Nothing scheduled on this day"', () => {

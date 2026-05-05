@@ -146,7 +146,7 @@ const PublicProfile = () => {
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
   const [followActionLoading, setFollowActionLoading] = useState(false)
   const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
-  const [_reportModalOpen, setReportModalOpen] = useState(false)
+  const [, setReportModalOpen] = useState(false)
   const [activePublicTab, setActivePublicTab] = useState<PublicProfileTab>('services')
 
   useEffect(() => {

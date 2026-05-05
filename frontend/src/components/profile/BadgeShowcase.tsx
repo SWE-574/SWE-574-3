@@ -11,7 +11,15 @@ import {
 } from '@/theme/tokens'
 
 // ── Tooltip (simple CSS-driven, no Chakra Tooltip to avoid portal issues) ─────
-function BadgeTooltip({ badge, children }: { badge: BadgeDetail; children: React.ReactNode }) {
+function BadgeTooltip({
+  badge,
+  children,
+  placement = 'top',
+}: {
+  badge: BadgeDetail
+  children: React.ReactNode
+  placement?: 'top' | 'bottom'
+}) {
   const [visible, setVisible] = useState(false)
   return (
     <Box
@@ -26,9 +34,10 @@ function BadgeTooltip({ badge, children }: { badge: BadgeDetail; children: React
       {visible && (
         <Box
           position="absolute"
-          bottom="calc(100% + 8px)"
+          top={placement === 'bottom' ? 'calc(100% + 8px)' : undefined}
+          bottom={placement === 'top' ? 'calc(100% + 8px)' : undefined}
           left="50%"
-          style={{ transform: 'translateX(-50%)', zIndex: 100 }}
+          style={{ transform: 'translateX(-50%)', zIndex: 4500 }}
           bg={GRAY800}
           color={WHITE}
           borderRadius="10px"
@@ -60,7 +69,7 @@ function CompactBadgeCircle({ badge, onHeroSurface }: { badge: BadgeDetail; onHe
   const iconColor = onHeroSurface ? 'rgba(255,255,255,0.9)' : GREEN
 
   return (
-    <BadgeTooltip badge={badge}>
+    <BadgeTooltip badge={badge} placement={onHeroSurface ? 'bottom' : 'top'}>
       <Flex
         w="40px"
         h="40px"

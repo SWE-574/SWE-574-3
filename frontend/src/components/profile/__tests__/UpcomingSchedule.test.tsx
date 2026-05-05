@@ -3,6 +3,7 @@ import { ChakraProvider } from '@chakra-ui/react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
+import { addDays, format } from 'date-fns'
 import system from '@/theme'
 import type { CalendarResponse } from '@/types'
 
@@ -79,19 +80,20 @@ describe('UpcomingSchedule', () => {
     expect(screen.getByText(/Loading schedule/i)).toBeInTheDocument()
   })
 
-  it('renders agenda items after successful fetch in collapsed mode', async () => {
+  it('renders the month calendar immediately after successful fetch', async () => {
     mockFetch.mockResolvedValue(mockResponse)
     render(
       <Wrapper>
         <UpcomingSchedule />
       </Wrapper>,
     )
-    await waitFor(() => {
-      expect(screen.getByText('Pottery basics')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByText('Mon')).toBeInTheDocument())
+    expect(screen.getByText('Mon')).toBeInTheDocument()
+    expect(screen.queryByText(/View calendar/i)).toBeNull()
+    expect(screen.queryByText(/Collapse/i)).toBeNull()
   })
 
-  it('renders empty state when no items', async () => {
+  it('renders selected-day empty state when no items', async () => {
     mockFetch.mockResolvedValue(emptyResponse)
     render(
       <Wrapper>
@@ -99,11 +101,11 @@ describe('UpcomingSchedule', () => {
       </Wrapper>,
     )
     await waitFor(() => {
-      expect(screen.getByText(/Nothing on your calendar yet/i)).toBeInTheDocument()
+      expect(screen.getByText(/Nothing scheduled on this day/i)).toBeInTheDocument()
     })
   })
 
-  it('renders week strip with 7 day cells', async () => {
+  it('renders month grid day cells', async () => {
     mockFetch.mockResolvedValue(emptyResponse)
     render(
       <Wrapper>
@@ -111,11 +113,8 @@ describe('UpcomingSchedule', () => {
       </Wrapper>,
     )
     await waitFor(() => {
-      // 7 day buttons in the week strip (each is a button)
-      // The strip uses a Grid with 7 columns
-      const buttons = screen.getAllByRole('button')
-      // At least 7 day-strip buttons plus the expand toggle
-      expect(buttons.length).toBeGreaterThanOrEqual(7)
+      expect(screen.getByText('Mon')).toBeInTheDocument()
+      expect(screen.getByText('Sun')).toBeInTheDocument()
     })
   })
 
@@ -132,50 +131,110 @@ describe('UpcomingSchedule', () => {
     })
   })
 
-  it('expand toggle reveals month grid and agenda in expanded mode', async () => {
+  it('shows only the selected day items after clicking a day', async () => {
+    const today = new Date()
+    const tomorrow = addDays(today, 1)
+    const todayStart = new Date(today)
+    todayStart.setHours(10, 0, 0, 0)
+    const todayEnd = new Date(todayStart.getTime() + 60 * 60 * 1000)
+    const tomorrowStart = new Date(tomorrow)
+    tomorrowStart.setHours(10, 0, 0, 0)
+    const tomorrowEnd = new Date(tomorrowStart.getTime() + 60 * 60 * 1000)
+
+    mockFetch.mockResolvedValue({
+      ...mockResponse,
+      items: [
+        { ...mockResponse.items[0], id: 'today-item', title: 'Today session', start: todayStart.toISOString(), end: todayEnd.toISOString() },
+        { ...mockResponse.items[0], id: 'tomorrow-item', title: 'Tomorrow session', start: tomorrowStart.toISOString(), end: tomorrowEnd.toISOString() },
+      ],
+    })
+    render(
+      <Wrapper>
+        <UpcomingSchedule />
+      </Wrapper>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Today session')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText(format(tomorrow, 'd MMMM yyyy')))
+    expect(screen.queryByText('Today session')).toBeNull()
+    expect(screen.getByText('Tomorrow session')).toBeInTheDocument()
+  })
+
+  it('opens upcoming grouped mode from the calendar header', async () => {
+    const today = new Date()
+    const tomorrow = addDays(today, 1)
+    const thisWeek = addDays(today, 3)
+    const todayStart = new Date(today)
+    todayStart.setHours(10, 0, 0, 0)
+    const tomorrowStart = new Date(tomorrow)
+    tomorrowStart.setHours(10, 0, 0, 0)
+    const thisWeekStart = new Date(thisWeek)
+    thisWeekStart.setHours(10, 0, 0, 0)
+
+    mockFetch.mockResolvedValue({
+      ...mockResponse,
+      items: [
+        {
+          ...mockResponse.items[0],
+          id: 'today-item',
+          title: 'Today session',
+          start: todayStart.toISOString(),
+          end: new Date(todayStart.getTime() + 60 * 60 * 1000).toISOString(),
+        },
+        {
+          ...mockResponse.items[0],
+          id: 'tomorrow-item',
+          title: 'Tomorrow session',
+          start: tomorrowStart.toISOString(),
+          end: new Date(tomorrowStart.getTime() + 60 * 60 * 1000).toISOString(),
+        },
+        {
+          ...mockResponse.items[0],
+          id: 'week-item',
+          title: 'This week session',
+          start: thisWeekStart.toISOString(),
+          end: new Date(thisWeekStart.getTime() + 60 * 60 * 1000).toISOString(),
+        },
+      ],
+    })
+
+    render(
+      <Wrapper>
+        <UpcomingSchedule />
+      </Wrapper>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Today session')).toBeInTheDocument())
+    expect(screen.queryByText('Tomorrow session')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show upcoming schedule' }))
+
+    expect(screen.queryByRole('grid', { name: /May|June|July|August|September|October|November|December|January|February|March|April/ })).toBeNull()
+    expect(screen.getByText('Tomorrow')).toBeInTheDocument()
+    expect(screen.getByText('Tomorrow session')).toBeInTheDocument()
+    expect(screen.getByText('This week session')).toBeInTheDocument()
+    expect(screen.queryByText('1 / 2')).toBeNull()
+  })
+
+  it('today button restores the calendar and selects today from upcoming mode', async () => {
     mockFetch.mockResolvedValue(mockResponse)
     render(
       <Wrapper>
         <UpcomingSchedule />
       </Wrapper>,
     )
-    // Wait for load
-    await waitFor(() => {
-      expect(screen.getByText('Pottery basics')).toBeInTheDocument()
-    })
 
-    // Find and click expand toggle
-    const expandBtn = screen.getByText(/View calendar/i)
-    fireEvent.click(expandBtn)
+    await waitFor(() => expect(screen.getByText('Pottery basics')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Show upcoming schedule' }))
+    expect(screen.queryByRole('grid')).toBeNull()
 
-    // Should now show the month grid header
-    await waitFor(() => {
-      // Month grid should be present with Mon-Sun headers
-      expect(screen.getByText('Mon')).toBeInTheDocument()
-    })
+    fireEvent.click(screen.getByRole('button', { name: 'Go to today' }))
+
+    expect(screen.getByRole('grid')).toBeInTheDocument()
+    expect(screen.getByText(/Nothing scheduled on this day|Pottery basics/i)).toBeInTheDocument()
   })
 
-  it('collapse button returns to collapsed mode', async () => {
-    mockFetch.mockResolvedValue(mockResponse)
-    render(
-      <Wrapper>
-        <UpcomingSchedule />
-      </Wrapper>,
-    )
-    await waitFor(() => screen.getByText('Pottery basics'))
-
-    // Expand
-    fireEvent.click(screen.getByText(/View calendar/i))
-    await waitFor(() => screen.getByText('Mon'))
-
-    // Collapse
-    fireEvent.click(screen.getByText(/Collapse/i))
-    await waitFor(() => {
-      expect(screen.queryByText('Mon')).not.toBeInTheDocument()
-    })
-  })
-
-  it('week strip dot indicators present for items on days in current week', async () => {
+  it('month grid dot indicators present for scheduled items', async () => {
     // Create item with today's date (in the future to pass nextNItems filter)
     const response: CalendarResponse = {
       ...mockResponse,
@@ -192,8 +251,7 @@ describe('UpcomingSchedule', () => {
       </Wrapper>,
     )
     await waitFor(() => {
-      // The component renders — check the section card label is present
-      expect(screen.getByText('UPCOMING')).toBeInTheDocument()
+      expect(screen.getByText('Mon')).toBeInTheDocument()
     })
   })
 })

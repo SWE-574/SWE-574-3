@@ -42,7 +42,11 @@ const CalendarMonthGrid = ({
 
   const handlePrevMonth = () => setCurrentMonth((m) => subMonths(m, 1))
   const handleNextMonth = () => setCurrentMonth((m) => addMonths(m, 1))
-  const handleToday = () => setCurrentMonth(new Date())
+  const handleToday = () => {
+    const today = new Date()
+    setCurrentMonth(today)
+    onSelectDate(today)
+  }
 
   // Disable forward navigation when the next month starts after maxDate
   const nextMonthStart = addMonths(currentMonth, 1)
@@ -50,13 +54,9 @@ const CalendarMonthGrid = ({
 
   const handleSelectDate = useCallback(
     (date: Date) => {
-      if (selectedDate && isSameDay(selectedDate, date)) {
-        onSelectDate(null)
-      } else {
-        onSelectDate(date)
-      }
+      onSelectDate(date)
     },
-    [selectedDate, onSelectDate],
+    [onSelectDate],
   )
 
   // Flat list of all cell dates in grid order, for arrow navigation
@@ -120,27 +120,27 @@ const CalendarMonthGrid = ({
   return (
     <Box>
       {/* Header row */}
-      <Flex align="center" justify="space-between" mb={3}>
-        <Flex align="center" gap={1}>
+      <Flex align="center" justify="space-between" mb={4}>
+        <Flex align="center" gap={2}>
           <Box
             as="button"
             aria-label="Previous month"
             onClick={handlePrevMonth}
-            px="8px"
-            py="6px"
-            borderRadius="8px"
+            px="11px"
+            py="9px"
+            borderRadius="11px"
             style={{ background: 'none', border: `1px solid ${GRAY200}`, cursor: 'pointer', color: GRAY700 }}
           >
-            <FiChevronLeft size={14} />
+            <FiChevronLeft size={17} />
           </Box>
           <Box
             as="button"
             aria-label="Next month"
             onClick={isNextDisabled ? undefined : handleNextMonth}
             aria-disabled={isNextDisabled ? 'true' : undefined}
-            px="8px"
-            py="6px"
-            borderRadius="8px"
+            px="11px"
+            py="9px"
+            borderRadius="11px"
             title={isNextDisabled ? 'Calendar limited to next 60 days' : undefined}
             style={{
               background: 'none',
@@ -150,33 +150,53 @@ const CalendarMonthGrid = ({
               opacity: isNextDisabled ? 0.5 : 1,
             }}
           >
-            <FiChevronRight size={14} />
+            <FiChevronRight size={17} />
           </Box>
         </Flex>
 
-        <Text fontSize="14px" fontWeight={700} color={GRAY800}>
+        <Text fontSize={{ base: '18px', md: '20px' }} fontWeight={800} color={GRAY800}>
           {format(currentMonth, 'MMMM yyyy')}
         </Text>
 
-        <Box
-          as="button"
-          aria-label="Go to today"
-          onClick={handleToday}
-          px="10px"
-          py="5px"
-          borderRadius="8px"
-          fontSize="11px"
-          fontWeight={600}
-          style={{ background: GREEN_LT, border: 'none', cursor: 'pointer', color: GREEN }}
-        >
-          Today
-        </Box>
+        <Flex align="center" gap={2}>
+          <Box
+            as="button"
+            aria-label="Show upcoming schedule"
+            onClick={() => onSelectDate(null)}
+            px="12px"
+            py="9px"
+            borderRadius="12px"
+            fontSize="12px"
+            fontWeight={800}
+            style={{
+              background: selectedDate === null ? GREEN : WHITE,
+              border: selectedDate === null ? 'none' : `1px solid ${GRAY200}`,
+              cursor: 'pointer',
+              color: selectedDate === null ? WHITE : GRAY700,
+            }}
+          >
+            Upcoming
+          </Box>
+          <Box
+            as="button"
+            aria-label="Go to today"
+            onClick={handleToday}
+            px="14px"
+            py="9px"
+            borderRadius="12px"
+            fontSize="13px"
+            fontWeight={700}
+            style={{ background: GREEN_LT, border: 'none', cursor: 'pointer', color: GREEN }}
+          >
+            Today
+          </Box>
+        </Flex>
       </Flex>
 
       {/* Day of week labels */}
       <Grid
         templateColumns="repeat(7, 1fr)"
-        mb={1}
+        mb={2}
         role="row"
         aria-label="Day of week headers"
       >
@@ -185,9 +205,9 @@ const CalendarMonthGrid = ({
             key={d}
             role="columnheader"
             textAlign="center"
-            py="4px"
+            py="6px"
           >
-            <Text fontSize="10px" fontWeight={700} color={GRAY400} letterSpacing="0.05em">
+            <Text fontSize="12px" fontWeight={800} color={GRAY400} letterSpacing="0.05em">
               {d}
             </Text>
           </Box>
@@ -204,15 +224,7 @@ const CalendarMonthGrid = ({
               // Roving tabindex: only the "tabbable" cell gets tabIndex=0
               const isTabbable = isSameDay(cell.date, tabbableDate)
 
-              // Deduplicate dots by accent_token
-              const tokensSeen = new Set<string>()
-              const dots = cell.items
-                .filter((item) => {
-                  if (tokensSeen.has(item.accent_token)) return false
-                  tokensSeen.add(item.accent_token)
-                  return true
-                })
-                .slice(0, 3)
+              const dots = cell.items.slice(0, 4)
 
               const hasConflict = cell.isConflict
 
@@ -240,15 +252,16 @@ const CalendarMonthGrid = ({
                   aria-label={format(cell.date, 'd MMMM yyyy')}
                   aria-selected={isSelected}
                   tabIndex={isTabbable ? 0 : -1}
-                  p="4px"
-                  borderRadius="8px"
+                  minH="42px"
+                  p="7px"
+                  borderRadius="11px"
                   display="flex"
                   flexDirection="column"
                   alignItems="center"
-                  gap="2px"
+                  gap="4px"
                   style={{
                     background: cellBg,
-                    border: 'none',
+                    border: hasConflict && !isSelected ? `1px solid ${AMBER}66` : '1px solid transparent',
                     cursor: 'pointer',
                     outline,
                     outlineOffset: '-2px',
@@ -256,36 +269,29 @@ const CalendarMonthGrid = ({
                   _hover={{ bg: isSelected ? GREEN : GRAY100 }}
                 >
                   <Text
-                    fontSize="12px"
+                    fontSize="16px"
                     fontWeight={isCurrentDay || isSelected ? 700 : 400}
                     color={cellColor}
-                    lineHeight="1"
+                    lineHeight="1.05"
                   >
                     {format(cell.date, 'd')}
                   </Text>
 
                   {/* Dots */}
                   {cell.items.length > 0 && (
-                    <Flex gap="2px" justify="center" flexWrap="wrap">
+                    <Flex gap="3px" justify="center" flexWrap="wrap">
                       {dots.map((item) => (
                         <Box
-                          key={item.accent_token}
-                          w="5px"
-                          h="5px"
+                          key={item.id}
+                          data-testid="calendar-item-dot"
+                          w="6px"
+                          h="6px"
                           borderRadius="full"
                           style={{
                             background: isSelected ? WHITE : itemAccentColor(item.accent_token).dot,
                           }}
                         />
                       ))}
-                      {hasConflict && (
-                        <Box
-                          w="5px"
-                          h="5px"
-                          borderRadius="full"
-                          style={{ background: isSelected ? WHITE : AMBER }}
-                        />
-                      )}
                     </Flex>
                   )}
                 </Box>

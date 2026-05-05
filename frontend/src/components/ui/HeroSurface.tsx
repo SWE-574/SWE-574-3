@@ -8,15 +8,16 @@ type Props = {
   mt?: number | string
   p?: number | string | object
   borderRadius?: string
+  boxShadow?: string
 }
 
-const HeroSurface = ({ gradient, children, mb, mt, p, borderRadius }: Props) => {
+const HeroSurface = ({ gradient, children, mb, mt, p, borderRadius, boxShadow }: Props) => {
   return (
     <Box
       position="relative"
       overflow="hidden"
       borderRadius={borderRadius ?? '22px'}
-      boxShadow="0 14px 38px rgba(17,24,39,0.18)"
+      boxShadow={boxShadow ?? '0 14px 38px rgba(17,24,39,0.18)'}
       backgroundImage={gradient}
       color="white"
       mb={mb}
