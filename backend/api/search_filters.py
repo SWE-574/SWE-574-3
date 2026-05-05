@@ -16,6 +16,15 @@ from django.db.models import (
 )
 
 
+# Search ordering weights (FR-17g / FR-SEA-01 / #306, #324).
+# Title matches outrank tag matches outrank description-only matches.
+# Social proximity is gated on FR-DIS-05 (social graph) -- placeholder until then.
+TITLE_WEIGHT = 1.0
+TAG_WEIGHT = 0.8
+DESC_WEIGHT = 0.4
+SOCIAL_PROXIMITY_WEIGHT = 0.0  # TODO: wire when social graph lands (FR-DIS-05)
+
+
 class SearchStrategy(ABC):
     """Abstract base class for search filter strategies"""
 
@@ -130,12 +139,28 @@ class TextStrategy(SearchStrategy):
         if not search:
             return queryset
 
-        # Search in title, description, and tag names
-        queryset = queryset.filter(
-            Q(title__icontains=search) |
-            Q(description__icontains=search) |
-            Q(tags__name__icontains=search)
-        ).distinct()
+        # Weighted scoring: title (1.0) > tag (0.8) > description (0.4).
+        # Tie-break by hot_score so Phase 2 still matters on equal-quality matches.
+        # FR-17g / FR-SEA-01 / #306, #324.
+        queryset = queryset.annotate(
+            _match_score=(
+                Case(
+                    When(title__icontains=search, then=Value(TITLE_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(tags__name__icontains=search, then=Value(TAG_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(description__icontains=search, then=Value(DESC_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+            )
+        ).filter(_match_score__gt=0).order_by('-_match_score', '-hot_score').distinct()
 
         return queryset
 
