@@ -864,3 +864,13 @@ RANKING_FEED_E2E_SLA_SECONDS = float(os.environ.get('RANKING_FEED_E2E_SLA_SECOND
 # multiplicative bump in Phase 2 score so brand-new members surface before
 # their reputation accumulates. Customer request, May 2026.
 RANKING_NEWCOMER_BOOST = float(os.environ.get('RANKING_NEWCOMER_BOOST', '1.2'))
+
+# Stochastic boost probabilities (#477). Each ranges 0..1. Default 1.0 means
+# the boost behaves exactly like the deterministic baseline. Lowering a
+# probability rotates which boosted items surface across impressions while
+# preserving the expected multiplier (sample_boost in api/ranking.py amplifies
+# the effective multiplier when applied so the average across calls equals
+# the configured target).
+RANKING_NEWCOMER_BOOST_PROBABILITY = float(os.environ.get('RANKING_NEWCOMER_BOOST_PROBABILITY', '1.0'))
+RANKING_CAPACITY_BOOST_PROBABILITY = float(os.environ.get('RANKING_CAPACITY_BOOST_PROBABILITY', '1.0'))
+RANKING_SOCIAL_PROXIMITY_PROBABILITY = float(os.environ.get('RANKING_SOCIAL_PROXIMITY_PROBABILITY', '1.0'))

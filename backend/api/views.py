@@ -1948,7 +1948,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 # composite_score = hot_score + 0.5 * social_boost
                 # social_boost: 1.0 (1st-degree) or 0.5 (2nd-degree), 0 otherwise.
                 # Single SQL CTE call — no pre-evaluation of the service queryset.
+                from .ranking import apply_stochastic_social_proximity
                 boosts = get_social_proximity_boosts(self.request.user.id)
+                boosts = apply_stochastic_social_proximity(
+                    boosts,
+                    getattr(settings, 'RANKING_SOCIAL_PROXIMITY_PROBABILITY', 1.0),
+                )
                 if boosts:
                     # boosts keys are UUID objects; user_id on Service is also UUID — no coercion needed.
                     whens = [

@@ -33,6 +33,52 @@ if TYPE_CHECKING:
 FORMULA_VERSION = "v2.1-2026-05"
 
 
+def sample_boost(target_multiplier: float, probability: float, rng=None):
+    """Apply a multiplicative boost stochastically while preserving its expected value.
+
+    Returns (effective_multiplier, applied).
+
+    With probability >= 1.0 the boost is deterministic and the configured
+    multiplier is returned. With 0 < probability < 1.0 the boost applies on
+    a fraction of calls matching probability, and when applied the multiplier
+    is amplified to 1 + (target - 1) / probability so that the expected
+    multiplier across many calls equals target_multiplier. Probability <= 0
+    disables the boost.
+
+    Callers are expected to gate eligibility before calling: only call when the
+    boost would otherwise fire deterministically (e.g. owner is a newcomer,
+    capacity is in the trigger band).
+    """
+    if probability >= 1.0:
+        return target_multiplier, True
+    if probability <= 0.0:
+        return 1.0, False
+    rng_to_use = rng if rng is not None else random
+    if rng_to_use.random() < probability:
+        return 1.0 + (target_multiplier - 1.0) / probability, True
+    return 1.0, False
+
+
+def apply_stochastic_social_proximity(boosts: dict, probability: float, rng=None) -> dict:
+    """Stochastic application of the social proximity boost map.
+
+    Each entry is independently subjected to a Bernoulli trial. On success the
+    boost is amplified by 1/probability so that the expected boost across many
+    impressions equals the configured value; on failure the boost becomes 0.
+    Probability >= 1.0 returns the input unchanged. Probability <= 0 returns
+    an empty dict (boost disabled entirely).
+    """
+    if probability >= 1.0:
+        return boosts
+    if probability <= 0.0:
+        return {}
+    rng_to_use = rng if rng is not None else random
+    return {
+        uid: (boost / probability) if rng_to_use.random() < probability else 0.0
+        for uid, boost in boosts.items()
+    }
+
+
 def wilson_score_lower_bound(positives: int, total: int, z: float = 1.96) -> float:
     """
     Wilson score lower bound for the positive rate of a Bernoulli sample.
@@ -102,6 +148,7 @@ def _compute_service_factors(service: Service) -> dict:
     # Applies to Events AND group Offers (Offer with max_participants > 1).
     # Solo Offers/Needs (max_participants <= 1) are not capacitated; no boost.
     capacity_multiplier = 1.0
+    capacity_applied = False
     if service.max_participants and service.max_participants > 0 and (
         service.type == 'Event'
         or (service.type == 'Offer' and service.max_participants > 1)
@@ -112,9 +159,17 @@ def _compute_service_factors(service: Service) -> dict:
         ).count()
         ratio = accepted / service.max_participants
         if 0.75 <= ratio < 1.0:
-            capacity_multiplier = 1.5
+            capacity_multiplier, capacity_applied = sample_boost(
+                1.5, getattr(settings, 'RANKING_CAPACITY_BOOST_PROBABILITY', 1.0),
+            )
 
-    newcomer_boost = settings.RANKING_NEWCOMER_BOOST if is_newcomer(user) else 1.0
+    if is_newcomer(user):
+        newcomer_boost, newcomer_applied = sample_boost(
+            settings.RANKING_NEWCOMER_BOOST,
+            getattr(settings, 'RANKING_NEWCOMER_BOOST_PROBABILITY', 1.0),
+        )
+    else:
+        newcomer_boost, newcomer_applied = 1.0, False
 
     final = round(quality * activity * capacity_multiplier * newcomer_boost, 6)
     return {
@@ -125,7 +180,9 @@ def _compute_service_factors(service: Service) -> dict:
         'quality': quality,
         'activity': activity,
         'capacity_multiplier': capacity_multiplier,
+        'capacity_boost_applied': capacity_applied,
         'newcomer_boost': newcomer_boost,
+        'newcomer_boost_applied': newcomer_applied,
         'final_score': final,
     }
 
@@ -188,6 +245,7 @@ def _compute_event_factors(event: Service) -> dict:
     # Capacity multiplier scope (FR-17e / #304): same rule as the service
     # formula -- 1.5x at 75-99% fill.
     capacity_multiplier = 1.0
+    capacity_applied = False
     if event.max_participants and event.max_participants > 0:
         accepted_count = Handshake.objects.filter(
             service=event,
@@ -195,9 +253,17 @@ def _compute_event_factors(event: Service) -> dict:
         ).count()
         ratio = accepted_count / event.max_participants
         if 0.75 <= ratio < 1.0:
-            capacity_multiplier = 1.5
+            capacity_multiplier, capacity_applied = sample_boost(
+                1.5, getattr(settings, 'RANKING_CAPACITY_BOOST_PROBABILITY', 1.0),
+            )
 
-    newcomer_boost = settings.RANKING_NEWCOMER_BOOST if is_newcomer(organiser) else 1.0
+    if is_newcomer(organiser):
+        newcomer_boost, newcomer_applied = sample_boost(
+            settings.RANKING_NEWCOMER_BOOST,
+            getattr(settings, 'RANKING_NEWCOMER_BOOST_PROBABILITY', 1.0),
+        )
+    else:
+        newcomer_boost, newcomer_applied = 1.0, False
 
     final = round(velocity * organiser_quality * capacity_multiplier * newcomer_boost, 6)
     return {
@@ -207,7 +273,9 @@ def _compute_event_factors(event: Service) -> dict:
         'organiser_quality': organiser_quality,
         'velocity': velocity,
         'capacity_multiplier': capacity_multiplier,
+        'capacity_boost_applied': capacity_applied,
         'newcomer_boost': newcomer_boost,
+        'newcomer_boost_applied': newcomer_applied,
         'final_score': final,
     }
 
@@ -316,12 +384,17 @@ def calculate_hot_scores_batch(services) -> dict:
         if service.id in accepted_by_service:
             ratio = accepted_by_service[service.id] / service.max_participants
             if 0.75 <= ratio < 1.0:
-                capacity_multiplier = 1.5
+                capacity_multiplier, _ = sample_boost(
+                    1.5, getattr(settings, 'RANKING_CAPACITY_BOOST_PROBABILITY', 1.0),
+                )
 
-        newcomer_boost = (
-            settings.RANKING_NEWCOMER_BOOST
-            if service.user_id in newcomer_user_ids else 1.0
-        )
+        if service.user_id in newcomer_user_ids:
+            newcomer_boost, _ = sample_boost(
+                settings.RANKING_NEWCOMER_BOOST,
+                getattr(settings, 'RANKING_NEWCOMER_BOOST_PROBABILITY', 1.0),
+            )
+        else:
+            newcomer_boost = 1.0
 
         scores[service.id] = round(
             quality * activity * capacity_multiplier * newcomer_boost, 6
