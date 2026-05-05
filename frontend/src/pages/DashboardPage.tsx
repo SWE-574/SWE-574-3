@@ -410,12 +410,7 @@ const DashboardPage = () => {
 
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
-<<<<<<< feature/458-ranking-redesign
-=======
-  const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
-  const [rankingDebugAvailable, setRankingDebugAvailable] = useState(false)
   const [typeDropdownOpen, setTypeDropdownOpen]           = useState(false)
->>>>>>> dev
 
   const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
