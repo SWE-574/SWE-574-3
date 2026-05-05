@@ -307,6 +307,43 @@ export default function RecommendationDebugPanel({
               </Stack>
             </SectionCard>
 
+            <SectionCard bg="purple.50">
+              <Text fontSize="xs" fontWeight="800" color="purple.800" mb={2}>
+                Phase 3 trace
+              </Text>
+              <Flex gap={2} wrap="wrap" mb={2}>
+                <MiniStat
+                  label="Pool"
+                  value={selected.phase3.pool ?? 'none'}
+                />
+                <MiniStat
+                  label="Explore rate"
+                  value={`${Math.round(selected.phase3.exploration_rate * 100)}%`}
+                />
+                <MiniStat
+                  label="Owner h.shakes"
+                  value={String(selected.phase3.lifetime_completed_handshakes)}
+                />
+                <MiniStat
+                  label="Days idle"
+                  value={
+                    selected.phase3.days_since_last_completed_handshake == null
+                      ? 'never'
+                      : `${selected.phase3.days_since_last_completed_handshake}d`
+                  }
+                />
+              </Flex>
+              <Text fontSize="xs" color="purple.700">
+                {selected.phase3.pool === 'cold_start'
+                  ? `Eligible because owner has < ${selected.phase3.cold_start_threshold} completed handshakes.`
+                  : selected.phase3.pool === 'undershown_quality'
+                  ? `Eligible because quality is high but the service has had no completed handshake in the last ${selected.phase3.undershown_stale_days} days.`
+                  : selected.phase3.pool === 'stale_recurring'
+                  ? 'Eligible because the recurring growth check flagged this listing as stale.'
+                  : 'Not eligible for the explore bucket. Served from the regular hot list.'}
+              </Text>
+            </SectionCard>
+
             {selected.notes.length > 0 ? (
               <SectionCard bg="orange.50">
                 <Stack gap={1}>

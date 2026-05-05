@@ -259,6 +259,54 @@ export interface RecommendationDebugBreakdown {
   social_reason: string
 }
 
+export interface RecommendationDebugFactorsService {
+  kind: 'service'
+  positive_count: number
+  negative_count: number
+  comment_count: number
+  hours_exchanged: number
+  quality: number
+  activity: number
+  capacity_multiplier: number
+  newcomer_boost: number
+  is_newcomer: boolean
+  final_score: number
+}
+
+export interface RecommendationDebugFactorsEvent {
+  kind: 'event'
+  positive_count: number
+  negative_count: number
+  rsvps_last_7d: number
+  organiser_quality: number
+  velocity: number
+  capacity_multiplier: number
+  newcomer_boost: number
+  is_newcomer: boolean
+  final_score: number
+}
+
+export type RecommendationDebugFactors =
+  | RecommendationDebugFactorsService
+  | RecommendationDebugFactorsEvent
+
+export type RecommendationDebugPhase3Pool =
+  | 'cold_start'
+  | 'undershown_quality'
+  | 'stale_recurring'
+  | null
+
+export interface RecommendationDebugPhase3 {
+  pool: RecommendationDebugPhase3Pool
+  exploration_rate: number
+  lifetime_completed_handshakes: number
+  days_since_last_completed_handshake: number | null
+  is_stale_recurring: boolean
+  cold_start_threshold: number
+  undershown_quality_threshold: number
+  undershown_stale_days: number
+}
+
 export interface RecommendationDebugSelectedService {
   id: string
   title: string
@@ -276,6 +324,8 @@ export interface RecommendationDebugSelectedService {
   distance_km: number | null
   participant_count: number
   max_participants: number
+  factors: RecommendationDebugFactors
+  phase3: RecommendationDebugPhase3
   breakdown: RecommendationDebugBreakdown
   formula_lines: string[]
   notes: string[]
