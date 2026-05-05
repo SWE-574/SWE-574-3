@@ -17,6 +17,7 @@ export interface ServiceListParams {
   page?: number
   page_size?: number
   user_id?: string
+  explore_only?: boolean
 }
 
 export interface ServiceRankingDebugParams {
@@ -48,6 +49,7 @@ export const serviceAPI = {
     if (params?.page) queryParams.set('page', String(params.page))
     if (params?.page_size) queryParams.set('page_size', String(params.page_size))
     if (params?.user_id) queryParams.set('user', params.user_id)
+    if (params?.explore_only) queryParams.set('explore_only', 'true')
 
     const res = await apiClient.get<ServiceListResponse>('/services/', {
       params: queryParams,

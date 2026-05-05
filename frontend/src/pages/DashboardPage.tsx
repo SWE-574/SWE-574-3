@@ -27,12 +27,14 @@ import {
   FiLayers,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
+import { MapInfoStrip } from '@/components/MapInfoStrip'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
 import ForYouCarousel from '@/components/ForYouCarousel'
+import ExploreCarousel from '@/components/ExploreCarousel'
 import { Avatar } from '@/components/Avatar'
 import type { Handshake } from '@/services/handshakeAPI'
 
@@ -376,6 +378,7 @@ const DashboardPage = () => {
   const [services, setServices]                     = useState<Service[]>([])
   const [allActiveServices, setAllActiveServices]   = useState<Service[]>([])
   const [mapOpen, setMapOpen]                       = useState(true)
+  const [mapCollapsed, setMapCollapsed]             = useState(false)
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
   const [userLocation, setUserLocation]             = useState<{ lat: number; lng: number } | null>(null)
@@ -766,17 +769,30 @@ const DashboardPage = () => {
             </Flex>
           </Box>
 
-          {/* Map panel */}
+          {/* Map panel — collapses to a slim info strip when the feed scrolls
+              past a small threshold, so the feed reclaims the 280px the map
+              would otherwise hold. Tap the strip (or scroll back to top) to
+              re-expand. */}
           {mapOpen && (
-            <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
-              <MapView
-                services={displayServices}
-                height="280px"
-                onServiceClick={(id) => navigate(`/service-detail/${id}`)}
-                userLocation={userLocation}
-                isRefreshing={isLoading && services.length > 0}
+            mapCollapsed ? (
+              <MapInfoStrip
+                area={displayServices[0]?.location_area || null}
+                offerCount={displayServices.filter(s => s.type === 'Offer').length}
+                needCount={displayServices.filter(s => s.type === 'Need').length}
+                eventCount={displayServices.filter(s => s.type === 'Event').length}
+                onExpand={() => setMapCollapsed(false)}
               />
-            </Box>
+            ) : (
+              <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
+                <MapView
+                  services={displayServices}
+                  height="280px"
+                  onServiceClick={(id) => navigate(`/service-detail/${id}`)}
+                  userLocation={userLocation}
+                  isRefreshing={isLoading && services.length > 0}
+                />
+              </Box>
+            )
           )}
 
           {/* Results count */}
@@ -787,8 +803,20 @@ const DashboardPage = () => {
           </Box>
 
           {/* Grid */}
-          <Box flex={1} overflowY="auto" px={{ base: 3, md: 6 }} pt={2} pb={8}>
+          <Box
+            flex={1}
+            overflowY="auto"
+            px={{ base: 3, md: 6 }}
+            pt={2}
+            pb={8}
+            onScroll={(e) => {
+              const top = e.currentTarget.scrollTop
+              if (top > 80 && !mapCollapsed) setMapCollapsed(true)
+              else if (top < 20 && mapCollapsed) setMapCollapsed(false)
+            }}
+          >
             <ForYouCarousel />
+            <ExploreCarousel />
             {isLoading && displayServices.length === 0 ? (
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
             ) : fetchError && displayServices.length === 0 ? (

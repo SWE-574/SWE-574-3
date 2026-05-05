@@ -1818,11 +1818,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             sort_param == 'hot'
             and getattr(_ranking_settings, 'RANKING_EXPLORATION_RATE', 0.0) > 0
         )
+        explore_only_param = request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes')
         use_cache = not (
             (request.query_params.get('lat') and request.query_params.get('lng'))
             or (sort_param == 'hot' and request.user.is_authenticated)
             or sort_param == 'for_you'
             or explore_enabled
+            or explore_only_param
         )
 
         if use_cache:
@@ -1836,6 +1838,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
         # declared skills get a populated response; everyone else gets [].
         if sort_param == 'for_you':
             return self._list_for_you(request)
+
+        # Explore-only feed: surfaces Phase 3 candidates (cold-start,
+        # under-shown quality, stale recurring) as a standalone list rather
+        # than mixed into hot at slot 5. Powers the web "Try something new"
+        # carousel and any client that wants the rotation pool directly.
+        if request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes'):
+            return self._list_explore_only(request)
 
         queryset = self.filter_queryset(self.get_queryset())
         paginator = self.pagination_class()
@@ -1864,6 +1873,64 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if use_cache:
             cache_service_list(cache_key_params, response_data, ttl=CACHE_TTL_SHORT)
         return Response(response_data)
+
+    def _list_explore_only(self, request):
+        """Return Phase 3 explore candidates flat, tagged with their pool.
+
+        Mixes the three sub-buckets (cold-start, under-shown quality, stale
+        recurring) round-robin so the carousel surfaces all three pools when
+        each is non-empty. Caps at RANKING_EXPLORE_LIMIT (default 10).
+        """
+        from .ranking import _eligible_exploration
+
+        # Build the candidate pool from the same hot-sorted queryset the
+        # explore slot picks from at request time, capped to keep the
+        # eligibility scan bounded.
+        request.query_params._mutable = True if hasattr(request.query_params, '_mutable') else None
+        try:
+            request.query_params['sort'] = 'hot'
+        except Exception:
+            pass
+
+        queryset = self.filter_queryset(self.get_queryset())
+        candidates = list(queryset[:200])
+        cold, undershown, stale = _eligible_exploration(candidates)
+
+        for s in cold:
+            s.explore_pool = 'cold_start'
+            s.source = 'explore'
+        for s in undershown:
+            s.explore_pool = 'undershown_quality'
+            s.source = 'explore'
+        for s in stale:
+            s.explore_pool = 'stale_recurring'
+            s.source = 'explore'
+
+        # Round-robin across the three pools so the response surfaces each
+        # vocabulary when available, rather than draining cold first.
+        limit = int(getattr(settings, 'RANKING_EXPLORE_LIMIT', 10))
+        pools = [list(cold), list(undershown), list(stale)]
+        mixed = []
+        seen = set()
+        while len(mixed) < limit and any(pools):
+            for pool in pools:
+                if not pool:
+                    continue
+                item = pool.pop(0)
+                if item.id in seen:
+                    continue
+                mixed.append(item)
+                seen.add(item.id)
+                if len(mixed) >= limit:
+                    break
+
+        serializer = self.get_serializer(mixed, many=True)
+        return Response({
+            'count': len(mixed),
+            'next': None,
+            'previous': None,
+            'results': serializer.data,
+        })
 
     def _list_for_you(self, request):
         """For You feed (#481). Re-rank top hot candidates with viewer-specific

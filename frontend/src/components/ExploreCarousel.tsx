@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Box, Flex, HStack, Skeleton, Stack, Text } from '@chakra-ui/react'
-import { FiHeart } from 'react-icons/fi'
-import { Link as RouterLink, useNavigate } from 'react-router-dom'
+import { FiCompass } from 'react-icons/fi'
+import { Link as RouterLink } from 'react-router-dom'
 
 import { Avatar } from '@/components/Avatar'
 import { serviceAPI } from '@/services/serviceAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
-import { chipForSignals, diversifyByChip } from '@/utils/forYouChips'
 
 const CARD_WIDTH = 240
 const IMAGE_HEIGHT = 120
@@ -18,8 +17,27 @@ const TYPE_GRADIENT: Record<Service['type'], string> = {
   Event: 'linear-gradient(135deg, #f59e0b 0%, #b45309 100%)',
 }
 
-function ForYouCard({ service }: { service: Service }) {
-  const chip = chipForSignals(service.for_you_signals)
+interface PoolChip {
+  label: string
+  bg: string
+  fg: string
+}
+
+const POOL_CHIPS: Record<NonNullable<Service['explore_pool']>, PoolChip> = {
+  cold_start: { label: 'Fresh face', bg: 'rgba(234, 179, 8, 0.95)', fg: 'white' },
+  undershown_quality: { label: 'Quiet gem', bg: 'rgba(20, 184, 166, 0.95)', fg: 'white' },
+  stale_recurring: { label: 'Worth another look', bg: 'rgba(244, 63, 94, 0.95)', fg: 'white' },
+}
+
+const DEFAULT_CHIP: PoolChip = { label: 'Discover', bg: 'rgba(107, 114, 128, 0.95)', fg: 'white' }
+
+function chipForPool(pool?: Service['explore_pool']): PoolChip {
+  if (!pool) return DEFAULT_CHIP
+  return POOL_CHIPS[pool] ?? DEFAULT_CHIP
+}
+
+function ExploreCard({ service }: { service: Service }) {
+  const chip = chipForPool(service.explore_pool)
   const heroImage = service.media?.[0]?.file_url
   const heroBg = heroImage
     ? `url(${heroImage}) center/cover no-repeat`
@@ -29,7 +47,7 @@ function ForYouCard({ service }: { service: Service }) {
 
   return (
     <RouterLink
-      to={`/service-detail/${service.id}?from=for_you`}
+      to={`/service-detail/${service.id}?from=explore`}
       style={{ textDecoration: 'none', flexShrink: 0 }}
     >
       <Box
@@ -42,12 +60,11 @@ function ForYouCard({ service }: { service: Service }) {
         transition="all 0.18s ease"
         _hover={{
           transform: 'translateY(-2px)',
-          borderColor: 'purple.200',
-          boxShadow: '0 12px 24px rgba(168, 85, 247, 0.15)',
+          borderColor: 'teal.200',
+          boxShadow: '0 12px 24px rgba(20, 184, 166, 0.18)',
         }}
       >
         <Box position="relative" h={`${IMAGE_HEIGHT}px`} style={{ background: heroBg }}>
-          {/* Bottom-up gradient scrim so the title stays readable on any image */}
           <Box
             position="absolute"
             inset={0}
@@ -103,7 +120,7 @@ function ForYouCard({ service }: { service: Service }) {
   )
 }
 
-function ForYouSkeletonCard() {
+function ExploreSkeletonCard() {
   return (
     <Box
       w={`${CARD_WIDTH}px`}
@@ -126,45 +143,9 @@ function ForYouSkeletonCard() {
   )
 }
 
-function ForYouEmptyState() {
-  const navigate = useNavigate()
-  return (
-    <Box
-      bg="purple.50"
-      borderRadius="14px"
-      borderWidth="1px"
-      borderColor="purple.100"
-      p={5}
-      display="flex"
-      flexDirection="column"
-      gap={3}
-      alignItems="flex-start"
-    >
-      <Text fontSize="sm" color="gray.700">
-        Your For You feed is quiet today. Add more interests to widen it.
-      </Text>
-      <Box
-        as="button"
-        onClick={() => navigate('/onboarding')}
-        px="14px"
-        py="7px"
-        borderRadius="9px"
-        bg="purple.500"
-        color="white"
-        fontSize="12px"
-        fontWeight={700}
-        _hover={{ bg: 'purple.600' }}
-        cursor="pointer"
-      >
-        Edit interests
-      </Box>
-    </Box>
-  )
-}
-
-export default function ForYouCarousel() {
+export default function ExploreCarousel() {
   const user = useAuthStore(state => state.user)
-  const eligible = Boolean(user?.is_onboarded && user?.skills?.length)
+  const eligible = Boolean(user)
   const [services, setServices] = useState<Service[]>([])
   const [loading, setLoading] = useState(eligible)
 
@@ -172,9 +153,9 @@ export default function ForYouCarousel() {
     if (!eligible) return
     let cancelled = false
     serviceAPI
-      .list({ sort: 'for_you' })
+      .list({ explore_only: true, page_size: 10 })
       .then(results => {
-        if (!cancelled) setServices(diversifyByChip(results))
+        if (!cancelled) setServices(results)
       })
       .catch(() => {
         if (!cancelled) setServices([])
@@ -188,36 +169,32 @@ export default function ForYouCarousel() {
   }, [eligible])
 
   if (!eligible) return null
-
-  const headerName = user?.first_name?.trim()
-  const headerTitle = headerName ? `For ${headerName}` : 'For you'
+  if (!loading && services.length === 0) return null
 
   return (
     <Box mb={6}>
       <Flex align="center" mb={3} gap={2}>
-        <Box as={FiHeart} color="purple.500" />
+        <Box as={FiCompass} color="teal.500" />
         <Text fontSize="md" fontWeight={700} color="gray.900">
-          {headerTitle}
+          Try something new
         </Text>
         <Text fontSize="xs" color="gray.500">
-          Picked from your interests, follows, and recent activity
+          Hand-picked finds we think deserve more attention
         </Text>
       </Flex>
       {loading ? (
         <Box overflowX="auto" pb={2} css={{ scrollbarWidth: 'thin' }}>
           <HStack gap={3} align="stretch">
-            <ForYouSkeletonCard />
-            <ForYouSkeletonCard />
-            <ForYouSkeletonCard />
+            <ExploreSkeletonCard />
+            <ExploreSkeletonCard />
+            <ExploreSkeletonCard />
           </HStack>
         </Box>
-      ) : services.length === 0 ? (
-        <ForYouEmptyState />
       ) : (
         <Box overflowX="auto" pb={2} css={{ scrollbarWidth: 'thin' }}>
           <HStack gap={3} align="stretch">
             {services.map(service => (
-              <ForYouCard key={service.id} service={service} />
+              <ExploreCard key={service.id} service={service} />
             ))}
           </HStack>
         </Box>
