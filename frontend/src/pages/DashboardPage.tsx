@@ -7,7 +7,6 @@ import {
   Text,
   Input,
   Grid,
-  HStack,
   Spinner,
 } from '@chakra-ui/react'
 import {
@@ -34,6 +33,7 @@ import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
 import ForYouCarousel from '@/components/ForYouCarousel'
+import { Avatar } from '@/components/Avatar'
 import type { Handshake } from '@/services/handshakeAPI'
 
 import {
@@ -41,7 +41,7 @@ import {
   AMBER, AMBER_LT,
   BLUE, BLUE_LT,
   RED, RED_LT,
-  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
+  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY800,
   WHITE,
 } from '@/theme/tokens'
 import { isNearlyFull } from '@/utils/eventUtils'
@@ -95,13 +95,6 @@ function fmt(h: number | string | undefined | null) {
   return Number.isInteger(n) ? String(n) : n.toFixed(1)
 }
 
-function initials(u?: { first_name?: string; last_name?: string; email?: string } | null) {
-  if (!u) return '?'
-  const f = u.first_name?.[0] ?? ''
-  const l = u.last_name?.[0] ?? ''
-  return (f || l) ? `${f}${l}`.toUpperCase() : (u.email?.[0] ?? '?').toUpperCase()
-}
-
 function fullName(u?: { first_name?: string; last_name?: string; email?: string } | null) {
   if (!u) return 'User'
   const n = `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim()
@@ -145,22 +138,6 @@ function sortServicesByFeedPriority(a: Service, b: Service) {
 }
 
 // ─── Tiny reusable bits ───────────────────────────────────────────────────────
-
-function Avatar({ u, size = 36 }: { u?: { first_name?: string; last_name?: string; email?: string; avatar_url?: string } | null; size?: number }) {
-  return (
-    <Box
-      w={`${size}px`} h={`${size}px`} borderRadius="full" flexShrink={0}
-      bg={GREEN} color={WHITE} overflow="hidden"
-      display="flex" alignItems="center" justifyContent="center"
-      fontSize={`${Math.round(size * 0.34)}px`} fontWeight={700}
-    >
-      {u?.avatar_url
-        ? <img src={u.avatar_url} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        : initials(u)
-      }
-    </Box>
-  )
-}
 
 function Pill({ label, bg, color }: { label: string; bg: string; color: string }) {
   return (
@@ -791,26 +768,13 @@ const DashboardPage = () => {
 
           {/* Map panel */}
           {mapOpen && (
-            <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0}>
-              <Flex align="center" px={5} py="10px" gap={4}>
-                <Text fontSize="12px" fontWeight={600} color={GRAY700}>Map View</Text>
-                <HStack gap={3} fontSize="11px" color={GRAY500}>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={GREEN} />Offers</Flex>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={BLUE} />Wants</Flex>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={AMBER} />Events</Flex>
-                </HStack>
-                {isLoading && services.length > 0 && (
-                  <Flex align="center" gap="5px" ml="auto">
-                    <Spinner size="xs" color="gray.400" />
-                    <Text fontSize="11px" color={GRAY400}>Refreshing</Text>
-                  </Flex>
-                )}
-              </Flex>
+            <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
               <MapView
                 services={displayServices}
                 height="280px"
                 onServiceClick={(id) => navigate(`/service-detail/${id}`)}
                 userLocation={userLocation}
+                isRefreshing={isLoading && services.length > 0}
               />
             </Box>
           )}
