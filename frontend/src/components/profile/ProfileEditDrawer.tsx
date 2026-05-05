@@ -401,6 +401,13 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
               bg={WHITE}
               boxShadow="0 24px 80px rgba(0,0,0,0.24)"
               style={{ display: 'flex', flexDirection: 'column', position: 'relative' }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && dirty) {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setConfirmDiscard(true)
+                }
+              }}
               w={{ base: 'calc(100% - 24px)', md: '760px' }}
               maxW="760px"
               maxH="calc(100dvh - 48px)"

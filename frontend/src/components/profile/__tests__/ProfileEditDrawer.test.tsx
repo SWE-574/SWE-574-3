@@ -219,8 +219,10 @@ describe('ProfileEditDrawer', () => {
     await user.keyboard('{Escape}')
 
     // Dialog appears once
-    const dialogs = screen.getAllByText('Discard changes?')
-    expect(dialogs).toHaveLength(1)
+    await waitFor(() => {
+      const dialogs = screen.getAllByText('Discard changes?')
+      expect(dialogs).toHaveLength(1)
+    })
 
     // onClose should NOT have been called yet (guarded by discard dialog)
   })
