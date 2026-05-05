@@ -67,6 +67,70 @@ class TestActivityProducers:
             actor=a, verb=ActivityEvent.USER_FOLLOWED, target_user=b,
         ).exists()
 
+    def test_handshake_complete_emits_celebration_event(self):
+        from api.models import ActivityEvent, Handshake
+
+        owner = UserFactory()
+        viewer = UserFactory()
+        svc = ServiceFactory(user=owner, type='Offer', status='Active')
+        hs = HandshakeFactory(service=svc, requester=viewer, status='accepted')
+        hs = Handshake.objects.get(pk=hs.pk)
+        hs.status = 'completed'
+        hs.save()
+        assert ActivityEvent.objects.filter(
+            actor=viewer,
+            verb=ActivityEvent.HANDSHAKE_COMPLETED,
+            service=svc,
+            target_user=owner,
+        ).exists()
+
+    def test_event_filling_up_fires_once_at_threshold(self):
+        from api.models import ActivityEvent, Handshake
+
+        organizer = UserFactory()
+        # Event with 5 max participants -> threshold trips at 4 (>= 0.8 * 5).
+        event = ServiceFactory(
+            user=organizer, type='Event', status='Active', max_participants=5,
+        )
+
+        # 3 accepted participants -- below threshold.
+        for _ in range(3):
+            HandshakeFactory(service=event, status='accepted')
+        assert not ActivityEvent.objects.filter(
+            service=event, verb=ActivityEvent.EVENT_FILLING_UP,
+        ).exists()
+
+        # 4th accepted -- should trip.
+        HandshakeFactory(service=event, status='accepted')
+        assert ActivityEvent.objects.filter(
+            service=event, verb=ActivityEvent.EVENT_FILLING_UP,
+        ).count() == 1
+
+        # 5th accepted -- already fired, idempotency holds.
+        HandshakeFactory(service=event, status='accepted')
+        assert ActivityEvent.objects.filter(
+            service=event, verb=ActivityEvent.EVENT_FILLING_UP,
+        ).count() == 1
+
+    def test_new_neighbor_event_fires_when_user_finishes_onboarding(self):
+        from api.models import ActivityEvent
+
+        # UserFactory may or may not set is_onboarded -- force the transition.
+        u = UserFactory(is_onboarded=False)
+        assert not ActivityEvent.objects.filter(
+            actor=u, verb=ActivityEvent.NEW_NEIGHBOR,
+        ).exists()
+        u.is_onboarded = True
+        u.save()
+        assert ActivityEvent.objects.filter(
+            actor=u, verb=ActivityEvent.NEW_NEIGHBOR,
+        ).count() == 1
+        # Saving again does not double-emit.
+        u.save()
+        assert ActivityEvent.objects.filter(
+            actor=u, verb=ActivityEvent.NEW_NEIGHBOR,
+        ).count() == 1
+
 
 @pytest.mark.django_db
 @pytest.mark.integration
@@ -140,6 +204,82 @@ class TestActivityFeedEndpoint:
         resp = client.get('/api/activity/feed/')
         actors = {row['actor']['id'] for row in resp.json()['results']}
         assert str(viewer.id) not in actors
+
+    def test_sort_nearby_orders_by_distance_and_caps_at_12(self):
+        from decimal import Decimal as D
+
+        viewer = UserFactory()
+        # Five service authors, each posting at increasing distance from (0,0).
+        for i, dist in enumerate([0.001, 0.005, 0.01, 0.05, 0.1]):
+            owner = UserFactory()
+            ServiceFactory(
+                user=owner, type='Offer', status='Active',
+                location_lat=D(str(dist)), location_lng=D('0.0'),
+            )
+
+        client = APIClient()
+        client.force_authenticate(user=viewer)
+        resp = client.get('/api/activity/feed/?lat=0.0&lng=0.0&sort=nearby')
+        assert resp.status_code == 200
+        results = resp.json()['results']
+        assert len(results) <= 12
+        # Distances should be monotonically increasing.
+        distances = [row['distance_km'] for row in results if row['distance_km'] is not None]
+        assert distances == sorted(distances)
+
+    def test_event_capacity_pct_populated_on_event_filling_up_card(self):
+        from api.models import ActivityEvent
+
+        organizer = UserFactory()
+        viewer = UserFactory()
+        # Make viewer follow organizer so the event_filling_up card is
+        # included in the feed regardless of location.
+        from api.models import UserFollow
+        UserFollow.objects.create(follower=viewer, following=organizer)
+
+        event = ServiceFactory(
+            user=organizer, type='Event', status='Active', max_participants=5,
+        )
+        for _ in range(4):
+            HandshakeFactory(service=event, status='accepted')
+
+        client = APIClient()
+        client.force_authenticate(user=viewer)
+        resp = client.get('/api/activity/feed/')
+        assert resp.status_code == 200
+        rows = [
+            r for r in resp.json()['results']
+            if r['verb'] == ActivityEvent.EVENT_FILLING_UP
+        ]
+        assert len(rows) == 1
+        assert rows[0]['event_capacity_pct'] == 80.0
+
+    def test_handshake_duration_hours_populated_on_completed_card(self):
+        from api.models import ActivityEvent, Handshake, UserFollow
+
+        owner = UserFactory()
+        viewer = UserFactory()
+        actor = UserFactory()
+        UserFollow.objects.create(follower=viewer, following=actor)
+
+        svc = ServiceFactory(user=owner, type='Offer', status='Active')
+        hs = HandshakeFactory(
+            service=svc, requester=actor, status='accepted',
+            provisioned_hours=2.5,
+        )
+        hs = Handshake.objects.get(pk=hs.pk)
+        hs.status = 'completed'
+        hs.save()
+
+        client = APIClient()
+        client.force_authenticate(user=viewer)
+        resp = client.get('/api/activity/feed/')
+        rows = [
+            r for r in resp.json()['results']
+            if r['verb'] == ActivityEvent.HANDSHAKE_COMPLETED
+        ]
+        assert len(rows) >= 1
+        assert rows[0]['handshake_duration_hours'] == 2.5
 
     def test_days_param_bounds_window(self):
         from api.models import ActivityEvent, UserFollow

@@ -1,57 +1,68 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Box, Flex, Spinner, Stack, Text } from '@chakra-ui/react'
-import { Link as RouterLink } from 'react-router-dom'
-import { FiActivity, FiUserPlus, FiCheckCircle, FiFileText } from 'react-icons/fi'
+import { FiActivity } from 'react-icons/fi'
+import { useNavigate } from 'react-router-dom'
 
 import { useGeoStore } from '@/store/useGeoStore'
+import { useAuthStore } from '@/store/useAuthStore'
 import { activityAPI, type ActivityEvent } from '@/services/activityAPI'
 
-function formatTime(iso: string): string {
-  const then = new Date(iso).getTime()
-  const diffMin = Math.max(1, Math.floor((Date.now() - then) / 60000))
-  if (diffMin < 60) return `${diffMin}m ago`
-  if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)}h ago`
-  return `${Math.floor(diffMin / 1440)}d ago`
+import { ActivityFilterChips, type ActivityFilter } from '@/components/activity/ActivityFilterChips'
+import { ActivityDayHeader } from '@/components/activity/ActivityDayHeader'
+import { ActivityCard } from '@/components/activity/dispatcher'
+import { applyFilter } from '@/components/activity/applyFilter'
+import { ActivityPulseRail } from '@/components/activity/ActivityPulseRail'
+import { ActivityHeaderStats } from '@/components/activity/ActivityHeaderStats'
+
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
 }
 
-function actorName(a: ActivityEvent['actor']): string {
-  return [a.first_name, a.last_name].filter(Boolean).join(' ') || 'Someone'
+function dayBucketLabel(eventTs: number, today: number): string {
+  const oneDay = 86_400_000
+  const diff = today - eventTs
+  if (diff <= 0) return 'Today'
+  if (diff <= oneDay) return 'Yesterday'
+  if (diff <= oneDay * 6) return `${Math.floor(diff / oneDay) + 1} days ago`
+  return new Date(eventTs).toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
-function VerbIcon({ verb }: { verb: ActivityEvent['verb'] }) {
-  if (verb === 'service_created') return <FiFileText />
-  if (verb === 'handshake_accepted') return <FiCheckCircle />
-  return <FiUserPlus />
+interface DayGroup {
+  label: string
+  events: ActivityEvent[]
 }
 
-function describe(event: ActivityEvent): { text: string; href: string | null } {
-  const actor = actorName(event.actor)
-  if (event.verb === 'service_created' && event.service) {
-    return {
-      text: `${actor} posted ${event.service.title}`,
-      href: `/service-detail/${event.service.id}`,
+function groupByDay(events: ActivityEvent[]): DayGroup[] {
+  const today = startOfDay(new Date())
+  const buckets = new Map<string, DayGroup>()
+  const order: string[] = []
+  for (const ev of events) {
+    const eventTs = startOfDay(new Date(ev.created_at))
+    const label = dayBucketLabel(eventTs, today)
+    if (!buckets.has(label)) {
+      buckets.set(label, { label, events: [] })
+      order.push(label)
     }
+    buckets.get(label)!.events.push(ev)
   }
-  if (event.verb === 'handshake_accepted' && event.service) {
-    return {
-      text: `${actor} is joining ${event.service.title}`,
-      href: `/service-detail/${event.service.id}`,
-    }
-  }
-  if (event.verb === 'user_followed' && event.target_user) {
-    return {
-      text: `${actor} started following ${actorName(event.target_user)}`,
-      href: `/public-profile/${event.target_user.id}`,
-    }
-  }
-  return { text: `${actor} did something`, href: null }
+  return order.map(o => buckets.get(o)!)
 }
+
 
 export default function ActivityPage() {
+  const navigate = useNavigate()
   const geoLocation = useGeoStore(state => state.geoLocation)
+  const user = useAuthStore(state => state.user)
+
   const [events, setEvents] = useState<ActivityEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [filter, setFilter] = useState<ActivityFilter>('all')
+  const [followingIds] = useState<Set<string>>(new Set())
 
   const lat = geoLocation?.latitude
   const lng = geoLocation?.longitude
@@ -79,67 +90,117 @@ export default function ActivityPage() {
     }
   }, [hasLocation, lat, lng])
 
-  return (
-    <Box maxW="640px" mx="auto" px={4} py={6}>
-      <Flex align="center" mb={4} gap={2}>
-        <FiActivity />
-        <Text fontSize="xl" fontWeight="800" color="gray.900">
-          Activity
-        </Text>
-      </Flex>
-      <Text fontSize="sm" color="gray.600" mb={4}>
-        What people you follow and folks in your area have been up to.
-      </Text>
+  const filtered = useMemo(
+    () => applyFilter(events, filter, followingIds),
+    [events, filter, followingIds],
+  )
+  const grouped = useMemo(() => groupByDay(filtered), [filtered])
 
-      {loading ? (
-        <Flex h="120px" align="center" justify="center">
-          <Spinner color="purple.500" />
-        </Flex>
-      ) : error ? (
-        <Box bg="red.50" p={3} borderRadius="md">
-          <Text fontSize="sm" color="red.700">{error}</Text>
-        </Box>
-      ) : events.length === 0 ? (
-        <Box bg="gray.50" p={6} borderRadius="md">
-          <Text fontSize="sm" color="gray.600">
-            Nothing here yet. Follow some people or enable location to see events from your area.
+  const filterCounts = useMemo(() => ({
+    all: events.length,
+    following: applyFilter(events, 'following', followingIds).length,
+    nearby: applyFilter(events, 'nearby', followingIds).length,
+    recent: applyFilter(events, 'recent', followingIds).length,
+  }), [events, followingIds])
+
+  return (
+    <Box
+      minH="calc(100vh - 64px)"
+      style={{
+        background: 'linear-gradient(180deg, #fafaff 0%, #f5f3ff 35%, #fafafa 100%)',
+      }}
+    >
+      <Box maxW="1280px" mx="auto" px={{ base: 4, md: 6 }} py={8}>
+        <Flex align="center" mb={2} gap={2}>
+          <Box
+            display="inline-flex"
+            alignItems="center"
+            justifyContent="center"
+            w="38px"
+            h="38px"
+            borderRadius="12px"
+            bg="linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(59, 130, 246, 0.15) 100%)"
+            color="purple.600"
+          >
+            <Box as={FiActivity} fontSize="20px" />
+          </Box>
+          <Text fontSize="2xl" fontWeight={800} color="gray.900">
+            Activity
           </Text>
-        </Box>
-      ) : (
-        <Stack gap={2}>
-          {events.map(event => {
-            const d = describe(event)
-            const card = (
-              <Flex
-                align="center"
-                gap={3}
-                p={3}
-                borderRadius="lg"
-                bg="white"
-                borderWidth="1px"
-                borderColor="gray.200"
-                _hover={d.href ? { bg: 'gray.50', cursor: 'pointer' } : {}}
+        </Flex>
+        <Text fontSize="sm" color="gray.600" mb={5}>
+          What people you follow and folks in your area have been up to.
+          {!hasLocation && user && (
+            <Text as="span" color="purple.700" fontWeight={600}>
+              {' '}Enable location to widen the feed.
+            </Text>
+          )}
+        </Text>
+
+        <ActivityHeaderStats events={events} />
+        <ActivityFilterChips active={filter} counts={filterCounts} onChange={setFilter} />
+
+        <Flex gap={6} align="flex-start">
+        <Box flex={1} minW={0}>
+          {loading ? (
+            <Flex h="160px" align="center" justify="center">
+              <Spinner color="purple.500" />
+            </Flex>
+          ) : error ? (
+            <Box bg="red.50" p={4} borderRadius="md">
+              <Text fontSize="sm" color="red.700">{error}</Text>
+            </Box>
+          ) : grouped.length === 0 ? (
+            <Box
+              bg="purple.50"
+              borderWidth="1px"
+              borderColor="purple.100"
+              borderRadius="14px"
+              p={6}
+            >
+              <Text fontSize="sm" color="gray.700" mb={3}>
+                Quiet day in the hive. Follow more people or zoom out to see broader activity.
+              </Text>
+              <Box
+                as="button"
+                onClick={() => navigate('/users')}
+                px="14px"
+                py="7px"
+                borderRadius="9px"
+                bg="purple.500"
+                color="white"
+                fontSize="12px"
+                fontWeight={700}
+                _hover={{ bg: 'purple.600' }}
+                cursor="pointer"
               >
-                <Box color="purple.500">
-                  <VerbIcon verb={event.verb} />
+                Find people to follow
+              </Box>
+            </Box>
+          ) : (
+            <Stack gap={3}>
+              {grouped.map(group => (
+                <Box key={group.label}>
+                  <ActivityDayHeader label={group.label} count={group.events.length} />
+                  <Stack gap={3}>
+                    {group.events.map(event => (
+                      <ActivityCard key={event.id} event={event} />
+                    ))}
+                  </Stack>
                 </Box>
-                <Box flex="1">
-                  <Text fontSize="sm" color="gray.900">{d.text}</Text>
-                  <Text fontSize="xs" color="gray.500">{formatTime(event.created_at)}</Text>
-                </Box>
-              </Flex>
-            )
-            if (d.href) {
-              return (
-                <RouterLink key={event.id} to={d.href} style={{ textDecoration: 'none' }}>
-                  {card}
-                </RouterLink>
-              )
-            }
-            return <Box key={event.id}>{card}</Box>
-          })}
-        </Stack>
-      )}
+              ))}
+            </Stack>
+          )}
+        </Box>
+
+          <Box w="320px" flexShrink={0} display={{ base: 'none', lg: 'block' }}>
+            <ActivityPulseRail
+              lat={hasLocation ? lat : undefined}
+              lng={hasLocation ? lng : undefined}
+            />
+          </Box>
+        </Flex>
+      </Box>
     </Box>
   )
 }

@@ -6892,11 +6892,12 @@ class ActivityFeedView(generics.ListAPIView):
 
     def get_queryset(self):
         from datetime import timedelta
+        from django.contrib.gis.db.models.functions import Distance
         from django.contrib.gis.geos import Point
         from django.contrib.gis.measure import D
-        from django.db.models import Q
+        from django.db.models import Prefetch, Q
 
-        from .models import ActivityEvent, UserFollow
+        from .models import ActivityEvent, ServiceMedia, UserFollow
 
         viewer = self.request.user
         try:
@@ -6922,6 +6923,7 @@ class ActivityFeedView(generics.ListAPIView):
         except (TypeError, ValueError):
             lat_f = lng_f = None
 
+        viewer_point = None
         if lat_f is not None and lng_f is not None:
             half_life = float(getattr(
                 settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0,
@@ -6933,11 +6935,58 @@ class ActivityFeedView(generics.ListAPIView):
                 location__distance_lte=(viewer_point, D(km=radius_km)),
             )
 
+        # Prefetch the first photo for each service so the hero card thumbnail
+        # is one query instead of one-per-event.
+        media_prefetch = Prefetch(
+            'service__media',
+            queryset=ServiceMedia.objects.order_by('display_order', 'created_at'),
+        )
+
         qs = (
             ActivityEvent.objects
             .filter(created_at__gte=cutoff)
             .filter(filters)
             .exclude(actor=viewer)
-            .select_related('actor', 'target_user', 'service')
+            .select_related('actor', 'target_user', 'service', 'service__user')
+            .prefetch_related(media_prefetch, 'actor__skills')
         )
+
+        # When the viewer passes lat/lng we annotate distance and optionally
+        # sort by it for the right-rail "Active near you" pulse list.
+        sort = self.request.query_params.get('sort')
+        if viewer_point is not None:
+            qs = qs.annotate(_distance=Distance('location', viewer_point))
+            if sort == 'nearby':
+                qs = qs.filter(_distance__isnull=False).order_by('_distance', '-created_at')
+
         return qs
+
+    def list(self, request, *args, **kwargs):
+        # Cap the response when sort=nearby so the rail stays a small payload.
+        if request.query_params.get('sort') == 'nearby':
+            qs = self.filter_queryset(self.get_queryset())[:12]
+            self._annotate_distances(qs)
+            serializer = self.get_serializer(qs, many=True)
+            return Response({
+                'count': len(serializer.data),
+                'next': None,
+                'previous': None,
+                'results': serializer.data,
+            })
+        # Standard paginated response for the main feed.
+        response = super().list(request, *args, **kwargs)
+        # Annotate distances on the page so cards can show "0.4 km away".
+        page = self.paginator.page if hasattr(self, 'paginator') and getattr(self.paginator, 'page', None) else None
+        if page is not None:
+            self._annotate_distances(page.object_list)
+            serializer = self.get_serializer(page.object_list, many=True)
+            response.data['results'] = serializer.data
+        return response
+
+    def _annotate_distances(self, events):
+        """Convert the PostGIS Distance annotation to plain km on each
+        instance so the serializer can read `_distance_km` without
+        re-importing the GIS measure machinery."""
+        for ev in events:
+            d = getattr(ev, '_distance', None)
+            ev._distance_km = round(d.km, 2) if d is not None else None

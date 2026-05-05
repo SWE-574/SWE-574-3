@@ -1273,11 +1273,19 @@ class ActivityEvent(models.Model):
     """
     SERVICE_CREATED = 'service_created'
     HANDSHAKE_ACCEPTED = 'handshake_accepted'
+    HANDSHAKE_COMPLETED = 'handshake_completed'
     USER_FOLLOWED = 'user_followed'
+    SERVICE_ENDORSED = 'service_endorsed'
+    EVENT_FILLING_UP = 'event_filling_up'
+    NEW_NEIGHBOR = 'new_neighbor'
     VERB_CHOICES = [
         (SERVICE_CREATED, 'service_created'),
         (HANDSHAKE_ACCEPTED, 'handshake_accepted'),
+        (HANDSHAKE_COMPLETED, 'handshake_completed'),
         (USER_FOLLOWED, 'user_followed'),
+        (SERVICE_ENDORSED, 'service_endorsed'),
+        (EVENT_FILLING_UP, 'event_filling_up'),
+        (NEW_NEIGHBOR, 'new_neighbor'),
     ]
 
     actor = models.ForeignKey(

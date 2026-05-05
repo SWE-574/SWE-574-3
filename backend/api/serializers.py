@@ -3091,16 +3091,31 @@ class ForumTopicDetailSerializer(ForumTopicSerializer):
 
 
 class ActivityEventSerializer(serializers.ModelSerializer):
-    """Card payload for the activity feed (#482)."""
+    """Card payload for the activity feed (#482, redesigned for #493).
+
+    Fields beyond the basic actor/verb/object set are populated lazily so the
+    cost stays bounded for the small share of cards that actually use them
+    (event_filling_up needs capacity %, handshake_completed needs duration,
+    etc.). `distance_km` is computed at view time and stashed on the instance
+    via `_distance_km` -- the serializer just reads it.
+    """
     actor = serializers.SerializerMethodField()
     target_user = serializers.SerializerMethodField()
     service = serializers.SerializerMethodField()
+    distance_km = serializers.SerializerMethodField()
+    event_capacity_pct = serializers.SerializerMethodField()
+    event_starts_in_seconds = serializers.SerializerMethodField()
+    handshake_duration_hours = serializers.SerializerMethodField()
+    actor_skills = serializers.SerializerMethodField()
+    actor_location = serializers.SerializerMethodField()
 
     class Meta:
         from .models import ActivityEvent
         model = ActivityEvent
         fields = [
             'id', 'verb', 'actor', 'target_user', 'service', 'created_at',
+            'distance_km', 'event_capacity_pct', 'event_starts_in_seconds',
+            'handshake_duration_hours', 'actor_skills', 'actor_location',
         ]
 
     def _user_summary(self, user):
@@ -3123,8 +3138,70 @@ class ActivityEventSerializer(serializers.ModelSerializer):
         if obj.service_id is None:
             return None
         svc = obj.service
+        media = list(getattr(svc, 'media', None).all()[:1]) if hasattr(svc, 'media') else []
+        thumb = media[0].file_url if media and getattr(media[0], 'file_url', None) else None
         return {
             'id': str(svc.id),
             'title': svc.title,
             'type': svc.type,
+            'location_area': getattr(svc, 'location_area', None),
+            'thumbnail_url': thumb,
         }
+
+    def get_distance_km(self, obj):
+        """Set by ActivityFeedView when viewer passes lat/lng. Otherwise None."""
+        return getattr(obj, '_distance_km', None)
+
+    def get_event_capacity_pct(self, obj):
+        """Percentage of the event's max_participants that have committed.
+        Only meaningful for service.type=='Event'; None elsewhere."""
+        from .models import Handshake
+        svc = obj.service
+        if svc is None or svc.type != 'Event' or not svc.max_participants:
+            return None
+        committed = Handshake.objects.filter(
+            service=svc,
+            status__in=('accepted', 'completed', 'checked_in', 'attended'),
+        ).count()
+        return round(100.0 * committed / svc.max_participants, 1)
+
+    def get_event_starts_in_seconds(self, obj):
+        """Seconds until the event's scheduled_time. Negative if past. None
+        for non-events or events without a scheduled_time."""
+        svc = obj.service
+        if svc is None or svc.type != 'Event' or not svc.scheduled_time:
+            return None
+        delta = svc.scheduled_time - timezone.now()
+        return int(delta.total_seconds())
+
+    def get_handshake_duration_hours(self, obj):
+        """Banked hours flourish for handshake_completed cards. Looks up the
+        most recently completed handshake on (service, requester=actor) so we
+        do not need a direct FK on ActivityEvent. Returns None if not found."""
+        from .models import ActivityEvent, Handshake
+        if obj.verb != ActivityEvent.HANDSHAKE_COMPLETED or obj.service_id is None:
+            return None
+        hs = (
+            Handshake.objects
+            .filter(service_id=obj.service_id, requester=obj.actor, status='completed')
+            .order_by('-updated_at')
+            .first()
+        )
+        if hs is None:
+            return None
+        hours = hs.exact_duration if hs.exact_duration is not None else hs.provisioned_hours
+        return float(hours) if hours is not None else None
+
+    def get_actor_skills(self, obj):
+        """Top declared skill tag names for new_neighbor cards. Capped at 3."""
+        from .models import ActivityEvent
+        if obj.verb != ActivityEvent.NEW_NEIGHBOR:
+            return None
+        return list(obj.actor.skills.values_list('name', flat=True)[:3])
+
+    def get_actor_location(self, obj):
+        """Human-readable location text for new_neighbor cards."""
+        from .models import ActivityEvent
+        if obj.verb != ActivityEvent.NEW_NEIGHBOR:
+            return None
+        return getattr(obj.actor, 'location', None) or None

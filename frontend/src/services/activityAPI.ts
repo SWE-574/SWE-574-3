@@ -10,12 +10,18 @@ export interface ActivityActor {
 export type ActivityVerb =
   | 'service_created'
   | 'handshake_accepted'
+  | 'handshake_completed'
   | 'user_followed'
+  | 'service_endorsed'
+  | 'event_filling_up'
+  | 'new_neighbor'
 
 export interface ActivityServiceRef {
   id: string
   title: string
   type: 'Offer' | 'Need' | 'Event'
+  location_area?: string | null
+  thumbnail_url?: string | null
 }
 
 export interface ActivityEvent {
@@ -25,6 +31,12 @@ export interface ActivityEvent {
   target_user: ActivityActor | null
   service: ActivityServiceRef | null
   created_at: string
+  distance_km: number | null
+  event_capacity_pct: number | null
+  event_starts_in_seconds: number | null
+  handshake_duration_hours: number | null
+  actor_skills: string[] | null
+  actor_location: string | null
 }
 
 interface PaginatedActivity {
@@ -34,9 +46,17 @@ interface PaginatedActivity {
   results: ActivityEvent[]
 }
 
+export interface ActivityFeedParams {
+  days?: number
+  lat?: number
+  lng?: number
+  page?: number
+  sort?: 'nearby'
+}
+
 export const activityAPI = {
   feed: async (
-    params?: { days?: number; lat?: number; lng?: number; page?: number },
+    params?: ActivityFeedParams,
     signal?: AbortSignal,
   ): Promise<ActivityEvent[]> => {
     const query = new URLSearchParams()
@@ -44,6 +64,7 @@ export const activityAPI = {
     if (params?.lat != null) query.set('lat', String(params.lat))
     if (params?.lng != null) query.set('lng', String(params.lng))
     if (params?.page != null) query.set('page', String(params.page))
+    if (params?.sort) query.set('sort', params.sort)
 
     const res = await apiClient.get<PaginatedActivity | ActivityEvent[]>(
       '/activity/feed/',
