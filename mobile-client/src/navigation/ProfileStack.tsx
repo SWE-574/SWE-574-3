@@ -9,6 +9,7 @@ import FollowListScreen from "../presentation/screens/FollowListScreen";
 import NotificationsScreen from "../presentation/screens/NotificationsScreen";
 import TimeActivityScreen from "../presentation/screens/TimeActivityScreen";
 import ServiceDetailScreen from "../presentation/screens/ServiceDetailScreen";
+import CalendarScreen from "../presentation/screens/CalendarScreen";
 import { colors } from "../constants/colors";
 
 export type ProfileStackParamList = {
@@ -21,6 +22,7 @@ export type ProfileStackParamList = {
   Notifications: undefined;
   TimeActivity: undefined;
   ServiceDetail: { id: string };
+  Calendar: undefined;
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -77,6 +79,19 @@ export default function ProfileStack() {
         options={{
           headerShown: true,
           title: "Time Activity",
+          headerStyle: { backgroundColor: colors.WHITE },
+          headerTitleStyle: { fontSize: 17, fontWeight: "600" },
+          headerShadowVisible: true,
+          gestureEnabled: true,
+          animation: "slide_from_right",
+        }}
+      />
+      <Stack.Screen
+        name="Calendar"
+        component={CalendarScreen}
+        options={{
+          headerShown: true,
+          title: "Calendar",
           headerStyle: { backgroundColor: colors.WHITE },
           headerTitleStyle: { fontSize: 17, fontWeight: "600" },
           headerShadowVisible: true,

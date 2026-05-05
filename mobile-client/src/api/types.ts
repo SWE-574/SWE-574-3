@@ -23,8 +23,13 @@ export interface UserSummary {
   role?: string;
   date_joined?: string;
   badges?: string[];
+  /** @deprecated Use featured_badges[] instead */
   featured_badge?: string | null;
   featured_achievement_id?: string | null;
+  /** Up to 2 badge IDs the user has chosen to feature on their profile. */
+  featured_badges?: string[];
+  /** Resolved badge details for featured_badges (read-only, from API). */
+  featured_badges_detail?: import("./calendar").BadgeDetail[];
   /** When false, other users should not see exchange history (web parity). */
   show_history?: boolean;
   is_verified?: boolean;
@@ -53,6 +58,10 @@ export interface PublicUserProfile {
   punctual_count?: number;
   badges?: string[];
   achievements?: string[];
+  /** Up to 2 badge IDs the user has chosen to feature on their profile. */
+  featured_badges?: string[];
+  /** Resolved badge details for featured_badges (read-only, from API). */
+  featured_badges_detail?: import("./calendar").BadgeDetail[];
   skills?: Array<{ id: string; name: string }>;
   portfolio_images?: string[];
   /** Public exchange history visibility; when false, do not fetch history for viewers. */

@@ -54,6 +54,9 @@ import ProfileSkillsSection from "../components/ProfileSkillsSection";
 import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
 import NotificationBadge from "../components/NotificationBadge";
 import { useNotificationStore } from "../../store/useNotificationStore";
+import ProfileHero from "../components/profile/ProfileHero";
+import UpcomingScheduleCard from "../components/profile/UpcomingScheduleCard";
+import ProfileEditSheet from "../components/profile/ProfileEditSheet";
 
 type ProfileHomeNavigation = CompositeNavigationProp<
   NativeStackNavigationProp<ProfileStackParamList, "ProfileHome">,
@@ -93,6 +96,7 @@ export default function ProfileScreen() {
   );
 
   const [isEditing, setIsEditing] = useState(false);
+  const [isEditSheetOpen, setIsEditSheetOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isBioExpanded, setIsBioExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<ProfileTabKey>("offers");
@@ -559,7 +563,7 @@ export default function ProfileScreen() {
               <Pressable
                 onPress={() => {
                   setMenuOpen(false);
-                  setIsEditing(true);
+                  setIsEditSheetOpen(true);
                 }}
                 style={({ pressed }) => [
                   styles.overflowMenuItem,
@@ -615,154 +619,67 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroCard}>
-          <Image
-            source={{ uri: form.banner_url || DEFAULT_BANNER_URI }}
-            style={styles.banner}
+        {/* New hero component */}
+        <ProfileHero
+          mode="own"
+          user={{
+            id: String(user.id ?? ""),
+            first_name: typedUser.first_name ?? form.first_name,
+            last_name: typedUser.last_name ?? form.last_name,
+            email: user.email ?? "",
+            bio: form.bio,
+            avatar_url: form.avatar_url || null,
+            banner_url: form.banner_url || typedUser.banner_url || null,
+            date_joined: typedUser.date_joined,
+            location: form.location || null,
+            followers_count: typedUser.followers_count,
+            following_count: typedUser.following_count,
+            featured_badges: typedUser.featured_badges ?? [],
+            featured_badges_detail: typedUser.featured_badges_detail ?? [],
+          }}
+          activeServicesCount={offersCount + needsCount}
+          completedExchanges={exchangesCount}
+          onEditPress={() => setIsEditSheetOpen(true)}
+          onFollowersPress={() => {
+            if (!user?.id) return;
+            navigation.navigate("FollowList", {
+              userId: String(user.id),
+              kind: "followers",
+            });
+          }}
+          onFollowingPress={() => {
+            if (!user?.id) return;
+            navigation.navigate("FollowList", {
+              userId: String(user.id),
+              kind: "following",
+            });
+          }}
+          onBadgePickerOpenRequest={() => setIsEditSheetOpen(true)}
+          onTimeActivityPress={() => navigation.navigate("TimeActivity")}
+        />
+
+        {/* ProfileEditSheet replaces the inline edit form */}
+        {user && (
+          <ProfileEditSheet
+            visible={isEditSheetOpen}
+            onClose={() => setIsEditSheetOpen(false)}
+            onSaveSuccess={(updated) => {
+              void refreshUser();
+              setIsEditSheetOpen(false);
+            }}
+            user={{
+              ...user,
+              location: typedUser.location ?? null,
+              avatar_url: typedUser.avatar_url ?? null,
+              banner_url: typedUser.banner_url ?? null,
+              featured_badges: typedUser.featured_badges ?? [],
+              featured_badges_detail: typedUser.featured_badges_detail ?? [],
+            }}
           />
+        )}
 
-          <View style={styles.avatarWrapper}>
-            <Image
-              source={{ uri: form.avatar_url || DEFAULT_AVATAR_URI }}
-              style={styles.avatar}
-            />
-          </View>
-
-          <View style={styles.profileHeaderContent}>
-            {!isEditing ? (
-              <>
-                <View style={styles.nameRow}>
-                  <Text style={styles.name}>{fullName || "Unnamed User"}</Text>
-                  {typedUser.is_verified ? (
-                    <View style={styles.verifiedBadge}>
-                      <Text style={styles.verifiedBadgeText}>Verified</Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                <View style={styles.followMetaRow}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="View your followers"
-                    onPress={() => {
-                      if (!user?.id) return;
-                      navigation.navigate("FollowList", {
-                        userId: String(user.id),
-                        kind: "followers",
-                      });
-                    }}
-                  >
-                    <Text style={styles.followMetaLink}>
-                      {typedUser.followers_count ?? 0} followers
-                    </Text>
-                  </Pressable>
-                  <Text style={styles.followMetaDot}> · </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="View users you follow"
-                    onPress={() => {
-                      if (!user?.id) return;
-                      navigation.navigate("FollowList", {
-                        userId: String(user.id),
-                        kind: "following",
-                      });
-                    }}
-                  >
-                    <Text style={styles.followMetaLink}>
-                      {typedUser.following_count ?? 0} following
-                    </Text>
-                  </Pressable>
-                </View>
-
-                {form.location ? (
-                  <View style={styles.locationRow}>
-                    <Ionicons
-                      name="location-outline"
-                      size={14}
-                      color={colors.GRAY500}
-                    />
-                    <Text style={styles.location}>{form.location}</Text>
-                  </View>
-                ) : null}
-
-                {form.bio ? (
-                  <>
-                    <Text
-                      style={styles.bio}
-                      numberOfLines={isBioExpanded ? undefined : 2}
-                    >
-                      {form.bio}
-                    </Text>
-                    {showBioToggle ? (
-                      <Pressable
-                        onPress={() => setIsBioExpanded((prev) => !prev)}
-                        style={({ pressed }) => pressed && styles.pressed}
-                      >
-                        <Text style={styles.bioToggle}>
-                          {isBioExpanded ? "Less" : "Read more"}
-                        </Text>
-                      </Pressable>
-                    ) : null}
-                  </>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <InputField
-                  label="First name"
-                  value={form.first_name}
-                  editable
-                  onChangeText={(value) => handleChange("first_name", value)}
-                />
-                <InputField
-                  label="Last name"
-                  value={form.last_name}
-                  editable
-                  onChangeText={(value) => handleChange("last_name", value)}
-                />
-                <InputField
-                  label="Email"
-                  value={form.email}
-                  editable
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  onChangeText={(value) => handleChange("email", value)}
-                />
-                <InputField
-                  label="Location"
-                  value={form.location}
-                  editable
-                  onChangeText={(value) => handleChange("location", value)}
-                />
-                <InputField
-                  label="Bio"
-                  value={form.bio}
-                  editable
-                  multiline
-                  onChangeText={(value) => handleChange("bio", value)}
-                />
-                <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={styles.secondarySmallButton}
-                    onPress={handleCancelEdit}
-                    disabled={isSaving}
-                  >
-                    <Text style={styles.secondarySmallButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.primaryGreenButton}
-                    onPress={() => void handleSave()}
-                    disabled={isSaving}
-                  >
-                    <Text style={styles.primaryGreenButtonText}>
-                      {isSaving ? "Saving..." : "Save changes"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        </View>
+        {/* Upcoming schedule card – own profile only */}
+        <UpcomingScheduleCard />
 
         <ProfileListingStatsRow
           offersCount={offersCount}

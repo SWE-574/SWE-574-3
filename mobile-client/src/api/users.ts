@@ -43,6 +43,8 @@ export interface UserProfileRequest {
   bio?: string;
   avatar_url?: string;
   banner_url?: string;
+  /** Up to 2 badge IDs to feature in the profile hero (must be earned). */
+  featured_badges?: string[];
 }
 
 export function getMe(): Promise<UserSummary> {

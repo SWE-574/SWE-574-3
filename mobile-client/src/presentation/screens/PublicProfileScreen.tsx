@@ -44,6 +44,7 @@ import { useAuth } from "../../context/AuthContext";
 import AchievementsSection from "../components/AchievementsSection";
 import ProfileSkillsSection from "../components/ProfileSkillsSection";
 import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
+import ProfileHero from "../components/profile/ProfileHero";
 
 const DEFAULT_BANNER_URI =
   "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80";
@@ -506,119 +507,34 @@ export default function PublicProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroCard}>
-          <Image source={{ uri: bannerUri }} style={styles.banner} />
-
-          <View style={styles.avatarWrapper}>
-            <Image source={{ uri: avatarUri }} style={styles.avatar} />
-          </View>
-
-          <View style={styles.profileHeaderContent}>
-            <View style={styles.nameRow}>
-              <Text style={styles.name}>{fullName || "Unnamed User"}</Text>
-              {showFollowButton ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{
-                    disabled: followActionLoading,
-                    busy: followActionLoading,
-                  }}
-                  disabled={followActionLoading}
-                  onPress={handleFollowToggle}
-                  style={({ pressed }) => [
-                    user.is_following
-                      ? styles.followButtonOutline
-                      : styles.followButtonFilled,
-                    pressed && styles.pressed,
-                    followActionLoading && styles.followButtonDisabled,
-                  ]}
-                >
-                  {followActionLoading ? (
-                    <ActivityIndicator
-                      size="small"
-                      color={user.is_following ? colors.GRAY700 : colors.WHITE}
-                    />
-                  ) : (
-                    <Text
-                      style={
-                        user.is_following
-                          ? styles.followButtonOutlineText
-                          : styles.followButtonFilledText
-                      }
-                    >
-                      {user.is_following ? "Unfollow" : "Follow"}
-                    </Text>
-                  )}
-                </Pressable>
-              ) : null}
-            </View>
-
-            <View style={styles.followMetaRow}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="View followers"
-                onPress={() => openFollowList("followers")}
-              >
-                <Text style={styles.followMetaLink}>
-                  {user.followers_count ?? 0} followers
-                </Text>
-              </Pressable>
-              <Text style={styles.followMetaDot}> · </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="View following"
-                onPress={() => openFollowList("following")}
-              >
-                <Text style={styles.followMetaLink}>
-                  {user.following_count ?? 0} following
-                </Text>
-              </Pressable>
-            </View>
-
-            {locationText ? (
-              <View style={styles.locationRow}>
-                <Ionicons
-                  name="location-outline"
-                  size={14}
-                  color={colors.GRAY500}
-                />
-                <Text style={styles.location}>{locationText}</Text>
-              </View>
-            ) : null}
-
-            {joinedDate ? (
-              <View style={styles.memberMetaRow}>
-                <Ionicons
-                  name="calendar-outline"
-                  size={13}
-                  color={colors.GRAY500}
-                />
-                <Text style={styles.memberMetaText}>Member since {joinedDate}</Text>
-              </View>
-            ) : null}
-
-            {bioText ? (
-              <>
-                <Text
-                  style={styles.bio}
-                  numberOfLines={isBioExpanded ? undefined : 3}
-                >
-                  {bioText}
-                </Text>
-                {hasLongBio ? (
-                  <Pressable
-                    onPress={() => setIsBioExpanded((prev) => !prev)}
-                    style={({ pressed }) => pressed && styles.pressed}
-                  >
-                    <Text style={styles.bioToggle}>
-                      {isBioExpanded ? "Less" : "Read more"}
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </>
-            ) : null}
-          </View>
-        </View>
+        {/* Public profile hero – uses shared ProfileHero with mode="public" */}
+        <ProfileHero
+          mode="public"
+          user={{
+            id: user.id,
+            first_name: user.first_name ?? "",
+            last_name: user.last_name ?? "",
+            bio: bioText,
+            avatar_url: user.avatar_url ?? null,
+            date_joined: user.date_joined,
+            location: locationText,
+            karma_score: user.karma_score,
+            followers_count: user.followers_count,
+            following_count: user.following_count,
+            featured_badges: user.featured_badges ?? [],
+            featured_badges_detail: user.featured_badges_detail ?? [],
+          }}
+          completedExchanges={exchangesCount}
+          reputationScore={user.karma_score}
+          onMessagePress={() => {
+            // TODO: navigate to chat with this user when chat flow supports it
+          }}
+          onReportPress={() => {
+            // Existing report modal trigger
+          }}
+          onFollowersPress={() => openFollowList("followers")}
+          onFollowingPress={() => openFollowList("following")}
+        />
 
         <ProfileListingStatsRow
           offersCount={offersCount}
