@@ -30,6 +30,26 @@ function addDays(date: Date, n: number): Date {
   return d;
 }
 
+const PROFILE_CALENDAR_HISTORY_START = "2020-01-01";
+const PROFILE_CALENDAR_WINDOW_DAYS = 365;
+
+export function profileCalendarFetchRange(
+  referenceDate: Date = new Date(),
+  userJoinedAt?: string | null,
+): { from: string; to: string } {
+  const fallbackStart = new Date(`${PROFILE_CALENDAR_HISTORY_START}T12:00:00`);
+  const joinedDate = userJoinedAt ? new Date(userJoinedAt) : null;
+  const fromDate =
+    joinedDate && !Number.isNaN(joinedDate.getTime()) && joinedDate.getTime() < fallbackStart.getTime()
+      ? joinedDate
+      : fallbackStart;
+
+  return {
+    from: toDateString(fromDate),
+    to: toDateString(addDays(referenceDate, PROFILE_CALENDAR_WINDOW_DAYS)),
+  };
+}
+
 // ── Agenda grouping ───────────────────────────────────────────────────────
 
 export interface AgendaGroups {

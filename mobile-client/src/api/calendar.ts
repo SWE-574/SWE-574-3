@@ -21,8 +21,10 @@ export type CalendarItemStatus =
   | "accepted"
   | "checked_in"
   | "attended"
+  | "completed"
   | "Active"
-  | "Agreed";
+  | "Agreed"
+  | "Completed";
 
 export interface CalendarCounterpart {
   id: string;

@@ -2,62 +2,50 @@
  * Smoke tests for UpcomingScheduleCard component.
  *
  * react-test-renderer is not installed in this project (node test environment).
- * We test module export and the week-strip builder logic exercised by the component.
+ * We test the month-grid and selected-day logic exercised by the component.
  */
 
-import { addDays, startOfDay } from "../../../../utils/calendarItems";
+import { addDays, buildMonthGrid, startOfDay, toDateString } from "../../../../utils/calendarItems";
 import type { CalendarItem } from "../../../../api/calendar";
 
-// ── Week-strip helper logic ───────────────────────────────────────────────
-// Reproduce the component's buildWeekStrip to verify 7 cells are always built.
-
-const WEEK_DAY_LABELS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-
-function buildWeekStrip(
-  items: CalendarItem[],
-  referenceDate: Date,
-): Array<{ label: string; dayNum: string; isToday: boolean }> {
-  const today = startOfDay(referenceDate);
-  const dayOfWeek = today.getDay();
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  const monday = addDays(today, mondayOffset);
-
-  return WEEK_DAY_LABELS.map((label, i) => {
-    const date = addDays(monday, i);
-    return {
-      label,
-      dayNum: String(date.getDate()),
-      isToday:
-        date.getFullYear() === today.getFullYear() &&
-        date.getMonth() === today.getMonth() &&
-        date.getDate() === today.getDate(),
-    };
-  });
+function makeItemOnDate(id: string, date: Date): CalendarItem {
+  const start = new Date(date);
+  start.setHours(10, 0, 0, 0);
+  const end = new Date(start.getTime() + 3600 * 1000);
+  return {
+    id,
+    kind: "service_session",
+    title: `Item ${id}`,
+    start: start.toISOString(),
+    end: end.toISOString(),
+    duration_hours: 1,
+    location_type: "Online",
+    location_label: null,
+    service_type: "Offer",
+    service_id: null,
+    handshake_id: null,
+    chat_id: null,
+    counterpart: null,
+    is_owner: true,
+    status: "accepted",
+    accent_token: "GREEN",
+    link: { type: "service", id },
+  };
 }
 
-describe("UpcomingScheduleCard week strip", () => {
-  it("always produces exactly 7 cells", () => {
-    const strip = buildWeekStrip([], new Date());
-    expect(strip).toHaveLength(7);
+describe("UpcomingScheduleCard month grid", () => {
+  it("always produces a 6x7 month grid", () => {
+    const grid = buildMonthGrid(new Date(), []);
+    expect(grid).toHaveLength(6);
+    expect(grid.every((week) => week.length === 7)).toBe(true);
   });
 
-  it("labels cells with weekday abbreviations Mo–Su", () => {
-    const strip = buildWeekStrip([], new Date());
-    const labels = strip.map((c) => c.label);
-    expect(labels).toEqual(["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]);
-  });
-
-  it("marks exactly one cell as today", () => {
-    const strip = buildWeekStrip([], new Date());
-    const todayCells = strip.filter((c) => c.isToday);
-    expect(todayCells).toHaveLength(1);
-  });
-
-  it("dayNum is a numeric string", () => {
-    const strip = buildWeekStrip([], new Date());
-    for (const cell of strip) {
-      expect(Number.isNaN(Number(cell.dayNum))).toBe(false);
-    }
+  it("marks scheduled days inside the month grid", () => {
+    const today = startOfDay(new Date());
+    const item = makeItemOnDate("a", today);
+    const grid = buildMonthGrid(today, [item]);
+    const matchingCell = grid.flat().find((cell) => toDateString(cell.date) === toDateString(today));
+    expect(matchingCell?.items).toHaveLength(1);
   });
 });
 
@@ -66,33 +54,6 @@ describe("UpcomingScheduleCard week strip", () => {
 // only items starting on that day should be visible.
 
 describe("UpcomingScheduleCard selected-day filtering", () => {
-  const { addDays, startOfDay, toDateString } = require("../../../../utils/calendarItems");
-
-  function makeItemOnDate(id: string, date: Date): CalendarItem {
-    const start = new Date(date);
-    start.setHours(10, 0, 0, 0);
-    const end = new Date(start.getTime() + 3600 * 1000);
-    return {
-      id,
-      kind: "service_session",
-      title: `Item ${id}`,
-      start: start.toISOString(),
-      end: end.toISOString(),
-      duration_hours: 1,
-      location_type: "Online",
-      location_label: null,
-      service_type: "Offer",
-      service_id: null,
-      handshake_id: null,
-      chat_id: null,
-      counterpart: null,
-      is_owner: true,
-      status: "accepted",
-      accent_token: "GREEN",
-      link: { type: "service", id },
-    };
-  }
-
   it("filters to only items matching the selected day key", () => {
     const today = startOfDay(new Date());
     const tomorrow = addDays(today, 1);
@@ -111,10 +72,9 @@ describe("UpcomingScheduleCard selected-day filtering", () => {
 
   it("returns no items when selected day has none", () => {
     const items: CalendarItem[] = [];
-    const { toDateString: tds, startOfDay: sod } = require("../../../../utils/calendarItems");
-    const day = tds(sod(new Date()));
+    const day = toDateString(startOfDay(new Date()));
     const filtered = items.filter((item) => {
-      const itemDay = tds(sod(new Date(item.start)));
+      const itemDay = toDateString(startOfDay(new Date(item.start)));
       return itemDay === day;
     });
     expect(filtered).toHaveLength(0);

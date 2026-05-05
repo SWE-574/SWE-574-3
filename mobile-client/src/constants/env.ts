@@ -53,15 +53,37 @@ export function normalizeRuntimeUrl(
   }
 
   if (trimmed.startsWith("/")) {
+    if (trimmed.startsWith("/hive-media/")) {
+      const mediaUrl = new URL(trimmed, apiUrl.origin);
+      const shouldUseLocalMinioPort =
+        apiUrl.protocol === "http:" && apiUrl.hostname !== "apiary.selmangunes.com";
+      if (shouldUseLocalMinioPort) {
+        mediaUrl.port = "9000";
+      }
+      return mediaUrl.toString();
+    }
     return `${apiUrl.origin}${trimmed}`;
   }
 
   try {
     const parsed = new URL(trimmed);
-    if (!["localhost", "127.0.0.1", "10.0.2.2"].includes(parsed.hostname)) {
+    const runtimeOnlyHosts = new Set([
+      "localhost",
+      "127.0.0.1",
+      "0.0.0.0",
+      "10.0.2.2",
+      "minio",
+      "backend",
+    ]);
+    if (!runtimeOnlyHosts.has(parsed.hostname)) {
       return trimmed;
     }
+    parsed.protocol = apiUrl.protocol;
     parsed.hostname = apiUrl.hostname;
+    const isMediaUrl = parsed.pathname.startsWith("/hive-media/");
+    const shouldUseLocalMinioPort =
+      isMediaUrl && apiUrl.protocol === "http:" && apiUrl.hostname !== "apiary.selmangunes.com";
+    parsed.port = shouldUseLocalMinioPort ? parsed.port || "9000" : apiUrl.port;
     return parsed.toString();
   } catch {
     return trimmed;

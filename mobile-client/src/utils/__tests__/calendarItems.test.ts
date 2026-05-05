@@ -11,6 +11,7 @@ import {
   addDays,
   startOfDay,
   isSameDay,
+  profileCalendarFetchRange,
 } from "../calendarItems";
 import type { CalendarItem } from "../../api/calendar";
 
@@ -214,6 +215,25 @@ describe("buildMonthGrid", () => {
     const grid = buildMonthGrid(month, []);
     const outsideCells = grid.flat().filter((c) => !c.isCurrentMonth);
     expect(outsideCells.length).toBeGreaterThan(0);
+  });
+});
+
+// ── profileCalendarFetchRange ──────────────────────────────────────────────
+
+describe("profileCalendarFetchRange", () => {
+  it("fetches history from the broader fallback date and one year forward", () => {
+    const reference = new Date(2026, 4, 5, 12, 0, 0);
+    const range = profileCalendarFetchRange(reference, "2024-03-10T09:00:00Z");
+
+    expect(range.from).toBe("2020-01-01");
+    expect(range.to).toBe("2027-05-05");
+  });
+
+  it("uses the user's join date when it is earlier than the fallback", () => {
+    const reference = new Date(2026, 4, 5, 12, 0, 0);
+    const range = profileCalendarFetchRange(reference, "2019-04-25T09:00:00Z");
+
+    expect(range.from).toBe("2019-04-25");
   });
 });
 

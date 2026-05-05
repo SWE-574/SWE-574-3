@@ -1,13 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Image,
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -22,7 +20,7 @@ import {
 } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
-import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { useAuth } from "../../context/AuthContext";
@@ -33,11 +31,6 @@ import {
   getVerifiedReviews,
   type ProfileReview,
 } from "../../api/users";
-import {
-  EMPTY_SUMMARY,
-  listTransactions,
-  type TransactionSummary,
-} from "../../api/transactions";
 import type { Service, UserHistoryItem } from "../../api/types";
 import {
   groupHistoryItems,
@@ -51,12 +44,10 @@ import {
 } from "../../utils/profileFormatters";
 import AchievementsSection from "../components/AchievementsSection";
 import ProfileSkillsSection from "../components/ProfileSkillsSection";
-import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
 import NotificationBadge from "../components/NotificationBadge";
 import { useNotificationStore } from "../../store/useNotificationStore";
 import ProfileHero from "../components/profile/ProfileHero";
 import UpcomingScheduleCard from "../components/profile/UpcomingScheduleCard";
-import ProfileEditSheet from "../components/profile/ProfileEditSheet";
 
 type ProfileHomeNavigation = CompositeNavigationProp<
   NativeStackNavigationProp<ProfileStackParamList, "ProfileHome">,
@@ -73,17 +64,7 @@ type EditableProfile = {
   banner_url: string;
 };
 
-const DEFAULT_BANNER_URI =
-  "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80";
-const DEFAULT_AVATAR_URI =
-  "https://api.dicebear.com/9.x/avataaars/png?seed=profile";
-
 type ProfileTabKey = "offers" | "needs" | "events" | "history" | "reviews";
-
-function safeNumber(value: string | number | undefined | null): number {
-  const next = Number(value ?? 0);
-  return Number.isFinite(next) ? next : 0;
-}
 
 export default function ProfileScreen() {
   const { user, logout, refreshUser } = useAuth();
@@ -95,10 +76,6 @@ export default function ProfileScreen() {
     [insets.top, insets.bottom],
   );
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [isEditSheetOpen, setIsEditSheetOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isBioExpanded, setIsBioExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<ProfileTabKey>("offers");
   const [activeServices, setActiveServices] = useState<Service[]>([]);
   const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
@@ -108,7 +85,6 @@ export default function ProfileScreen() {
   const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<
     ReturnType<typeof groupHistoryItems>[number] | null
   >(null);
-  const [timeSummary, setTimeSummary] = useState<TransactionSummary>(EMPTY_SUMMARY);
 
   const initialForm = useMemo<EditableProfile>(
     () => ({
@@ -128,10 +104,8 @@ export default function ProfileScreen() {
   const [form, setForm] = useState<EditableProfile>(initialForm);
 
   useEffect(() => {
-    if (!isEditing) {
-      setForm(initialForm);
-    }
-  }, [initialForm, isEditing]);
+    setForm(initialForm);
+  }, [initialForm]);
 
   const profileUserId = user?.id;
   useFocusEffect(
@@ -185,31 +159,6 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     if (!user?.id) {
-      setTimeSummary(EMPTY_SUMMARY);
-      return;
-    }
-
-    let cancelled = false;
-
-    listTransactions({ page: 1, page_size: 1, direction: "all" })
-      .then((res) => {
-        if (!cancelled) {
-          setTimeSummary(res.summary ?? EMPTY_SUMMARY);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTimeSummary(EMPTY_SUMMARY);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!user?.id) {
       setReviews([]);
       return;
     }
@@ -238,30 +187,6 @@ export default function ProfileScreen() {
       cancelled = true;
     };
   }, [user?.id]);
-
-  const handleChange = (key: keyof EditableProfile, value: string) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const handleCancelEdit = () => {
-    setForm(initialForm);
-    setIsEditing(false);
-  };
-
-  const handleSave = async () => {
-    try {
-      setIsSaving(true);
-
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      setIsEditing(false);
-      Alert.alert("Profile updated", "Your profile changes have been saved.");
-    } catch {
-      Alert.alert("Error", "Could not save your profile.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   if (!user) {
     return (
@@ -335,11 +260,6 @@ export default function ProfileScreen() {
     historyItems.filter(isOwnHistoryItem),
   ).length;
 
-  const balance = safeNumber(
-    timeSummary.current_balance || typedUser.timebank_balance,
-  );
-  const hasLongBio = form.bio.trim().length > 120;
-  const showBioToggle = hasLongBio && !isEditing;
   const tabItems: Array<{ key: ProfileTabKey; label: string; count: number }> = [
     { key: "offers", label: "Offers", count: offerServices.length },
     { key: "needs", label: "Needs", count: needServices.length },
@@ -563,7 +483,7 @@ export default function ProfileScreen() {
               <Pressable
                 onPress={() => {
                   setMenuOpen(false);
-                  setIsEditSheetOpen(true);
+                  navigation.navigate("ProfileEdit", { initialTab: "identity" });
                 }}
                 style={({ pressed }) => [
                   styles.overflowMenuItem,
@@ -632,14 +552,16 @@ export default function ProfileScreen() {
             banner_url: form.banner_url || typedUser.banner_url || null,
             date_joined: typedUser.date_joined,
             location: form.location || null,
+            karma_score: typedUser.karma_score,
             followers_count: typedUser.followers_count,
             following_count: typedUser.following_count,
             featured_badges: typedUser.featured_badges ?? [],
             featured_badges_detail: typedUser.featured_badges_detail ?? [],
           }}
-          activeServicesCount={offersCount + needsCount}
+          activeServicesCount={activeServices.length}
           completedExchanges={exchangesCount}
-          onEditPress={() => setIsEditSheetOpen(true)}
+          onEditPress={() => navigation.navigate("ProfileEdit", { initialTab: "identity" })}
+          onAvatarPress={() => navigation.navigate("ProfileEdit", { initialTab: "photos" })}
           onFollowersPress={() => {
             if (!user?.id) return;
             navigation.navigate("FollowList", {
@@ -654,115 +576,11 @@ export default function ProfileScreen() {
               kind: "following",
             });
           }}
-          onBadgePickerOpenRequest={() => setIsEditSheetOpen(true)}
-          onTimeActivityPress={() => navigation.navigate("TimeActivity")}
+          onBadgePickerOpenRequest={() => navigation.navigate("ProfileEdit", { initialTab: "showcase" })}
         />
-
-        {/* ProfileEditSheet replaces the inline edit form */}
-        {user && (
-          <ProfileEditSheet
-            visible={isEditSheetOpen}
-            onClose={() => setIsEditSheetOpen(false)}
-            onSaveSuccess={(updated) => {
-              void refreshUser();
-              setIsEditSheetOpen(false);
-            }}
-            user={{
-              ...user,
-              location: typedUser.location ?? null,
-              avatar_url: typedUser.avatar_url ?? null,
-              banner_url: typedUser.banner_url ?? null,
-              featured_badges: typedUser.featured_badges ?? [],
-              featured_badges_detail: typedUser.featured_badges_detail ?? [],
-            }}
-          />
-        )}
 
         {/* Upcoming schedule card – own profile only */}
         <UpcomingScheduleCard />
-
-        <ProfileListingStatsRow
-          offersCount={offersCount}
-          needsCount={needsCount}
-          exchangesCount={exchangesCount}
-        />
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open time activity"
-          onPress={() => navigation.navigate("TimeActivity")}
-          style={({ pressed }) => [
-            styles.balanceCard,
-            pressed && styles.balanceCardPressed,
-          ]}
-        >
-          <View style={styles.balanceTopRow}>
-            <View style={styles.balanceHeadingWrap}>
-              <View style={styles.balanceIconWrap}>
-                <Ionicons name="time-outline" size={18} color={colors.WHITE} />
-              </View>
-              <View>
-                <Text style={styles.balanceEyebrow}>Your Time</Text>
-                <Text style={styles.balanceMainValue}>{balance}</Text>
-                <Text style={styles.balanceLabel}>hours available</Text>
-              </View>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={20}
-              color="rgba(255,255,255,0.82)"
-            />
-          </View>
-
-        </Pressable>
-
-        <View style={styles.miniStatsRow}>
-          <MiniStatCard
-            icon={<Ionicons name="heart-outline" size={18} color={colors.GREEN} />}
-            label="Karma"
-            value={typedUser.karma_score ?? 0}
-            accentColor={colors.GREEN}
-            accentBg={colors.GREEN_LT}
-          />
-          <MiniStatCard
-            icon={
-              <SimpleLineIcons name="badge" size={16} color={colors.PURPLE} />
-            }
-            label="Badges"
-            value={typedUser.badges?.length ?? 0}
-            accentColor={colors.PURPLE}
-            accentBg={colors.PURPLE_LT}
-            onPress={
-              user?.id
-                ? () =>
-                    navigation.navigate("AchievementsList", {
-                      userId: user.id,
-                    })
-                : undefined
-            }
-          />
-        </View>
-
-        <View style={styles.metricsRow}>
-          <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>
-              {typedUser.helpful_count ?? 0}
-            </Text>
-            <Text style={styles.metricPillLabel}>Helpful</Text>
-          </View>
-          <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>
-              {typedUser.kind_count ?? 0}
-            </Text>
-            <Text style={styles.metricPillLabel}>Kind</Text>
-          </View>
-          <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>
-              {typedUser.punctual_count ?? 0}
-            </Text>
-            <Text style={styles.metricPillLabel}>Punctual</Text>
-          </View>
-        </View>
 
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>
@@ -983,159 +801,6 @@ function ProfileActivityServiceCard({ service }: { service: Service }) {
     </View>
   );
 }
-
-function MiniStatCard({
-  icon,
-  label,
-  value,
-  accentColor,
-  accentBg,
-  onPress,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  accentColor: string;
-  accentBg: string;
-  onPress?: () => void;
-}) {
-  const content = (
-    <>
-      <View style={[miniCardStyles.accentBar, { backgroundColor: accentColor }]} />
-      <View style={miniCardStyles.inner}>
-        <View style={miniCardStyles.topRow}>
-          <View style={[miniCardStyles.iconWrap, { backgroundColor: accentBg }]}>
-            {icon}
-          </View>
-          <Text style={miniCardStyles.value}>{value}</Text>
-        </View>
-        <View style={miniCardStyles.bottomRow}>
-          <Text style={miniCardStyles.label}>{label}</Text>
-          {onPress ? (
-            <Ionicons name="chevron-forward" size={14} color={colors.GRAY400} />
-          ) : null}
-        </View>
-      </View>
-    </>
-  );
-
-  if (onPress) {
-    return (
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [miniCardStyles.card, pressed && { opacity: 0.9 }]}
-      >
-        {content}
-      </Pressable>
-    );
-  }
-
-  return (
-    <View style={miniCardStyles.card}>
-      {content}
-    </View>
-  );
-}
-
-type InputFieldProps = {
-  label: string;
-  value: string;
-  editable?: boolean;
-  multiline?: boolean;
-  keyboardType?: "default" | "email-address" | "numeric" | "phone-pad" | "url";
-  autoCapitalize?: "none" | "sentences" | "words" | "characters";
-  onChangeText: (value: string) => void;
-};
-
-function InputField({
-  label,
-  value,
-  editable = false,
-  multiline = false,
-  keyboardType = "default",
-  autoCapitalize = "sentences",
-  onChangeText,
-}: InputFieldProps) {
-  const insets = useSafeAreaInsets();
-  const styles = useMemo(
-    () => getStyles(insets.top, insets.bottom),
-    [insets.top, insets.bottom],
-  );
-
-  return (
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        editable={editable}
-        multiline={multiline}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize}
-        onChangeText={onChangeText}
-        placeholder={label}
-        placeholderTextColor={colors.GRAY400}
-        textAlignVertical={multiline ? "top" : "center"}
-        style={[
-          styles.input,
-          multiline && styles.multilineInput,
-          !editable && styles.readOnlyInput,
-        ]}
-      />
-    </View>
-  );
-}
-
-const miniCardStyles = StyleSheet.create({
-  card: {
-    flex: 1,
-    backgroundColor: colors.WHITE,
-    borderRadius: 12,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: colors.GRAY200,
-    shadowColor: colors.GRAY900,
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
-  },
-  accentBar: {
-    height: 3,
-    width: "100%",
-  },
-  inner: {
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-  },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 4,
-  },
-  iconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  value: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: colors.GRAY800,
-  },
-  bottomRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: "500",
-    color: colors.GRAY500,
-  },
-});
 
 const profileActivityCardStyles = StyleSheet.create({
   card: {

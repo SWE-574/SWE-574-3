@@ -18,6 +18,7 @@ export interface UserSummary {
   bio?: string | null;
   avatar_url?: string | null;
   banner_url?: string | null;
+  location?: string | null;
   timebank_balance?: string;
   karma_score?: number;
   role?: string;

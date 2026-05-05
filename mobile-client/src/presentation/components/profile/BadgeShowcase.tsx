@@ -132,11 +132,13 @@ function CompactShowcase({
         accessibilityLabel="Showcase a badge"
       >
         <Ionicons
-          name="add-circle-outline"
-          size={16}
-          color="rgba(255,255,255,0.7)"
+          name="ribbon-outline"
+          size={20}
+          color="rgba(255,255,255,0.72)"
         />
-        <Text style={compactStyles.emptyPlaceholderText}>Showcase a badge</Text>
+        <View style={compactStyles.emptyPlusBadge}>
+          <Ionicons name="add" size={11} color={colors.GREEN} />
+        </View>
       </Pressable>
     );
   }
@@ -351,62 +353,71 @@ export default function BadgeShowcase({
 const compactStyles = StyleSheet.create({
   row: {
     flexDirection: "row",
-    gap: 12,
+    gap: 6,
+    padding: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
   },
   badge: {
     alignItems: "center",
-    maxWidth: 70,
+    maxWidth: 36,
   },
   iconWrapper: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.2)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
+    borderColor: "rgba(255,255,255,0.38)",
     alignItems: "center",
     justifyContent: "center",
   },
   icon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
   },
   iconFallback: {
     alignItems: "center",
     justifyContent: "center",
-    width: 40,
-    height: 40,
+    width: 34,
+    height: 34,
   },
   badgeName: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.9)",
-    textAlign: "center",
-    marginTop: 4,
+    display: "none",
   },
   earnedDate: {
-    fontSize: 9,
-    color: "rgba(255,255,255,0.6)",
-    textAlign: "center",
+    display: "none",
   },
   emptyPlaceholder: {
-    flexDirection: "row",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
     borderWidth: 1,
-    borderStyle: "dashed",
-    borderColor: "rgba(255,255,255,0.4)",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.12)",
     alignSelf: "flex-start",
   },
+  emptyPlusBadge: {
+    position: "absolute",
+    right: 5,
+    bottom: 5,
+    width: 17,
+    height: 17,
+    borderRadius: 8.5,
+    backgroundColor: colors.WHITE,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.5)",
+  },
   emptyPlaceholderText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.7)",
+    display: "none",
   },
 });
 

@@ -33,12 +33,12 @@ import {
   groupItemsByAgenda,
   accentColorFor,
   formatItemRange,
-  conflictMap,
-  addDays,
+  profileCalendarFetchRange,
   startOfDay,
   toDateString,
 } from "../../utils/calendarItems";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
+import { useAuth } from "../../context/AuthContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -210,6 +210,7 @@ function AgendaSectionHeader({ label }: { label: string }) {
 
 export default function CalendarScreen() {
   const navigation = useNavigation<CalNavigation>();
+  const { user } = useAuth();
 
   const [items, setItems] = useState<CalendarItem[]>([]);
   const [conflicts, setConflicts] = useState<CalendarConflict[]>([]);
@@ -223,27 +224,12 @@ export default function CalendarScreen() {
   );
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
-  // TODO: Widen fetch window dynamically when currentMonth shifts beyond the
-  //       60-day cap (i.e. track currentMonth in fetchData and refetch with
-  //       from=startOfMonth-1m, to=endOfMonth+1m, capped at 120 days/request).
-  //       For now we use the simpler approach: disable the [>] button once the
-  //       user would navigate past the last fetched month (today+60d).
-  const maxFetchedMonth = useMemo(() => {
-    const limit = addDays(today, 60);
-    return new Date(limit.getFullYear(), limit.getMonth(), 1);
-  }, [today]);
-  const isNextMonthDisabled = useMemo(
-    () => currentMonth >= maxFetchedMonth,
-    [currentMonth, maxFetchedMonth],
-  );
-
   const fetchData = useCallback(async (signal?: AbortSignal) => {
-    const from = toDateString(today);
-    const to = toDateString(addDays(today, 60));
+    const { from, to } = profileCalendarFetchRange(today, user?.date_joined);
     const res = await fetchUpcoming({ from, to }, signal);
     setItems(res.items ?? []);
     setConflicts(res.conflicts ?? []);
-  }, [today]);
+  }, [today, user?.date_joined]);
 
   useEffect(() => {
     let cancelled = false;
@@ -386,24 +372,18 @@ export default function CalendarScreen() {
             </Text>
 
             <Pressable
-              onPress={isNextMonthDisabled ? undefined : () => setCurrentMonth((m) => addMonths(m, 1))}
+              onPress={() => setCurrentMonth((m) => addMonths(m, 1))}
               style={({ pressed }) => [
                 styles.monthNav,
-                isNextMonthDisabled && styles.monthNavDisabled,
-                pressed && !isNextMonthDisabled && { opacity: 0.7 },
+                pressed && { opacity: 0.7 },
               ]}
               accessibilityRole="button"
-              accessibilityLabel={
-                isNextMonthDisabled
-                  ? "Showing next 60 days only"
-                  : "Next month"
-              }
-              accessibilityState={{ disabled: isNextMonthDisabled }}
+              accessibilityLabel="Next month"
             >
               <Ionicons
                 name="chevron-forward"
                 size={22}
-                color={isNextMonthDisabled ? colors.GRAY300 : colors.GRAY700}
+                color={colors.GRAY700}
               />
             </Pressable>
           </View>
@@ -434,11 +414,7 @@ export default function CalendarScreen() {
                       cell={cell}
                       selected={selectedDay === key}
                       conflictItemIds={conflictIds}
-                      onPress={() =>
-                        setSelectedDay((prev) =>
-                          prev === key ? null : key,
-                        )
-                      }
+                      onPress={() => setSelectedDay(key)}
                     />
                   );
                 })}
@@ -710,9 +686,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 18,
     backgroundColor: colors.GRAY100,
-  },
-  monthNavDisabled: {
-    opacity: 0.4,
   },
   monthTitle: {
     fontSize: 16,

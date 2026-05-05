@@ -21,6 +21,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -42,6 +43,11 @@ import type { UserSummary } from "../../../api/types";
 import BadgeShowcase from "./BadgeShowcase";
 import type { BadgeProgress } from "./BadgeShowcase";
 import type { BadgeDetail } from "../../../api/calendar";
+import {
+  getMapboxToken,
+  searchMapboxLocations,
+  type LocationValue,
+} from "../../../utils/mapboxLocation";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +77,8 @@ export interface ProfileEditSheetProps {
   onChangeEmailPress?: () => void;
   /** Called when the user taps "Change password" */
   onChangePasswordPress?: () => void;
+  initialTab?: EditTabKey;
+  presentation?: "modal" | "screen";
 }
 
 type EditableFields = {
@@ -82,6 +90,16 @@ type EditableFields = {
   featured_badges: string[];
   banner_url: string;
 };
+
+type EditTabKey = "identity" | "photos" | "skills" | "showcase" | "privacy";
+
+const EDIT_TABS: Array<{ key: EditTabKey; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
+  { key: "identity", label: "Identity", icon: "person-outline" },
+  { key: "photos", label: "Photos", icon: "images-outline" },
+  { key: "skills", label: "Skills", icon: "sparkles-outline" },
+  { key: "showcase", label: "Showcase", icon: "ribbon-outline" },
+  { key: "privacy", label: "Privacy", icon: "shield-checkmark-outline" },
+];
 
 // ── Diff helper ───────────────────────────────────────────────────────────
 
@@ -212,6 +230,8 @@ export default function ProfileEditSheet({
   onCoverPhotoChangePress,
   onChangeEmailPress,
   onChangePasswordPress,
+  initialTab = "identity",
+  presentation = "modal",
 }: ProfileEditSheetProps) {
   const insets = useSafeAreaInsets();
 
@@ -237,6 +257,9 @@ export default function ProfileEditSheet({
   const [form, setForm] = useState<EditableFields>(buildInitial);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<EditTabKey>(initialTab);
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationValue[]>([]);
+  const [locationLoading, setLocationLoading] = useState(false);
   // UI-only public visibility toggle (no backend support yet)
   const [isPublic, setIsPublic] = useState(true);
 
@@ -250,9 +273,41 @@ export default function ProfileEditSheet({
       originalRef.current = initial;
       setSaveError(null);
       setLocalSkills(user.skills ?? []);
+      setActiveTab(initialTab);
+      setLocationSuggestions([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+  }, [initialTab, visible]);
+
+  useEffect(() => {
+    let active = true;
+    const query = form.location.trim();
+
+    if (!visible || activeTab !== "identity" || !getMapboxToken() || query.length < 2) {
+      setLocationSuggestions([]);
+      setLocationLoading(false);
+      return;
+    }
+
+    setLocationLoading(true);
+    const timer = setTimeout(() => {
+      searchMapboxLocations(query, "full")
+        .then((results) => {
+          if (active) setLocationSuggestions(results.slice(0, 5));
+        })
+        .catch(() => {
+          if (active) setLocationSuggestions([]);
+        })
+        .finally(() => {
+          if (active) setLocationLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [activeTab, form.location, visible]);
 
   const dirty = useMemo(
     () => isDirty(originalRef.current, form),
@@ -303,29 +358,29 @@ export default function ProfileEditSheet({
   const setField = (key: keyof EditableFields) => (value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle={Platform.OS === "ios" ? "pageSheet" : "overFullScreen"}
-      onRequestClose={handleClose}
-    >
+  const content = (
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={[
+          styles.keyboardLayer,
+          presentation === "screen" && styles.screenKeyboardLayer,
+        ]}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={0}
       >
       <View
         style={[
           styles.sheetContainer,
+          presentation === "screen" && styles.sheetContainerScreen,
           { paddingBottom: insets.bottom + 8 },
         ]}
       >
         {/* Sheet header */}
         <View style={styles.sheetHeader}>
-          <View style={styles.sheetHandle} />
           <View style={styles.headerRow}>
-            <Text style={styles.sheetTitle}>Edit profile</Text>
+            <View>
+              <Text style={styles.sheetEyebrow}>Profile settings</Text>
+              <Text style={styles.sheetTitle}>Edit profile</Text>
+            </View>
             <Pressable
               onPress={handleClose}
               style={styles.closeButton}
@@ -335,6 +390,40 @@ export default function ProfileEditSheet({
               <Ionicons name="close" size={22} color={colors.GRAY700} />
             </Pressable>
           </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabRow}
+          >
+            {EDIT_TABS.map((tab) => {
+              const selected = activeTab === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  onPress={() => setActiveTab(tab.key)}
+                  style={({ pressed }) => [
+                    styles.tabButton,
+                    selected && styles.tabButtonActive,
+                    pressed && { opacity: 0.82 },
+                  ]}
+                >
+                  <Ionicons
+                    name={tab.icon}
+                    size={14}
+                    color={selected ? colors.GREEN : colors.GRAY500}
+                  />
+                  <Text
+                    style={[
+                      styles.tabButtonText,
+                      selected && styles.tabButtonTextActive,
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
 
         {/* Scrollable content */}
@@ -344,176 +433,215 @@ export default function ProfileEditSheet({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* 1. Identity */}
-          <SectionHeader title="Identity" />
-          <FormField
-            label="First name"
-            value={form.first_name}
-            onChangeText={setField("first_name")}
-          />
-          <FormField
-            label="Last name"
-            value={form.last_name}
-            onChangeText={setField("last_name")}
-          />
-          <FormField
-            label="Username"
-            value={user.email?.split("@")[0] ?? ""}
-            readOnly
-            helperText="Username cannot be changed."
-          />
-          <FormField
-            label="City"
-            value={form.location}
-            onChangeText={setField("location")}
-            placeholder="e.g. Istanbul"
-          />
-          {/* TODO: Timezone and Language pickers – UI-only, no persistence yet */}
-
-          {/* 2. About you */}
-          <SectionHeader title="About you" />
-          <FormField
-            label="Bio"
-            value={form.bio}
-            onChangeText={setField("bio")}
-            multiline
-            maxLength={280}
-            placeholder="Tell the community a bit about yourself…"
-          />
-          <FormField
-            label="Profession"
-            value={form.profession}
-            onChangeText={setField("profession")}
-            placeholder="e.g. Graphic designer"
-          />
-
-          {/* 3. Avatar & cover photo */}
-          <SectionHeader title="Avatar & cover photo" />
-          <TouchableOpacity
-            onPress={onAvatarChangePress}
-            style={styles.avatarButton}
-            accessibilityRole="button"
-            accessibilityLabel="Change avatar"
-          >
-            <Ionicons name="camera-outline" size={18} color={colors.GREEN} />
-            <Text style={styles.avatarButtonText}>Change avatar</Text>
-          </TouchableOpacity>
-
-          {/* Cover photo subsection */}
-          {form.banner_url ? (
-            <View style={styles.coverPreviewWrapper}>
-              <Image
-                source={{ uri: form.banner_url }}
-                style={styles.coverPreview}
-                accessibilityLabel="Current cover photo"
-                accessibilityIgnoresInvertColors
+          {activeTab === "identity" ? (
+            <>
+              <SectionHeader title="Identity" />
+              <FormField
+                label="First name"
+                value={form.first_name}
+                onChangeText={setField("first_name")}
               />
-            </View>
-          ) : null}
-          <TouchableOpacity
-            onPress={onCoverPhotoChangePress}
-            style={styles.coverButton}
-            accessibilityRole="button"
-            accessibilityLabel="Change cover photo"
-          >
-            <Ionicons name="image-outline" size={18} color={colors.GREEN} />
-            <Text style={styles.coverButtonText}>
-              {form.banner_url ? "Change cover photo" : "Add cover photo"}
-            </Text>
-          </TouchableOpacity>
-
-          {/* 4. Skills & interests */}
-          {/* Decision: No WikidataTagAutocomplete exists in mobile-client (web-only).
-              Rendering existing skill chips with X-to-remove (UI-only; no PATCH endpoint
-              for skills in mobile yet). To add new skills, use the web profile.
-              TODO: Wire chip additions to PATCH /users/me/ when mobile skill endpoint lands. */}
-          <SectionHeader title="Skills & interests" />
-          {localSkills.length > 0 ? (
-            <View style={styles.skillsWrap}>
-              {localSkills.map((skill) => (
-                <View key={skill.id} style={styles.skillChip}>
-                  <Text style={styles.skillChipText}>{skill.name}</Text>
-                  <Pressable
-                    onPress={() =>
-                      setLocalSkills((prev) =>
-                        prev.filter((s) => s.id !== skill.id),
-                      )
-                    }
-                    style={styles.skillChipRemove}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove skill ${skill.name}`}
-                    hitSlop={8}
-                  >
-                    <Ionicons name="close" size={12} color={colors.GRAY500} />
-                  </Pressable>
+              <FormField
+                label="Last name"
+                value={form.last_name}
+                onChangeText={setField("last_name")}
+              />
+              <FormField
+                label="Username"
+                value={user.email?.split("@")[0] ?? ""}
+                readOnly
+                helperText="Username cannot be changed."
+              />
+              <View style={fieldStyles.group}>
+                <Text style={fieldStyles.label}>City / Location</Text>
+                <View style={styles.locationInputWrap}>
+                  <Ionicons name="location-outline" size={17} color={colors.GRAY500} />
+                  <TextInput
+                    value={form.location}
+                    onChangeText={setField("location")}
+                    placeholder="Search a city, district, or address"
+                    placeholderTextColor={colors.GRAY400}
+                    style={styles.locationInput}
+                    autoCapitalize="words"
+                  />
+                  {locationLoading ? (
+                    <ActivityIndicator size="small" color={colors.GREEN} />
+                  ) : null}
                 </View>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.todoSection}>
-              <Ionicons name="sparkles-outline" size={16} color={colors.GRAY500} />
-              <Text style={styles.todoText}>No skills yet.</Text>
-            </View>
-          )}
-          <View style={styles.todoSection}>
-            <Ionicons name="information-circle-outline" size={16} color={colors.GRAY500} />
-            <Text style={styles.todoText}>
-              To add new skills, use the web profile. Tap × on a chip to remove it here (UI only until backend support lands).
-            </Text>
-          </View>
+                {locationSuggestions.length > 0 ? (
+                  <View style={styles.locationSuggestions}>
+                    {locationSuggestions.map((item) => (
+                      <Pressable
+                        key={`${item.lat}-${item.lng}-${item.fullAddress ?? item.label}`}
+                        onPress={() => {
+                          setForm((prev) => ({
+                            ...prev,
+                            location: item.fullAddress ?? item.label,
+                          }));
+                          setLocationSuggestions([]);
+                        }}
+                        style={({ pressed }) => [
+                          styles.locationSuggestionRow,
+                          pressed && { backgroundColor: colors.GREEN_LT },
+                        ]}
+                      >
+                        <Ionicons name="pin-outline" size={15} color={colors.GREEN} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.locationSuggestionTitle} numberOfLines={1}>
+                            {item.district ?? item.label}
+                          </Text>
+                          <Text style={styles.locationSuggestionText} numberOfLines={1}>
+                            {item.fullAddress ?? item.label}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
 
-          {/* 5. Showcase badges */}
-          <SectionHeader title="Showcase badges" />
-          <BadgeShowcase
-            variant="picker"
-            mode="own"
-            badgeProgress={badgeProgress}
-            selectedIds={form.featured_badges}
-            onSelectionChange={(ids) =>
-              setForm((prev) => ({ ...prev, featured_badges: ids }))
-            }
-          />
+              <SectionHeader title="About you" />
+              <FormField
+                label="Bio"
+                value={form.bio}
+                onChangeText={setField("bio")}
+                multiline
+                maxLength={280}
+                placeholder="Tell the community a bit about yourself..."
+              />
+              <FormField
+                label="Profession"
+                value={form.profession}
+                onChangeText={setField("profession")}
+                placeholder="e.g. Graphic designer"
+              />
+            </>
+          ) : null}
 
-          {/* 6. Account & privacy */}
-          <SectionHeader title="Account & privacy" />
-          <Pressable
-            onPress={onChangeEmailPress}
-            style={({ pressed }) => [
-              styles.linkRow,
-              pressed && { opacity: 0.75 },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Change email"
-          >
-            <Ionicons name="mail-outline" size={18} color={colors.GRAY600} />
-            <Text style={styles.linkRowText}>Change email</Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.GRAY400} />
-          </Pressable>
-          <Pressable
-            onPress={onChangePasswordPress}
-            style={({ pressed }) => [
-              styles.linkRow,
-              pressed && { opacity: 0.75 },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Change password"
-          >
-            <Ionicons name="lock-closed-outline" size={18} color={colors.GRAY600} />
-            <Text style={styles.linkRowText}>Change password</Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.GRAY400} />
-          </Pressable>
-          {/* TODO: wire public visibility to backend when supported */}
-          <View style={styles.toggleRow}>
-            <Ionicons name="eye-outline" size={18} color={colors.GRAY600} />
-            <Text style={styles.toggleRowText}>Public profile</Text>
-            <Switch
-              value={isPublic}
-              onValueChange={setIsPublic}
-              trackColor={{ false: colors.GRAY200, true: colors.GREEN_MD }}
-              thumbColor={isPublic ? colors.GREEN : colors.GRAY400}
-              accessibilityLabel="Toggle public profile visibility"
-            />
-          </View>
+          {activeTab === "photos" ? (
+            <>
+              <SectionHeader title="Avatar & cover photo" />
+              <View style={styles.photoGrid}>
+                <TouchableOpacity
+                  onPress={onAvatarChangePress}
+                  style={styles.photoActionCard}
+                  accessibilityRole="button"
+                  accessibilityLabel="Change avatar"
+                >
+                  <Ionicons name="camera-outline" size={20} color={colors.GREEN} />
+                  <Text style={styles.photoActionTitle}>Profile photo</Text>
+                  <Text style={styles.photoActionText}>Update your avatar.</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={onCoverPhotoChangePress}
+                  style={styles.photoActionCard}
+                  accessibilityRole="button"
+                  accessibilityLabel="Change cover photo"
+                >
+                  <Ionicons name="image-outline" size={20} color={colors.GREEN} />
+                  <Text style={styles.photoActionTitle}>Cover photo</Text>
+                  <Text style={styles.photoActionText}>Refresh the hero banner.</Text>
+                </TouchableOpacity>
+              </View>
+              {form.banner_url ? (
+                <View style={styles.coverPreviewWrapper}>
+                  <Image
+                    source={{ uri: form.banner_url }}
+                    style={styles.coverPreview}
+                    accessibilityLabel="Current cover photo"
+                    accessibilityIgnoresInvertColors
+                  />
+                </View>
+              ) : null}
+            </>
+          ) : null}
+
+          {activeTab === "skills" ? (
+            <>
+              <SectionHeader title="Skills & interests" />
+              {localSkills.length > 0 ? (
+                <View style={styles.skillsWrap}>
+                  {localSkills.map((skill) => (
+                    <View key={skill.id} style={styles.skillChip}>
+                      <Text style={styles.skillChipText}>{skill.name}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.todoSection}>
+                  <Ionicons name="sparkles-outline" size={16} color={colors.GRAY500} />
+                  <Text style={styles.todoText}>No skills yet.</Text>
+                </View>
+              )}
+              <View style={styles.todoSection}>
+                <Ionicons name="information-circle-outline" size={16} color={colors.GRAY500} />
+                <Text style={styles.todoText}>
+                  Skill editing is read-only on mobile for now. Use the web profile to add or remove skills.
+                </Text>
+              </View>
+            </>
+          ) : null}
+
+          {activeTab === "showcase" ? (
+            <>
+              <SectionHeader title="Showcase badges" />
+              <BadgeShowcase
+                variant="picker"
+                mode="own"
+                badgeProgress={badgeProgress}
+                selectedIds={form.featured_badges}
+                onSelectionChange={(ids) =>
+                  setForm((prev) => ({ ...prev, featured_badges: ids }))
+                }
+              />
+            </>
+          ) : null}
+
+          {activeTab === "privacy" ? (
+            <>
+              <SectionHeader title="Account & privacy" />
+              <Pressable
+                onPress={onChangeEmailPress}
+                style={({ pressed }) => [
+                  styles.linkRow,
+                  pressed && { opacity: 0.75 },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Change email"
+              >
+                <Ionicons name="mail-outline" size={18} color={colors.GRAY600} />
+                <Text style={styles.linkRowText}>Change email</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.GRAY400} />
+              </Pressable>
+              <Pressable
+                onPress={onChangePasswordPress}
+                style={({ pressed }) => [
+                  styles.linkRow,
+                  pressed && { opacity: 0.75 },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Change password"
+              >
+                <Ionicons name="lock-closed-outline" size={18} color={colors.GRAY600} />
+                <Text style={styles.linkRowText}>Change password</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.GRAY400} />
+              </Pressable>
+              <View style={styles.toggleRow}>
+                <Ionicons name="eye-outline" size={18} color={colors.GRAY600} />
+                <Text style={styles.toggleRowText}>Public profile</Text>
+                <Switch
+                  value={isPublic}
+                  onValueChange={setIsPublic}
+                  trackColor={{ false: colors.GRAY200, true: colors.GREEN_MD }}
+                  thumbColor={isPublic ? colors.GREEN : colors.GRAY400}
+                  accessibilityLabel="Toggle public profile visibility"
+                />
+              </View>
+              <Text style={styles.disabledHelp}>
+                Public visibility is shown here for parity with web settings and will be saved when the backend setting is exposed to mobile.
+              </Text>
+            </>
+          ) : null}
 
           {/* Error display */}
           {saveError ? (
@@ -554,6 +682,23 @@ export default function ProfileEditSheet({
         </View>
       </View>
       </KeyboardAvoidingView>
+  );
+
+  if (presentation === "screen") {
+    return <View style={styles.screenRoot}>{content}</View>;
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent
+      presentationStyle="overFullScreen"
+      onRequestClose={handleClose}
+    >
+      <View style={styles.modalBackdrop}>
+        {content}
+      </View>
     </Modal>
   );
 }
@@ -637,15 +782,51 @@ const fieldStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  sheetContainer: {
+  modalBackdrop: {
     flex: 1,
+    backgroundColor: "rgba(17, 24, 39, 0.42)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  keyboardLayer: {
+    width: "100%",
+    maxWidth: 540,
+  },
+  screenRoot: {
+    flex: 1,
+    backgroundColor: colors.GRAY50,
+  },
+  screenKeyboardLayer: {
+    flex: 1,
+    maxWidth: undefined,
+  },
+  sheetContainer: {
     backgroundColor: colors.WHITE,
+    borderRadius: 24,
+    overflow: "hidden",
+    maxHeight: "90%",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.68)",
+    shadowColor: colors.GRAY900,
+    shadowOpacity: 0.26,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 18,
+  },
+  sheetContainerScreen: {
+    flex: 1,
+    maxHeight: undefined,
+    borderRadius: 0,
+    borderWidth: 0,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   sheetHeader: {
-    alignItems: "center",
-    paddingTop: 12,
+    paddingTop: 16,
     borderBottomWidth: 1,
     borderBottomColor: colors.GRAY100,
+    backgroundColor: colors.WHITE,
   },
   sheetHandle: {
     width: 40,
@@ -659,12 +840,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     width: "100%",
     paddingHorizontal: 20,
-    paddingBottom: 14,
+    paddingBottom: 12,
     justifyContent: "space-between",
   },
+  sheetEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: colors.GREEN,
+    marginBottom: 2,
+  },
   sheetTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 20,
+    fontWeight: "800",
     color: colors.GRAY800,
   },
   closeButton: {
@@ -676,6 +865,104 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 16,
+  },
+  tabRow: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  tabButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    backgroundColor: colors.GRAY50,
+  },
+  tabButtonActive: {
+    backgroundColor: colors.GREEN_LT,
+    borderColor: "rgba(45, 92, 78, 0.28)",
+  },
+  tabButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.GRAY500,
+  },
+  tabButtonTextActive: {
+    color: colors.GREEN,
+  },
+  locationInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: colors.WHITE,
+  },
+  locationInput: {
+    flex: 1,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: colors.GRAY800,
+  },
+  locationSuggestions: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: colors.WHITE,
+  },
+  locationSuggestionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.GRAY100,
+  },
+  locationSuggestionTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.GRAY800,
+  },
+  locationSuggestionText: {
+    fontSize: 12,
+    color: colors.GRAY500,
+    marginTop: 1,
+  },
+  photoGrid: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 12,
+  },
+  photoActionCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderRadius: 16,
+    backgroundColor: colors.GRAY50,
+    padding: 12,
+    minHeight: 104,
+    justifyContent: "space-between",
+  },
+  photoActionTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.GRAY800,
+    marginTop: 10,
+  },
+  photoActionText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.GRAY500,
+    marginTop: 2,
   },
   avatarButton: {
     flexDirection: "row",
@@ -737,6 +1024,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.GRAY600,
     lineHeight: 18,
+  },
+  disabledHelp: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.GRAY500,
+    marginTop: 8,
   },
   skillsWrap: {
     flexDirection: "row",

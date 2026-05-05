@@ -2,20 +2,18 @@
  * UpcomingScheduleCard – compact schedule preview for ProfileScreen (own profile only).
  *
  * Layout:
- *   - "UPCOMING" eyebrow + "[Open calendar →]" button
- *   - Horizontal 7-day strip (Mon–Sun of current week), each cell with date + colored dots
- *   - Up to 3 next agenda items as compact cards with accent strip
- *   - Empty state if no items
+ *   - "UPCOMING" eyebrow
+ *   - Inline month calendar grid
+ *   - Selected-day agenda items
+ *   - Empty state if selected day has no items
  *
- * Pressing "[Open calendar →]" navigates to CalendarScreen.
- * Pressing an agenda item navigates to the service/event/chat.
+ * Pressing an agenda item navigates to the related service detail.
  */
 
 import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -25,12 +23,13 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { colors } from "../../../constants/colors";
 import { fetchUpcoming } from "../../../api/calendar";
-import type { CalendarItem } from "../../../api/calendar";
+import type { CalendarConflict, CalendarItem } from "../../../api/calendar";
+import { useAuth } from "../../../context/AuthContext";
 import {
-  nextNItems,
   accentColorFor,
   formatItemRange,
-  addDays,
+  buildMonthGrid,
+  profileCalendarFetchRange,
   startOfDay,
   toDateString,
 } from "../../../utils/calendarItems";
@@ -40,92 +39,66 @@ import type { ProfileStackParamList } from "../../../navigation/ProfileStack";
 
 type ScheduleNavigation = NativeStackNavigationProp<ProfileStackParamList>;
 
-interface WeekDay {
-  date: Date;
-  label: string;
-  dayNum: string;
-  items: CalendarItem[];
-  isToday: boolean;
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-// toDateString is imported from utils/calendarItems (shared utility).
+const MONTH_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-const WEEK_DAY_LABELS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-
-function buildWeekStrip(items: CalendarItem[], referenceDate: Date): WeekDay[] {
-  const today = startOfDay(referenceDate);
-  // Find Monday of the current week
-  const dayOfWeek = today.getDay(); // 0=Sun
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  const monday = addDays(today, mondayOffset);
-
-  return WEEK_DAY_LABELS.map((label, i) => {
-    const date = addDays(monday, i);
-    const dateStart = date.getTime();
-    const dateEnd = addDays(date, 1).getTime();
-
-    const dayItems = items.filter((item) => {
-      const itemStart = new Date(item.start).getTime();
-      return itemStart >= dateStart && itemStart < dateEnd;
-    });
-
-    return {
-      date,
-      label,
-      dayNum: String(date.getDate()),
-      items: dayItems,
-      isToday:
-        date.getFullYear() === today.getFullYear() &&
-        date.getMonth() === today.getMonth() &&
-        date.getDate() === today.getDate(),
-    };
-  });
+function addMonths(date: Date, amount: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
 }
 
-// ── Week day cell ─────────────────────────────────────────────────────────
+function formatMonth(date: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
 
-function WeekDayCell({
-  day,
+function formatSelectedDay(dayKey: string | null): string {
+  if (!dayKey) return "Select a day";
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${dayKey}T12:00:00`));
+}
+
+// ── Month day cell ────────────────────────────────────────────────────────
+
+function MonthDayCell({
+  cell,
   selected,
   onPress,
 }: {
-  day: WeekDay;
+  cell: ReturnType<typeof buildMonthGrid>[number][number];
   selected: boolean;
   onPress: () => void;
 }) {
-  const dots = day.items.slice(0, 3);
+  const dots = cell.items.slice(0, 4);
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
         cellStyles.cell,
-        day.isToday && cellStyles.todayCell,
+        !cell.isCurrentMonth && cellStyles.outsideMonthCell,
+        cell.isToday && cellStyles.todayCell,
+        cell.hasConflict && !selected && cellStyles.conflictCell,
         selected && cellStyles.selectedCell,
         pressed && { opacity: 0.8 },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={`${day.label} ${day.dayNum}, ${day.items.length} events`}
+      accessibilityLabel={`${cell.date.getDate()}, ${cell.items.length} events`}
     >
       <Text
         style={[
-          cellStyles.dayLabel,
-          day.isToday && cellStyles.todayText,
-          selected && cellStyles.selectedText,
-        ]}
-      >
-        {day.label}
-      </Text>
-      <Text
-        style={[
           cellStyles.dayNum,
-          day.isToday && cellStyles.todayText,
+          !cell.isCurrentMonth && cellStyles.outsideMonthText,
+          cell.isToday && cellStyles.todayText,
           selected && cellStyles.selectedText,
         ]}
       >
-        {day.dayNum}
+        {cell.date.getDate()}
       </Text>
       <View style={cellStyles.dots}>
         {dots.map((item) => (
@@ -134,6 +107,7 @@ function WeekDayCell({
             style={[
               cellStyles.dot,
               { backgroundColor: accentColorFor(item.accent_token) },
+              selected && { backgroundColor: colors.WHITE },
             ]}
           />
         ))}
@@ -189,14 +163,17 @@ function AgendaItemCard({
 
 export default function UpcomingScheduleCard() {
   const navigation = useNavigation<ScheduleNavigation>();
+  const { user } = useAuth();
 
   const [items, setItems] = useState<CalendarItem[]>([]);
+  const [conflicts, setConflicts] = useState<CalendarConflict[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
-  // `now` is recomputed on each focus so long-running sessions fetch from the
-  // correct date rather than a stale mount-time value.
-  const [now, setNow] = useState(() => new Date());
-
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(() =>
+    toDateString(new Date()),
+  );
+  const [currentMonth, setCurrentMonth] = useState(
+    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  );
   useFocusEffect(
     React.useCallback(() => {
       let cancelled = false;
@@ -204,18 +181,24 @@ export default function UpcomingScheduleCard() {
 
       // Refresh the reference date on every focus.
       const focusNow = new Date();
-      setNow(focusNow);
+      setCurrentMonth(new Date(focusNow.getFullYear(), focusNow.getMonth(), 1));
+      setSelectedDayKey(toDateString(focusNow));
 
-      const from = toDateString(focusNow);
-      const to = toDateString(addDays(focusNow, 60));
+      const { from, to } = profileCalendarFetchRange(focusNow, user?.date_joined);
 
       setLoading(true);
       fetchUpcoming({ from, to }, ac.signal)
         .then((res) => {
-          if (!cancelled) setItems(res.items ?? []);
+          if (!cancelled) {
+            setItems(res.items ?? []);
+            setConflicts(res.conflicts ?? []);
+          }
         })
         .catch(() => {
-          if (!cancelled) setItems([]);
+          if (!cancelled) {
+            setItems([]);
+            setConflicts([]);
+          }
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -225,32 +208,29 @@ export default function UpcomingScheduleCard() {
         cancelled = true;
         ac.abort();
       };
-    }, []),
+    }, [user?.date_joined]),
   );
 
-  const weekStrip = useMemo(() => buildWeekStrip(items, now), [items, now]);
+  const monthGrid = useMemo(
+    () => buildMonthGrid(currentMonth, items, conflicts),
+    [currentMonth, items, conflicts],
+  );
 
   const visibleItems = useMemo(() => {
-    if (selectedDayKey) {
-      const day = weekStrip.find((d) => toDateString(d.date) === selectedDayKey);
-      return day?.items ?? [];
-    }
-    return nextNItems(items, 3, now);
-  }, [items, selectedDayKey, weekStrip, now]);
+    if (!selectedDayKey) return [];
+    return items
+      .filter((item) => toDateString(startOfDay(new Date(item.start))) === selectedDayKey)
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  }, [items, selectedDayKey]);
 
   const handleItemPress = (item: CalendarItem) => {
-    if (item.link.type === "service" && item.service_id) {
+    if (item.service_id) {
       navigation.navigate("ServiceDetail", { id: item.service_id });
       return;
     }
-    // chat and event links: navigate to ServiceDetail with link id as fallback
     if (item.link.id) {
       navigation.navigate("ServiceDetail", { id: item.link.id });
     }
-  };
-
-  const handleOpenCalendar = () => {
-    navigation.navigate("Calendar");
   };
 
   return (
@@ -258,43 +238,73 @@ export default function UpcomingScheduleCard() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.eyebrow}>UPCOMING</Text>
+      </View>
+
+      <View style={styles.monthHeader}>
+        <View style={styles.monthNav}>
+          <Pressable
+            onPress={() => setCurrentMonth((prev) => addMonths(prev, -1))}
+            style={styles.monthNavButton}
+            accessibilityRole="button"
+            accessibilityLabel="Previous month"
+          >
+            <Ionicons name="chevron-back" size={16} color={colors.GRAY700} />
+          </Pressable>
+          <Pressable
+            onPress={() => setCurrentMonth((prev) => addMonths(prev, 1))}
+            style={styles.monthNavButton}
+            accessibilityRole="button"
+            accessibilityLabel="Next month"
+          >
+            <Ionicons name="chevron-forward" size={16} color={colors.GRAY700} />
+          </Pressable>
+        </View>
+        <Text style={styles.monthTitle}>{formatMonth(currentMonth)}</Text>
         <Pressable
-          onPress={handleOpenCalendar}
-          style={({ pressed }) => [
-            styles.openCalendarButton,
-            pressed && { opacity: 0.75 },
-          ]}
+          onPress={() => {
+            const today = new Date();
+            setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+            setSelectedDayKey(toDateString(today));
+          }}
+          style={styles.todayButton}
           accessibilityRole="button"
-          accessibilityLabel="Open full calendar"
+          accessibilityLabel="Go to today"
         >
-          <Text style={styles.openCalendarText}>Open calendar</Text>
-          <Ionicons name="chevron-forward" size={14} color={colors.GREEN} />
+          <Text style={styles.todayText}>Today</Text>
         </Pressable>
       </View>
 
-      {/* 7-day strip */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.weekStrip}
-      >
-        {weekStrip.map((day) => {
-          const key = toDateString(day.date);
-          return (
-            <WeekDayCell
-              key={key}
-              day={day}
-              selected={selectedDayKey === key}
-              onPress={() =>
-                setSelectedDayKey((prev) => (prev === key ? null : key))
-              }
-            />
-          );
-        })}
-      </ScrollView>
+      <View style={styles.dayLabels}>
+        {MONTH_DAY_LABELS.map((label) => (
+          <Text key={label} style={styles.dayHeaderText}>
+            {label}
+          </Text>
+        ))}
+      </View>
+
+      <View style={styles.monthGrid}>
+        {monthGrid.map((week, weekIndex) => (
+          <View key={weekIndex} style={styles.monthRow}>
+            {week.map((cell) => {
+              const key = toDateString(cell.date);
+              return (
+                <MonthDayCell
+                  key={key}
+                  cell={cell}
+                  selected={selectedDayKey === key}
+                  onPress={() => setSelectedDayKey(key)}
+                />
+              );
+            })}
+          </View>
+        ))}
+      </View>
 
       {/* Agenda items */}
       <View style={styles.agendaList}>
+        <Text style={styles.selectedDayTitle}>
+          {formatSelectedDay(selectedDayKey)}
+        </Text>
         {loading ? (
           <ActivityIndicator
             size="small"
@@ -309,7 +319,7 @@ export default function UpcomingScheduleCard() {
               color={colors.GRAY400}
             />
             <Text style={styles.emptyText}>
-              Nothing on your calendar yet.
+              Nothing scheduled on this day.
             </Text>
           </View>
         ) : (
@@ -331,27 +341,32 @@ export default function UpcomingScheduleCard() {
 const cellStyles = StyleSheet.create({
   cell: {
     alignItems: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    borderRadius: 12,
-    minWidth: 38,
+    justifyContent: "center",
+    paddingVertical: 7,
+    borderRadius: 10,
+    flex: 1,
+    minHeight: 42,
+  },
+  outsideMonthCell: {
+    opacity: 0.45,
   },
   todayCell: {
     backgroundColor: colors.GREEN_LT,
   },
+  conflictCell: {
+    borderWidth: 1,
+    borderColor: `${colors.AMBER}66`,
+  },
   selectedCell: {
     backgroundColor: colors.GREEN,
   },
-  dayLabel: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: colors.GRAY500,
-    marginBottom: 2,
-  },
   dayNum: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
     color: colors.GRAY700,
+  },
+  outsideMonthText: {
+    color: colors.GRAY400,
   },
   todayText: {
     color: colors.GREEN,
@@ -438,23 +453,70 @@ const styles = StyleSheet.create({
     color: colors.GRAY500,
     textTransform: "uppercase",
   },
-  openCalendarButton: {
+  monthHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    justifyContent: "space-between",
+    marginBottom: 10,
   },
-  openCalendarText: {
-    fontSize: 13,
-    fontWeight: "600",
+  monthNav: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  monthNavButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.WHITE,
+  },
+  monthTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.GRAY800,
+  },
+  todayButton: {
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: colors.GREEN_LT,
+  },
+  todayText: {
+    fontSize: 12,
+    fontWeight: "700",
     color: colors.GREEN,
   },
-  weekStrip: {
-    gap: 4,
-    paddingBottom: 8,
+  dayLabels: {
     flexDirection: "row",
+    marginBottom: 4,
+  },
+  dayHeaderText: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.GRAY400,
+  },
+  monthGrid: {
+    gap: 2,
+  },
+  monthRow: {
+    flexDirection: "row",
+    gap: 2,
   },
   agendaList: {
-    marginTop: 4,
+    marginTop: 12,
+  },
+  selectedDayTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.GRAY500,
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+    marginBottom: 8,
   },
   emptyState: {
     alignItems: "center",
