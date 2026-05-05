@@ -17,6 +17,7 @@ from .views import (
     UserHistoryView,
     UserBadgeProgressView,
     UserVerifiedReviewsView,
+    ActivityFeedView,
     UserFollowView,
     UserFollowersListView,
     UserFollowingListView,
@@ -338,6 +339,10 @@ urlpatterns = [
     path('forum/posts/recent/', forum_post_recent, name='forum-post-recent'),
     # E2E test utilities (only active when DJANGO_E2E=1)
     path('e2e/set-balance/', E2ESetBalanceView.as_view(), name='e2e-set-balance'),
+
+    # Activity feed (#482) — chronological events from followed actors and
+    # actors within the configured proximity radius of the viewer.
+    path('activity/feed/', ActivityFeedView.as_view(), name='activity-feed'),
 
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

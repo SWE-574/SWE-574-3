@@ -6868,3 +6868,76 @@ class E2ESetBalanceView(APIView):
             'email': user.email,
             'balance': float(user.timebank_balance),
         })
+
+
+class ActivityFeedView(generics.ListAPIView):
+    """Activity feed (#482).
+
+    GET /api/activity/feed/?days=N
+
+    Returns ActivityEvent rows from the last N days (default 14, max 90)
+    where the actor is either someone the viewer follows OR an actor
+    whose own (or whose service's) location is within
+    `RANKING_PROXIMITY_HALF_LIFE_KM * 3` of the viewer's location.
+
+    Requires authentication. Anonymous viewers get 401. Viewers without
+    a known location only see events from people they follow.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+
+    def get_serializer_class(self):
+        from .serializers import ActivityEventSerializer
+        return ActivityEventSerializer
+
+    def get_queryset(self):
+        from datetime import timedelta
+        from django.contrib.gis.geos import Point
+        from django.contrib.gis.measure import D
+        from django.db.models import Q
+
+        from .models import ActivityEvent, UserFollow
+
+        viewer = self.request.user
+        try:
+            days = int(self.request.query_params.get('days', '14'))
+        except ValueError:
+            days = 14
+        days = max(1, min(days, 90))
+        cutoff = timezone.now() - timedelta(days=days)
+
+        followed_ids = list(
+            UserFollow.objects.filter(follower=viewer).values_list(
+                'following_id', flat=True,
+            )
+        )
+
+        filters = Q(actor_id__in=followed_ids) if followed_ids else Q(pk__in=[])
+
+        lat = self.request.query_params.get('lat')
+        lng = self.request.query_params.get('lng')
+        try:
+            lat_f = float(lat) if lat is not None else None
+            lng_f = float(lng) if lng is not None else None
+        except (TypeError, ValueError):
+            lat_f = lng_f = None
+
+        if lat_f is not None and lng_f is not None:
+            half_life = float(getattr(
+                settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0,
+            ))
+            radius_km = half_life * 3.0
+            viewer_point = Point(lng_f, lat_f, srid=4326)
+            filters = filters | Q(
+                location__isnull=False,
+                location__distance_lte=(viewer_point, D(km=radius_km)),
+            )
+
+        qs = (
+            ActivityEvent.objects
+            .filter(created_at__gte=cutoff)
+            .filter(filters)
+            .exclude(actor=viewer)
+            .select_related('actor', 'target_user', 'service')
+        )
+        return qs

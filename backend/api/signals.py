@@ -6,7 +6,10 @@ from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
-from .models import Service, User, Tag, ChatRoom, Comment, ReputationRep, NegativeRep, Handshake, ChatMessage, Notification, ScoreAuditLog
+from .models import (
+    ActivityEvent, ChatMessage, ChatRoom, Comment, Handshake, NegativeRep,
+    Notification, ReputationRep, ScoreAuditLog, Service, Tag, User, UserFollow,
+)
 from .cache_utils import (
     invalidate_on_service_change,
     invalidate_on_user_change,
@@ -32,6 +35,71 @@ def create_service_chat_room(sender, instance, created, **kwargs):
             name=f"Discussion: {instance.title}",
             type='public',
             related_service=instance
+        )
+
+
+@receiver(post_save, sender=Service)
+def emit_activity_for_service_create(sender, instance, created, **kwargs):
+    """Emit an ActivityEvent when a publicly visible service is created
+    (#482 activity feed). Hidden or non-active services produce no event."""
+    if not created:
+        return
+    if instance.status != 'Active' or not instance.is_visible:
+        return
+    try:
+        ActivityEvent.objects.create(
+            actor=instance.user,
+            verb=ActivityEvent.SERVICE_CREATED,
+            service=instance,
+            location=instance.location,
+        )
+    except Exception:
+        logger.exception(
+            'Failed to emit ActivityEvent for service create %s', instance.pk,
+        )
+
+
+@receiver(post_save, sender=Handshake)
+def emit_activity_for_handshake_accept(sender, instance, created, **kwargs):
+    """Emit an ActivityEvent when a handshake transitions to accepted so the
+    activity feed can show 'X is joining service Y'. The acting user is the
+    requester (the one whose interest got confirmed)."""
+    if created:
+        return
+    if not getattr(instance, '_status_changed', False):
+        return
+    if instance.status != 'accepted':
+        return
+    try:
+        svc = instance.service
+        ActivityEvent.objects.create(
+            actor=instance.requester,
+            verb=ActivityEvent.HANDSHAKE_ACCEPTED,
+            service=svc,
+            target_user=svc.user,
+            location=svc.location if svc else None,
+        )
+    except Exception:
+        logger.exception(
+            'Failed to emit ActivityEvent for handshake accept %s', instance.pk,
+        )
+
+
+@receiver(post_save, sender=UserFollow)
+def emit_activity_for_user_follow(sender, instance, created, **kwargs):
+    """Emit an ActivityEvent when a follow edge is created so a viewer can
+    see 'X started following Y' in the activity feed."""
+    if not created:
+        return
+    try:
+        ActivityEvent.objects.create(
+            actor=instance.follower,
+            verb=ActivityEvent.USER_FOLLOWED,
+            target_user=instance.following,
+        )
+    except Exception:
+        logger.exception(
+            'Failed to emit ActivityEvent for follow %s', instance.pk,
         )
 
 

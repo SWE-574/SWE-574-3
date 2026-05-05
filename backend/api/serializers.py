@@ -3088,3 +3088,43 @@ class ForumTopicDetailSerializer(ForumTopicSerializer):
         # This is just for the initial load
         posts = obj.posts.filter(is_deleted=False).select_related('author')[:20]
         return ForumPostSerializer(posts, many=True).data
+
+
+class ActivityEventSerializer(serializers.ModelSerializer):
+    """Card payload for the activity feed (#482)."""
+    actor = serializers.SerializerMethodField()
+    target_user = serializers.SerializerMethodField()
+    service = serializers.SerializerMethodField()
+
+    class Meta:
+        from .models import ActivityEvent
+        model = ActivityEvent
+        fields = [
+            'id', 'verb', 'actor', 'target_user', 'service', 'created_at',
+        ]
+
+    def _user_summary(self, user):
+        if user is None:
+            return None
+        return {
+            'id': str(user.id),
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'avatar_url': getattr(user, 'avatar_url', None),
+        }
+
+    def get_actor(self, obj):
+        return self._user_summary(obj.actor)
+
+    def get_target_user(self, obj):
+        return self._user_summary(obj.target_user)
+
+    def get_service(self, obj):
+        if obj.service_id is None:
+            return None
+        svc = obj.service
+        return {
+            'id': str(svc.id),
+            'title': svc.title,
+            'type': svc.type,
+        }
