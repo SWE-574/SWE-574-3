@@ -31,6 +31,8 @@ function targetHref(report: MyReport): string | null {
     case 'forum_topic':
       return `/forum/topic/${report.target_id}`
     case 'forum_post':
+      // target_id is the parent topic id (set by MyReportSerializer) so the
+      // /forum/topic/{id} URL resolves to the topic that contains the reply.
       return `/forum/topic/${report.target_id}`
     case 'user':
       return `/public-profile/${report.target_id}`
@@ -50,23 +52,13 @@ function formatDate(iso: string): string {
   }
 }
 
-export default function MyReports() {
-  const [reports, setReports] = useState<MyReport[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<StatusFilter>('all')
+interface MyReportsListProps {
+  reports: MyReport[] | null
+  error: string | null
+}
 
-  useEffect(() => {
-    const ac = new AbortController()
-    setError(null)
-    userAPI.getMyReports(ac.signal)
-      .then(setReports)
-      .catch((err) => {
-        if (ac.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'Failed to load reports')
-        setReports([])
-      })
-    return () => ac.abort()
-  }, [])
+export function MyReportsList({ reports, error }: MyReportsListProps) {
+  const [filter, setFilter] = useState<StatusFilter>('all')
 
   const visible = useMemo(() => {
     if (!reports) return []
@@ -80,14 +72,7 @@ export default function MyReports() {
   }, [reports])
 
   return (
-    <Box maxW="900px" mx="auto" px={{ base: 4, md: 6 }} py={{ base: 4, md: 8 }}>
-      <Flex direction="column" gap={1} mb={6}>
-        <Text fontSize="22px" fontWeight={700} color={GRAY900}>Your reports</Text>
-        <Text fontSize="13px" color={GRAY500}>
-          What you've submitted, and where moderators landed on it.
-        </Text>
-      </Flex>
-
+    <>
       <Flex gap={2} mb={5} wrap="wrap">
         {FILTERS.map(({ key, label }) => {
           const active = filter === key
@@ -201,6 +186,43 @@ export default function MyReports() {
           )
         })}
       </Flex>
+    </>
+  )
+}
+
+export function useMyReports() {
+  const [reports, setReports] = useState<MyReport[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const ac = new AbortController()
+    setError(null)
+    userAPI.getMyReports(ac.signal)
+      .then(setReports)
+      .catch((err) => {
+        if (ac.signal.aborted) return
+        setError(err instanceof Error ? err.message : 'Failed to load reports')
+        setReports([])
+      })
+    return () => ac.abort()
+  }, [])
+
+  return { reports, error }
+}
+
+export default function MyReports() {
+  const { reports, error } = useMyReports()
+
+  return (
+    <Box maxW="900px" mx="auto" px={{ base: 4, md: 6 }} py={{ base: 4, md: 8 }}>
+      <Flex direction="column" gap={1} mb={6}>
+        <Text fontSize="22px" fontWeight={700} color={GRAY900}>Your reports</Text>
+        <Text fontSize="13px" color={GRAY500}>
+          What you've submitted, and where moderators landed on it.
+        </Text>
+      </Flex>
+
+      <MyReportsList reports={reports} error={error} />
     </Box>
   )
 }

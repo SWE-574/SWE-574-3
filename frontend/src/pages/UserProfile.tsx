@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Box, Flex, Text, Input, Textarea, Spinner, Stack } from '@chakra-ui/react'
 import {
   FiEdit2, FiCamera, FiSave, FiX, FiAward, FiClock, FiMapPin,
   FiCalendar, FiArrowUpRight, FiPlus, FiCheckCircle, FiStar,
   FiZap, FiLayers, FiRepeat, FiLock, FiSettings, FiMail, FiShield, FiEye, FiEyeOff, FiTag, FiMessageSquare,
-  FiChevronDown, FiChevronUp,
+  FiChevronDown, FiChevronUp, FiFlag,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -30,6 +30,7 @@ import { getErrorMessage } from '@/services/api'
 import ImageCropModal from '@/components/ImageCropModal'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 import FollowListModal from '@/components/FollowListModal'
+import { MyReportsList, useMyReports } from '@/pages/MyReports'
 
 const AVATAR_PALETTE = [GREEN, BLUE, PURPLE, AMBER, '#0D9488', '#EA580C']
 const avatarBg   = (name: string) => AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length]
@@ -120,7 +121,7 @@ function handshakeToEventCardService(handshake: EventHandshake): Service {
   }
 }
 
-type ServiceTab = 'offers' | 'needs' | 'events' | 'history' | 'reviews' | 'settings'
+type ServiceTab = 'offers' | 'needs' | 'events' | 'history' | 'reviews' | 'reports' | 'settings'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const SectionCard = ({ children, mb = 5, overflow = 'hidden' }: { children: React.ReactNode; mb?: number; overflow?: string }) => (
@@ -298,7 +299,17 @@ function TabBtn({ active, label, onClick, icon }: { active: boolean; label: stri
 // ── Main component ────────────────────────────────────────────────────────────
 const UserProfile = () => {
   const navigate = useNavigate()
+  const routerLocation = useLocation()
+  const [searchParams] = useSearchParams()
   const { user, updateUserOptimistically, refreshUser } = useAuthStore()
+
+  const initialTab: ServiceTab = (() => {
+    const tabParam = searchParams.get('tab')
+    if (tabParam === 'reports' || routerLocation.pathname === '/profile/reports') return 'reports'
+    const allowed: ServiceTab[] = ['offers', 'needs', 'events', 'history', 'reviews', 'reports', 'settings']
+    if (tabParam && (allowed as string[]).includes(tabParam)) return tabParam as ServiceTab
+    return 'offers'
+  })()
 
   useEffect(() => {
     void refreshUser()
@@ -339,7 +350,15 @@ const UserProfile = () => {
   const [servicesLoading, setServicesLoading] = useState(true)
   const [historyLoading, setHistoryLoading]   = useState(true)
   const [eventsLoading, setEventsLoading]     = useState(true)
-  const [activeTab, setActiveTab]         = useState<ServiceTab>('offers')
+  const [activeTab, setActiveTab]         = useState<ServiceTab>(initialTab)
+  const { reports: myReports, error: myReportsError } = useMyReports()
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab')
+    if (tabParam === 'reports' || routerLocation.pathname === '/profile/reports') {
+      setActiveTab('reports')
+    }
+  }, [searchParams, routerLocation.pathname])
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
   const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
 
@@ -860,6 +879,7 @@ const UserProfile = () => {
                   <TabBtn active={activeTab === 'events'}   label={`Events (${eventServices.length+joinedUpcoming.length})`} onClick={() => setActiveTab('events')} />
                   <TabBtn active={activeTab === 'history'}  label={`History (${groupedOwnHistory.length})`}   onClick={() => setActiveTab('history')} />
                   <TabBtn active={activeTab === 'reviews'}  label={`Reviews (${reviewsAsProvider.length + reviewsAsTaker.length + reviewsAsOrganizer.length})`} onClick={() => setActiveTab('reviews')} icon={<FiMessageSquare size={12} />} />
+                  <TabBtn active={activeTab === 'reports'}  label={`Reports${myReports ? ` (${myReports.length})` : ''}`} onClick={() => setActiveTab('reports')} icon={<FiFlag size={12} />} />
                   <TabBtn active={activeTab === 'settings'} label="Settings"                        onClick={() => setActiveTab('settings')} icon={<FiSettings size={12} />} />
                 </Flex>
 
@@ -1039,6 +1059,13 @@ const UserProfile = () => {
                         })()}
                       </>
                     )}
+                  </Box>
+                )}
+
+                {/* ── Reports ── */}
+                {activeTab === 'reports' && (
+                  <Box p={4}>
+                    <MyReportsList reports={myReports} error={myReportsError} />
                   </Box>
                 )}
 

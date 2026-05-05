@@ -13,7 +13,6 @@ import {
   FiMenu,
   FiX,
   FiLayers,
-  FiFlag,
 } from 'react-icons/fi'
 import { useAuthStore } from '@/store/useAuthStore'
 
@@ -290,7 +289,6 @@ const Navbar = () => {
                   </Box>
                   <Box py="4px">
                     <DropdownItem onClick={() => navigate('/profile')} icon={<FiUser size={14} />}>My Profile</DropdownItem>
-                    <DropdownItem onClick={() => navigate('/profile/reports')} icon={<FiFlag size={14} />}>Your Reports</DropdownItem>
                     {isAdmin && (
                       <DropdownItem onClick={() => navigate('/admin')} icon={<FiGrid size={14} />}>Admin Panel</DropdownItem>
                     )}
@@ -393,7 +391,6 @@ const Navbar = () => {
             <MobileNavLink to="/messages" icon={<FiMessageSquare size={16} />} active={p === '/messages' || p.startsWith('/messages/')} onClick={() => setMobileOpen(false)}>Messages</MobileNavLink>
             <MobileNavLink to="/notifications" icon={<FiBell size={16} />} active={p === '/notifications'} onClick={() => setMobileOpen(false)}>Notifications</MobileNavLink>
             <MobileNavLink to="/profile" icon={<FiUser size={16} />} active={p === '/profile'} onClick={() => setMobileOpen(false)}>My Profile</MobileNavLink>
-            <MobileNavLink to="/profile/reports" icon={<FiFlag size={16} />} active={p === '/profile/reports'} onClick={() => setMobileOpen(false)}>Your Reports</MobileNavLink>
             {isAdmin && (
               <MobileNavLink to="/admin" icon={<FiGrid size={16} />} active={p === '/admin' || p.startsWith('/admin?')} onClick={() => setMobileOpen(false)}>
                 Admin Panel

@@ -1327,10 +1327,11 @@ class HandshakeService:
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Report Requires Review',
                 message=f"New {report.get_type_display()} report for service '{handshake.service.title}'",
                 handshake=handshake,
+                report=report,
             )
         notify_reporter_of_receipt(report)
 
@@ -1953,7 +1954,7 @@ class EventNoShowAppealService:
             for admin in User.objects.filter(role='admin').only('id'):
                 create_notification(
                     user=admin,
-                    notification_type='admin_warning',
+                    notification_type='new_report',
                     title='No-Show Appeal Requires Review',
                     message=(
                         f"New no-show appeal for event '{locked_handshake.service.title}' "
@@ -1961,6 +1962,7 @@ class EventNoShowAppealService:
                     ),
                     handshake=locked_handshake,
                     service=locked_handshake.service,
+                    report=report,
                 )
 
             return report

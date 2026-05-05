@@ -278,6 +278,7 @@ def notify_reporter_of_receipt(report: Report) -> None:
         message='Thanks — your report has been received and will be reviewed by a moderator.',
         service=report.reported_service,
         handshake=report.related_handshake,
+        report=report,
     )
 
 
@@ -311,6 +312,7 @@ def notify_reporter_of_state_change(report: Report) -> None:
         message=message,
         service=report.reported_service,
         handshake=report.related_handshake,
+        report=report,
     )
 
 
@@ -321,6 +323,7 @@ def create_notification(
     message: str,
     handshake: Handshake | None = None,
     service: Service | None = None,
+    report: Report | None = None,
 ) -> Notification:
     """Persist a notification and broadcast it via WebSocket."""
     notification = Notification.objects.create(
@@ -329,7 +332,8 @@ def create_notification(
         title=title,
         message=message,
         related_handshake=handshake,
-        related_service=service
+        related_service=service,
+        related_report=report,
     )
     transaction.on_commit(lambda: _broadcast_notification(notification))
     return notification

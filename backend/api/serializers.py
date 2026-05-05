@@ -1859,7 +1859,7 @@ class NotificationSerializer(serializers.ModelSerializer):
         model = Notification
         fields = [
             'id', 'type', 'title', 'message', 'is_read',
-            'related_handshake', 'related_service', 'created_at'
+            'related_handshake', 'related_service', 'related_report', 'created_at'
         ]
 
 class DevicePushTokenSerializer(serializers.Serializer):
@@ -1986,6 +1986,7 @@ class ReportSerializer(serializers.ModelSerializer):
     reported_service_owner_name = serializers.SerializerMethodField()
     reported_service_owner_email = serializers.SerializerMethodField()
     reported_service_owner_karma_score = serializers.SerializerMethodField()
+    reported_service_has_active_handshakes = serializers.SerializerMethodField()
     reported_forum_topic = serializers.PrimaryKeyRelatedField(read_only=True)
     reported_forum_post = serializers.PrimaryKeyRelatedField(read_only=True)
     reported_forum_topic_title = serializers.SerializerMethodField()
@@ -2003,7 +2004,8 @@ class ReportSerializer(serializers.ModelSerializer):
             'reported_service', 'reported_service_title', 'reported_service_status', 'reported_service_type',
             'reported_service_description', 'reported_service_location', 'reported_service_hours',
             'reported_service_owner', 'reported_service_owner_name', 'reported_service_owner_email',
-            'reported_service_owner_karma_score', 'related_handshake',
+            'reported_service_owner_karma_score', 'reported_service_has_active_handshakes',
+            'related_handshake',
             'reported_forum_topic', 'reported_forum_topic_title',
             'reported_forum_post', 'reported_forum_post_excerpt',
             'handshake_hours', 'handshake_scheduled_time', 'handshake_status',
@@ -2078,6 +2080,17 @@ class ReportSerializer(serializers.ModelSerializer):
         if service:
             return service.type
         return None
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_reported_service_has_active_handshakes(self, obj):
+        # Mirror ServiceViewSet.destroy() so the client can disable the
+        # Close-service button when the destroy endpoint would reject.
+        service = obj.reported_service
+        if not service:
+            return False
+        return service.handshakes.filter(
+            status__in=['pending', 'accepted', 'checked_in', 'attended']
+        ).exists()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_reported_service_description(self, obj):
@@ -2249,8 +2262,11 @@ class MyReportSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_target_id(self, obj):
+        # Forum URLs are topic-based (/forum/topic/{topic_id}); for a post
+        # report, return the parent topic id so the deep-link resolves.
+        if obj.reported_forum_post_id:
+            return str(obj.reported_forum_topic_id) if obj.reported_forum_topic_id else None
         for fk in (
-            obj.reported_forum_post_id,
             obj.reported_forum_topic_id,
             obj.reported_service_id,
             obj.reported_user_id,

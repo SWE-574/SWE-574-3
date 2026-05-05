@@ -2609,10 +2609,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Listing Report',
                 message=f"New {report.get_type_display()} report for service '{service.title}'",
                 service=service,
+                report=report,
             )
         notify_reporter_of_receipt(report)
 
@@ -4227,9 +4228,11 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
 
         queryset = Report.objects.all()
 
-        # For retrieve (single object by PK), skip the status filter so resolved/dismissed
-        # reports can still be fetched for the detail panel.
-        if self.action == 'retrieve':
+        # For retrieve (single object by PK) and the resolve action, skip the status
+        # filter so resolved/dismissed reports can still be fetched for the detail
+        # panel and so re-resolving a closed report hits the idempotency guard
+        # (HTTP 400) rather than a 404 from get_object().
+        if self.action in ('retrieve', 'resolve_report'):
             return queryset.order_by('-created_at')
 
         # For list, filter by status (default: pending)
@@ -6526,9 +6529,10 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Forum Topic Report',
                 message=f"{request.user.first_name or request.user.email} reported topic '{topic.title}'.",
+                report=report,
             )
         notify_reporter_of_receipt(report)
 
@@ -6803,9 +6807,10 @@ class ForumPostViewSet(viewsets.ViewSet):
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Forum Post Report',
                 message=f"{request.user.first_name or request.user.email} reported content in '{post.topic.title}'.",
+                report=report,
             )
         notify_reporter_of_receipt(report)
 
