@@ -1939,38 +1939,65 @@ class ServiceViewSet(viewsets.ModelViewSet):
         lng_param = self.request.query_params.get('lng')
         sort_param = self.request.query_params.get('sort', 'latest')
         
-        # If location-based search, distance ordering takes priority
-        if is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
-            queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
-        elif sort_param == 'hot':
+        # Hot sort wraps both viewer-aware factors (proximity + social).
+        # When the viewer has a location, hot_score is multiplied by a
+        # distance-decay factor so closer services rank higher even when
+        # base scores are equal. When the viewer has no location, the
+        # multiplier is 1.0 and ordering matches today's hot behavior.
+        if sort_param == 'hot':
+            from .ranking import apply_stochastic_social_proximity
+
+            proximity_active = (
+                is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param)
+            )
+            half_life_km = getattr(settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0)
+            if proximity_active and half_life_km > 0:
+                # PostGIS Distance annotation is in metres (srid=4326).
+                proximity_expr = ExpressionWrapper(
+                    Value(1.0, output_field=FloatField()) / (
+                        Value(1.0, output_field=FloatField())
+                        + F('distance') / Value(
+                            1000.0 * half_life_km, output_field=FloatField()
+                        )
+                    ),
+                    output_field=FloatField(),
+                )
+            else:
+                proximity_expr = Value(1.0, output_field=FloatField())
+            queryset = queryset.annotate(proximity_factor=proximity_expr)
+
+            social_addend = Value(0.0, output_field=FloatField())
             if self.request.user.is_authenticated:
-                # Apply social proximity boost (weight 0.5) for authenticated users.
-                # composite_score = hot_score + 0.5 * social_boost
-                # social_boost: 1.0 (1st-degree) or 0.5 (2nd-degree), 0 otherwise.
-                # Single SQL CTE call — no pre-evaluation of the service queryset.
-                from .ranking import apply_stochastic_social_proximity
                 boosts = get_social_proximity_boosts(self.request.user.id)
                 boosts = apply_stochastic_social_proximity(
                     boosts,
                     getattr(settings, 'RANKING_SOCIAL_PROXIMITY_PROBABILITY', 1.0),
                 )
                 if boosts:
-                    # boosts keys are UUID objects; user_id on Service is also UUID — no coercion needed.
                     whens = [
                         When(user_id=uid, then=Value(boost, output_field=FloatField()))
                         for uid, boost in boosts.items()
                     ]
                     queryset = queryset.annotate(
-                        social_boost=Case(*whens, default=Value(0.0, output_field=FloatField()), output_field=FloatField()),
-                        composite_score=ExpressionWrapper(
-                            F('hot_score') + Value(0.5, output_field=FloatField()) * F('social_boost'),
+                        social_boost=Case(
+                            *whens,
+                            default=Value(0.0, output_field=FloatField()),
                             output_field=FloatField(),
                         ),
-                    ).order_by('-is_pinned', '-composite_score', '-created_at')
-                else:
-                    queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
-            else:
-                queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
+                    )
+                    social_addend = Value(
+                        0.5, output_field=FloatField()
+                    ) * F('social_boost')
+
+            queryset = queryset.annotate(
+                composite_score=ExpressionWrapper(
+                    F('hot_score') * F('proximity_factor') + social_addend,
+                    output_field=FloatField(),
+                ),
+            ).order_by('-is_pinned', '-composite_score', '-created_at')
+        elif is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
+            # Non-hot sorts with a location: distance-only ordering, as before.
+            queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         else:
             # Default: sort by latest (created_at descending)
             queryset = queryset.order_by('-is_pinned', '-created_at')

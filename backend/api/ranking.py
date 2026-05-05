@@ -79,6 +79,27 @@ def apply_stochastic_social_proximity(boosts: dict, probability: float, rng=None
     }
 
 
+def proximity_multiplier(distance_km, half_life_km: float) -> float:
+    """Smooth distance decay used as a Phase 2 ranking factor.
+
+    Returns 1 / (1 + distance_km / half_life_km), bounded at 1.0 from above.
+    A service at the viewer's location keeps full score, a service at the
+    half life distance keeps half its score, and the curve approaches zero
+    asymptotically at very large distances.
+
+    Returns 1.0 (no effect) when distance_km is None (viewer location
+    unknown), when half_life_km is non-positive, or when the distance is
+    non-positive (defensive against PostGIS rounding noise).
+    """
+    if distance_km is None:
+        return 1.0
+    if half_life_km is None or half_life_km <= 0:
+        return 1.0
+    if distance_km <= 0:
+        return 1.0
+    return 1.0 / (1.0 + distance_km / half_life_km)
+
+
 def wilson_score_lower_bound(positives: int, total: int, z: float = 1.96) -> float:
     """
     Wilson score lower bound for the positive rate of a Bernoulli sample.
