@@ -851,3 +851,16 @@ EVENT_FEEDBACK_WINDOW_HOURS = int(os.environ.get('EVENT_FEEDBACK_WINDOW_HOURS', 
 # Audit log retention (FR-AUDIT): admin audit records must be retained for
 # at least 7 years (2555 days) before archival is permitted.
 AUDIT_RETENTION_DAYS = int(os.environ.get('AUDIT_RETENTION_DAYS', '2555'))
+
+# ── Ranking pipeline (Phase 3 + SLA) ────────────────────────────────────────
+RANKING_EXPLORATION_RATE = float(os.environ.get('RANKING_EXPLORATION_RATE', '0.20'))
+RANKING_COLDSTART_THRESHOLD = int(os.environ.get('RANKING_COLDSTART_THRESHOLD', '5'))
+RANKING_EXPLORATION_SLOT_INDEX = int(os.environ.get('RANKING_EXPLORATION_SLOT_INDEX', '5'))
+RANKING_UNDERSHOWN_QUALITY_THRESHOLD = float(os.environ.get('RANKING_UNDERSHOWN_QUALITY_THRESHOLD', '0.4'))
+RANKING_UNDERSHOWN_STALE_DAYS = int(os.environ.get('RANKING_UNDERSHOWN_STALE_DAYS', '14'))
+RANKING_FEED_SLA_SECONDS = float(os.environ.get('RANKING_FEED_SLA_SECONDS', '1.0'))
+RANKING_FEED_E2E_SLA_SECONDS = float(os.environ.get('RANKING_FEED_E2E_SLA_SECONDS', '2.0'))
+# Newcomer boost: services owned by users registered < 30 days ago receive a
+# multiplicative bump in Phase 2 score so brand-new members surface before
+# their reputation accumulates. Customer request, May 2026.
+RANKING_NEWCOMER_BOOST = float(os.environ.get('RANKING_NEWCOMER_BOOST', '1.2'))
