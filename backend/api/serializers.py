@@ -1376,7 +1376,41 @@ class ProfileFollowStatsMixin(serializers.Serializer):
         ).exists()
 
 
-class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
+class FeaturedBadgesDetailMixin:
+    """Shared serializer logic for featured_badges_detail.
+
+    Returns the resolved Badge objects in the order specified by
+    ``obj.featured_badges``. Skips IDs the user has not earned (defensive —
+    User.clean() should prevent this, but stale data could exist).
+    """
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_featured_badges_detail(self, obj):
+        ids = list(obj.featured_badges or [])
+        if not ids:
+            return []
+        earned = (
+            UserBadge.objects
+            .filter(user=obj, badge_id__in=ids)
+            .select_related('badge')
+        )
+        by_id = {ub.badge_id: ub for ub in earned}
+        result = []
+        for badge_id in ids:
+            ub = by_id.get(badge_id)
+            if ub is None:
+                continue
+            result.append({
+                'id': ub.badge.id,
+                'name': ub.badge.name,
+                'description': ub.badge.description,
+                'icon_url': ub.badge.icon_url,
+                'earned_at': ub.earned_at,
+            })
+        return result
+
+
+class UserProfileSerializer(FeaturedBadgesDetailMixin, ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     created_events = serializers.SerializerMethodField()
     joined_events = serializers.SerializerMethodField()
@@ -1404,6 +1438,12 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
         child=serializers.CharField(allow_blank=True), write_only=True, required=False
     )
 
+    # Featured badges (writable list of badge IDs, max 2, must be earned)
+    featured_badges = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    featured_badges_detail = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
@@ -1416,6 +1456,7 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
             'is_onboarded', 'is_verified',
             'skills', 'skill_ids',
             'followers_count', 'following_count', 'is_following',
+            'featured_badges', 'featured_badges_detail',
         ]
         read_only_fields = [
             'id', 'email', 'timebank_balance', 'karma_score', 'role', 'services',
@@ -1424,6 +1465,7 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
             'video_intro_file_url', 'featured_achievement_id', 'is_verified',
             'skills',
             'followers_count', 'following_count', 'is_following',
+            'featured_badges_detail',
         ]
         extra_kwargs = {
             'video_intro_file': {'write_only': True, 'required': False}
@@ -1529,11 +1571,34 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
             return [ub.badge.id for ub in user_badges if getattr(ub, 'badge', None)]
         except (AttributeError, Exception):
             return []
-    
+
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_badges(self, obj):
         """Deprecated: use achievements instead. Return list of achievement IDs for backward compatibility."""
         return self.get_achievements(obj)
+
+    def validate_featured_badges(self, value):
+        """Validate that featured_badges is a list of ≤2 unique earned badge IDs."""
+        if value is None:
+            value = []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Must be a list.')
+        if len(value) > 2:
+            raise serializers.ValidationError('At most 2 featured badges are allowed.')
+        for entry in value:
+            if not isinstance(entry, str):
+                raise serializers.ValidationError('All entries must be strings.')
+        if len(value) != len(set(value)):
+            raise serializers.ValidationError('Duplicate badge IDs are not allowed.')
+        if value:
+            instance = getattr(self, 'instance', None)
+            if instance is not None:
+                earned_count = UserBadge.objects.filter(user=instance, badge_id__in=value).count()
+                if earned_count != len(value):
+                    raise serializers.ValidationError(
+                        'One or more badge IDs have not been earned by this user.'
+                    )
+        return value
 
     def update(self, instance, validated_data):
         import uuid as _uuid_mod
@@ -1583,7 +1648,7 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
             instance.skills.set(tags_to_set)
         return instance
 
-class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
+class PublicUserProfileSerializer(FeaturedBadgesDetailMixin, ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     created_events = serializers.SerializerMethodField()
     joined_events = serializers.SerializerMethodField()
@@ -1594,6 +1659,7 @@ class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMix
     badges = serializers.SerializerMethodField()  # Deprecated: use achievements instead
     video_intro_file_url = serializers.SerializerMethodField()
     skills = serializers.SerializerMethodField()
+    featured_badges_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -1604,6 +1670,7 @@ class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMix
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
             'followers_count', 'following_count', 'is_following',
+            'featured_badges', 'featured_badges_detail',
         ]
         read_only_fields = [
             'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
@@ -1612,6 +1679,7 @@ class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMix
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
             'followers_count', 'following_count', 'is_following',
+            'featured_badges', 'featured_badges_detail',
         ]
 
     def get_skills(self, obj):
@@ -1647,6 +1715,7 @@ class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMix
     def get_badges(self, obj):
         """Deprecated: use achievements instead. Return list of achievement IDs for backward compatibility."""
         return self.get_achievements(obj)
+
 
 # Handshake Serializers
 @extend_schema_serializer(
@@ -1691,6 +1760,8 @@ class HandshakeSerializer(serializers.ModelSerializer):
     cancellation_requested_by_name = serializers.SerializerMethodField()
     can_request_cancellation = serializers.SerializerMethodField()
     can_respond_to_cancellation = serializers.SerializerMethodField()
+    # Interests panel: full requester profile — only exposed to the service owner
+    requester_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = Handshake
@@ -1707,18 +1778,45 @@ class HandshakeSerializer(serializers.ModelSerializer):
             'can_request_cancellation', 'can_respond_to_cancellation',
             'evaluation_window_starts_at', 'evaluation_window_ends_at', 'evaluation_window_closed_at',
             'user_has_reviewed',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
+            'requester_detail',
         ]
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_requester_name(self, obj):
         return f"{obj.requester.first_name} {obj.requester.last_name}".strip()
-    
+
     @extend_schema_field(OpenApiTypes.STR)
     def get_provider_name(self, obj):
         from .utils import get_provider_and_receiver
         provider, _ = get_provider_and_receiver(obj)
         return f"{provider.first_name} {provider.last_name}".strip()
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_requester_detail(self, obj):
+        """
+        Return requester profile detail for the Interests panel.
+        Only exposed to the service owner — non-owners receive null.
+        Includes: id, first_name, last_name, avatar_url, member_since (date_joined year).
+
+        Note: username is intentionally omitted — this project's custom User model
+        sets username = None (AbstractUser field removed) and the frontend no longer
+        uses it (direction from team: "don't use username at all").
+        """
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        # Owner-only rule: only the service owner sees this field
+        if str(obj.service.user_id) != str(request.user.id):
+            return None
+        r = obj.requester
+        return {
+            'id': str(r.id),
+            'first_name': r.first_name,
+            'last_name': r.last_name,
+            'avatar_url': r.avatar_url,
+            'member_since': r.date_joined.isoformat() if r.date_joined else None,
+        }
 
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_counterpart(self, obj):

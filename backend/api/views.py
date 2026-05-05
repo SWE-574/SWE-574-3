@@ -100,7 +100,8 @@ from .cache_utils import (
     get_cached_service_list, cache_service_list, invalidate_service_lists,
     get_cached_conversations, cache_conversations, invalidate_conversations,
     get_cached_transactions, cache_transactions, invalidate_transactions,
-    invalidate_user_services, CACHE_TTL_SHORT
+    invalidate_user_services, invalidate_user_calendar, CACHE_TTL_SHORT,
+    register_calendar_cache_key,
 )
 
 from django.contrib.auth import authenticate
@@ -1221,6 +1222,190 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             from .serializers import PublicUserProfileSerializer
             return PublicUserProfileSerializer
         return UserProfileSerializer
+
+
+class MeCalendarView(APIView):
+    """
+    GET /api/users/me/calendar/?from=YYYY-MM-DD&to=YYYY-MM-DD
+
+    Returns the authenticated user's scheduled items within the given date window.
+    Defaults to today → today+60d. Window is capped at 120 days.
+
+    Response shape (contract for Teams B, C, D):
+    {
+        "items": [
+            {
+                "id": "uuid",
+                "kind": "service_session" | "event_organized" | "event_joined" | "scheduled_commitment",
+                "title": "...",
+                "start": "ISO8601",
+                "end": "ISO8601",
+                "duration_hours": 2.0,
+                "location_type": "In-Person" | "Online" | null,
+                "location_label": "..." | null,
+                "service_type": "Offer" | "Need" | "Event" | null,
+                "service_id": "uuid" | null,
+                "handshake_id": "uuid" | null,
+                "chat_id": "uuid" | null,
+                "counterpart": {"id": "uuid", "name": "...", "avatar_url": "..."} | null,
+                "is_owner": true,
+                "status": "...",
+                "accent_token": "GREEN" | "BLUE" | "TEAL",
+                "link": {"type": "service" | "event" | "chat", "id": "uuid"}
+            }
+        ],
+        "conflicts": [{"item_id": "uuid", "overlaps_with": ["uuid", ...]}],
+        "range": {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}
+    }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    _CALENDAR_CACHE_TTL = 60  # 60 seconds — short TTL, supplemented by explicit invalidation
+
+    def get(self, request, *args, **kwargs):
+        from datetime import date
+        from django.core.cache import cache
+        from .schedule_utils import _user_scheduled_intervals, find_overlapping_pairs
+
+        today = timezone.now().date()
+
+        from_str = request.query_params.get('from')
+        to_str = request.query_params.get('to')
+
+        try:
+            from_date = date.fromisoformat(from_str) if from_str else today
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid "from" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            to_date = date.fromisoformat(to_str) if to_str else today + timedelta(days=60)
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid "to" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if to_date < from_date:
+            return Response({'detail': '"to" must not be before "from".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        max_days = 120
+        if (to_date - from_date).days > max_days:
+            return Response(
+                {'detail': f'Date window exceeds maximum of {max_days} days.', 'max_days': max_days},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cache_key = f"user_calendar:{request.user.id}:{from_date.isoformat()}:{to_date.isoformat()}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        window_start = timezone.make_aware(
+            timezone.datetime.combine(from_date, timezone.datetime.min.time())
+        )
+        window_end = timezone.make_aware(
+            timezone.datetime.combine(to_date, timezone.datetime.max.time())
+        )
+
+        user = request.user
+        intervals = list(_user_scheduled_intervals(user, window_start, window_end))
+        items = [self._serialize_interval(iv, user) for iv in intervals]
+        conflicts = find_overlapping_pairs(intervals)
+
+        response_data = {
+            'items': items,
+            'conflicts': conflicts,
+            'range': {
+                'from': from_date.isoformat(),
+                'to': to_date.isoformat(),
+            },
+        }
+        cache.set(cache_key, response_data, self._CALENDAR_CACHE_TTL)
+        # Register this key in the per-user tracking set so invalidate_user_calendar
+        # can find and delete it without pattern-delete support (spec §6.1).
+        # register_calendar_cache_key uses a bounded retry loop to reduce the
+        # read-modify-write race on concurrent requests (H2 fix).
+        register_calendar_cache_key(str(user.id), cache_key)
+        return Response(response_data)
+
+    def _serialize_interval(self, iv, user) -> dict:
+        from .schedule_utils import ScheduledInterval
+
+        source = iv.source_obj
+        is_handshake = iv.source_kind == 'handshake'
+
+        if is_handshake:
+            h = source
+            svc = h.service
+            service_id = str(svc.id)
+            handshake_id = str(h.id)
+            title = svc.title
+            location_type = svc.location_type
+            location_label = svc.location_area or None
+            service_type = svc.type
+            item_status = h.status
+
+            is_owner = (svc.user_id == user.id)
+            # counterpart is the other party
+            if is_owner:
+                cp = h.requester
+            else:
+                cp = svc.user
+            counterpart = {
+                'id': str(cp.id),
+                'name': f"{cp.first_name} {cp.last_name}".strip(),
+                'avatar_url': cp.avatar_url,
+            }
+
+            # Accent token
+            if svc.type == 'Event':
+                accent_token = 'BLUE'
+            else:
+                accent_token = 'GREEN'
+
+            # Link: prefer chat (via handshake's messages), then service/event
+            # Handshake-level chat is the ChatMessage thread. Use handshake id as chat id.
+            chat_id = handshake_id  # The chat channel is keyed by handshake id
+            link = {'type': 'chat', 'id': handshake_id}
+
+        else:
+            svc = source
+            service_id = str(svc.id)
+            handshake_id = None
+            chat_id = None
+            title = svc.title
+            location_type = svc.location_type
+            location_label = svc.location_area or None
+            service_type = svc.type
+            item_status = svc.status
+            is_owner = True
+            counterpart = None
+
+            if svc.type == 'Event':
+                accent_token = 'BLUE'
+                link = {'type': 'event', 'id': service_id}
+            else:
+                accent_token = 'TEAL'
+                link = {'type': 'service', 'id': service_id}
+
+        duration_hours = (iv.end - iv.start).total_seconds() / 3600.0
+
+        return {
+            'id': str(source.id),
+            'kind': iv.kind,
+            'title': title,
+            'start': iv.start.isoformat(),
+            'end': iv.end.isoformat(),
+            'duration_hours': round(duration_hours, 2),
+            'location_type': location_type,
+            'location_label': location_label,
+            'service_type': service_type,
+            'service_id': service_id,
+            'handshake_id': handshake_id,
+            'chat_id': chat_id,
+            'counterpart': counterpart,
+            'is_owner': is_owner,
+            'status': item_status,
+            'accent_token': accent_token,
+            'link': link,
+        }
 
 
 class UserHistoryView(APIView):

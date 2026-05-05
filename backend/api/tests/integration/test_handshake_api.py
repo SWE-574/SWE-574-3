@@ -1467,3 +1467,93 @@ class TestMarkAttendedAndCompleteEvent:
             status.HTTP_409_CONFLICT,
             status.HTTP_404_NOT_FOUND,  # completed events may be filtered from active queryset
         )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestHandshakeInterestsPanelRequesterDetail:
+    """
+    Tests for the requester_detail field in HandshakeSerializer.
+    This field powers the owner-side Interests panel (#298).
+    """
+
+    def test_owner_sees_requester_detail_with_id(self):
+        """Service owner's handshake list must include requester_detail.id."""
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', duration=Decimal('2.00'))
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+        resp = client.get('/api/handshakes/')
+        assert resp.status_code == status.HTTP_200_OK
+        results = resp.json()
+        # Find our handshake in the list
+        hs_data = next(
+            (h for h in results if str(h.get('service_id')) == str(service.id)),
+            None
+        )
+        assert hs_data is not None, "Handshake not found in owner's list"
+        assert 'requester_detail' in hs_data
+        detail = hs_data['requester_detail']
+        assert detail is not None
+        assert 'id' in detail
+        assert str(detail['id']) == str(requester.id)
+        assert 'first_name' in detail
+        assert 'last_name' in detail
+        assert 'avatar_url' in detail
+        assert 'member_since' in detail
+        # member_since must be an ISO string (not an int year) so the frontend
+        # can call new Date(detail.member_since).getFullYear() correctly.
+        if detail['member_since'] is not None:
+            assert isinstance(detail['member_since'], str), (
+                "member_since must be an ISO datetime string, not an int"
+            )
+
+    def test_non_owner_gets_null_requester_detail(self):
+        """Non-owner (requester) must NOT see requester_detail — it should be null."""
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', duration=Decimal('2.00'))
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        resp = client.get('/api/handshakes/')
+        assert resp.status_code == status.HTTP_200_OK
+        results = resp.json()
+        hs_data = next(
+            (h for h in results if str(h.get('service_id')) == str(service.id)),
+            None
+        )
+        assert hs_data is not None, "Handshake not found in requester's list"
+        # requester_detail must be null for the non-owner
+        assert hs_data.get('requester_detail') is None
+
+    def test_requester_detail_does_not_include_username(self):
+        """
+        requester_detail must NOT include a 'username' key.
+
+        This project's custom User model sets username=None (AbstractUser field
+        removed) and the team direction is to not use username anywhere —
+        the frontend now shows first/last name + member-since year only.
+        """
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', duration=Decimal('2.00'))
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+        resp = client.get('/api/handshakes/')
+        assert resp.status_code == status.HTTP_200_OK
+        results = resp.json()
+        hs_data = next(
+            (h for h in results if str(h.get('service_id')) == str(service.id)),
+            None
+        )
+        assert hs_data is not None, "Handshake not found in owner's list"
+        detail = hs_data.get('requester_detail')
+        assert detail is not None, "requester_detail should not be null for the owner"
+        assert 'username' not in detail, (
+            "requester_detail must NOT include 'username' — the User model has no "
+            "username field and the frontend no longer uses it."
+        )
