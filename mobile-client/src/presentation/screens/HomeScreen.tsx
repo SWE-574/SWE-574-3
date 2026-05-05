@@ -24,6 +24,7 @@ import { listServices, type ServicesListParams } from "../../api/services";
 import { Service } from "../../api/types";
 import ServiceCard from "../components/ServiceCard";
 import FeaturedSection from "../components/FeaturedSection";
+import ExploreCarousel from "../components/ExploreCarousel";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
@@ -366,13 +367,16 @@ export default function HomeScreen() {
   );
 
   const listHeader = (
-    <FeaturedSection
-      services={filteredServices}
-      onServicePress={handleServicePress}
-      userLocation={userLocation}
-      locationStatus={locationStatus}
-      maxNearbyKm={filters.distanceKm}
-    />
+    <>
+      <ExploreCarousel onServicePress={handleServicePress} />
+      <FeaturedSection
+        services={filteredServices}
+        onServicePress={handleServicePress}
+        userLocation={userLocation}
+        locationStatus={locationStatus}
+        maxNearbyKm={filters.distanceKm}
+      />
+    </>
   );
 
   const showNearbyStatus =

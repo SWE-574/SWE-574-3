@@ -130,6 +130,11 @@ export default function ServiceCard({
               <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
             </View>
           )}
+          {service.is_newcomer_owner && (
+            <View style={styles.newcomerBadge}>
+              <Text style={styles.newcomerBadgeText}>New</Text>
+            </View>
+          )}
         </View>
 
         <Text style={styles.description} numberOfLines={3}>
@@ -279,6 +284,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     color: colors.RED,
+  },
+  newcomerBadge: {
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: colors.PURPLE_LT,
+    marginLeft: 4,
+  },
+  newcomerBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.PURPLE,
   },
   typeOfferBadgeText: {
     fontSize: 11,

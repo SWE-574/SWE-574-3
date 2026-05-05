@@ -1906,6 +1906,17 @@ class ServiceViewSet(viewsets.ModelViewSet):
         
         queryset = search_engine.search(queryset, search_params)
 
+        # explore_only=true (#480): restrict the feed to Phase 3 eligible
+        # services (cold-start, undershown quality, stale recurring) so the
+        # mobile "Try something new" carousel can fetch them in one call.
+        explore_only_raw = self.request.query_params.get('explore_only', '')
+        if str(explore_only_raw).strip().lower() in {'1', 'true', 'yes'}:
+            from .ranking import _eligible_exploration
+            sample = list(queryset[:200])
+            cold, under, stale = _eligible_exploration(sample)
+            eligible_ids = [s.id for s in (*cold, *under, *stale)]
+            queryset = queryset.filter(id__in=eligible_ids)
+
         user_param = self.request.query_params.get('user')
         # Filter by owner user (for profile pages)
         if user_param:

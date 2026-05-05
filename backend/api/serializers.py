@@ -541,6 +541,7 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    is_newcomer_owner = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
@@ -550,9 +551,20 @@ class ServiceSerializer(serializers.ModelSerializer):
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
-            'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
+            'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary', 'is_newcomer_owner',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
+        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned', 'is_newcomer_owner']
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_is_newcomer_owner(self, obj):
+        """True when the service owner registered less than 30 days ago. Lets
+        the feed render a Newcomer badge that mirrors the Phase 2 newcomer
+        boost (#477)."""
+        from .achievement_utils import is_newcomer
+        owner = getattr(obj, 'user', None)
+        if owner is None:
+            return False
+        return bool(is_newcomer(owner))
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):
