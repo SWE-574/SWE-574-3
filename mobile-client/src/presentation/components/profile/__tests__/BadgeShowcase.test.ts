@@ -5,7 +5,7 @@
  * We test module exports and the pure logic that drives compact vs picker behaviour.
  */
 
-import { getCompactBadgeTooltipText } from "../badgeDisplay";
+import { getCompactBadgeTooltipText } from "../../../../utils/profileBadgeDisplay";
 
 // ── Compact variant logic ─────────────────────────────────────────────────
 
