@@ -357,6 +357,7 @@ REST_FRAMEWORK = {
         'anon': '20/hour',        # Reduced from 100/hour (REQ-NF-SEC-002)
         'user': '200/hour',       # Reduced from 1000/hour (REQ-NF-SEC-002)
         'registration': '20/hour',  # Separate rate for registration
+        'login': '30/hour',       # Per-IP login throttle (#244)
         'handshake': '20/hour',   # Limit handshake creation
         'chat': '100/hour',       # Limit chat messages
         'confirm': '10/hour',     # Limit confirmations
@@ -376,6 +377,7 @@ if THROTTLE_RELAXED:
         'anon': '500/hour',
         'user': '10000/hour',
         'registration': '200/hour',
+        'login': '500/hour',
         'handshake': '500/hour',
         'chat': '5000/hour',
         'confirm': '200/hour',
@@ -393,6 +395,7 @@ if DJANGO_E2E:
         'anon': '100000/hour',
         'user': '100000/hour',
         'registration': '100000/hour',
+        'login': '100000/hour',
         'handshake': '100000/hour',
         'chat': '100000/hour',
         'confirm': '100000/hour',
@@ -409,6 +412,7 @@ if DISABLE_THROTTLING:
         'anon': '1000000/hour',
         'user': '1000000/hour',
         'registration': '1000000/hour',
+        'login': '1000000/hour',
         'handshake': '1000000/hour',
         'chat': '1000000/hour',
         'confirm': '1000000/hour',
@@ -434,6 +438,13 @@ SIMPLE_JWT = {
 }
 
 # Security settings for production
+#
+# Geolocation encryption posture (NFR-19c, #326): user coordinates rely on
+# transport-layer TLS (HSTS below) for confidentiality plus a deterministic
+# ~1 km fuzz applied at serializer-output time as the access-control layer.
+# Field-level encryption at rest is intentionally NOT in scope at MVP — see
+# docs/security/geolocation-encryption-posture.md for the full reasoning and
+# the conditions under which this decision should be revisited.
 if not DEBUG:
     # SSL redirect is handled by nginx — backend runs plain HTTP internally
     SECURE_SSL_REDIRECT = False
@@ -832,6 +843,13 @@ LOGGING = {
         'api.consumers': {
             'handlers': ['console'],
             'level': 'DEBUG',
+            'propagate': False,
+        },
+        # Security events: successful + failed logins, IP, etc. (#244).
+        # Goes to console + file so Docker log scraping picks it up.
+        'api.security': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
             'propagate': False,
         },
         'django.request': {
