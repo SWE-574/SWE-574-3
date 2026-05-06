@@ -9,7 +9,7 @@ from contextlib import nullcontext
 from django.db import transaction
 from django.db.models import F, Q
 
-from .models import DevicePushToken, Handshake, Notification, Service, User, TransactionHistory
+from .models import DevicePushToken, Handshake, Notification, Report, Service, User, TransactionHistory
 
 logger = logging.getLogger(__name__)
 from .cache_utils import invalidate_conversations, invalidate_transactions, invalidate_user_profile
@@ -452,6 +452,53 @@ def cancel_timebank_transfer(handshake: Handshake) -> bool:
     return True
 
 
+def notify_reporter_of_receipt(report: Report) -> None:
+    """Tell the reporter we received their report. Moderator identity omitted."""
+    create_notification(
+        user=report.reporter,
+        notification_type='report_received',
+        title='Report received',
+        message='Thanks — your report has been received and will be reviewed by a moderator.',
+        service=report.reported_service,
+        handshake=report.related_handshake,
+        report=report,
+    )
+
+
+def notify_reporter_of_state_change(report: Report) -> None:
+    """Tell the reporter their report was resolved or dismissed.
+
+    No moderator PII is exposed; the message is intentionally generic so the
+    reporter knows action was taken without learning who the moderator was.
+    """
+    if report.status == 'resolved':
+        notification_type = 'report_resolved'
+        title = 'Your report was resolved'
+        message = (
+            'A moderator reviewed your report and took action. '
+            'Thanks for helping keep the community safe.'
+        )
+    elif report.status == 'dismissed':
+        notification_type = 'report_dismissed'
+        title = 'Your report was reviewed'
+        message = (
+            "A moderator reviewed your report and didn't find a violation. "
+            'Thanks for flagging it.'
+        )
+    else:
+        return
+
+    create_notification(
+        user=report.reporter,
+        notification_type=notification_type,
+        title=title,
+        message=message,
+        service=report.reported_service,
+        handshake=report.related_handshake,
+        report=report,
+    )
+
+
 def create_notification(
     user: User,
     notification_type: str,
@@ -459,7 +506,7 @@ def create_notification(
     message: str,
     handshake: Handshake | None = None,
     service: Service | None = None,
-    report=None,
+    report: Report | None = None,
 ) -> Notification:
     """Persist a notification and broadcast it via WebSocket."""
     notification = Notification.objects.create(

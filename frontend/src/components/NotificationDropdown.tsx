@@ -50,6 +50,27 @@ export function NotificationDropdown() {
       } else if (notification.related_service_type === 'Event' && notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)
       } else if (notification.related_service && notification.type === 'positive_rep') {
+
+      // Report-lifecycle notifications take priority over related_service so the
+      // admin lands on the report panel and the reporter on their reports tab,
+      // instead of the service detail page.
+      if (notification.type === 'new_report' && notification.related_report) {
+        navigate(`/admin?tab=reports&reportId=${notification.related_report}`)
+        return
+      }
+      if (
+        notification.type === 'report_received'
+        || notification.type === 'report_resolved'
+        || notification.type === 'report_dismissed'
+      ) {
+        navigate('/profile?tab=reports')
+        return
+      }
+
+      // Feedback/reputation notifications with a related service → go to the service detail
+      // so users can leave their evaluation there. Other handshake notifications → messages.
+      const isFeedbackNotif = notification.type === 'positive_rep'
+      if (notification.related_service && isFeedbackNotif) {
         navigate(`/service-detail/${notification.related_service}`)
       } else if (notification.related_handshake) {
         navigate(`/messages/${notification.related_handshake}`)
