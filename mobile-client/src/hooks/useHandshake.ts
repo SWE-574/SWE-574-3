@@ -148,7 +148,7 @@ export function useHandshake({
    * Web parity:
    * - Pending action ownership is based on SERVICE OWNERSHIP, not provider role.
    * - Offer: service owner == provider
-   * - Need/Want: service owner == receiver
+   * - Need: service owner == receiver
    *
    * Therefore:
    * - service owner initiates
