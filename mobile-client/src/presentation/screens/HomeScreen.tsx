@@ -36,7 +36,6 @@ import {
   isRecurringService,
   type Coordinates,
 } from "../../utils/discovery";
-import { useAuth } from "../../context/AuthContext";
 import { useScreenCache } from "../../hooks/useScreenCache";
 import { ApiNetworkError } from "../../api/client";
 
