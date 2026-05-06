@@ -161,6 +161,21 @@ export const userAPI = {
     return res.data.results
   },
 
+  getSuggested: async (
+    options?: { page?: number; signal?: AbortSignal },
+  ): Promise<{ results: UserSummary[]; next: string | null; count: number }> => {
+    const params = options?.page ? { page: options.page } : undefined
+    const res = await apiClient.get<{ results: UserSummary[]; next: string | null; count: number }>(
+      '/users/suggested/',
+      { params, signal: options?.signal },
+    )
+    return {
+      results: res.data.results ?? [],
+      next: res.data.next ?? null,
+      count: res.data.count ?? 0,
+    }
+  },
+
   getHistory: async (userId: string, signal?: AbortSignal): Promise<UserHistoryItem[]> => {
     const res = await apiClient.get<UserHistoryItem[] | { results: UserHistoryItem[] }>(
       `/users/${userId}/history/`,

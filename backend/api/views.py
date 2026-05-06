@@ -6907,3 +6907,228 @@ class E2ESetBalanceView(APIView):
             'email': user.email,
             'balance': float(user.timebank_balance),
         })
+
+
+class SuggestedUsersView(generics.ListAPIView):
+    """Discover people to follow.
+
+    GET /api/users/suggested/
+
+    Returns active users the viewer doesn't already follow, ranked by:
+      1. Number of shared skill tags with the viewer (desc).
+      2. Karma score (desc) as a tiebreaker.
+      3. Recency of join (desc) as a final tiebreaker.
+
+    Excludes the viewer themselves, inactive users, and accounts the viewer
+    already follows. Paginated via the project's standard pagination.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+
+    def get_serializer_class(self):
+        from .serializers import UserSummarySerializer
+        return UserSummarySerializer
+
+    def get_queryset(self):
+        from django.db.models import Count, Q
+
+        from .models import UserFollow
+
+        viewer = self.request.user
+        followed_ids = list(
+            UserFollow.objects.filter(follower=viewer).values_list(
+                'following_id', flat=True,
+            )
+        )
+        viewer_skill_ids = list(viewer.skills.values_list('id', flat=True))
+
+        qs = (
+            User.objects
+            .filter(is_active=True)
+            .exclude(pk=viewer.pk)
+        )
+        if followed_ids:
+            qs = qs.exclude(pk__in=followed_ids)
+
+        if viewer_skill_ids:
+            qs = qs.annotate(
+                _shared_skills=Count(
+                    'skills',
+                    filter=Q(skills__id__in=viewer_skill_ids),
+                    distinct=True,
+                ),
+            )
+        else:
+            qs = qs.annotate(_shared_skills=Count('pk', filter=Q(pk__isnull=True)))
+
+        return qs.order_by('-_shared_skills', '-karma_score', '-date_joined')
+
+
+class ActivityFeedView(generics.ListAPIView):
+    """Activity feed (#482).
+
+    GET /api/activity/feed/?days=N
+
+    Returns ActivityEvent rows from the last N days (default 14, max 90)
+    where the actor is either someone the viewer follows OR an actor
+    whose own (or whose service's) location is within
+    `RANKING_PROXIMITY_HALF_LIFE_KM * 3` of the viewer's location.
+
+    Requires authentication. Anonymous viewers get 401. Viewers without
+    a known location only see events from people they follow.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+
+    def get_serializer_class(self):
+        from .serializers import ActivityEventSerializer
+        return ActivityEventSerializer
+
+    def get_queryset(self):
+        from datetime import timedelta
+        from django.contrib.gis.db.models.functions import Distance
+        from django.contrib.gis.geos import Point
+        from django.contrib.gis.measure import D
+        from django.db.models import Count, Prefetch, Q
+
+        from .models import ActivityEvent, ServiceMedia, UserFollow
+
+        viewer = self.request.user
+        try:
+            days = int(self.request.query_params.get('days', '14'))
+        except ValueError:
+            days = 14
+        days = max(1, min(days, 90))
+        cutoff = timezone.now() - timedelta(days=days)
+
+        followed_ids = list(
+            UserFollow.objects.filter(follower=viewer).values_list(
+                'following_id', flat=True,
+            )
+        )
+
+        filters = Q(actor_id__in=followed_ids) if followed_ids else Q(pk__in=[])
+        # Show follow events to the user being followed so they see "X started
+        # following you" without having to follow X back.
+        filters = filters | Q(
+            verb=ActivityEvent.USER_FOLLOWED, target_user=viewer,
+        )
+
+        lat = self.request.query_params.get('lat')
+        lng = self.request.query_params.get('lng')
+        try:
+            lat_f = float(lat) if lat is not None else None
+            lng_f = float(lng) if lng is not None else None
+        except (TypeError, ValueError):
+            lat_f = lng_f = None
+
+        viewer_point = None
+        if lat_f is not None and lng_f is not None:
+            half_life = float(getattr(
+                settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0,
+            ))
+            radius_km = half_life * 3.0
+            viewer_point = Point(lng_f, lat_f, srid=4326)
+            filters = filters | Q(
+                location__isnull=False,
+                location__distance_lte=(viewer_point, D(km=radius_km)),
+            )
+
+        # Prefetch the first photo for each service so the hero card thumbnail
+        # is one query instead of one-per-event.
+        media_prefetch = Prefetch(
+            'service__media',
+            queryset=ServiceMedia.objects.order_by('display_order', 'created_at'),
+        )
+
+        # Annotate committed-handshake count once for the whole page so
+        # event_capacity_pct doesn't query per-card.
+        committed_statuses = ('accepted', 'completed', 'checked_in', 'attended')
+        qs = (
+            ActivityEvent.objects
+            .filter(created_at__gte=cutoff)
+            .filter(filters)
+            .exclude(actor=viewer)
+            .select_related('actor', 'target_user', 'service', 'service__user')
+            .prefetch_related(media_prefetch, 'actor__skills')
+            .annotate(
+                _committed_count=Count(
+                    'service__handshakes',
+                    filter=Q(service__handshakes__status__in=committed_statuses),
+                    distinct=True,
+                ),
+            )
+        )
+
+        # When the viewer passes lat/lng we annotate distance and optionally
+        # sort by it for the right-rail "Active near you" pulse list.
+        sort = self.request.query_params.get('sort')
+        if viewer_point is not None:
+            qs = qs.annotate(_distance=Distance('location', viewer_point))
+            if sort == 'nearby':
+                qs = qs.filter(_distance__isnull=False).order_by('_distance', '-created_at')
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        # Cap the response when sort=nearby so the rail stays a small payload.
+        if request.query_params.get('sort') == 'nearby':
+            qs = self.filter_queryset(self.get_queryset())[:12]
+            self._annotate_extras(qs)
+            serializer = self.get_serializer(qs, many=True)
+            return Response({
+                'count': len(serializer.data),
+                'next': None,
+                'previous': None,
+                'results': serializer.data,
+            })
+        # Standard paginated response for the main feed.
+        response = super().list(request, *args, **kwargs)
+        # Annotate per-page extras so cards can show "0.4 km away" and the
+        # banked-hours flourish without per-card queries.
+        page = self.paginator.page if hasattr(self, 'paginator') and getattr(self.paginator, 'page', None) else None
+        if page is not None:
+            self._annotate_extras(page.object_list)
+            serializer = self.get_serializer(page.object_list, many=True)
+            response.data['results'] = serializer.data
+        return response
+
+    def _annotate_extras(self, events):
+        """Per-page extras for the serializer:
+        - `_distance_km`: convert the PostGIS Distance annotation to plain km.
+        - `_completed_handshake`: batch-fetch the matching Handshake row for
+          every HANDSHAKE_COMPLETED event in one query so the duration
+          flourish doesn't hit the DB per card.
+        """
+        from .models import ActivityEvent, Handshake
+
+        for ev in events:
+            d = getattr(ev, '_distance', None)
+            ev._distance_km = round(d.km, 2) if d is not None else None
+            ev._completed_handshake = None
+
+        completion_keys = {
+            (ev.service_id, ev.actor_id)
+            for ev in events
+            if ev.verb == ActivityEvent.HANDSHAKE_COMPLETED and ev.service_id
+        }
+        if not completion_keys:
+            return
+
+        service_ids = {sid for sid, _ in completion_keys}
+        actor_ids = {aid for _, aid in completion_keys}
+        rows = (
+            Handshake.objects
+            .filter(service_id__in=service_ids, requester_id__in=actor_ids, status='completed')
+            .order_by('-updated_at')
+        )
+        latest_by_key = {}
+        for hs in rows:
+            key = (hs.service_id, hs.requester_id)
+            if key in completion_keys and key not in latest_by_key:
+                latest_by_key[key] = hs
+
+        for ev in events:
+            if ev.verb != ActivityEvent.HANDSHAKE_COMPLETED:
+                continue
+            ev._completed_handshake = latest_by_key.get((ev.service_id, ev.actor_id))

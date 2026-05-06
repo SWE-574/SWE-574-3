@@ -430,6 +430,18 @@ export default function HomeScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
+          onPress={() => navigation.navigate("Activity")}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={{ marginRight: 12 }}
+        >
+          <Ionicons
+            name="pulse-outline"
+            size={24}
+            color={colors.GRAY600}
+          />
+        </TouchableOpacity>
+
+        <TouchableOpacity
           onPress={() => navigation.navigate("Notifications")}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >

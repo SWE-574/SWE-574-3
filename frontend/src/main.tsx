@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import App from './App'
 import system from './theme'
+import './styles/global.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

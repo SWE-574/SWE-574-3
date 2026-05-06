@@ -543,6 +543,7 @@ class Notification(models.Model):
         ('positive_rep', 'Positive Reputation'),
         ('admin_warning', 'Admin Warning'),
         ('dispute_resolved', 'Dispute Resolved'),
+        ('user_followed', 'New Follower'),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1268,3 +1269,59 @@ class ScoreAuditLog(models.Model):
 
     def __str__(self):
         return f'Audit({self.service_id}, {self.recorded_at}, {self.final_score:.4f})'
+
+
+class ActivityEvent(models.Model):
+    """Append-only timeline of platform activity that powers the activity feed.
+
+    The actor performed `verb` on the optional `service` and/or `target_user`.
+    Producers live in api/signals.py and run on Service create, Handshake
+    accept, and UserFollow create. Visibility filtering happens at read time:
+    a viewer sees events from people they follow plus events from actors
+    located within the configured proximity radius of the viewer.
+    """
+    SERVICE_CREATED = 'service_created'
+    HANDSHAKE_ACCEPTED = 'handshake_accepted'
+    HANDSHAKE_COMPLETED = 'handshake_completed'
+    USER_FOLLOWED = 'user_followed'
+    SERVICE_ENDORSED = 'service_endorsed'
+    EVENT_FILLING_UP = 'event_filling_up'
+    NEW_NEIGHBOR = 'new_neighbor'
+    VERB_CHOICES = [
+        (SERVICE_CREATED, 'service_created'),
+        (HANDSHAKE_ACCEPTED, 'handshake_accepted'),
+        (HANDSHAKE_COMPLETED, 'handshake_completed'),
+        (USER_FOLLOWED, 'user_followed'),
+        (SERVICE_ENDORSED, 'service_endorsed'),
+        (EVENT_FILLING_UP, 'event_filling_up'),
+        (NEW_NEIGHBOR, 'new_neighbor'),
+    ]
+
+    actor = models.ForeignKey(
+        'User', on_delete=models.CASCADE, related_name='activity_events',
+    )
+    verb = models.CharField(max_length=32, choices=VERB_CHOICES)
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE,
+        related_name='activity_events', null=True, blank=True,
+    )
+    target_user = models.ForeignKey(
+        'User', on_delete=models.CASCADE,
+        related_name='activity_events_targeted', null=True, blank=True,
+    )
+    location = gis_models.PointField(
+        null=True, blank=True, geography=True, srid=4326,
+        help_text='Snapshot of the actor or service location at event time.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['actor', '-created_at']),
+            models.Index(fields=['-created_at']),
+            models.Index(fields=['verb', '-created_at']),
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Activity({self.actor_id}, {self.verb}, {self.created_at})'

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Box, Flex, Text } from '@chakra-ui/react'
 import {
+  FiActivity,
   FiMessageSquare,
   FiUser,
   FiBell,
@@ -196,6 +197,7 @@ const Navbar = () => {
           >
             <NavLink to="/dashboard" icon={<FiGrid size={15} />} active={p === '/dashboard'}>Browse</NavLink>
             <NavLink to="/forum" icon={<FiMessageCircle size={15} />} active={p.startsWith('/forum')}>Forum</NavLink>
+            <NavLink to="/activity" icon={<FiActivity size={15} />} active={p === '/activity'}>Activity</NavLink>
             <NavLink to="/messages" icon={<FiMessageSquare size={15} />} active={p === '/messages' || p.startsWith('/messages/')}>Messages</NavLink>
           </Flex>
         )}

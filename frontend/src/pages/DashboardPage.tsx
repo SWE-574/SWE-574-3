@@ -31,6 +31,7 @@ import { MapView } from '@/components/MapView'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useGeoStore } from '@/store/useGeoStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
 import type { Handshake } from '@/services/handshakeAPI'
@@ -501,6 +502,10 @@ const DashboardPage = () => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        useGeoStore.getState().setGeoLocation({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        })
         setLocationEnabled(true); localStorage.setItem('locationEnabled', 'true'); setLocationLoading(false)
       },
       (err) => {
