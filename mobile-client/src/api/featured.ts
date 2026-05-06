@@ -4,6 +4,7 @@
  */
 
 import { apiRequest } from './client';
+import { normalizeRuntimeUrl } from '../constants/env';
 
 export interface FeaturedServiceUser {
   id: string;
@@ -47,6 +48,25 @@ export interface FeaturedResponse {
   top_providers: FeaturedProvider[];
 }
 
+function normalizeFeaturedUser<T extends FeaturedServiceUser | FeaturedProvider>(user: T): T {
+  return {
+    ...user,
+    avatar_url: normalizeRuntimeUrl(user.avatar_url),
+  };
+}
+
+function normalizeFeaturedService(service: FeaturedService): FeaturedService {
+  return {
+    ...service,
+    user: normalizeFeaturedUser(service.user),
+  };
+}
+
 export function getFeatured(): Promise<FeaturedResponse> {
-  return apiRequest<FeaturedResponse>('/featured/');
+  return apiRequest<FeaturedResponse>('/featured/').then((response) => ({
+    ...response,
+    trending: (response.trending ?? []).map(normalizeFeaturedService),
+    friends: (response.friends ?? []).map(normalizeFeaturedService),
+    top_providers: (response.top_providers ?? []).map(normalizeFeaturedUser),
+  }));
 }

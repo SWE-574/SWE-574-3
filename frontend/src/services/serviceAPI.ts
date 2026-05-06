@@ -146,8 +146,8 @@ export const serviceAPI = {
     await apiClient.post(`/services/${serviceId}/complete-event/`, {})
   },
 
-  cancelEvent: async (serviceId: string): Promise<void> => {
-    await apiClient.post(`/services/${serviceId}/cancel-event/`, {})
+  cancelEvent: async (serviceId: string, reason: string): Promise<void> => {
+    await apiClient.post(`/services/${serviceId}/cancel-event/`, { reason })
   },
 
   generateQRToken: async (serviceId: string) => {

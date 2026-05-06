@@ -357,6 +357,7 @@ REST_FRAMEWORK = {
         'anon': '20/hour',        # Reduced from 100/hour (REQ-NF-SEC-002)
         'user': '200/hour',       # Reduced from 1000/hour (REQ-NF-SEC-002)
         'registration': '20/hour',  # Separate rate for registration
+        'login': '30/hour',       # Per-IP login throttle (#244)
         'handshake': '20/hour',   # Limit handshake creation
         'chat': '100/hour',       # Limit chat messages
         'confirm': '10/hour',     # Limit confirmations
@@ -376,6 +377,7 @@ if THROTTLE_RELAXED:
         'anon': '500/hour',
         'user': '10000/hour',
         'registration': '200/hour',
+        'login': '500/hour',
         'handshake': '500/hour',
         'chat': '5000/hour',
         'confirm': '200/hour',
@@ -393,6 +395,7 @@ if DJANGO_E2E:
         'anon': '100000/hour',
         'user': '100000/hour',
         'registration': '100000/hour',
+        'login': '100000/hour',
         'handshake': '100000/hour',
         'chat': '100000/hour',
         'confirm': '100000/hour',
@@ -409,6 +412,7 @@ if DISABLE_THROTTLING:
         'anon': '1000000/hour',
         'user': '1000000/hour',
         'registration': '1000000/hour',
+        'login': '1000000/hour',
         'handshake': '1000000/hour',
         'chat': '1000000/hour',
         'confirm': '1000000/hour',
@@ -434,6 +438,13 @@ SIMPLE_JWT = {
 }
 
 # Security settings for production
+#
+# Geolocation encryption posture (NFR-19c, #326): user coordinates rely on
+# transport-layer TLS (HSTS below) for confidentiality plus a deterministic
+# ~1 km fuzz applied at serializer-output time as the access-control layer.
+# Field-level encryption at rest is intentionally NOT in scope at MVP — see
+# docs/security/geolocation-encryption-posture.md for the full reasoning and
+# the conditions under which this decision should be revisited.
 if not DEBUG:
     # SSL redirect is handled by nginx — backend runs plain HTTP internally
     SECURE_SSL_REDIRECT = False
@@ -834,6 +845,13 @@ LOGGING = {
             'level': 'DEBUG',
             'propagate': False,
         },
+        # Security events: successful + failed logins, IP, etc. (#244).
+        # Goes to console + file so Docker log scraping picks it up.
+        'api.security': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
         'django.request': {
             'handlers': ['console', 'file'],
             'level': 'WARNING',
@@ -851,3 +869,16 @@ EVENT_FEEDBACK_WINDOW_HOURS = int(os.environ.get('EVENT_FEEDBACK_WINDOW_HOURS', 
 # Audit log retention (FR-AUDIT): admin audit records must be retained for
 # at least 7 years (2555 days) before archival is permitted.
 AUDIT_RETENTION_DAYS = int(os.environ.get('AUDIT_RETENTION_DAYS', '2555'))
+
+# ── Ranking pipeline (Phase 3 + SLA) ────────────────────────────────────────
+RANKING_EXPLORATION_RATE = float(os.environ.get('RANKING_EXPLORATION_RATE', '0.20'))
+RANKING_COLDSTART_THRESHOLD = int(os.environ.get('RANKING_COLDSTART_THRESHOLD', '5'))
+RANKING_EXPLORATION_SLOT_INDEX = int(os.environ.get('RANKING_EXPLORATION_SLOT_INDEX', '5'))
+RANKING_UNDERSHOWN_QUALITY_THRESHOLD = float(os.environ.get('RANKING_UNDERSHOWN_QUALITY_THRESHOLD', '0.4'))
+RANKING_UNDERSHOWN_STALE_DAYS = int(os.environ.get('RANKING_UNDERSHOWN_STALE_DAYS', '14'))
+RANKING_FEED_SLA_SECONDS = float(os.environ.get('RANKING_FEED_SLA_SECONDS', '1.0'))
+RANKING_FEED_E2E_SLA_SECONDS = float(os.environ.get('RANKING_FEED_E2E_SLA_SECONDS', '2.0'))
+# Newcomer boost: services owned by users registered < 30 days ago receive a
+# multiplicative bump in Phase 2 score so brand-new members surface before
+# their reputation accumulates. Customer request, May 2026.
+RANKING_NEWCOMER_BOOST = float(os.environ.get('RANKING_NEWCOMER_BOOST', '1.2'))
