@@ -1,15 +1,27 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+} from "react-native";
 import { colors } from "../../../constants/colors";
+import {
+  getChatParticipantInitial,
+  getChatParticipantLabel,
+} from "../../../utils/chatParticipant";
 
 export type ChatTopMetaProps = {
-  otherUserName: string;
+  otherUserName?: string | null;
   otherUserAvatarUrl?: string | null;
   serviceTitle?: string;
   handshakeStatus?: string;
   formatStatusLabel: (status: string) => string;
   connected: boolean;
   reconnectAttempts: number;
+  isParticipantLoading?: boolean;
   onViewProfile?: () => void;
   onOpenService?: () => void;
 };
@@ -22,9 +34,13 @@ export function ChatTopMeta({
   formatStatusLabel,
   connected,
   reconnectAttempts,
+  isParticipantLoading = false,
   onViewProfile,
   onOpenService,
 }: ChatTopMetaProps) {
+  const participantName = getChatParticipantLabel(otherUserName);
+  const participantInitial = getChatParticipantInitial(otherUserName);
+
   return (
     <View style={styles.topMeta}>
       {/* Avatar — tappable to view profile */}
@@ -34,12 +50,16 @@ export function ChatTopMeta({
         style={styles.avatarWrap}
         activeOpacity={onViewProfile ? 0.7 : 1}
       >
-        {otherUserAvatarUrl ? (
+        {isParticipantLoading ? (
+          <View style={styles.avatarFallback}>
+            <ActivityIndicator size="small" color={colors.GREEN} />
+          </View>
+        ) : otherUserAvatarUrl ? (
           <Image source={{ uri: otherUserAvatarUrl }} style={styles.avatar} />
         ) : (
           <View style={styles.avatarFallback}>
             <Text style={styles.avatarFallbackText}>
-              {otherUserName.charAt(0).toUpperCase()}
+              {participantInitial}
             </Text>
           </View>
         )}
@@ -59,7 +79,7 @@ export function ChatTopMeta({
               ]}
               numberOfLines={1}
             >
-              {otherUserName}
+              {isParticipantLoading ? "Loading conversation..." : participantName}
             </Text>
           </TouchableOpacity>
         </View>

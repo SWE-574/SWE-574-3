@@ -30,7 +30,7 @@ export interface Notification {
   title: string;
   message: string;
   is_read: boolean;
-  related_handshake: string | null;
+  related_handshake: string | { id?: string } | null;
   related_service: string | null;
   created_at: string;
 }

@@ -50,8 +50,29 @@ const apiUrl =
 const mapboxToken =
   rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || rootEnv.VITE_MAPBOX_TOKEN || "";
 
+// #370 — let CI/EAS point at the Firebase credential file outside the repo.
+// app.json's androidFile/iosFile defaults still apply when these env vars
+// are absent, which is the local-dev path documented in CLAUDE.md.
+const androidFirebaseFile =
+  process.env.EXPO_GOOGLE_SERVICES_JSON ||
+  rootEnv.EXPO_GOOGLE_SERVICES_JSON;
+const iosFirebaseFile =
+  process.env.EXPO_GOOGLE_SERVICES_PLIST ||
+  rootEnv.EXPO_GOOGLE_SERVICES_PLIST;
+
+const androidConfig = {
+  ...(mobileConfig.android ?? {}),
+  ...(androidFirebaseFile ? { googleServicesFile: androidFirebaseFile } : {}),
+};
+const iosConfig = {
+  ...(mobileConfig.ios ?? {}),
+  ...(iosFirebaseFile ? { googleServicesFile: iosFirebaseFile } : {}),
+};
+
 module.exports = {
   ...mobileConfig,
+  ios: iosConfig,
+  android: androidConfig,
   plugins: [
     ...(mobileConfig.plugins ?? []),
     "@react-native-community/datetimepicker",

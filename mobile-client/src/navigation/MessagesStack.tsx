@@ -13,8 +13,9 @@ export type MessagesStackParamList = {
   MessagesList: undefined;
   Chat: {
     handshakeId: string;
+    notificationId?: string;
     serviceId?: string;
-    otherUserName: string;
+    otherUserName?: string;
     serviceTitle?: string;
     otherUserId?: string;
     otherUserAvatarUrl?: string;
