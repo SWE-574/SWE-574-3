@@ -52,7 +52,8 @@ class TestDisposableEmailBlacklist:
         response = client.post(REGISTER_URL, _payload(f'spammer@{domain}'))
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         # Error must come back attached to the email field, not as a server error.
-        assert 'email' in response.data
+        # The custom exception handler nests DRF field errors under field_errors.
+        assert 'email' in response.data.get('field_errors', response.data)
 
     def test_real_provider_accepted(self):
         client = APIClient()

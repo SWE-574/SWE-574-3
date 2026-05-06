@@ -542,6 +542,9 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    is_saved = serializers.SerializerMethodField()
+    is_endorsed = serializers.SerializerMethodField()
+    endorsement_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
@@ -552,8 +555,52 @@ class ServiceSerializer(serializers.ModelSerializer):
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
+            'is_saved', 'is_endorsed', 'endorsement_count',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
+        read_only_fields = [
+            'user', 'hot_score', 'is_visible', 'is_pinned',
+            'is_saved', 'is_endorsed', 'endorsement_count',
+        ]
+
+    def get_is_saved(self, obj):
+        """True when the current viewer has saved this service (#483).
+        Reads the is_saved_anno annotation set by ServiceViewSet.get_queryset
+        when present so list responses don't fire one query per service.
+        Falls back to a per-row query for detail views.
+        """
+        annotated = getattr(obj, 'is_saved_anno', None)
+        if annotated is not None:
+            return bool(annotated)
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        viewer = getattr(request, 'user', None) if request else None
+        if viewer is None or not viewer.is_authenticated:
+            return False
+        from .models import SavedService
+        return SavedService.objects.filter(user=viewer, service=obj).exists()
+
+    def get_is_endorsed(self, obj):
+        """True when the current viewer has endorsed this service (#483).
+        Annotation-aware; same fallback pattern as get_is_saved.
+        """
+        annotated = getattr(obj, 'is_endorsed_anno', None)
+        if annotated is not None:
+            return bool(annotated)
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        viewer = getattr(request, 'user', None) if request else None
+        if viewer is None or not viewer.is_authenticated:
+            return False
+        from .models import Endorsement
+        return Endorsement.objects.filter(endorser=viewer, service=obj).exists()
+
+    def get_endorsement_count(self, obj):
+        """Public endorsement count for the service (#483).
+        Annotation-aware; falls back to a per-row count for detail views.
+        """
+        annotated = getattr(obj, 'endorsement_count_anno', None)
+        if annotated is not None:
+            return int(annotated)
+        from .models import Endorsement
+        return Endorsement.objects.filter(service=obj).count()
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):

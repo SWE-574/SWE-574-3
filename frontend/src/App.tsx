@@ -30,6 +30,7 @@ const UserProfile            = lazy(() => import('@/pages/UserProfile'))
 const PublicProfile          = lazy(() => import('@/pages/PublicProfile'))
 const TransactionHistoryPage = lazy(() => import('@/pages/TransactionHistoryPage'))
 const NotificationsPage      = lazy(() => import('@/pages/NotificationsPage'))
+const SavedServicesPage      = lazy(() => import('@/pages/SavedServicesPage'))
 const AdminDashboard         = lazy(() => import('@/pages/AdminDashboard'))
 const AdminUserDetailPage    = lazy(() => import('@/pages/AdminUserDetailPage'))
 const ReportDetail           = lazy(() => import('@/pages/ReportDetail'))
@@ -252,6 +253,14 @@ function App() {
           <Route path="/verify-email"    element={<VerifyEmailPage />} />
           <Route path="/verify-email-sent" element={<VerifyEmailSentPage />} />
           <Route path="/dashboard"      element={<DashboardPage />} />
+          <Route
+            path="/saved"
+            element={
+              <ProtectedRoute>
+                <SavedServicesPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/service-detail/:id" element={<ServiceDetailPage />} />
           <Route path="/public-profile/:userId" element={<PublicProfile />} />
 

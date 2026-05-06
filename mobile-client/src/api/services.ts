@@ -118,6 +118,29 @@ export function reportService(
   return apiRequest(`/services/${id}/report/`, { method: 'POST', body: body ?? {} });
 }
 
+export function setServiceSaved(
+  serviceId: string,
+  saved: boolean,
+): Promise<{ is_saved: boolean }> {
+  return apiRequest<{ is_saved: boolean }>(`/services/${serviceId}/save/`, {
+    method: saved ? 'POST' : 'DELETE',
+  });
+}
+
+export function listSavedServices(): Promise<PaginatedResponse<Service>> {
+  return apiRequest<PaginatedResponse<Service>>('/services/saved/');
+}
+
+export function setServiceEndorsed(
+  serviceId: string,
+  endorsed: boolean,
+): Promise<{ is_endorsed: boolean; endorsement_count: number }> {
+  return apiRequest<{ is_endorsed: boolean; endorsement_count: number }>(
+    `/services/${serviceId}/endorse/`,
+    { method: endorsed ? 'POST' : 'DELETE' },
+  );
+}
+
 export function toggleServiceVisibility(id: string): Promise<Service> {
   return apiRequest<Service>(`/services/${id}/toggle-visibility/`, { method: 'POST' });
 }

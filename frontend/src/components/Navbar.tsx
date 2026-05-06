@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Box, Flex, Text } from '@chakra-ui/react'
 import {
+  FiBookmark,
   FiMessageSquare,
   FiUser,
   FiBell,
@@ -289,6 +290,7 @@ const Navbar = () => {
                   </Box>
                   <Box py="4px">
                     <DropdownItem onClick={() => navigate('/profile')} icon={<FiUser size={14} />}>My Profile</DropdownItem>
+                    <DropdownItem onClick={() => navigate('/saved')} icon={<FiBookmark size={14} />}>Saved</DropdownItem>
                     {isAdmin && (
                       <DropdownItem onClick={() => navigate('/admin')} icon={<FiGrid size={14} />}>Admin Panel</DropdownItem>
                     )}
