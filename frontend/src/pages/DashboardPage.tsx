@@ -33,6 +33,7 @@ import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
+import RecommendationDebugBar from '@/components/RecommendationDebugBar'
 import type { Handshake } from '@/services/handshakeAPI'
 
 import {
@@ -411,6 +412,8 @@ const DashboardPage = () => {
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
   const [typeDropdownOpen, setTypeDropdownOpen]           = useState(false)
+  const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
+  const [rankingDebugEnabled, setRankingDebugEnabled] = useState(false)
 
   const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -428,10 +431,25 @@ const DashboardPage = () => {
     return () => { if (distanceTimer.current) clearTimeout(distanceTimer.current) }
   }, [distanceKm])
 
-  // Per #371 the ranking debug panel is admin-only and lives in the admin
-  // dashboard. The floating launcher and getRankingDebugAvailability poll
-  // were removed from the regular dashboard; non-admin clients no longer
-  // need to know whether the debug panel exists.
+  // Ranking debug bar (#476) lives back on the dashboard so admins can hover
+  // a card and see its Phase 2/3 breakdown live. The availability endpoint
+  // is admin-only per #371, so non-admins quietly get no result and the bar
+  // stays hidden. The PlatformSetting flag (toggled in the admin panel)
+  // controls whether the bar appears at all even for admins.
+  useEffect(() => {
+    let cancelled = false
+    serviceAPI
+      .getRankingDebugAvailability()
+      .then(({ enabled }) => {
+        if (!cancelled) setRankingDebugEnabled(Boolean(enabled))
+      })
+      .catch(() => {
+        if (!cancelled) setRankingDebugEnabled(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const fetchServices = useCallback(async (signal: AbortSignal) => {
     let raw: typeof services
@@ -868,6 +886,11 @@ const DashboardPage = () => {
                       incomingCount={aCount}
                       pendingCount={pCount}
                       onClick={() => navigate(`/service-detail/${service.id}`)}
+                      onHover={
+                        rankingDebugEnabled
+                          ? () => setHoveredServiceId(service.id)
+                          : undefined
+                      }
                     />
                   )
                 })}
@@ -876,6 +899,17 @@ const DashboardPage = () => {
           </Box>
         </Flex>
       </Box>
+      {rankingDebugEnabled && (
+        <RecommendationDebugBar
+          services={displayServices}
+          hoveredServiceId={hoveredServiceId}
+          activeFilter={activeFilter}
+          search={debouncedSearch}
+          lat={userLocation?.lat}
+          lng={userLocation?.lng}
+          distance={debouncedDistance}
+        />
+      )}
     </Box>
   )
 }
