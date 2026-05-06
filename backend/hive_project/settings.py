@@ -892,3 +892,10 @@ RANKING_NEWCOMER_BOOST = float(os.environ.get('RANKING_NEWCOMER_BOOST', '1.2'))
 RANKING_NEWCOMER_BOOST_PROBABILITY = float(os.environ.get('RANKING_NEWCOMER_BOOST_PROBABILITY', '1.0'))
 RANKING_CAPACITY_BOOST_PROBABILITY = float(os.environ.get('RANKING_CAPACITY_BOOST_PROBABILITY', '1.0'))
 RANKING_SOCIAL_PROXIMITY_PROBABILITY = float(os.environ.get('RANKING_SOCIAL_PROXIMITY_PROBABILITY', '1.0'))
+
+# Proximity ranking factor (#479). Distance decay applied to the hot score on
+# the recommendation feed when the viewer has a known location. The
+# multiplier is 1 / (1 + distance_km / half_life_km); a service at the half
+# life distance keeps half its score. Skipped when the viewer has no
+# location (multiplier = 1.0).
+RANKING_PROXIMITY_HALF_LIFE_KM = float(os.environ.get('RANKING_PROXIMITY_HALF_LIFE_KM', '10.0'))
