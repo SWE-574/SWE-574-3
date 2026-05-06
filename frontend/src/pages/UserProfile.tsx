@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import UpcomingSchedule from '@/components/profile/UpcomingSchedule'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Box, Flex, Grid, Text, Input, Spinner, Stack } from '@chakra-ui/react'
 import {
   FiCalendar, FiCheckCircle, FiChevronDown, FiChevronUp,
   FiLayers, FiLock, FiMail, FiMessageSquare, FiPlus,
-  FiRepeat, FiSettings, FiShield, FiStar, FiZap, FiEye, FiEyeOff,
+  FiRepeat, FiSettings, FiShield, FiStar, FiZap, FiEye, FiEyeOff, FiFlag,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -33,6 +33,8 @@ import ProfileEditDrawer from '@/components/profile/ProfileEditDrawer'
 import { TabBtn } from '@/components/ui/TabBtn'
 import { ServiceCard } from '@/components/profile/ServiceCard'
 import { ProfileReviewRow } from '@/components/profile/ProfileReviewRow'
+import { MyReportsList } from '@/pages/MyReports'
+import { useMyReports } from '@/hooks/useMyReports'
 
 // ── Shared helpers (still used by tab content) ─────────────────────────────────
 const AVATAR_PALETTE = [GREEN, BLUE, TEAL, AMBER, '#0D9488', '#EA580C']
@@ -68,7 +70,7 @@ function handshakeToEventCardService(handshake: EventHandshake): Service {
   }
 }
 
-type ServiceTab = 'offers' | 'needs' | 'events' | 'history' | 'reviews' | 'settings'
+type ServiceTab = 'offers' | 'needs' | 'events' | 'history' | 'reviews' | 'reports' | 'settings'
 
 // ── History row ────────────────────────────────────────────────────────────────
 function HistoryRow({ item, onNavigate, onOpenDetails, contextLabel }: {
@@ -140,7 +142,17 @@ function BadgeChip({ badge }: { badge: BadgeProgress }) {
 // ── Main component ─────────────────────────────────────────────────────────────
 const UserProfile = () => {
   const navigate = useNavigate()
+  const routerLocation = useLocation()
+  const [searchParams] = useSearchParams()
   const { user, updateUserOptimistically, refreshUser } = useAuthStore()
+
+  const initialTab: ServiceTab = (() => {
+    const tabParam = searchParams.get('tab')
+    if (tabParam === 'reports' || routerLocation.pathname === '/profile/reports') return 'reports'
+    const allowed: ServiceTab[] = ['offers', 'needs', 'events', 'history', 'reviews', 'reports', 'settings']
+    if (tabParam && (allowed as string[]).includes(tabParam)) return tabParam as ServiceTab
+    return 'offers'
+  })()
 
   useEffect(() => {
     void refreshUser()
@@ -164,7 +176,15 @@ const UserProfile = () => {
   const [servicesLoading, setServicesLoading] = useState(true)
   const [historyLoading, setHistoryLoading]   = useState(true)
   const [eventsLoading, setEventsLoading]     = useState(true)
-  const [activeTab, setActiveTab]         = useState<ServiceTab>('offers')
+  const [activeTab, setActiveTab]         = useState<ServiceTab>(initialTab)
+  const { reports: myReports, error: myReportsError } = useMyReports()
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab')
+    if (tabParam === 'reports' || routerLocation.pathname === '/profile/reports') {
+      setActiveTab('reports')
+    }
+  }, [searchParams, routerLocation.pathname])
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
   const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
   const heroCardRef = useRef<HTMLDivElement | null>(null)
@@ -362,6 +382,7 @@ const UserProfile = () => {
                   <TabBtn tabKey="events"   active={activeTab === 'events'}   label="Events"   count={eventServices.length + joinedUpcoming.length} onClick={() => setActiveTab('events')} />
                   <TabBtn tabKey="history"  active={activeTab === 'history'}  label="History"  count={groupedOwnHistory.length} onClick={() => setActiveTab('history')} />
                   <TabBtn tabKey="reviews"  active={activeTab === 'reviews'}  label="Reviews"  count={reviewsAsProvider.length + reviewsAsTaker.length + reviewsAsOrganizer.length} onClick={() => setActiveTab('reviews')} icon={<FiMessageSquare size={12} />} />
+                  <TabBtn tabKey="reports"  active={activeTab === 'reports'}  label="Reports"  count={myReports?.length} onClick={() => setActiveTab('reports')} icon={<FiFlag size={12} />} />
                   <TabBtn tabKey="settings" active={activeTab === 'settings'} label="Settings" onClick={() => setActiveTab('settings')} icon={<FiSettings size={12} />} />
                 </Flex>
               </Box>
@@ -525,6 +546,15 @@ const UserProfile = () => {
                       })()}
                     </>
                   )}
+                </Box>
+              )}
+              </Box>
+
+              {/* ── Reports ── */}
+              <Box role="tabpanel" id="panel-reports" aria-labelledby="tab-reports" hidden={activeTab !== 'reports'}>
+              {activeTab === 'reports' && (
+                <Box p={4}>
+                  <MyReportsList reports={myReports} error={myReportsError} />
                 </Box>
               )}
               </Box>

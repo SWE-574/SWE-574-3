@@ -117,8 +117,9 @@ export async function registerFreshUser(page: Page): Promise<{
 
 export async function fetchCurrentUser(page: Page): Promise<CurrentUserPayload> {
   const user = await page.evaluate(async () => {
-    const response = await fetch('/api/users/me/', {
+    const response = await fetch(`/api/users/me/?_=${Date.now()}`, {
       credentials: 'include',
+      cache: 'no-store',
     })
 
     if (!response.ok) {
@@ -140,8 +141,9 @@ export async function listTransactions(
   direction: 'all' | 'credit' | 'debit' = 'all',
 ): Promise<TransactionPagePayload> {
   const data = await page.evaluate(async ({ direction }) => {
-    const response = await fetch(`/api/transactions/?page=1&direction=${direction}`, {
+    const response = await fetch(`/api/transactions/?page=1&direction=${direction}&_=${Date.now()}`, {
       credentials: 'include',
+      cache: 'no-store',
     })
 
     if (!response.ok) {

@@ -16,6 +16,7 @@ from .views import (
     UserProfileView,
     MeCalendarView,
     UserHistoryView,
+    MyReportsView,
     UserBadgeProgressView,
     UserVerifiedReviewsView,
     UserFollowView,
@@ -57,7 +58,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .views import CustomTokenObtainPairView
 from .views import CustomTokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
-from .views_featured import FeaturedView
+from .views_featured import FeaturedView, PublicFeaturedView
 
 router = DefaultRouter()
 router.register(r'services', ServiceViewSet, basename='service')
@@ -296,6 +297,7 @@ urlpatterns = [
     path('auth/send-verification/', SendVerificationEmailView.as_view(), name='send-verification'),
     path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
+    path('users/me/reports/', MyReportsView.as_view(), name='my-reports'),
     path('users/me/calendar/', MeCalendarView.as_view(), name='user-calendar'),
     # Nested /users/<id>/… routes must be registered before the generic user-detail path
     # so paths like …/follow/ are never mistaken for detail (defensive ordering).
@@ -345,5 +347,6 @@ urlpatterns = [
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
     path('featured/', FeaturedView.as_view(), name='featured'),
+    path('featured/public/', PublicFeaturedView.as_view(), name='featured-public'),
     path('', include(router.urls)),
 ]

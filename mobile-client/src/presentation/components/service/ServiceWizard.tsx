@@ -31,6 +31,7 @@ import { searchWikidata } from "../../../api/wikidata";
 import type { Tag } from "../../../api/types";
 import type { PostStackParamList } from "../../../navigation/PostStack";
 import { colors } from "../../../constants/colors";
+import { useAuth } from "../../../context/AuthContext";
 import {
   getMapboxToken,
   reverseGeocodeLocation,
@@ -104,6 +105,7 @@ export default function ServiceWizard({
   organizerBanText,
 }: ServiceWizardProps) {
   const navigation = useNavigation<NavProp>();
+  const { refreshUser } = useAuth();
   const accent =
     type === "Event" ? colors.AMBER : type === "Offer" ? colors.GREEN : colors.BLUE;
   const accentLight =
@@ -692,6 +694,9 @@ export default function ServiceWizard({
       const saved = serviceId
         ? await patchService(serviceId, buildFormData())
         : await createService(buildFormData());
+      if (type === "Need") {
+        await refreshUser();
+      }
       Alert.alert(
         "Success",
         serviceId

@@ -13,7 +13,7 @@ from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Handshake, ChatMessage
+from api.models import Handshake, ChatMessage, TransactionHistory
 
 
 @pytest.mark.django_db
@@ -98,9 +98,9 @@ class TestExpressInterestView:
         assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
     
     def test_express_interest_insufficient_balance(self):
-        """Test expressing interest with insufficient balance"""
+        """Test expressing interest is blocked only past the -10h debt floor."""
         provider = UserFactory()
-        requester = UserFactory(timebank_balance=Decimal('1.00'))
+        requester = UserFactory(timebank_balance=Decimal('-9.00'))
         service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
         
         client = AuthenticatedAPIClient()
@@ -475,6 +475,49 @@ class TestHandshakeViewSet:
         requester.refresh_from_db()
         assert requester.timebank_balance == Decimal('3.00')
 
+    def test_need_approved_cancellation_keeps_service_reservation(self):
+        """Cancelling a Need agreement must not return hours unless the Need is cancelled."""
+        owner = UserFactory(timebank_balance=Decimal('1.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('2.00'),
+            reserved_timebank_hours=Decimal('2.00'),
+            status='Agreed',
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='accepted',
+            provisioned_hours=Decimal('2.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
+            'reason': 'Cannot help anymore',
+        })
+        assert request_response.status_code == status.HTTP_200_OK
+
+        client.authenticate_user(owner)
+        response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
+        assert response.status_code == status.HTTP_200_OK
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+        handshake.refresh_from_db()
+        assert handshake.status == 'cancelled'
+        assert service.status == 'Active'
+        assert owner.timebank_balance == Decimal('1.00')
+        assert service.reserved_timebank_hours == Decimal('2.00')
+        assert not TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=handshake,
+            transaction_type='refund',
+        ).exists()
+
     def test_reject_cancellation_request_keeps_handshake_active(self):
         provider = UserFactory()
         requester = UserFactory(timebank_balance=Decimal('4.00'))
@@ -764,6 +807,39 @@ class TestInitiateApproveServiceOwnerModel:
         assert resp.status_code == status.HTTP_200_OK
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
+
+    def test_need_approve_reuses_existing_request_reservation(self):
+        """Approving a Need must not deduct again when creation already reserved hours."""
+        service_owner = UserFactory(timebank_balance=Decimal('2.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=service_owner,
+            type='Need',
+            duration=Decimal('1.00'),
+            reserved_timebank_hours=Decimal('1.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='pending',
+            provider_initiated=True,
+            exact_location='Need Location',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+            provisioned_hours=Decimal('1.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_200_OK
+
+        service_owner.refresh_from_db()
+        service.refresh_from_db()
+        handshake.refresh_from_db()
+        assert handshake.status == 'accepted'
+        assert service_owner.timebank_balance == Decimal('2.00')
+        assert service.reserved_timebank_hours == Decimal('1.00')
 
     def test_confirm_rejects_fractional_hours_adjustment(self):
         """Completion confirmation must reject fractional hour adjustments."""

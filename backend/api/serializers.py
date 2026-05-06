@@ -7,6 +7,7 @@ from .models import (
     ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog, PlatformSetting,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow
 )
+from django.conf import settings
 from django.db.models import Q
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
@@ -541,6 +542,17 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    # source / for_you_signals / explore_pool are transient: not stored on
+    # the Service model. They are attached to the instance by _list_for_you()
+    # and the explore-only list path in views.py before serialization.
+    # getattr(obj, ..., None) returns None for cards from non-personalized
+    # endpoints, which is the intended "absent" representation.
+    source = serializers.SerializerMethodField()
+    for_you_signals = serializers.SerializerMethodField()
+    explore_pool = serializers.SerializerMethodField()
+    is_newcomer_owner = serializers.SerializerMethodField()
+    edit_locked = serializers.BooleanField(read_only=True)
+    edit_lock_reason = serializers.CharField(read_only=True, allow_null=True)
 
     class Meta:
         model = Service
@@ -551,8 +563,41 @@ class ServiceSerializer(serializers.ModelSerializer):
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
+            'is_newcomer_owner', 'source', 'for_you_signals', 'explore_pool',
+            'edit_locked', 'edit_lock_reason',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
+        read_only_fields = [
+            'user', 'hot_score', 'is_visible', 'is_pinned', 'is_newcomer_owner',
+            'source', 'for_you_signals', 'explore_pool',
+            'edit_locked', 'edit_lock_reason',
+        ]
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_is_newcomer_owner(self, obj):
+        """True when the service owner registered less than 30 days ago. Lets
+        the feed render a Newcomer badge that mirrors the Phase 2 newcomer
+        boost (#477)."""
+        from .achievement_utils import is_newcomer
+        owner = getattr(obj, 'user', None)
+        if owner is None:
+            return False
+        return bool(is_newcomer(owner))
+   
+    def get_source(self, obj):
+        """Set transiently by the For You list view (#481) and the onboarding
+        fallback (#478). None when the card came from the regular feed."""
+        return getattr(obj, 'source', None)
+
+    def get_for_you_signals(self, obj):
+        """Per-card breakdown of the four For You signals (#481). None for
+        cards not served by the For You feed."""
+        return getattr(obj, 'for_you_signals', None)
+
+    def get_explore_pool(self, obj):
+        """Which Phase 3 sub-bucket this service was drawn from when served by
+        the explore-only list path. One of cold_start, undershown_quality,
+        stale_recurring, or None for non-explore responses."""
+        return getattr(obj, 'explore_pool', None)
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):
@@ -803,6 +848,33 @@ class ServiceSerializer(serializers.ModelSerializer):
             status__in=['accepted', 'checked_in', 'attended'],
         ).exists()
 
+    def _has_accepted_handshake(self, instance, user):
+        """FR-17l (#319): exact location is unblocked once a handshake exists
+        between the requester and provider in an accepted-or-later state.
+        Covers both Event participants and 1:1 Offer/Need handshakes; this
+        is the canonical "we know each other now" signal.
+        """
+        if user is None:
+            return False
+        if instance.type == 'Event':
+            return self._is_event_participant(instance, user)
+        return Handshake.objects.filter(
+            service=instance,
+            requester=user,
+            status__in=['accepted', 'completed', 'reported', 'paused'],
+        ).exists()
+
+    def _blur_distance_to_500m(self, value):
+        """Round a meters distance to the nearest 500m so triangulation across
+        repeated feed queries cannot recover the precise location."""
+        if value is None:
+            return None
+        try:
+            meters = float(value)
+        except (TypeError, ValueError):
+            return None
+        return int(round(meters / 500.0)) * 500
+
     def to_representation(self, instance):
         """Replace exact coordinates with a ~1 km privacy-fuzzed version before sending."""
         data = super().to_representation(instance)
@@ -813,13 +885,13 @@ class ServiceSerializer(serializers.ModelSerializer):
             and getattr(request_user, 'is_authenticated', False)
             and str(getattr(request_user, 'id', '')) == str(instance.user_id)
         )
-        is_joined_event = (
+        is_handshake_partner = (
             not is_owner
             and request_user
             and getattr(request_user, 'is_authenticated', False)
-            and self._is_event_participant(instance, request_user)
+            and self._has_accepted_handshake(instance, request_user)
         )
-        show_exact = is_owner or is_joined_event
+        show_exact = is_owner or is_handshake_partner
         if not show_exact:
             data.pop('session_exact_location', None)
             data.pop('session_exact_location_lat', None)
@@ -831,6 +903,17 @@ class ServiceSerializer(serializers.ModelSerializer):
                 fuzzy_lat, fuzzy_lng = _fuzzy_coords(str(instance.id), lat, lng)
                 data['location_lat'] = round(fuzzy_lat, 6)
                 data['location_lng'] = round(fuzzy_lng, 6)
+
+        # Distance-to-viewer (annotated by LocationStrategy when lat/lng are
+        # supplied). Round to 500m for non-handshake-partners so repeated
+        # queries from different reference points cannot triangulate the
+        # provider's address.
+        annotated_distance = getattr(instance, 'distance', None)
+        if annotated_distance is not None:
+            distance_m = getattr(annotated_distance, 'm', annotated_distance)
+            data['distance'] = (
+                float(distance_m) if show_exact else self._blur_distance_to_500m(distance_m)
+            )
         return data
 
     def create(self, validated_data):
@@ -1224,6 +1307,24 @@ class ServiceSerializer(serializers.ModelSerializer):
 
         return service
 
+# Disposable / temporary email providers we refuse at registration time.
+# Conservative list — covers the most prevalent throwaway services seen in
+# spam logs. Extend via the DISPOSABLE_EMAIL_DOMAINS_EXTRA setting if needed.
+DISPOSABLE_EMAIL_DOMAINS = frozenset({
+    'mailinator.com', 'guerrillamail.com', 'guerrillamailblock.com',
+    'sharklasers.com', 'grr.la', 'guerrillamail.net', 'guerrillamail.org',
+    'guerrillamail.biz', 'guerrillamail.de', 'spam4.me', 'pokemail.net',
+    '10minutemail.com', '10minutemail.net', 'tempmail.com', 'temp-mail.org',
+    'temp-mail.io', 'tempmailo.com', 'throwawaymail.com', 'yopmail.com',
+    'yopmail.fr', 'yopmail.net', 'getnada.com', 'maildrop.cc',
+    'fakeinbox.com', 'trashmail.com', 'trashmail.net', 'trashmail.de',
+    'trashmail.io', 'dispostable.com', 'mintemail.com', 'mailcatch.com',
+    'mvrht.com', 'inboxbear.com', 'spamgourmet.com', 'mohmal.com',
+    'getairmail.com', 'mytemp.email', 'tempmailaddress.com',
+    'tempinbox.com', 'mail-temp.com', 'emailondeck.com',
+})
+
+
 @extend_schema_serializer(
     examples=[
         OpenApiExample(
@@ -1263,6 +1364,22 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         model = User
         fields = ['email', 'password', 'first_name', 'last_name']
         extra_kwargs = {'password': {'write_only': True}}
+
+    def validate_email(self, value):
+        # NormalizeBaseUserManager already lowercases the domain part on create,
+        # but we need it lowercased here for the blacklist check before save.
+        normalized = (value or '').strip().lower()
+        if '@' not in normalized:
+            raise serializers.ValidationError('Enter a valid email address.')
+        domain = normalized.rsplit('@', 1)[1]
+        # Allow extension via settings without code change.
+        extra = set(getattr(settings, 'DISPOSABLE_EMAIL_DOMAINS_EXTRA', []) or [])
+        blacklist = DISPOSABLE_EMAIL_DOMAINS | {d.lower() for d in extra}
+        if domain in blacklist:
+            raise serializers.ValidationError(
+                'Disposable email addresses are not allowed. Please use a permanent email.'
+            )
+        return normalized
 
     def validate_password(self, value):
         try:
@@ -1430,6 +1547,7 @@ class UserProfileSerializer(FeaturedBadgesDetailMixin, ProfileFollowStatsMixin, 
     video_intro_url = serializers.CharField(allow_blank=True, required=False, allow_null=True)
     portfolio_images = serializers.JSONField(required=False, default=list)
     show_history = serializers.BooleanField(required=False, default=True)
+    notification_preferences = serializers.JSONField(required=False, default=dict)
     video_intro_file_url = serializers.SerializerMethodField()
 
     # Skills: read as tag objects, write as list of tag IDs or new tag names
@@ -1452,7 +1570,7 @@ class UserProfileSerializer(FeaturedBadgesDetailMixin, ProfileFollowStatsMixin, 
             'created_events', 'joined_events', 'invited_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file', 'video_intro_file_url',
-            'portfolio_images', 'show_history', 'featured_achievement_id',
+            'portfolio_images', 'show_history', 'notification_preferences', 'featured_achievement_id',
             'is_onboarded', 'is_verified',
             'skills', 'skill_ids',
             'followers_count', 'following_count', 'is_following',
@@ -1957,7 +2075,7 @@ class NotificationSerializer(serializers.ModelSerializer):
         model = Notification
         fields = [
             'id', 'type', 'title', 'message', 'is_read',
-            'related_handshake', 'related_service', 'created_at'
+            'related_handshake', 'related_service', 'related_report', 'created_at'
         ]
 
 class DevicePushTokenSerializer(serializers.Serializer):
@@ -2084,6 +2202,7 @@ class ReportSerializer(serializers.ModelSerializer):
     reported_service_owner_name = serializers.SerializerMethodField()
     reported_service_owner_email = serializers.SerializerMethodField()
     reported_service_owner_karma_score = serializers.SerializerMethodField()
+    reported_service_has_active_handshakes = serializers.SerializerMethodField()
     reported_forum_topic = serializers.PrimaryKeyRelatedField(read_only=True)
     reported_forum_post = serializers.PrimaryKeyRelatedField(read_only=True)
     reported_forum_topic_title = serializers.SerializerMethodField()
@@ -2101,7 +2220,8 @@ class ReportSerializer(serializers.ModelSerializer):
             'reported_service', 'reported_service_title', 'reported_service_status', 'reported_service_type',
             'reported_service_description', 'reported_service_location', 'reported_service_hours',
             'reported_service_owner', 'reported_service_owner_name', 'reported_service_owner_email',
-            'reported_service_owner_karma_score', 'related_handshake',
+            'reported_service_owner_karma_score', 'reported_service_has_active_handshakes',
+            'related_handshake',
             'reported_forum_topic', 'reported_forum_topic_title',
             'reported_forum_post', 'reported_forum_post_excerpt',
             'handshake_hours', 'handshake_scheduled_time', 'handshake_status',
@@ -2176,6 +2296,17 @@ class ReportSerializer(serializers.ModelSerializer):
         if service:
             return service.type
         return None
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_reported_service_has_active_handshakes(self, obj):
+        # Mirror ServiceViewSet.destroy() so the client can disable the
+        # Close-service button when the destroy endpoint would reject.
+        service = obj.reported_service
+        if not service:
+            return False
+        return service.handshakes.filter(
+            status__in=['pending', 'accepted', 'checked_in', 'attended']
+        ).exists()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_reported_service_description(self, obj):
@@ -2298,10 +2429,81 @@ class ReportSerializer(serializers.ModelSerializer):
         """
         if not obj.related_handshake or not obj.reported_user:
             return None
-        
+
         from .utils import get_provider_and_receiver
         _, receiver = get_provider_and_receiver(obj.related_handshake)
         return obj.reported_user.id == receiver.id
+
+
+class MyReportSerializer(serializers.ModelSerializer):
+    """Reporter-facing serializer — no moderator PII or admin-only fields.
+
+    Used by GET /api/users/me/reports/ so a user can see what they've submitted
+    and the moderation outcome without learning the moderator's identity.
+    """
+    type_display = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    target_summary = serializers.SerializerMethodField()
+    target_kind = serializers.SerializerMethodField()
+    target_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Report
+        fields = [
+            'id', 'type', 'type_display', 'status', 'status_display',
+            'description', 'target_kind', 'target_id', 'target_summary',
+            'created_at', 'resolved_at',
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_type_display(self, obj):
+        return obj.get_type_display()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_kind(self, obj):
+        if obj.reported_forum_post_id:
+            return 'forum_post'
+        if obj.reported_forum_topic_id:
+            return 'forum_topic'
+        if obj.reported_service_id:
+            return 'service'
+        if obj.reported_user_id:
+            return 'user'
+        return 'other'
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_id(self, obj):
+        # Forum URLs are topic-based (/forum/topic/{topic_id}); for a post
+        # report, return the parent topic id so the deep-link resolves.
+        if obj.reported_forum_post_id:
+            return str(obj.reported_forum_topic_id) if obj.reported_forum_topic_id else None
+        for fk in (
+            obj.reported_forum_topic_id,
+            obj.reported_service_id,
+            obj.reported_user_id,
+        ):
+            if fk:
+                return str(fk)
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_summary(self, obj):
+        if obj.reported_forum_post_id and obj.reported_forum_topic:
+            return f"Reply in '{obj.reported_forum_topic.title}'"
+        if obj.reported_forum_topic:
+            return obj.reported_forum_topic.title
+        if obj.reported_service:
+            return obj.reported_service.title
+        if obj.reported_user:
+            full = f"{obj.reported_user.first_name} {obj.reported_user.last_name}".strip()
+            return full or obj.reported_user.email
+        return None
+
 
 # Transaction History Serializer
 @extend_schema_serializer(
@@ -2330,6 +2532,8 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
     service_type = serializers.SerializerMethodField()
     schedule_type = serializers.SerializerMethodField()
     max_participants = serializers.SerializerMethodField()
+    handshake_status = serializers.SerializerMethodField()
+    service_status = serializers.SerializerMethodField()
     is_current_user_provider = serializers.SerializerMethodField()
     counterpart = serializers.SerializerMethodField()
 
@@ -2338,10 +2542,15 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'handshake_id', 'service_id', 'transaction_type', 'transaction_type_display',
             'amount', 'balance_after', 'description', 'service_title', 'service_type',
-            'schedule_type', 'max_participants', 'is_current_user_provider',
+            'schedule_type', 'max_participants', 'handshake_status', 'service_status', 'is_current_user_provider',
             'counterpart', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
+
+    def _context_service(self, obj):
+        if obj.handshake and obj.handshake.service:
+            return obj.handshake.service
+        return obj.service
 
     @extend_schema_field(OpenApiTypes.UUID)
     def get_handshake_id(self, obj):
@@ -2351,41 +2560,62 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.UUID)
     def get_service_id(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return str(obj.handshake.service.id)
+        service = self._context_service(obj)
+        if service:
+            return str(service.id)
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_service_title(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.title
+        service = self._context_service(obj)
+        if service:
+            return service.title
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_service_type(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.type
+        service = self._context_service(obj)
+        if service:
+            return service.type
         return None
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_schedule_type(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.schedule_type
+        service = self._context_service(obj)
+        if service:
+            return service.schedule_type
         return None
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_max_participants(self, obj):
-        if obj.handshake and obj.handshake.service:
-            return obj.handshake.service.max_participants
+        service = self._context_service(obj)
+        if service:
+            return service.max_participants
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_handshake_status(self, obj):
+        if obj.handshake:
+            return obj.handshake.status
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_service_status(self, obj):
+        service = self._context_service(obj)
+        if service:
+            return service.status
         return None
 
     @extend_schema_field(serializers.BooleanField())
     def get_is_current_user_provider(self, obj):
         handshake = obj.handshake
-        if not handshake or not handshake.service:
+        service = self._context_service(obj)
+        if not service:
             return False
 
-        service = handshake.service
+        if handshake is None:
+            return service.type == 'Offer' and str(service.user_id) == str(obj.user_id)
+
         if service.type == 'Offer':
             provider = service.user
         else:
@@ -2396,18 +2626,34 @@ class TransactionHistorySerializer(serializers.ModelSerializer):
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_counterpart(self, obj):
         handshake = obj.handshake
-        if not handshake or not handshake.service:
+        service = self._context_service(obj)
+        if not service:
             return None
 
-        service = handshake.service
-        if service.type == 'Offer':
+        if handshake is None:
+            if service.type == 'Need' and service.status == 'Completed':
+                completed_handshake = (
+                    Handshake.objects
+                    .filter(service=service, status='completed')
+                    .select_related('requester')
+                    .order_by('-updated_at')
+                    .first()
+                )
+                counterpart = completed_handshake.requester if completed_handshake else service.user
+            else:
+                # Service-level reservations/refunds (for Need creation/deletion)
+                # do not have a handshake counterpart yet. Surface the service owner
+                # so clients can show who reserved the hours instead of "System".
+                counterpart = service.user
+        elif service.type == 'Offer':
             provider = service.user
             receiver = handshake.requester
+            counterpart = receiver if str(provider.id) == str(obj.user_id) else provider
         else:
             provider = handshake.requester
             receiver = service.user
+            counterpart = receiver if str(provider.id) == str(obj.user_id) else provider
 
-        counterpart = receiver if str(provider.id) == str(obj.user_id) else provider
         if not counterpart:
             return None
 

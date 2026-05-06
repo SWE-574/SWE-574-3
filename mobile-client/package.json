@@ -36,6 +36,7 @@
     "expo-file-system": "~19.0.21",
     "expo-image-picker": "~17.0.10",
     "expo-location": "~19.0.8",
+    "expo-network": "~8.0.8",
     "expo-notifications": "~0.32.16",
     "expo-secure-store": "~15.0.8",
     "expo-status-bar": "~3.0.9",
@@ -71,7 +72,8 @@
       "**/__tests__/**/*.test.ts"
     ],
     "moduleNameMapper": {
-      "^expo-secure-store$": "<rootDir>/src/api/__tests__/__mocks__/expo-secure-store.ts"
+      "^expo-secure-store$": "<rootDir>/src/api/__tests__/__mocks__/expo-secure-store.ts",
+      "^expo-network$": "<rootDir>/src/api/__tests__/__mocks__/expo-network.ts"
     }
   },
   "private": true

@@ -620,6 +620,53 @@ class TestTransactionHistorySerializer:
         assert data['counterpart'] is None
         assert data['is_current_user_provider'] is False
 
+    def test_need_service_level_reservation_uses_service_fallback(self):
+        """Service-level Need reservations should still serialize service metadata."""
+        owner = UserFactory(first_name='Ayşe', last_name='Demir')
+        service = ServiceFactory(user=owner, type='Need', title='Need Reservation')
+        transaction = TransactionHistoryFactory(
+            user=owner,
+            service=service,
+            handshake=None,
+            transaction_type='provision',
+            description='Hours reserved for request',
+        )
+
+        serializer = TransactionHistorySerializer(transaction)
+        data = serializer.data
+
+        assert data['handshake_id'] is None
+        assert data['service_id'] == str(service.id)
+        assert data['service_title'] == 'Need Reservation'
+        assert data['service_type'] == 'Need'
+        assert data['schedule_type'] == service.schedule_type
+        assert data['max_participants'] == service.max_participants
+        assert data['counterpart']['id'] == str(owner.id)
+        assert data['counterpart']['email'] == owner.email
+        assert data['is_current_user_provider'] is False
+
+    def test_completed_need_service_level_reservation_uses_helper_counterpart(self):
+        """Completed Need reservation rows should show the helper instead of the owner."""
+        owner = UserFactory(first_name='Ayşe', last_name='Demir')
+        helper = UserFactory(first_name='Can', last_name='Şahin')
+        service = ServiceFactory(user=owner, type='Need', title='Completed Need', status='Completed')
+        HandshakeFactory(service=service, requester=helper, status='completed')
+        transaction = TransactionHistoryFactory(
+            user=owner,
+            service=service,
+            handshake=None,
+            transaction_type='provision',
+            description='Hours reserved for request',
+        )
+
+        serializer = TransactionHistorySerializer(transaction)
+        data = serializer.data
+
+        assert data['handshake_id'] is None
+        assert data['service_status'] == 'Completed'
+        assert data['counterpart']['id'] == str(helper.id)
+        assert data['counterpart']['email'] == helper.email
+
 
 @pytest.mark.django_db
 @pytest.mark.unit

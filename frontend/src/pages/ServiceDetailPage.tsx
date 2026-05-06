@@ -476,7 +476,7 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
 export default function ServiceDetailPage() {
   const { id }     = useParams<{ id: string }>()
   const navigate   = useNavigate()
-  const { isAuthenticated, user } = useAuthStore()
+  const { isAuthenticated, user, refreshUser, updateUserOptimistically } = useAuthStore()
 
   const [service, setService]           = useState<Service | null>(null)
   const [loading, setLoading]           = useState(true)
@@ -603,33 +603,42 @@ export default function ServiceDetailPage() {
   })()
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
-  const eventEditLocked = isEvent && isWithinLockdownWindow(service?.scheduled_time)
+  // FR-11f / FR-11n: prefer the backend-canonical edit_locked flag when the
+  // server provided it (#267). Fall back to client-side math only for the
+  // brief window where an older API hasn't shipped the new field yet.
+  const eventEditLocked = isEvent && (
+    service?.edit_locked ?? isWithinLockdownWindow(service?.scheduled_time)
+  )
   const hasActiveApprovedSession = incoming.some((h) => ['accepted', 'reported', 'paused'].includes(h.status))
   const activeApprovedSessionEditLocked = !isEvent && !isRecurr && hasActiveApprovedSession
   const ownerEditLocked = isOwn && ((isEvent && eventEditLocked) || activeApprovedSessionEditLocked)
   const ownerEditLockReason = isEvent
-    ? 'Editing is locked during the final 24 hours before event start.'
+    ? (service?.edit_lock_reason || 'Editing is locked during the final 24 hours before event start.')
     : 'Editing is locked while an approved session is still active.'
   const reportedParticipantIds = new Set(
     incoming
       .filter((h) => h.status === 'reported')
-      .map((h) => h.requester),
+      .map((h) => exId(h.requester))
+      .filter((id): id is string => Boolean(id)),
   )
   const eventIncomingParticipants = isEvent
     ? Array.from(
       incoming
         .filter((h) => ['accepted', 'checked_in', 'attended', 'no_show', 'reported'].includes(h.status))
         .reduce((acc, h) => {
-          const existing = acc.get(h.requester)
+          const requesterId = exId(h.requester)
+          if (!requesterId) return acc
+
+          const existing = acc.get(requesterId)
           if (!existing) {
-            acc.set(h.requester, h)
+            acc.set(requesterId, h)
             return acc
           }
 
           const existingPriority = EVENT_PARTICIPANT_STATUS_PRIORITY[existing.status] ?? -1
           const candidatePriority = EVENT_PARTICIPANT_STATUS_PRIORITY[h.status] ?? -1
           if (candidatePriority > existingPriority) {
-            acc.set(h.requester, h)
+            acc.set(requesterId, h)
             return acc
           }
 
@@ -637,7 +646,7 @@ export default function ServiceDetailPage() {
             const existingTs = new Date(existing.updated_at ?? existing.created_at).getTime()
             const candidateTs = new Date(h.updated_at ?? h.created_at).getTime()
             if (candidateTs > existingTs) {
-              acc.set(h.requester, h)
+              acc.set(requesterId, h)
             }
           }
 
@@ -833,13 +842,14 @@ export default function ServiceDetailPage() {
 
   const handleReportParticipantBehavior = (participantHandshake: Handshake) => {
     if (reportingEventIssue) return
-    if (reportedParticipantIds.has(participantHandshake.requester)) {
+    const participantRequesterId = exId(participantHandshake.requester)
+    if (participantRequesterId && reportedParticipantIds.has(participantRequesterId)) {
       toast.info('You already reported this participant for this event.')
       return
     }
     openEventReportModal({
       handshakeId: participantHandshake.id,
-      reportedUserId: participantHandshake.requester,
+      reportedUserId: participantRequesterId,
       targetLabel: participantHandshake.requester_name,
     })
   }
@@ -859,7 +869,7 @@ export default function ServiceDetailPage() {
         toast.info('You already reported this participant for this event.')
         return
       }
-      const targetHandshake = eventIncomingParticipants.find((h) => h.requester === targetUserId)
+      const targetHandshake = eventIncomingParticipants.find((h) => exId(h.requester) === targetUserId)
       if (!targetHandshake) {
         toast.error('Could not find an active event participant to report.')
         return
@@ -946,6 +956,14 @@ export default function ServiceDetailPage() {
 
   const handleCancelEvent = async () => {
     if (!service || !cancelReason.trim()) return
+    // Prefer the API-provided edit_locked; fall back to client-side math
+    // when an older payload doesn't include the field yet (#267).
+    const inLockdown = service.edit_locked ?? isWithinLockdownWindow(service.scheduled_time)
+    const hasParticipants = (service.participant_count ?? 0) > 0
+    const confirmMsg = inLockdown && hasParticipants
+      ? 'You are in the 24h lockdown window. Cancelling now will apply a 30-day event creation ban. Continue?'
+      : 'Are you sure you want to cancel this event? All participants will be notified.'
+    if (!window.confirm(confirmMsg)) return
     setCancelLoading(true)
     setShowCancelModal(false)
     try {
@@ -964,6 +982,13 @@ export default function ServiceDetailPage() {
     setShowRemoveModal(false)
     try {
       await serviceAPI.delete(service.id)
+      if (service.type === 'Need') {
+        const currentBalance = Number(user?.timebank_balance ?? 0)
+        updateUserOptimistically({
+          timebank_balance: currentBalance + Number(service.duration),
+        })
+        await refreshUser()
+      }
       toast.success('Listing removed.')
       navigate('/dashboard')
     } catch (e: unknown) {
@@ -1021,6 +1046,27 @@ export default function ServiceDetailPage() {
           <FiArrowLeft size={15} /> Back to Browse
         </Box>
 
+        {/* FR-12g — cancellation banner above the fold for any cancelled service.
+            Detail-area inline messages still appear below as fallback context. */}
+        {service.status === 'Cancelled' && (
+          <Box
+            mb={4} p={4} borderRadius="12px"
+            bg={RED_LT}
+            border={`1px solid ${RED}40`}
+            display="flex" alignItems="center" gap={3}
+          >
+            <FiAlertTriangle size={18} color={RED} />
+            <Box>
+              <Text fontSize="14px" fontWeight={700} color={RED}>
+                {service.type === 'Event' ? 'This event was cancelled' : 'This listing was cancelled'}
+              </Text>
+              <Text fontSize="12px" color="#991B1B" mt="2px">
+                Joining, checking in, and evaluation are no longer available.
+              </Text>
+            </Box>
+          </Box>
+        )}
+
         <Grid templateColumns={{ base: '1fr', lg: '1fr 360px' }} gap={5} alignItems="start">
 
           {/* ── LEFT ──────────────────────────────────────────────────────── */}
@@ -1072,7 +1118,7 @@ export default function ServiceDetailPage() {
                       bg="rgba(255,255,255,0.2)" color={WHITE}
                       style={{ backdropFilter: 'blur(8px)' }}
                     >
-                      {isOffer ? 'Offer' : isEvent ? 'Event' : 'Want'}
+                      {isOffer ? 'Offer' : isEvent ? 'Event' : 'Need'}
                     </Box>
                     {isRecurr && !isEvent && (
                       <Box px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
@@ -1477,7 +1523,7 @@ export default function ServiceDetailPage() {
                       <Stack gap={2} maxH="200px" overflowY="auto">
                         {eventIncomingParticipants.map((h) => {
                           // Event reports should not alter owner-facing attendance/status display.
-                          const alreadyReportedParticipant = reportedParticipantIds.has(h.requester)
+                          const alreadyReportedParticipant = reportedParticipantIds.has(exId(h.requester) ?? '')
                           const displayStatus = h.status === 'reported' ? 'accepted' : h.status
                           const cfg = HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 }
                           return (
@@ -1546,6 +1592,18 @@ export default function ServiceDetailPage() {
                           <Text fontSize="13px" fontWeight={700} color={GREEN}>Event completed</Text>
                           <Text fontSize="12px" color="#166534" mt="2px">
                             This event has been marked as completed.
+                          </Text>
+                        </Box>
+                      </Box>
+                    ) : service.status === 'Cancelled' ? (
+                      <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiAlertTriangle size={20} color={RED} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={RED}>Event cancelled</Text>
+                          <Text fontSize="12px" color="#991B1B" mt="2px">
+                            Completing or cancelling this event is no longer available.
                           </Text>
                         </Box>
                       </Box>

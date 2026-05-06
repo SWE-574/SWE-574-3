@@ -90,9 +90,16 @@ export default function ServiceCard({
 
       <View style={styles.body}>
         <View style={styles.userRow}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
+          {service.user.avatar_url ? (
+            <Image
+              source={{ uri: service.user.avatar_url }}
+              style={styles.avatar}
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
+          )}
           <View style={styles.userMeta}>
             <Text style={styles.userName}>{displayName}</Text>
             <Text style={styles.timeAgo}>
@@ -121,13 +128,18 @@ export default function ServiceCard({
               {service.type === "Offer"
                 ? "Offer"
                 : service.type === "Need"
-                  ? "Want"
+                  ? "Need"
                   : "Event"}
             </Text>
           </View>
           {isNearlyFull && (
             <View style={styles.nearlyFullBadge}>
               <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
+            </View>
+          )}
+          {service.is_newcomer_owner && (
+            <View style={styles.newcomerBadge}>
+              <Text style={styles.newcomerBadgeText}>New</Text>
             </View>
           )}
         </View>
@@ -280,6 +292,18 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.RED,
   },
+  newcomerBadge: {
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: colors.PURPLE_LT,
+    marginLeft: 4,
+  },
+  newcomerBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.PURPLE,
+  },
   typeOfferBadgeText: {
     fontSize: 11,
     fontWeight: "700",
@@ -308,6 +332,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: colors.GRAY100,
   },
   avatarText: {
     fontSize: 12,

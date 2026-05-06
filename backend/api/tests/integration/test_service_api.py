@@ -11,7 +11,7 @@ from django.utils import timezone
 from api.tests.helpers.factories import UserFactory, ServiceFactory, TagFactory, HandshakeFactory
 from api.tests.helpers.factories import AdminUserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Service, Notification
+from api.models import Service, Notification, TransactionHistory
 
 
 @pytest.mark.django_db
@@ -75,6 +75,45 @@ class TestServiceViewSet:
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data['title'] == 'New Service'
         assert Service.objects.filter(id=response.data['id']).exists()
+
+    def test_create_need_reserves_timebank_and_updates_profile_payload(self):
+        """Creating a Need reserves the requester-side hours immediately."""
+        owner = UserFactory(is_verified=True, timebank_balance=Decimal('3.00'))
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(owner)
+
+        me_before = client.get('/api/users/me/')
+        assert me_before.status_code == status.HTTP_200_OK
+        assert Decimal(str(me_before.data['timebank_balance'])) == Decimal('3.00')
+
+        response = client.post('/api/services/', {
+            'title': 'Need Immediate Reservation',
+            'description': 'Need create should reserve hours immediately.',
+            'type': 'Need',
+            'duration': 2.0,
+            'location_type': 'Online',
+            'max_participants': 1,
+            'schedule_type': 'One-Time',
+        })
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+        service = Service.objects.get(id=response.data['id'])
+        owner.refresh_from_db()
+
+        assert owner.timebank_balance == Decimal('1.00')
+        assert service.reserved_timebank_hours == Decimal('2.00')
+        assert TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=None,
+            transaction_type='provision',
+            amount=Decimal('-2.00'),
+        ).exists()
+
+        me_after = client.get('/api/users/me/')
+        assert me_after.status_code == status.HTTP_200_OK
+        assert Decimal(str(me_after.data['timebank_balance'])) == Decimal('1.00')
 
     def test_create_service_with_video_media(self):
         """Test creating a service with a video URL media item"""
@@ -494,6 +533,35 @@ class TestServiceViewSet:
         assert response.status_code == status.HTTP_204_NO_CONTENT
         service.refresh_from_db()
         assert service.status == 'Cancelled'
+
+    def test_delete_need_releases_reserved_timebank(self):
+        """Removing a valid Need releases its upfront reserved hours."""
+        user = UserFactory(timebank_balance=Decimal('1.00'))
+        service = ServiceFactory(
+            user=user,
+            type='Need',
+            duration=Decimal('2.00'),
+            reserved_timebank_hours=Decimal('2.00'),
+        )
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.delete(f'/api/services/{service.id}/')
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+
+        service.refresh_from_db()
+        user.refresh_from_db()
+
+        assert service.status == 'Cancelled'
+        assert service.reserved_timebank_hours == Decimal('0.00')
+        assert user.timebank_balance == Decimal('3.00')
+        assert TransactionHistory.objects.filter(
+            user=user,
+            service=service,
+            handshake=None,
+            transaction_type='refund',
+            amount=Decimal('2.00'),
+        ).exists()
 
     def test_deleted_service_hidden_from_list_visible_to_admin(self):
         """Soft-deleted service is hidden from public list but visible to admin on user profile."""

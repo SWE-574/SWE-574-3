@@ -61,6 +61,8 @@ import {
 } from "../../utils/eventUtils";
 import type { Service } from "../../api/types";
 import { useAuth } from "../../context/AuthContext";
+import { useScreenCache } from "../../hooks/useScreenCache";
+import { ApiNetworkError } from "../../api/client";
 import { getMapboxToken } from "../../constants/env";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -256,7 +258,7 @@ export default function ServiceDetailScreen() {
   const insets = useSafeAreaInsets();
   const route = useRoute<RouteProp<ServiceDetailRouteParams, "ServiceDetail">>();
   const navigation = useNavigation<ServiceDetailNavigation>();
-  const { user: currentUser, isAuthenticated } = useAuth();
+  const { user: currentUser, isAuthenticated, refreshUser } = useAuth();
 
   const styles = useMemo(
     () => getStyles(insets.top, insets.bottom),
@@ -264,6 +266,11 @@ export default function ServiceDetailScreen() {
   );
 
   const { id } = route.params;
+  const cache = useScreenCache<Service>(
+    currentUser?.id ?? null,
+    `service-detail-${id}`,
+  );
+  const hydratedRef = useRef(false);
   const [service, setService] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -297,13 +304,26 @@ export default function ServiceDetailScreen() {
       setError(null);
       const next = await getService(id);
       setService(next);
+      cache.persist(next);
       return next;
     } catch (e) {
+      // Network failure: try the disk cache so the user sees the last
+      // version of this service they viewed instead of an error.
+      if (e instanceof ApiNetworkError) {
+        const seed = await cache.hydrate();
+        if (seed) {
+          setService(seed.data);
+          setError(null);
+          return seed.data;
+        }
+        setError("You are offline.");
+        throw e;
+      }
       const message = e instanceof Error ? e.message : "Failed to load";
       setError(message);
       throw e;
     }
-  }, [id]);
+  }, [id, cache]);
 
   const loadHandshakes = useCallback(async (targetService?: Service | null) => {
     const activeService = targetService;
@@ -355,8 +375,23 @@ export default function ServiceDetailScreen() {
 
   useEffect(() => {
     loadService()
+      .catch(() => {
+        /* loadService already wrote setError; nothing else to do */
+      })
       .finally(() => setLoading(false));
   }, [loadService]);
+
+  // Cold-start: paint the cached service immediately so the screen is not
+  // blank while the network round-trip resolves.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (!cache.enabled) return;
+    if (service) return;
+    hydratedRef.current = true;
+    cache.hydrate().then((seed) => {
+      if (seed) setService((prev) => prev ?? seed.data);
+    });
+  }, [cache, service]);
 
   useEffect(() => {
     if (!service) return;
@@ -685,6 +720,9 @@ export default function ServiceDetailScreen() {
           setOwnerActionLoading("delete");
           try {
             await deleteService(service.id);
+            if (service.type === "Need") {
+              await refreshUser();
+            }
             Alert.alert("Removed", "The listing has been removed.");
             navigation.navigate("Home", { screen: "HomeFeed" } as never);
           } catch (e) {
@@ -1449,6 +1487,16 @@ export default function ServiceDetailScreen() {
                 </View>
                 {ownerEditLockReason ? (
                   <Text style={styles.lockReasonText}>{ownerEditLockReason}</Text>
+                ) : null}
+
+                {service.type === "Need" ? (
+                  <View style={styles.needReservationNote}>
+                    <Text style={styles.needReservationTitle}>Time reserved for this request</Text>
+                    <Text style={styles.needReservationBody}>
+                      This listing itself is your request. The reserved time appears in Time Activity;
+                      incoming requests will show here only after another member offers help.
+                    </Text>
+                  </View>
                 ) : null}
 
                 {ownerIncomingHandshakes.length > 0 ? (
@@ -2651,6 +2699,26 @@ const getStyles = (topInset: number, bottomInset: number) =>
     ownerEmptyText: {
       fontSize: 13,
       color: colors.GRAY500,
+    },
+    needReservationNote: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: `${colors.BLUE}22`,
+      backgroundColor: colors.BLUE_LT,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      marginBottom: 10,
+    },
+    needReservationTitle: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: colors.BLUE,
+    },
+    needReservationBody: {
+      marginTop: 4,
+      fontSize: 12,
+      lineHeight: 17,
+      color: colors.GRAY700,
     },
     chatActionButton: {
       flexDirection: "row",

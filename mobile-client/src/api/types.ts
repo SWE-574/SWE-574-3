@@ -123,6 +123,13 @@ export interface EventEvaluationSummary {
   updated_at: string;
 }
 
+export interface ForYouSignals {
+  tag: number;
+  follow: number;
+  cooccur: number;
+  recency_penalty: number;
+}
+
 export interface Service {
   id: string;
   user: UserSummary;
@@ -146,6 +153,9 @@ export interface Service {
   hot_score?: number;
   is_visible?: boolean;
   is_pinned?: boolean;
+  is_newcomer_owner?: boolean;
+  source?: "tag_match" | "explore_topup" | "for_you" | null;
+  for_you_signals?: ForYouSignals | null;
   requires_qr_checkin?: boolean;
   session_exact_location?: string | null;
   session_exact_location_lat?: string | null;

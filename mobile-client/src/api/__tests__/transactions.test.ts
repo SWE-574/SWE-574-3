@@ -30,6 +30,8 @@ describe("transactions", () => {
       service_type: null,
       schedule_type: null,
       max_participants: null,
+      handshake_status: null,
+      service_status: null,
       is_current_user_provider: false,
       counterpart: null,
       amount: 10,

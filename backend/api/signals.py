@@ -1,5 +1,6 @@
 import logging
 
+from django.contrib.auth.signals import user_logged_in, user_login_failed
 from django.db.models.signals import post_save, post_delete, pre_delete
 from django.dispatch import receiver
 from django.db import transaction
@@ -22,6 +23,36 @@ from .ranking import (
     _compute_event_factors,
     _compute_service_factors,
 )
+
+security_logger = logging.getLogger('api.security')
+
+
+def _client_ip(request) -> str:
+    if request is None:
+        return 'unknown'
+    forwarded = request.META.get('HTTP_X_FORWARDED_FOR') if hasattr(request, 'META') else None
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', 'unknown') if hasattr(request, 'META') else 'unknown'
+
+
+@receiver(user_logged_in)
+def log_user_logged_in(sender, request, user, **kwargs):
+    security_logger.info(
+        'auth.login.success user_id=%s email=%s ip=%s',
+        getattr(user, 'id', None), getattr(user, 'email', None), _client_ip(request),
+    )
+
+
+@receiver(user_login_failed)
+def log_user_login_failed(sender, credentials, request=None, **kwargs):
+    # `credentials` may include the email but never the password thanks to
+    # Django stripping it before dispatching the signal. Still, only log the
+    # email key to avoid accidental exposure if Django's behaviour changes.
+    email = (credentials or {}).get('email') or (credentials or {}).get('username')
+    security_logger.warning(
+        'auth.login.failed email=%s ip=%s', email, _client_ip(request),
+    )
 
 
 @receiver(post_save, sender=Service)
@@ -75,6 +106,9 @@ def _update_service_hot_score(service):
                     quality=f['organiser_quality'],
                     activity=f['velocity'],
                     capacity_multiplier=f['capacity_multiplier'],
+                    capacity_boost_applied=f['capacity_boost_applied'],
+                    newcomer_boost=f['newcomer_boost'],
+                    newcomer_boost_applied=f['newcomer_boost_applied'],
                     final_score=f['final_score'],
                     formula_version=FORMULA_VERSION,
                     formula_kind=ScoreAuditLog.EVENT,
@@ -90,6 +124,9 @@ def _update_service_hot_score(service):
                     quality=f['quality'],
                     activity=f['activity'],
                     capacity_multiplier=f['capacity_multiplier'],
+                    capacity_boost_applied=f['capacity_boost_applied'],
+                    newcomer_boost=f['newcomer_boost'],
+                    newcomer_boost_applied=f['newcomer_boost_applied'],
                     final_score=f['final_score'],
                     formula_version=FORMULA_VERSION,
                     formula_kind=ScoreAuditLog.SERVICE,
@@ -178,6 +215,55 @@ def notify_on_new_chat_message(sender, instance, created, **kwargs):
         ))
     except Exception:
         logger.exception('Failed to queue chat notification for message %s', instance.pk)
+
+
+@receiver(post_save, sender=Handshake)
+def attribute_handshake_to_for_you_click(sender, instance, created, **kwargs):
+    """For You CTR proxy (#481): when a handshake is created, look up the
+    most recent For You click on this (viewer, service) within the
+    attribution window and emit a kind=handshake row tagged with the same
+    source. Lets the metrics endpoint compute click-to-handshake rate.
+
+    Fires only on initial Handshake creation. Status transitions
+    (pending -> accepted -> completed) are intentionally not attributed:
+    CTR is defined here as click -> handshake-creation, not click ->
+    completion. Completion-rate is a separate metric and is not measured
+    by this signal. The early return on `created is False` enforces that.
+    """
+    if not created:
+        return
+    try:
+        from datetime import timedelta
+        from django.conf import settings as _settings
+        from django.utils import timezone as _tz
+        from .models import ForYouEvent
+
+        attribution_minutes = int(getattr(
+            _settings, 'RANKING_FOR_YOU_ATTRIBUTION_MINUTES', 60,
+        ))
+        cutoff = _tz.now() - timedelta(minutes=attribution_minutes)
+        last_click = (
+            ForYouEvent.objects
+            .filter(
+                viewer=instance.requester,
+                service=instance.service,
+                kind=ForYouEvent.CLICK,
+                occurred_at__gte=cutoff,
+            )
+            .order_by('-occurred_at')
+            .first()
+        )
+        if last_click is not None:
+            ForYouEvent.objects.create(
+                service=instance.service,
+                viewer=instance.requester,
+                kind=ForYouEvent.HANDSHAKE,
+                source=last_click.source,
+            )
+    except Exception:
+        logger.exception(
+            'For You handshake attribution failed for handshake %s', instance.pk,
+        )
 
 
 @receiver(post_save, sender=Handshake)

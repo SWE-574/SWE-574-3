@@ -209,6 +209,21 @@ export interface Service {
   comment_count?: number
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
+  source?: 'tag_match' | 'explore_topup' | 'for_you' | 'explore' | null
+  for_you_signals?: ForYouSignals | null
+  explore_pool?: 'cold_start' | 'undershown_quality' | 'stale_recurring' | null
+  is_newcomer_owner?: boolean
+  // FR-11f / FR-11n: backend-canonical edit-lock state. Frontend should
+  // consume these directly instead of re-deriving the date math (#267).
+  edit_locked?: boolean
+  edit_lock_reason?: string | null
+}
+
+export interface ForYouSignals {
+  tag: number
+  follow: number
+  cooccur: number
+  recency_penalty: number
 }
 
 export interface EventEvaluationSummary {
@@ -268,6 +283,54 @@ export interface RecommendationDebugBreakdown {
   social_reason: string
 }
 
+export interface RecommendationDebugFactorsService {
+  kind: 'service'
+  positive_count: number
+  negative_count: number
+  comment_count: number
+  hours_exchanged: number
+  quality: number
+  activity: number
+  capacity_multiplier: number
+  newcomer_boost: number
+  is_newcomer: boolean
+  final_score: number
+}
+
+export interface RecommendationDebugFactorsEvent {
+  kind: 'event'
+  positive_count: number
+  negative_count: number
+  rsvps_last_7d: number
+  organiser_quality: number
+  velocity: number
+  capacity_multiplier: number
+  newcomer_boost: number
+  is_newcomer: boolean
+  final_score: number
+}
+
+export type RecommendationDebugFactors =
+  | RecommendationDebugFactorsService
+  | RecommendationDebugFactorsEvent
+
+export type RecommendationDebugPhase3Pool =
+  | 'cold_start'
+  | 'undershown_quality'
+  | 'stale_recurring'
+  | null
+
+export interface RecommendationDebugPhase3 {
+  pool: RecommendationDebugPhase3Pool
+  exploration_rate: number
+  lifetime_completed_handshakes: number
+  days_since_last_completed_handshake: number | null
+  is_stale_recurring: boolean
+  cold_start_threshold: number
+  undershown_quality_threshold: number
+  undershown_stale_days: number
+}
+
 export interface RecommendationDebugSelectedService {
   id: string
   title: string
@@ -285,6 +348,8 @@ export interface RecommendationDebugSelectedService {
   distance_km: number | null
   participant_count: number
   max_participants: number
+  factors: RecommendationDebugFactors
+  phase3: RecommendationDebugPhase3
   breakdown: RecommendationDebugBreakdown
   formula_lines: string[]
   notes: string[]
@@ -378,6 +443,10 @@ export type NotificationType =
   | 'positive_rep'
   | 'admin_warning'
   | 'dispute_resolved'
+  | 'new_report'
+  | 'report_received'
+  | 'report_resolved'
+  | 'report_dismissed'
 
 export interface Notification {
   id: string
@@ -387,6 +456,7 @@ export interface Notification {
   is_read: boolean
   related_handshake: string | null
   related_service: string | null
+  related_report: string | null
   created_at: string
 }
 
@@ -401,6 +471,8 @@ export interface Transaction {
   service_type?: 'Offer' | 'Need' | 'Event' | null
   schedule_type?: 'One-Time' | 'Recurrent' | null
   max_participants?: number | null
+  handshake_status?: string | null
+  service_status?: string | null
   is_current_user_provider?: boolean
   counterpart: {
     id: string
@@ -526,6 +598,7 @@ export interface AdminReport {
   reported_service_owner_name?: string | null
   reported_service_owner_email?: string | null
   reported_service_owner_karma_score?: number | null
+  reported_service_has_active_handshakes?: boolean | null
   reported_forum_topic?: string | null
   reported_forum_topic_title?: string | null
   reported_forum_post?: string | null
