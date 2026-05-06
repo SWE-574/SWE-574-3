@@ -13,7 +13,6 @@ import {
   FiMenu,
   FiX,
   FiLayers,
-  FiCalendar,
 } from 'react-icons/fi'
 import { useAuthStore } from '@/store/useAuthStore'
 
@@ -196,7 +195,6 @@ const Navbar = () => {
             position="absolute" left="50%" style={{ transform: 'translateX(-50%)' }}
           >
             <NavLink to="/dashboard" icon={<FiGrid size={15} />} active={p === '/dashboard'}>Browse</NavLink>
-            <NavLink to="/events" icon={<FiCalendar size={15} />} active={p === '/events'}>Events</NavLink>
             <NavLink to="/forum" icon={<FiMessageCircle size={15} />} active={p.startsWith('/forum')}>Forum</NavLink>
             <NavLink to="/messages" icon={<FiMessageSquare size={15} />} active={p === '/messages' || p.startsWith('/messages/')}>Messages</NavLink>
           </Flex>
@@ -389,7 +387,6 @@ const Navbar = () => {
           {/* Nav links */}
           <Box mb={2}>
             <MobileNavLink to="/dashboard" icon={<FiGrid size={16} />} active={p === '/dashboard'} onClick={() => setMobileOpen(false)}>Browse</MobileNavLink>
-            <MobileNavLink to="/events" icon={<FiCalendar size={16} />} active={p === '/events'} onClick={() => setMobileOpen(false)}>Events</MobileNavLink>
             <MobileNavLink to="/forum" icon={<FiMessageCircle size={16} />} active={p.startsWith('/forum')} onClick={() => setMobileOpen(false)}>Forum</MobileNavLink>
             <MobileNavLink to="/messages" icon={<FiMessageSquare size={16} />} active={p === '/messages' || p.startsWith('/messages/')} onClick={() => setMobileOpen(false)}>Messages</MobileNavLink>
             <MobileNavLink to="/notifications" icon={<FiBell size={16} />} active={p === '/notifications'} onClick={() => setMobileOpen(false)}>Notifications</MobileNavLink>

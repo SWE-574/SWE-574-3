@@ -1608,6 +1608,18 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
+                    ) : service.status === 'Cancelled' ? (
+                      <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiAlertTriangle size={20} color={RED} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={RED}>Event cancelled</Text>
+                          <Text fontSize="12px" color="#991B1B" mt="2px">
+                            Completing or cancelling this event is no longer available.
+                          </Text>
+                        </Box>
+                      </Box>
                     ) : (
                       <>
                         <Box as="button" w="full" py="11px" borderRadius="10px"
