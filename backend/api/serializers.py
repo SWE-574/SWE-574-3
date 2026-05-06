@@ -542,10 +542,17 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    # source / for_you_signals / explore_pool are transient: not stored on
+    # the Service model. They are attached to the instance by _list_for_you()
+    # and the explore-only list path in views.py before serialization.
+    # getattr(obj, ..., None) returns None for cards from non-personalized
+    # endpoints, which is the intended "absent" representation.
+    source = serializers.SerializerMethodField()
+    for_you_signals = serializers.SerializerMethodField()
+    explore_pool = serializers.SerializerMethodField()
     is_newcomer_owner = serializers.SerializerMethodField()
     edit_locked = serializers.BooleanField(read_only=True)
     edit_lock_reason = serializers.CharField(read_only=True, allow_null=True)
-    source = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
@@ -555,9 +562,15 @@ class ServiceSerializer(serializers.ModelSerializer):
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
-            'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary', 'is_newcomer_owner','source', 'edit_locked', 'edit_lock_reason'
+            'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
+            'is_newcomer_owner', 'source', 'for_you_signals', 'explore_pool',
+            'edit_locked', 'edit_lock_reason',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned', 'is_newcomer_owner', 'source', 'edit_locked', 'edit_lock_reason']
+        read_only_fields = [
+            'user', 'hot_score', 'is_visible', 'is_pinned', 'is_newcomer_owner',
+            'source', 'for_you_signals', 'explore_pool',
+            'edit_locked', 'edit_lock_reason',
+        ]
 
     @extend_schema_field(serializers.BooleanField())
     def get_is_newcomer_owner(self, obj):
@@ -571,10 +584,20 @@ class ServiceSerializer(serializers.ModelSerializer):
         return bool(is_newcomer(owner))
    
     def get_source(self, obj):
-        """Annotated by ServiceViewSet when the onboarding tag fallback (#478)
-        engages: 'tag_match' or 'explore_topup'. None otherwise."""
+        """Set transiently by the For You list view (#481) and the onboarding
+        fallback (#478). None when the card came from the regular feed."""
         return getattr(obj, 'source', None)
 
+    def get_for_you_signals(self, obj):
+        """Per-card breakdown of the four For You signals (#481). None for
+        cards not served by the For You feed."""
+        return getattr(obj, 'for_you_signals', None)
+
+    def get_explore_pool(self, obj):
+        """Which Phase 3 sub-bucket this service was drawn from when served by
+        the explore-only list path. One of cold_start, undershown_quality,
+        stale_recurring, or None for non-explore responses."""
+        return getattr(obj, 'explore_pool', None)
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):

@@ -200,10 +200,21 @@ export interface Service {
   comment_count?: number
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
+  source?: 'tag_match' | 'explore_topup' | 'for_you' | 'explore' | null
+  for_you_signals?: ForYouSignals | null
+  explore_pool?: 'cold_start' | 'undershown_quality' | 'stale_recurring' | null
+  is_newcomer_owner?: boolean
   // FR-11f / FR-11n: backend-canonical edit-lock state. Frontend should
   // consume these directly instead of re-deriving the date math (#267).
   edit_locked?: boolean
   edit_lock_reason?: string | null
+}
+
+export interface ForYouSignals {
+  tag: number
+  follow: number
+  cooccur: number
+  recency_penalty: number
 }
 
 export interface EventEvaluationSummary {

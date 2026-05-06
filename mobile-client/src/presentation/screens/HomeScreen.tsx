@@ -24,7 +24,9 @@ import { listServices, type ServicesListParams } from "../../api/services";
 import { Service } from "../../api/types";
 import ServiceCard from "../components/ServiceCard";
 import FeaturedSection from "../components/FeaturedSection";
+import ForYouSection from "../components/ForYouSection";
 import ExploreCarousel from "../components/ExploreCarousel";
+import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
@@ -35,7 +37,6 @@ import {
   isRecurringService,
   type Coordinates,
 } from "../../utils/discovery";
-import { useAuth } from "../../context/AuthContext";
 import { useScreenCache } from "../../hooks/useScreenCache";
 import { ApiNetworkError } from "../../api/client";
 
@@ -91,7 +92,8 @@ export default function HomeScreen() {
     useNavigation<NativeStackNavigationProp<HomeStackParamList, "HomeFeed">>();
   const tabNavigation =
     useNavigation<BottomTabNavigationProp<BottomTabParamList>>();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const forYouEligible = isAuthenticated && Boolean(user?.is_onboarded);
   const cache = useScreenCache<Service[]>(user?.id ?? null, "home-feed-default");
   const [services, setServices] = useState<Service[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -422,6 +424,10 @@ export default function HomeScreen() {
 
   const listHeader = (
     <>
+      <ForYouSection
+        enabled={forYouEligible}
+        onServicePress={handleServicePress}
+      />
       <ExploreCarousel onServicePress={handleServicePress} />
       <FeaturedSection
         services={filteredServices}
