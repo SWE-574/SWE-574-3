@@ -7,6 +7,8 @@ import PublicProfileScreen from "../presentation/screens/PublicProfileScreen";
 import AchievementsListScreen from "../presentation/screens/AchievementsListScreen";
 import FollowListScreen from "../presentation/screens/FollowListScreen";
 import NotificationsScreen from "../presentation/screens/NotificationsScreen";
+import NotificationPreferencesScreen from "../presentation/screens/NotificationPreferencesScreen";
+import MyCommitmentsScreen from "../presentation/screens/MyCommitmentsScreen";
 import TimeActivityScreen from "../presentation/screens/TimeActivityScreen";
 import ServiceDetailScreen from "../presentation/screens/ServiceDetailScreen";
 import { colors } from "../constants/colors";
@@ -19,6 +21,8 @@ export type ProfileStackParamList = {
   AchievementsList: { userId: string };
   FollowList: { userId: string; kind: "followers" | "following" };
   Notifications: undefined;
+  NotificationPreferences: undefined;
+  MyCommitments: undefined;
   TimeActivity: undefined;
   ServiceDetail: { id: string };
 };
@@ -70,6 +74,33 @@ export default function ProfileStack() {
         }}
       />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
+      <Stack.Screen
+        name="NotificationPreferences"
+        component={NotificationPreferencesScreen}
+        options={{
+          headerShown: true,
+          title: "Notification settings",
+          headerStyle: { backgroundColor: colors.WHITE },
+          headerTitleStyle: { fontSize: 17, fontWeight: "600" },
+          headerShadowVisible: true,
+          gestureEnabled: true,
+          animation: "slide_from_right",
+        }}
+      />
+
+      <Stack.Screen
+        name="MyCommitments"
+        component={MyCommitmentsScreen}
+        options={{
+          headerShown: true,
+          title: "My commitments",
+          headerStyle: { backgroundColor: colors.WHITE },
+          headerTitleStyle: { fontSize: 17, fontWeight: "600" },
+          headerShadowVisible: true,
+          gestureEnabled: true,
+          animation: "slide_from_right",
+        }}
+      />
       <Stack.Screen name="ServiceDetail" component={ServiceDetailScreen} />
       <Stack.Screen
         name="TimeActivity"

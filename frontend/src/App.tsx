@@ -322,6 +322,10 @@ function App() {
             element={<ProtectedRoute><TransactionHistoryPage /></ProtectedRoute>}
           />
           <Route
+            path="/profile/reports"
+            element={<ProtectedRoute><UserProfile /></ProtectedRoute>}
+          />
+          <Route
             path="/notifications"
             element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>}
           />
