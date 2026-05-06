@@ -5,14 +5,17 @@ import {
   StyleSheet,
   Text,
   View,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useToastStore } from '../../store/useToastStore';
 import { navigateToNotificationTarget } from '../../constants/notificationMappings';
+import { colors } from '../../constants/colors';
 
 const VISIBLE_MS = 4500;
 const SLIDE_MS = 220;
+const hiveIcon = require("../../assets/icon.png");
 
 // In-app foreground toast for #370. When the app is open, instead of relying
 // on the OS push banner (which Expo suppresses for foreground delivery), we
@@ -53,6 +56,8 @@ export default function InAppNotificationToast() {
 
   if (!current) return null;
 
+  const primaryText = current.body || current.title;
+
   const onTap = () => {
     if (dismissTimer.current) {
       clearTimeout(dismissTimer.current);
@@ -88,10 +93,17 @@ export default function InAppNotificationToast() {
       ]}
     >
       <Pressable onPress={onTap} style={styles.toast}>
-        <Text numberOfLines={1} style={styles.title}>{current.title}</Text>
-        {current.body ? (
-          <Text numberOfLines={2} style={styles.body}>{current.body}</Text>
-        ) : null}
+        <View style={styles.iconBadge}>
+          <Image
+            source={hiveIcon}
+            style={styles.appIcon}
+            resizeMode="cover"
+          />
+        </View>
+        <View style={styles.copy}>
+          <Text numberOfLines={1} style={styles.appLabel}>THE HIVE</Text>
+          <Text numberOfLines={2} style={styles.title}>{primaryText}</Text>
+        </View>
       </Pressable>
     </Animated.View>
   );
@@ -107,23 +119,50 @@ const styles = StyleSheet.create({
   toast: {
     backgroundColor: '#1F2937',
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     shadowColor: '#000',
     shadowOpacity: 0.18,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
   },
+  iconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: colors.WHITE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  appIcon: {
+    width: 38,
+    height: 38,
+  },
+  copy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  appLabel: {
+    color: 'rgba(255,255,255,0.64)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    marginBottom: 1,
+  },
   title: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '700',
-    marginBottom: 2,
-  },
-  body: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 13,
-    lineHeight: 17,
+    lineHeight: 18,
   },
 });
