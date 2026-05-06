@@ -2464,3 +2464,46 @@ def get_social_proximity_boosts(viewer_id) -> dict:
         if uid_key not in boosts or boost > boosts[uid_key]:
             boosts[uid_key] = boost
     return boosts
+
+
+def get_social_neighbours(user, depth: int = 2) -> set:
+    """Return the set of user IDs reachable from `user` within `depth` hops
+    via the social graph (FR-17k / #318).
+
+    The graph edges combine `UserFollow` and completed `Handshake` records,
+    matching `get_social_proximity_boosts` so callers see a consistent view.
+    Self-loops are guarded against. Results are cached per (user, depth) for
+    SOCIAL_NEIGHBOURS_TTL seconds because the graph changes slowly.
+
+    `depth=1` returns only direct connections; `depth=2` adds their direct
+    connections (friends-of-friends). Higher depths fall back to depth 2 to
+    avoid the SQL CTE explosion this MVP implementation can't justify yet.
+    """
+    if user is None:
+        return set()
+    user_id = getattr(user, 'id', user)
+    if user_id is None:
+        return set()
+    user_id_str = str(user_id)
+
+    capped_depth = 1 if depth <= 1 else 2
+    cache_key = f'social_neighbours:{user_id_str}:{capped_depth}'
+
+    from django.core.cache import cache as _cache
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return set(cached)
+
+    boosts = get_social_proximity_boosts(user_id)
+    if capped_depth == 1:
+        # 1.0 weight is reserved for direct (1-hop) connections.
+        ids = {str(uid) for uid, boost in boosts.items() if boost >= 1.0}
+    else:
+        ids = {str(uid) for uid in boosts.keys()}
+    ids.discard(user_id_str)
+
+    _cache.set(cache_key, list(ids), SOCIAL_NEIGHBOURS_TTL)
+    return ids
+
+
+SOCIAL_NEIGHBOURS_TTL = 60 * 60  # 1h — social graph changes slowly

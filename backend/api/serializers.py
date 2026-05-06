@@ -807,6 +807,33 @@ class ServiceSerializer(serializers.ModelSerializer):
             status__in=['accepted', 'checked_in', 'attended'],
         ).exists()
 
+    def _has_accepted_handshake(self, instance, user):
+        """FR-17l (#319): exact location is unblocked once a handshake exists
+        between the requester and provider in an accepted-or-later state.
+        Covers both Event participants and 1:1 Offer/Need handshakes; this
+        is the canonical "we know each other now" signal.
+        """
+        if user is None:
+            return False
+        if instance.type == 'Event':
+            return self._is_event_participant(instance, user)
+        return Handshake.objects.filter(
+            service=instance,
+            requester=user,
+            status__in=['accepted', 'completed', 'reported', 'paused'],
+        ).exists()
+
+    def _blur_distance_to_500m(self, value):
+        """Round a meters distance to the nearest 500m so triangulation across
+        repeated feed queries cannot recover the precise location."""
+        if value is None:
+            return None
+        try:
+            meters = float(value)
+        except (TypeError, ValueError):
+            return None
+        return int(round(meters / 500.0)) * 500
+
     def to_representation(self, instance):
         """Replace exact coordinates with a ~1 km privacy-fuzzed version before sending."""
         data = super().to_representation(instance)
@@ -817,13 +844,13 @@ class ServiceSerializer(serializers.ModelSerializer):
             and getattr(request_user, 'is_authenticated', False)
             and str(getattr(request_user, 'id', '')) == str(instance.user_id)
         )
-        is_joined_event = (
+        is_handshake_partner = (
             not is_owner
             and request_user
             and getattr(request_user, 'is_authenticated', False)
-            and self._is_event_participant(instance, request_user)
+            and self._has_accepted_handshake(instance, request_user)
         )
-        show_exact = is_owner or is_joined_event
+        show_exact = is_owner or is_handshake_partner
         if not show_exact:
             data.pop('session_exact_location', None)
             data.pop('session_exact_location_lat', None)
@@ -835,6 +862,17 @@ class ServiceSerializer(serializers.ModelSerializer):
                 fuzzy_lat, fuzzy_lng = _fuzzy_coords(str(instance.id), lat, lng)
                 data['location_lat'] = round(fuzzy_lat, 6)
                 data['location_lng'] = round(fuzzy_lng, 6)
+
+        # Distance-to-viewer (annotated by LocationStrategy when lat/lng are
+        # supplied). Round to 500m for non-handshake-partners so repeated
+        # queries from different reference points cannot triangulate the
+        # provider's address.
+        annotated_distance = getattr(instance, 'distance', None)
+        if annotated_distance is not None:
+            distance_m = getattr(annotated_distance, 'm', annotated_distance)
+            data['distance'] = (
+                float(distance_m) if show_exact else self._blur_distance_to_500m(distance_m)
+            )
         return data
 
     def create(self, validated_data):

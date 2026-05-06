@@ -324,27 +324,34 @@ def assign_achievement(user: User, achievement_id: str) -> bool:
 def get_achievement_progress(user: User) -> Dict[str, Dict]:
     """
     Get progress towards all achievements for a user.
-    
-    Returns dict with achievement info, current progress, and whether earned.
+
+    Returns a dict keyed by achievement_id with both earned and in-progress
+    entries (#167). Each entry also carries `id` on the value side so the
+    frontend can iterate the response as a list without keeping the outer
+    key around.
     """
     stats = get_user_stats(user)
     existing_achievements = set(
         UserBadge.objects.filter(user=user).values_list('badge_id', flat=True)
     )
-    
+
     progress = {}
-    
+
     for achievement_id, (stat_key, threshold) in ACHIEVEMENT_REQUIREMENTS.items():
         current = stats.get(stat_key, 0)
-        
+
         if achievement_id == 'perfect-record':
             has_negative = stats.get('negative_rep_count', 0) > 0
             current = stats.get('completed_services', 0) if not has_negative else 0
-        
+
         achievement_info = ACHIEVEMENT_DEFAULTS.get(achievement_id, {})
         is_hidden = achievement_info.get('is_hidden', False)
-        
+        is_visible = achievement_id in existing_achievements or not is_hidden
+
         progress[achievement_id] = {
+            # Echo the id on the value so consumers can flatten to a list:
+            # `Object.values(progress)` already carries everything they need.
+            'id': achievement_id,
             'achievement': {
                 'name': achievement_info.get('name', achievement_id),
                 'description': achievement_info.get('description', ''),
@@ -353,11 +360,23 @@ def get_achievement_progress(user: User) -> Dict[str, Dict]:
                 'is_hidden': is_hidden,
             },
             'earned': achievement_id in existing_achievements,
-            'current': current if (achievement_id in existing_achievements or not is_hidden) else None,
-            'threshold': threshold if (achievement_id in existing_achievements or not is_hidden) else None,
-            'progress_percent': min(100, int((current / threshold) * 100)) if threshold > 0 and (achievement_id in existing_achievements or not is_hidden) else 0,
+            'current': current if is_visible else None,
+            'threshold': threshold if is_visible else None,
+            'progress_percent': (
+                min(100, int((current / threshold) * 100))
+                if threshold > 0 and is_visible
+                else 0
+            ),
+            # Convenience flag mirroring `earned == False && is_visible`.
+            # Tests assert this directly so the response shape can't regress
+            # to "completed-only" without us noticing (#167).
+            'in_progress': (
+                achievement_id not in existing_achievements
+                and is_visible
+                and current > 0
+            ),
         }
-    
+
     return progress
 
 
