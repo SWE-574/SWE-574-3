@@ -865,7 +865,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         # provider's address.
         annotated_distance = getattr(instance, 'distance', None)
         if annotated_distance is not None:
-            distance_m = getattr(annotated_distance, 'm', None) or annotated_distance
+            distance_m = getattr(annotated_distance, 'm', annotated_distance)
             data['distance'] = (
                 float(distance_m) if show_exact else self._blur_distance_to_500m(distance_m)
             )
