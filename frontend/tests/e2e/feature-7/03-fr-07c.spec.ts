@@ -22,7 +22,7 @@ test('FR-07c: request creation reserves hours when a Time Share rule requires it
 
   // The same reservation should appear in the visible transaction history for the created request.
   await openTimeActivity(page)
-  await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText(title).last()).toBeVisible({ timeout: 10_000 })
 
   const transactions = await listTransactions(page)
   const related = transactions.results.find((transaction) => transaction.service_title === title)
