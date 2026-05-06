@@ -111,7 +111,18 @@ export function useNotificationSocket() {
     const handleAppState = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         const ws = wsRef.current;
-        if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          // iOS often suspends the socket in CLOSING. Force-close with a
+          // normal closure code so the original onclose skips its
+          // scheduleReconnect path, then reconnect atomically.
+          if (ws && ws.readyState !== WebSocket.CLOSED) {
+            ws.close(1000);
+            wsRef.current = null;
+          }
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+          }
           enabledRef.current = true;
           reconnectAttemptsRef.current = 0;
           connect();

@@ -208,7 +208,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 // ─── Conversation Row (inside a group) ───────────────────────────────────────
 
-/** True when the current user owns the service (regardless of Offer/Want). */
+/** True when the current user owns the service (regardless of Offer/Need). */
 function isServiceOwner(conv: ChatConversation): boolean {
   const isOffer = conv.service_type?.toLowerCase() !== 'need' && conv.service_type?.toLowerCase() !== 'want'
   return isOffer ? conv.is_provider : !conv.is_provider
@@ -798,7 +798,7 @@ function ActionCard({
       )
     : (conv.exact_location_maps_url || (previewLocation ? buildMapsUrl(previewLocation) : null))
 
-  // Service owner always initiates (Offer or Want) — requester approves
+  // Service owner always initiates (Offer or Need) — requester approves
 
   const myConfirmed    = is_provider ? provider_confirmed_complete : receiver_confirmed_complete
   const otherConfirmed = is_provider ? receiver_confirmed_complete : provider_confirmed_complete
@@ -1096,7 +1096,7 @@ function ActionCard({
       boxShadow="0 1px 3px rgba(0,0,0,0.04)"
     >
       {iAmServiceOwner ? (
-        // ── Service owner side (Offer owner OR Want/Need owner) ──────────────
+        // ── Service owner side (Offer owner OR Need owner) ──────────────
         provider_initiated ? (
           // Already sent details — waiting for requester to approve
           <Flex align="center" gap={3}>
@@ -2194,7 +2194,7 @@ export default function ChatPage() {
                         bg={selectedConv.service_type?.toLowerCase() === 'offer' ? '#FEF3C7' : '#F3E8FF'}
                         color={selectedConv.service_type?.toLowerCase() === 'offer' ? '#92400E' : '#6B21A8'}
                       >
-                        {selectedConv.service_type?.toLowerCase() === 'offer' ? 'Offer' : 'Want'}
+                        {selectedConv.service_type?.toLowerCase() === 'offer' ? 'Offer' : 'Need'}
                       </Box>
                     </Flex>
                     {/* Clickable service title */}

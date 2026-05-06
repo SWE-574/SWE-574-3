@@ -161,11 +161,11 @@ jobs:
 
       - name: Audit Python dependencies
         working-directory: backend
-        # Temporary unblocks:
-        #  - CVE-2026-4539 affects the latest available Pygments release (2.19.2);
-        #    no patch version available yet.
-        #  - CVE-2026-42304 affects twisted 25.5.0 (transitive via daphne); only
-        #    26.4.0rc2 (release candidate) carries the fix, so wait for stable.
+        # Temporary unblocks — both advisories have no stable patch release yet:
+        #   - CVE-2026-4539: latest Pygments (2.19.2) is still affected.
+        #   - CVE-2026-42304: Twisted DoS in twisted.names; the only fix is in
+        #     26.4.0rc2 (release candidate). We pull twisted in transitively via
+        #     daphne/channels and do not expose twisted.names, so impact is nil.
         run: >
           .venv/bin/pip-audit
           --skip-editable
