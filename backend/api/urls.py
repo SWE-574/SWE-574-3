@@ -57,7 +57,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .views import CustomTokenObtainPairView
 from .views import CustomTokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
-from .views_featured import FeaturedView
+from .views_featured import FeaturedView, PublicFeaturedView
 
 router = DefaultRouter()
 router.register(r'services', ServiceViewSet, basename='service')
@@ -345,5 +345,6 @@ urlpatterns = [
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
     path('featured/', FeaturedView.as_view(), name='featured'),
+    path('featured/public/', PublicFeaturedView.as_view(), name='featured-public'),
     path('', include(router.urls)),
 ]
