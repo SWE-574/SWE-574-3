@@ -24,7 +24,12 @@ const fetchCurrentUserWithRetry = async (): Promise<User> => {
   let attempt = 0
   while (true) {
     try {
-      const res = await apiClient.get<User>('/users/me/')
+      const res = await apiClient.get<User>('/users/me/', {
+        params: { _: Date.now() },
+        headers: {
+          'Cache-Control': 'no-cache',
+        },
+      })
       return res.data
     } catch (error) {
       if (!isRateLimitError(error) || attempt >= MAX_ME_RETRIES) {
@@ -48,6 +53,16 @@ const fetchCurrentUserSingleFlight = async (): Promise<User> => {
     })
 
   return inFlightUserRequest
+}
+
+const fetchCurrentUserFresh = async (): Promise<User> => {
+  const res = await apiClient.get<User>('/users/me/', {
+    params: { _: Date.now() },
+    headers: {
+      'Cache-Control': 'no-cache',
+    },
+  })
+  return res.data
 }
 
 interface AuthState {
@@ -143,7 +158,8 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
   refreshUser: async () => {
     try {
-      const user = await fetchCurrentUserSingleFlight()
+      inFlightUserRequest = null
+      const user = await fetchCurrentUserFresh()
       set({ user, isAuthenticated: true })
     } catch (error) {
       if (isRateLimitError(error)) {

@@ -13,7 +13,7 @@ if __name__ == "__main__":
 from api.models import (
     ChatMessage, Handshake, Notification, ReputationRep, Comment,
     Service, Tag, User, UserBadge, ForumCategory, ForumTopic, ForumPost,
-    Report, AdminAuditLog, ServiceMedia, PublicChatMessage,
+    Report, AdminAuditLog, ServiceMedia, PublicChatMessage, TransactionHistory,
     ServiceGroupChatMessage, NegativeRep, UserFollow,
 )
 from api.achievement_utils import check_and_assign_badges
@@ -1611,6 +1611,18 @@ print(f"  Added {service_media_count} semantic service media items")
 
 print("\n[5/8] Creating handshakes and completing workflows...")
 
+def backdate_timebank_activity(*, created_at, handshake=None, service=None, transaction_type=None):
+    """Move generated TimeBank ledger rows onto the demo timeline."""
+    queryset = TransactionHistory.objects.all()
+    if handshake is not None:
+        queryset = queryset.filter(handshake=handshake)
+    if service is not None:
+        queryset = queryset.filter(service=service)
+    if transaction_type is not None:
+        queryset = queryset.filter(transaction_type=transaction_type)
+    queryset.update(created_at=created_at)
+
+
 def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=0, completed_days_ago=None):
     """Complete handshake lifecycle through proper system workflows"""
     handshake = HandshakeService.express_interest(service, requester)
@@ -1655,6 +1667,11 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
     handshake.save()
     
     provision_timebank(handshake)
+    backdate_timebank_activity(
+        created_at=created_at_time + timedelta(hours=3),
+        handshake=handshake,
+        transaction_type='provision',
+    )
     handshake.status = 'accepted'
     handshake.requester_initiated = True
     handshake.updated_at = created_at_time + timedelta(hours=4)
@@ -1729,7 +1746,7 @@ def sync_fixed_group_offer_time(service, scheduled_time):
     Service.objects.filter(pk=service.pk).update(scheduled_time=scheduled_time)
     Handshake.objects.filter(
         service=service,
-        status__in=['pending', 'accepted', 'completed', 'reported', 'paused'],
+        status__in=['pending', 'accepted', 'reported', 'paused'],
     ).update(
         scheduled_time=scheduled_time,
         exact_location=exact_location,
@@ -1737,13 +1754,32 @@ def sync_fixed_group_offer_time(service, scheduled_time):
         exact_location_maps_url=exact_maps_url,
         exact_duration=service.duration,
     )
+    for completed in Handshake.objects.filter(service=service, status='completed'):
+        completed_time = completed.updated_at or timezone.now()
+        completed_schedule = scheduled_time
+        if completed_schedule is None or completed_schedule >= completed_time:
+            completed_schedule = completed_time - timedelta(hours=2)
+        Handshake.objects.filter(pk=completed.pk).update(
+            scheduled_time=completed_schedule,
+            exact_location=exact_location,
+            exact_location_guide=service.session_location_guide,
+            exact_location_maps_url=exact_maps_url,
+            exact_duration=service.duration,
+        )
     service.refresh_from_db(fields=['scheduled_time'])
 
 
 def complete_seeded_handshake(handshake, *, completed_days_ago):
     """Mark an already-accepted handshake as completed with realistic backdated timestamps."""
-    completion_time = timezone.now() - timedelta(days=completed_days_ago)
+    completion_offset = timedelta(days=completed_days_ago)
+    if completed_days_ago <= 0:
+        completion_offset = timedelta(hours=3)
+    completion_time = timezone.now() - completion_offset
+    scheduled_time = handshake.scheduled_time
+    if scheduled_time is None or scheduled_time >= completion_time:
+        scheduled_time = completion_time - timedelta(hours=2)
     with transaction.atomic():
+        handshake.scheduled_time = scheduled_time
         handshake.provider_confirmed_complete = True
         handshake.receiver_confirmed_complete = True
         handshake.updated_at = completion_time
@@ -1754,7 +1790,15 @@ def complete_seeded_handshake(handshake, *, completed_days_ago):
         complete_timebank_transfer(handshake)
 
         # After transfer, manually back-date the timestamps.
-        Handshake.objects.filter(pk=handshake.pk).update(updated_at=completion_time)
+        Handshake.objects.filter(pk=handshake.pk).update(
+            scheduled_time=scheduled_time,
+            updated_at=completion_time,
+        )
+        backdate_timebank_activity(
+            created_at=completion_time + timedelta(minutes=5),
+            handshake=handshake,
+            transaction_type='transfer',
+        )
 
         # Sync service status: One-Time services should become 'Completed'
         # when no active handshakes remain (mirrors utils.py logic).
@@ -1767,6 +1811,10 @@ def complete_seeded_handshake(handshake, *, completed_days_ago):
             if active_count == 0 and svc.status != 'Completed':
                 svc.status = 'Completed'
                 svc.save(update_fields=['status'])
+
+        if svc.status == 'Completed' and (svc.scheduled_time is None or svc.scheduled_time >= completion_time):
+            svc.scheduled_time = scheduled_time
+            svc.save(update_fields=['scheduled_time'])
 
     handshake.refresh_from_db()
     provider, receiver = get_provider_and_receiver(handshake)
@@ -1802,6 +1850,11 @@ def cancel_seeded_handshake(handshake, cancelled_days_ago):
     cancelled_at = timezone.now() - timedelta(days=cancelled_days_ago)
     with transaction.atomic():
         cancel_timebank_transfer(handshake)
+        backdate_timebank_activity(
+            created_at=cancelled_at,
+            handshake=handshake,
+            transaction_type='refund',
+        )
         Handshake.objects.filter(pk=handshake.pk).update(
             status='cancelled',
             updated_at=cancelled_at,

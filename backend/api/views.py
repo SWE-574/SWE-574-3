@@ -79,9 +79,10 @@ from .serializers import (
 )
 from .achievement_utils import get_achievement_progress
 from .utils import (
-    can_user_post_offer, provision_timebank, complete_timebank_transfer,
+    can_user_post_offer, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
     notify_reporter_of_receipt, notify_reporter_of_state_change,
+    reserve_timebank_for_need_service, release_timebank_for_need_service,
 )
 from .services import (
     HandshakeService, HandshakeServiceError,
@@ -98,7 +99,7 @@ from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, U
 from django.db.models.functions import Coalesce
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
-    get_cached_user_profile, cache_user_profile, invalidate_user_profile,
+    invalidate_user_profile,
     get_cached_service_list, cache_service_list, invalidate_service_lists,
     get_cached_conversations, cache_conversations, invalidate_conversations,
     get_cached_transactions, cache_transactions, invalidate_transactions,
@@ -1178,27 +1179,15 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         user_id = self.kwargs.get('id')
         if user_id:
             return self.get_queryset().get(id=user_id)
-        
-        cached_user = get_cached_user_profile(str(self.request.user.id))
-        if cached_user:
-            user = User.objects.get(id=self.request.user.id)
-            user._cached_data = cached_user
-            return user
-            
+
         return self.get_queryset().get(id=self.request.user.id)
     
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         
-        if hasattr(instance, '_cached_data'):
-            return Response(instance._cached_data)
-            
         response_data = serializer.data
         response_data['event_comments_history'] = _build_event_comments_history(instance, request)
-        
-        if not kwargs.get('id'):
-            cache_user_profile(str(request.user.id), response_data)
         
         return Response(response_data)
     
@@ -2179,7 +2168,18 @@ class ServiceViewSet(viewsets.ModelViewSet):
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
 
-        response = super().create(request, *args, **kwargs)
+        try:
+            with transaction.atomic():
+                response = super().create(request, *args, **kwargs)
+                if service_type == 'Need':
+                    created_service = Service.objects.get(id=response.data['id'])
+                    reserve_timebank_for_need_service(created_service)
+        except ValueError as e:
+            return create_error_response(
+                str(e),
+                code=ErrorCodes.INSUFFICIENT_BALANCE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         invalidate_service_lists()
         
         # Award karma for posting a service (+2)
@@ -2242,8 +2242,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
 
         # Soft-delete: mark as Cancelled instead of removing the row.
-        instance.status = 'Cancelled'
-        instance.save(update_fields=['status', 'updated_at'])
+        with transaction.atomic():
+            if instance.type == 'Need':
+                release_timebank_for_need_service(instance)
+            instance.status = 'Cancelled'
+            instance.save(update_fields=['status', 'updated_at'])
         invalidate_service_lists()
         invalidate_user_services(str(instance.user.id))
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -5355,7 +5358,8 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
 
         direction = self._get_direction_filter()
         page = request.query_params.get('page', '1')
-        cached_result = get_cached_transactions(str(user.id), page=page, direction=direction)
+        page_size = request.query_params.get('page_size', str(self.pagination_class.page_size))
+        cached_result = get_cached_transactions(str(user.id), page=page, direction=direction, page_size=page_size)
         if cached_result is not None:
             return Response(cached_result)
 
@@ -5366,7 +5370,14 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
             response.data['summary'] = summary
-            cache_transactions(str(user.id), response.data, page=request.query_params.get('page', '1'), direction=direction, ttl=CACHE_TTL_SHORT)
+            cache_transactions(
+                str(user.id),
+                response.data,
+                page=request.query_params.get('page', '1'),
+                direction=direction,
+                page_size=page_size,
+                ttl=CACHE_TTL_SHORT,
+            )
             return response
 
         serializer = self.get_serializer(queryset, many=True)
@@ -5377,11 +5388,19 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             'results': serializer.data,
             'summary': summary,
         }
-        cache_transactions(str(user.id), response_data, page=request.query_params.get('page', '1'), direction=direction, ttl=CACHE_TTL_SHORT)
+        cache_transactions(
+            str(user.id),
+            response_data,
+            page=request.query_params.get('page', '1'),
+            direction=direction,
+            page_size=page_size,
+            ttl=CACHE_TTL_SHORT,
+        )
         return Response(response_data)
 
     def get_queryset(self):
         queryset = TransactionHistory.objects.filter(user=self.request.user).select_related(
+            'service__user',
             'handshake__service__user',
             'handshake__requester',
         )
@@ -5391,12 +5410,14 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(amount__gt=0)
         elif direction == 'debit':
             queryset = queryset.filter(amount__lt=0)
+        elif direction == 'reservation':
+            queryset = queryset.filter(transaction_type__in=['provision', 'refund'])
 
         return queryset.order_by('-created_at')
 
     def _get_direction_filter(self):
         direction = self.request.query_params.get('direction', 'all').strip().lower()
-        if direction not in {'all', 'credit', 'debit'}:
+        if direction not in {'all', 'credit', 'debit', 'reservation'}:
             return 'all'
         return direction
 
