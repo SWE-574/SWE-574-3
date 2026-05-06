@@ -22,6 +22,7 @@ import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useScreenCache } from "../../hooks/useScreenCache";
 import { ApiNetworkError } from "../../api/client";
+import { shouldSuppressChatLoadError } from "../../utils/messagesOffline";
 
 type Nav = NativeStackNavigationProp<MessagesStackParamList, "MessagesList">;
 
@@ -349,7 +350,9 @@ export default function MessagesScreen() {
           ),
         );
       } catch (err) {
-        console.error("Failed to load chats:", err);
+        if (!shouldSuppressChatLoadError(err)) {
+          console.error("Failed to load chats:", err);
+        }
         // Network failure: fall back to cached chats so the conversation
         // list survives going offline. Event/joined-event derivations stay
         // empty — they require network round-trips we cannot replay here.
