@@ -362,10 +362,10 @@ const PublicProfile = () => {
         </Box>
 
         {/* ── Tab content + right sidebar ───────────────────────────────────── */}
-        <Flex gap={5} align="flex-start" direction={{ base: 'column', lg: 'row' }} pb={6}>
+        <Flex gap={5} align={{ base: 'stretch', lg: 'flex-start' }} direction={{ base: 'column', lg: 'row' }} pb={6}>
 
           {/* Left column — tab-switched content */}
-          <Box flex={1} minW={0}>
+          <Box flex={1} minW={0} w={{ base: '100%', lg: 'auto' }}>
 
             {/* services tab */}
             <Box role="tabpanel" id="panel-services" aria-labelledby="tab-services" hidden={activePublicTab !== 'services'}>

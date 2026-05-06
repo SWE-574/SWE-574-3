@@ -360,10 +360,10 @@ const UserProfile = () => {
         )}
 
         {/* ── Main activity layout ──────────────────────────────────────────── */}
-        <Flex gap={5} align="flex-start" direction={{ base: 'column', lg: 'row' }} pb={6}>
+        <Flex gap={5} align={{ base: 'stretch', lg: 'flex-start' }} direction={{ base: 'column', lg: 'row' }} pb={6}>
 
           {/* Left: Services + Tabs */}
-          <Box flex={1} minW={0}>
+          <Box flex={1} minW={0} w={{ base: '100%', lg: 'auto' }}>
             <SectionCard mb={0} overflow="visible">
               {/* ── Segmented tab track ─────────────────────────────────────── */}
               <Box
