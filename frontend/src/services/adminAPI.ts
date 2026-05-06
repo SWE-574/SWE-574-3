@@ -10,6 +10,8 @@ export type ReportResolveAction =
   | 'remove_from_event'
   | 'uphold_no_show'
   | 'overturn_no_show'
+  | 'mark_resolved'
+  | 'mark_dismissed'
 
 function toPaginated<T>(data: PaginatedResponse<T> | T[]): PaginatedResponse<T> {
   if (Array.isArray(data)) {

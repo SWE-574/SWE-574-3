@@ -21,6 +21,8 @@ from .utils import (
     complete_timebank_transfer,
     cancel_timebank_transfer,
     get_provider_and_receiver,
+    notify_reporter_of_receipt,
+    notify_reporter_of_state_change,
 )
 from .cache_utils import invalidate_conversations, invalidate_transactions
 
@@ -1348,11 +1350,13 @@ class HandshakeService:
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Report Requires Review',
                 message=f"New {report.get_type_display()} report for service '{handshake.service.title}'",
                 handshake=handshake,
+                report=report,
             )
+        notify_reporter_of_receipt(report)
 
         return report
 
@@ -1968,10 +1972,12 @@ class EventNoShowAppealService:
                 service=locked_handshake.service,
             )
 
+            notify_reporter_of_receipt(report)
+
             for admin in User.objects.filter(role='admin').only('id'):
                 create_notification(
                     user=admin,
-                    notification_type='admin_warning',
+                    notification_type='new_report',
                     title='No-Show Appeal Requires Review',
                     message=(
                         f"New no-show appeal for event '{locked_handshake.service.title}' "
@@ -1979,6 +1985,7 @@ class EventNoShowAppealService:
                     ),
                     handshake=locked_handshake,
                     service=locked_handshake.service,
+                    report=report,
                 )
 
             return report
@@ -2028,6 +2035,7 @@ class EventNoShowAppealService:
                 locked_report.resolved_at = timezone.now()
                 locked_report.admin_notes = admin_notes or 'No-show appeal approved; handshake updated to attended.'
                 locked_report.save(update_fields=['status', 'resolved_by', 'resolved_at', 'admin_notes'])
+                notify_reporter_of_state_change(locked_report)
 
                 create_notification(
                     user=participant,
@@ -2057,6 +2065,7 @@ class EventNoShowAppealService:
                 locked_report.resolved_at = timezone.now()
                 locked_report.admin_notes = admin_notes or 'No-show appeal rejected; no-show status upheld.'
                 locked_report.save(update_fields=['status', 'resolved_by', 'resolved_at', 'admin_notes'])
+                notify_reporter_of_state_change(locked_report)
 
                 create_notification(
                     user=participant,

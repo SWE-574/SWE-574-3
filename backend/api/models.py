@@ -543,6 +543,10 @@ class Notification(models.Model):
         ('positive_rep', 'Positive Reputation'),
         ('admin_warning', 'Admin Warning'),
         ('dispute_resolved', 'Dispute Resolved'),
+        ('new_report', 'New Report'),
+        ('report_received', 'Report Received'),
+        ('report_resolved', 'Report Resolved'),
+        ('report_dismissed', 'Report Dismissed'),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -553,6 +557,7 @@ class Notification(models.Model):
     is_read = models.BooleanField(default=False)
     related_handshake = models.ForeignKey(Handshake, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     related_service = models.ForeignKey(Service, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    related_report = models.ForeignKey('Report', on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -560,6 +565,7 @@ class Notification(models.Model):
             models.Index(fields=['user', 'is_read', 'created_at']),
             models.Index(fields=['related_handshake']),
             models.Index(fields=['related_service']),
+            models.Index(fields=['related_report']),
         ]
         ordering = ['-created_at']
 
