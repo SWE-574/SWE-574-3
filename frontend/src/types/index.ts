@@ -200,6 +200,10 @@ export interface Service {
   comment_count?: number
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
+  // FR-11f / FR-11n: backend-canonical edit-lock state. Frontend should
+  // consume these directly instead of re-deriving the date math (#267).
+  edit_locked?: boolean
+  edit_lock_reason?: string | null
 }
 
 export interface EventEvaluationSummary {

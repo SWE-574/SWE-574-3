@@ -93,7 +93,7 @@ from .services import (
 from .ranking_debug import build_service_debug_payload
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
-from .search_filters import SearchEngine
+from .search_filters import InvalidSearchParam, SearchEngine
 from .performance import track_performance
 from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
 from django.db.models.functions import Coalesce
@@ -1936,9 +1936,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
             'distance': self.request.query_params.get('distance', 10),
+            # FR-12c — event date-range filter (only fires when type=Event).
+            'date_from': self.request.query_params.get('date_from'),
+            'date_to': self.request.query_params.get('date_to'),
         }
-        
-        queryset = search_engine.search(queryset, search_params)
+
+        try:
+            queryset = search_engine.search(queryset, search_params)
+        except InvalidSearchParam as exc:
+            # Surface the field-level error instead of swallowing it.
+            raise drf_serializers.ValidationError({exc.field: exc.message})
 
         user_param = self.request.query_params.get('user')
         # Filter by owner user (for profile pages)
