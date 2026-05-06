@@ -7,6 +7,7 @@ from .models import (
     ChatRoom, PublicChatMessage, Comment, NegativeRep, AdminAuditLog, PlatformSetting,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia, UserFollow
 )
+from django.conf import settings
 from django.db.models import Q
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
@@ -1227,6 +1228,24 @@ class ServiceSerializer(serializers.ModelSerializer):
 
         return service
 
+# Disposable / temporary email providers we refuse at registration time.
+# Conservative list — covers the most prevalent throwaway services seen in
+# spam logs. Extend via the DISPOSABLE_EMAIL_DOMAINS_EXTRA setting if needed.
+DISPOSABLE_EMAIL_DOMAINS = frozenset({
+    'mailinator.com', 'guerrillamail.com', 'guerrillamailblock.com',
+    'sharklasers.com', 'grr.la', 'guerrillamail.net', 'guerrillamail.org',
+    'guerrillamail.biz', 'guerrillamail.de', 'spam4.me', 'pokemail.net',
+    '10minutemail.com', '10minutemail.net', 'tempmail.com', 'temp-mail.org',
+    'temp-mail.io', 'tempmailo.com', 'throwawaymail.com', 'yopmail.com',
+    'yopmail.fr', 'yopmail.net', 'getnada.com', 'maildrop.cc',
+    'fakeinbox.com', 'trashmail.com', 'trashmail.net', 'trashmail.de',
+    'trashmail.io', 'dispostable.com', 'mintemail.com', 'mailcatch.com',
+    'mvrht.com', 'inboxbear.com', 'spamgourmet.com', 'mohmal.com',
+    'getairmail.com', 'mytemp.email', 'tempmailaddress.com',
+    'tempinbox.com', 'mail-temp.com', 'emailondeck.com',
+})
+
+
 @extend_schema_serializer(
     examples=[
         OpenApiExample(
@@ -1266,6 +1285,22 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         model = User
         fields = ['email', 'password', 'first_name', 'last_name']
         extra_kwargs = {'password': {'write_only': True}}
+
+    def validate_email(self, value):
+        # NormalizeBaseUserManager already lowercases the domain part on create,
+        # but we need it lowercased here for the blacklist check before save.
+        normalized = (value or '').strip().lower()
+        if '@' not in normalized:
+            raise serializers.ValidationError('Enter a valid email address.')
+        domain = normalized.rsplit('@', 1)[1]
+        # Allow extension via settings without code change.
+        extra = set(getattr(settings, 'DISPOSABLE_EMAIL_DOMAINS_EXTRA', []) or [])
+        blacklist = DISPOSABLE_EMAIL_DOMAINS | {d.lower() for d in extra}
+        if domain in blacklist:
+            raise serializers.ValidationError(
+                'Disposable email addresses are not allowed. Please use a permanent email.'
+            )
+        return normalized
 
     def validate_password(self, value):
         try:
