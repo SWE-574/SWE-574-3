@@ -17,18 +17,18 @@ import {
 const HOW_IT_WORKS: { icon: React.ReactNode; title: string; body: string }[] = [
   {
     icon: <FiUsers size={20} />,
-    title: '1. Join the bank',
-    body: 'Sign up with an email. You start with 3 hours of credit so you can request help on day one.',
+    title: '1. Join your neighbourhood',
+    body: 'Sign up with an email. You start with 3 hours so you can join something on day one — no money, no strings.',
   },
   {
     icon: <FiRepeat size={20} />,
-    title: '2. Earn or spend hours',
-    body: 'Offer something you can do — pet-sit, fix a bike, teach Python — and earn an hour for every hour you give.',
+    title: '2. Share what you love',
+    body: 'Host a conversation, teach a hobby, lead a walk, swap a recipe — anything you enjoy doing with others.',
   },
   {
     icon: <FiClock size={20} />,
-    title: '3. Spend on what you need',
-    body: 'Use your hours on offers from other members. One hour given equals one hour received, regardless of skill.',
+    title: '3. Find your next thing',
+    body: 'Browse what neighbours are sharing and join in. One hour given is one hour received — every hour counts the same.',
   },
 ]
 
@@ -38,7 +38,7 @@ function useDocumentMeta() {
   // landing page (issue #457 acceptance criterion).
   useEffect(() => {
     const previousTitle = document.title
-    document.title = 'The Hive — A community time-bank where 1 hour = 1 hour'
+    document.title = 'The Hive — Share time and skills with your neighbours'
 
     function setMeta(selector: string, attr: 'name' | 'property', value: string, content: string) {
       let tag = document.head.querySelector<HTMLMetaElement>(selector)
@@ -51,10 +51,10 @@ function useDocumentMeta() {
     }
 
     const description =
-      'Trade time, not money. The Hive is a neighbourhood time-bank where every member starts with 3 hours of credit and one hour given equals one hour received.'
+      'The Hive is a neighbourhood community for sharing skills, hobbies, and time. Teach, learn, walk, cook, talk — every hour given is an hour received, and every member starts with three.'
 
     setMeta('meta[name="description"]', 'name', 'description', description)
-    setMeta('meta[property="og:title"]', 'property', 'og:title', 'The Hive — A community time-bank')
+    setMeta('meta[property="og:title"]', 'property', 'og:title', 'The Hive — A neighbourhood for sharing time')
     setMeta('meta[property="og:description"]', 'property', 'og:description', description)
     setMeta('meta[property="og:type"]', 'property', 'og:type', 'website')
 
@@ -204,7 +204,7 @@ const HomePage = () => {
             >
               <FiClock size={13} />
               <Text fontSize="12px" fontWeight={700} letterSpacing="0.02em">
-                3 hours free when you join
+                3 hours waiting when you join
               </Text>
             </Flex>
 
@@ -216,15 +216,16 @@ const HomePage = () => {
               lineHeight={1.1}
               letterSpacing="-0.02em"
             >
-              Trade time, not money.
+              Share what you love
               <br />
-              <Text as="span" color={GREEN}>One hour given = one hour received.</Text>
+              <Text as="span" color={GREEN}>with the people next door.</Text>
             </Text>
 
             <Text color={GRAY700} maxW="540px" fontSize="17px" lineHeight={1.55}>
-              The Hive is a neighbourhood time-bank. Post what you can do, browse what
-              your neighbours need, and exchange in hours. Start with three hours of
-              credit so you can ask for help on your very first day.
+              The Hive is a neighbourhood community for sharing skills, hobbies, and
+              time — language practice, cooking, walks, repairs, conversation. No money
+              changes hands. An hour given is an hour received, and you start with three
+              of them.
             </Text>
 
             <HStack gap={3} pt={2} flexWrap="wrap">
@@ -286,11 +287,11 @@ const HomePage = () => {
                     </Box>
                   </Flex>
                   <Text fontSize="14px" fontWeight={600} color={GRAY900}>
-                    Help moving boxes, half a day
+                    Italian conversation over coffee
                   </Text>
                   <Flex justify="space-between" mt={2}>
-                    <Text fontSize="11px" color={GRAY500}>4h exchange</Text>
-                    <Text fontSize="11px" color={GREEN} fontWeight={700}>4h ⟶</Text>
+                    <Text fontSize="11px" color={GRAY500}>1h chat</Text>
+                    <Text fontSize="11px" color={GREEN} fontWeight={700}>1h ⟶</Text>
                   </Flex>
                 </Box>
 
@@ -344,11 +345,11 @@ const HomePage = () => {
             mb={2}
             letterSpacing="-0.01em"
           >
-            What is a time-bank?
+            How The Hive works
           </Text>
           <Text fontSize="15px" color={GRAY600} maxW="640px" mb={8}>
-            A time-bank is a community where people exchange skills using time as the only currency.
-            An hour of dog-walking is worth the same as an hour of legal advice — every hour counts equally.
+            People share what they love with their neighbours and use time as the only thank-you.
+            An hour of teaching guitar is worth the same as an hour of garden help — no skill counts more than another.
           </Text>
 
           <Grid templateColumns={{ base: '1fr', md: 'repeat(3, 1fr)' }} gap={5}>
@@ -425,10 +426,10 @@ const HomePage = () => {
       <Box as="section" bg={GREEN} color={WHITE}>
         <Box maxW="900px" mx="auto" px={{ base: 4, md: 8 }} py={{ base: 12, md: 16 }} textAlign="center">
           <Text fontSize={{ base: '24px', md: '32px' }} fontWeight={700} mb={3} letterSpacing="-0.01em">
-            Three hours of credit are waiting.
+            Your three hours are waiting.
           </Text>
           <Text fontSize="15px" color="rgba(255,255,255,0.85)" mb={6} maxW="600px" mx="auto">
-            Sign up takes a minute. Browse, exchange, and meet your neighbours — with time as the currency.
+            Sign up takes a minute. Find people to share time with, in whatever way you love.
           </Text>
           <Button
             size="lg"
@@ -454,11 +455,11 @@ const HomePage = () => {
           <Flex align="center" gap={2}>
             <Logo size={20} />
             <Text fontSize="12px" color={GRAY500}>
-              The Hive · A community time-bank
+              The Hive · Share time with your neighbours
             </Text>
           </Flex>
           <Text fontSize="11px" color={GRAY400}>
-            Hours, not invoices.
+            Time shared, neighbour to neighbour.
           </Text>
         </Flex>
       </Box>
