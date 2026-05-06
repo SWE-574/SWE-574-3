@@ -252,6 +252,15 @@ const HomePage = () => {
               >
                 How it works
               </Button>
+              <Button
+                size="lg" variant="ghost"
+                onClick={() => navigate('/dashboard')}
+                borderRadius="10px" px={5}
+                color={GRAY700} _hover={{ bg: GRAY100 }}
+                fontWeight={600}
+              >
+                Browse without signing up
+              </Button>
             </HStack>
           </VStack>
 
