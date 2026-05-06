@@ -59,6 +59,8 @@ const service: Service = {
     first_name: 'Aylin',
     last_name: 'Host',
     role: 'registered',
+    featured_badges: [],
+    featured_badges_detail: [],
   },
 }
 

@@ -1,0 +1,621 @@
+/**
+ * BadgeShowcase – compact display or picker grid for featured badges.
+ *
+ * variant="compact":
+ *   - Horizontal row of up to 2 badges (40px circles with name caption).
+ *   - Own mode + empty: shows "+ Showcase a badge" dashed placeholder.
+ *   - Public mode + empty: renders nothing.
+ *
+ * variant="picker":
+ *   - Scrollable grid of ALL badges from badgeProgress.
+ *   - Press to toggle selection; max 2 enforced.
+ *   - Third selection swaps out the oldest (with inline message).
+ *   - Locked (not earned) badges are greyed and non-pressable.
+ */
+
+import React, { useState } from "react";
+import {
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { colors } from "../../../constants/colors";
+import type { BadgeDetail } from "../../../api/calendar";
+import {
+  formatBadgeEarnedDate,
+  getCompactBadgeTooltipText,
+} from "../../../utils/profileBadgeDisplay";
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+/** Shape used in picker mode – represents every badge with progress info */
+export interface BadgeProgress {
+  id: string;
+  name: string;
+  description: string;
+  icon_url: string | null;
+  earned_at: string | null;
+  /** Whether the badge has been earned by the user */
+  is_earned: boolean;
+  /** Optional progress hint for locked badges */
+  progress_hint?: string;
+}
+
+export interface BadgeShowcaseProps {
+  variant: "compact" | "picker";
+  /** "own" = the authenticated user's profile; "public" = read-only view */
+  mode?: "own" | "public";
+
+  // compact variant props
+  /** Resolved badge details for the currently featured badges */
+  badges?: BadgeDetail[];
+  /** Called when the empty-state placeholder is pressed (own compact) */
+  onPickerOpenRequest?: () => void;
+
+  // picker variant props
+  /** Full badge progress list for the picker grid */
+  badgeProgress?: BadgeProgress[];
+  /** Currently selected badge IDs (controlled) */
+  selectedIds?: string[];
+  /** Called when selection changes */
+  onSelectionChange?: (ids: string[]) => void;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+// ── Compact mode ──────────────────────────────────────────────────────────
+
+function CompactBadge({
+  badge,
+  active,
+  onPress,
+}: {
+  badge: BadgeDetail;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        compactStyles.badge,
+        active && compactStyles.badgeActive,
+        pressed && { opacity: 0.82 },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={`${badge.name} achievement`}
+      accessibilityHint="Shows what this achievement means"
+    >
+      <View style={compactStyles.iconWrapper}>
+        {badge.icon_url ? (
+          <Image
+            source={{ uri: badge.icon_url }}
+            style={compactStyles.icon}
+            accessibilityLabel={badge.name}
+          />
+        ) : (
+          <View style={compactStyles.iconFallback}>
+            <Ionicons name="ribbon-outline" size={20} color={colors.GREEN} />
+          </View>
+        )}
+      </View>
+      <Text style={compactStyles.badgeName} numberOfLines={2}>
+        {badge.name}
+      </Text>
+      {badge.earned_at ? (
+        <Text style={compactStyles.earnedDate}>
+          {formatBadgeEarnedDate(badge.earned_at)}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function CompactShowcase({
+  badges,
+  mode,
+  onPickerOpenRequest,
+}: {
+  badges: BadgeDetail[];
+  mode?: "own" | "public";
+  onPickerOpenRequest?: () => void;
+}) {
+  const [activeBadgeId, setActiveBadgeId] = useState<string | null>(null);
+  const featured = badges.slice(0, 2);
+  const activeBadge = featured.find((badge) => badge.id === activeBadgeId);
+
+  if (featured.length === 0) {
+    if (mode === "public") return null;
+
+    // Own mode empty placeholder
+    return (
+      <Pressable
+        onPress={onPickerOpenRequest}
+        style={({ pressed }) => [
+          compactStyles.emptyPlaceholder,
+          pressed && { opacity: 0.75 },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="Showcase a badge"
+      >
+        <Ionicons
+          name="ribbon-outline"
+          size={20}
+          color="rgba(255,255,255,0.72)"
+        />
+        <View style={compactStyles.emptyPlusBadge}>
+          <Ionicons name="add" size={11} color={colors.GREEN} />
+        </View>
+      </Pressable>
+    );
+  }
+
+  return (
+    <View style={compactStyles.wrapper}>
+      <View style={compactStyles.row}>
+        {featured.map((badge) => (
+          <CompactBadge
+            key={badge.id}
+            badge={badge}
+            active={activeBadgeId === badge.id}
+            onPress={() =>
+              setActiveBadgeId((current) => (current === badge.id ? null : badge.id))
+            }
+          />
+        ))}
+      </View>
+      {activeBadge ? (
+        <View style={compactStyles.tooltip}>
+          <View style={compactStyles.tooltipArrow} />
+          <Text style={compactStyles.tooltipText}>
+            {getCompactBadgeTooltipText(activeBadge)}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// ── Picker mode ───────────────────────────────────────────────────────────
+
+function PickerBadgeItem({
+  badge,
+  selected,
+  selectionOrder,
+  onPress,
+}: {
+  badge: BadgeProgress;
+  selected: boolean;
+  selectionOrder: number;
+  onPress: () => void;
+}) {
+  const isLocked = !badge.is_earned;
+
+  return (
+    <Pressable
+      onPress={isLocked ? undefined : onPress}
+      style={({ pressed }) => [
+        pickerStyles.badge,
+        selected && pickerStyles.badgeSelected,
+        isLocked && pickerStyles.badgeLocked,
+        pressed && !isLocked && { opacity: 0.85 },
+      ]}
+      accessibilityRole={isLocked ? "none" : "checkbox"}
+      accessibilityState={{ checked: selected }}
+      accessibilityLabel={`${badge.name}${isLocked ? " (locked)" : ""}`}
+    >
+      <View style={pickerStyles.iconWrapper}>
+        {badge.icon_url ? (
+          <Image
+            source={{ uri: badge.icon_url }}
+            style={[pickerStyles.icon, isLocked && pickerStyles.iconLocked]}
+            accessibilityLabel={badge.name}
+          />
+        ) : (
+          <View
+            style={[
+              pickerStyles.iconFallback,
+              isLocked && pickerStyles.iconFallbackLocked,
+            ]}
+          >
+            <Ionicons
+              name={isLocked ? "lock-closed-outline" : "ribbon-outline"}
+              size={22}
+              color={isLocked ? colors.GRAY400 : colors.GREEN}
+            />
+          </View>
+        )}
+
+        {selected && (
+          <View style={pickerStyles.selectionBadge}>
+            <Text style={pickerStyles.selectionBadgeText}>{selectionOrder}</Text>
+          </View>
+        )}
+
+        {isLocked && (
+          <View style={pickerStyles.lockOverlay}>
+            <Ionicons name="lock-closed" size={12} color={colors.WHITE} />
+          </View>
+        )}
+      </View>
+
+      <Text
+        style={[pickerStyles.badgeName, isLocked && pickerStyles.textLocked]}
+        numberOfLines={2}
+      >
+        {badge.name}
+      </Text>
+
+      {isLocked && badge.progress_hint ? (
+        <Text style={pickerStyles.progressHint} numberOfLines={1}>
+          {badge.progress_hint}
+        </Text>
+      ) : badge.earned_at ? (
+        <Text style={pickerStyles.earnedDate}>
+          {formatBadgeEarnedDate(badge.earned_at)}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function PickerGrid({
+  badgeProgress,
+  selectedIds,
+  onSelectionChange,
+}: {
+  badgeProgress: BadgeProgress[];
+  selectedIds: string[];
+  onSelectionChange: (ids: string[]) => void;
+}) {
+  const [swapMessage, setSwapMessage] = useState<string | null>(null);
+
+  const handlePress = (badge: BadgeProgress) => {
+    if (!badge.is_earned) return;
+
+    const alreadySelected = selectedIds.includes(badge.id);
+
+    if (alreadySelected) {
+      // Deselect
+      onSelectionChange(selectedIds.filter((id) => id !== badge.id));
+      setSwapMessage(null);
+      return;
+    }
+
+    if (selectedIds.length < 2) {
+      onSelectionChange([...selectedIds, badge.id]);
+      setSwapMessage(null);
+      return;
+    }
+
+    // Max 2 reached: swap out the oldest (first in array)
+    const [removed, ...rest] = selectedIds;
+    const removedBadge = badgeProgress.find((b) => b.id === removed);
+    const newIds = [...rest, badge.id];
+    onSelectionChange(newIds);
+    setSwapMessage(
+      `Replaced "${removedBadge?.name ?? removed}" with "${badge.name}"`,
+    );
+  };
+
+  return (
+    <View>
+      <Text style={pickerStyles.eyebrow}>PICK UP TO 2 TO FEATURE</Text>
+
+      {swapMessage ? (
+        <View style={pickerStyles.swapMessage}>
+          <Ionicons name="swap-horizontal-outline" size={14} color={colors.AMBER} />
+          <Text style={pickerStyles.swapMessageText}>{swapMessage}</Text>
+        </View>
+      ) : null}
+
+      <View style={pickerStyles.grid}>
+        {badgeProgress.map((badge) => {
+          const selected = selectedIds.includes(badge.id);
+          const selectionOrder = selected ? selectedIds.indexOf(badge.id) + 1 : 0;
+          return (
+            <PickerBadgeItem
+              key={badge.id}
+              badge={badge}
+              selected={selected}
+              selectionOrder={selectionOrder}
+              onPress={() => handlePress(badge)}
+            />
+          );
+        })}
+      </View>
+
+      {badgeProgress.length === 0 && (
+        <View style={pickerStyles.emptyState}>
+          <Ionicons name="ribbon-outline" size={32} color={colors.GRAY400} />
+          <Text style={pickerStyles.emptyStateText}>
+            No badges earned yet. Complete exchanges to earn badges.
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── Main export ───────────────────────────────────────────────────────────
+
+export default function BadgeShowcase({
+  variant,
+  mode = "own",
+  badges = [],
+  onPickerOpenRequest,
+  badgeProgress = [],
+  selectedIds = [],
+  onSelectionChange,
+}: BadgeShowcaseProps) {
+  if (variant === "compact") {
+    return (
+      <CompactShowcase
+        badges={badges}
+        mode={mode}
+        onPickerOpenRequest={onPickerOpenRequest}
+      />
+    );
+  }
+
+  // picker variant – rendered inside ProfileEditSheet's outer ScrollView, so no
+  // inner ScrollView here (nested same-direction ScrollViews collapse on Android
+  // and cause gesture conflicts on iOS). The flat View inherits scroll from above.
+  return (
+    <View style={{ paddingBottom: 16 }}>
+      <PickerGrid
+        badgeProgress={badgeProgress}
+        selectedIds={selectedIds}
+        onSelectionChange={onSelectionChange ?? (() => {})}
+      />
+    </View>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────
+
+const compactStyles = StyleSheet.create({
+  wrapper: {
+    alignItems: "flex-end",
+    gap: 6,
+  },
+  row: {
+    flexDirection: "row",
+    gap: 6,
+    padding: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+  badge: {
+    alignItems: "center",
+    maxWidth: 36,
+    borderRadius: 18,
+  },
+  badgeActive: {
+    transform: [{ scale: 1.04 }],
+  },
+  iconWrapper: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.38)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  icon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+  },
+  iconFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 34,
+    height: 34,
+  },
+  badgeName: {
+    display: "none",
+  },
+  earnedDate: {
+    display: "none",
+  },
+  emptyPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignSelf: "flex-start",
+  },
+  emptyPlusBadge: {
+    position: "absolute",
+    right: 5,
+    bottom: 5,
+    width: 17,
+    height: 17,
+    borderRadius: 8.5,
+    backgroundColor: colors.WHITE,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.5)",
+  },
+  emptyPlaceholderText: {
+    display: "none",
+  },
+  tooltip: {
+    maxWidth: 220,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: "rgba(17,24,39,0.88)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+  tooltipArrow: {
+    position: "absolute",
+    top: -5,
+    right: 16,
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: "rgba(17,24,39,0.88)",
+    transform: [{ rotate: "45deg" }],
+  },
+  tooltipText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "700",
+    color: colors.WHITE,
+  },
+});
+
+const pickerStyles = StyleSheet.create({
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.1,
+    color: colors.GRAY500,
+    textTransform: "uppercase",
+    marginBottom: 12,
+  },
+  swapMessage: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.AMBER_LT,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 10,
+  },
+  swapMessageText: {
+    fontSize: 12,
+    color: colors.AMBER,
+    fontWeight: "600",
+    flex: 1,
+  },
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  badge: {
+    width: "30%",
+    alignItems: "center",
+    backgroundColor: colors.WHITE,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    padding: 10,
+    minHeight: 100,
+    justifyContent: "flex-start",
+  },
+  badgeSelected: {
+    borderColor: colors.GREEN,
+    backgroundColor: colors.GREEN_LT,
+  },
+  badgeLocked: {
+    opacity: 0.5,
+  },
+  iconWrapper: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: "visible",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  icon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  iconLocked: {
+    opacity: 0.5,
+  },
+  iconFallback: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.GREEN_LT,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconFallbackLocked: {
+    backgroundColor: colors.GRAY100,
+  },
+  selectionBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.GREEN,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: colors.WHITE,
+  },
+  selectionBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.WHITE,
+  },
+  lockOverlay: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.GRAY500,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeName: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.GRAY700,
+    textAlign: "center",
+    marginBottom: 2,
+  },
+  textLocked: {
+    color: colors.GRAY400,
+  },
+  earnedDate: {
+    fontSize: 10,
+    color: colors.GRAY400,
+    textAlign: "center",
+  },
+  progressHint: {
+    fontSize: 9,
+    color: colors.AMBER,
+    textAlign: "center",
+    fontWeight: "600",
+  },
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: 32,
+    gap: 10,
+  },
+  emptyStateText: {
+    fontSize: 13,
+    color: colors.GRAY500,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+});

@@ -100,6 +100,13 @@ export default defineConfig(({ mode }) => {
         include: ['src/**/*.{ts,tsx}'],
         exclude: ['src/test/**', 'src/main.tsx'],
       },
+      server: {
+        deps: {
+          // @exodus/bytes is ESM-only but html-encoding-sniffer (jsdom 28 dep) requires it via CJS.
+          // Inline it so Vite transforms it to CJS-compatible output before the test environment loads.
+          inline: ['@exodus/bytes'],
+        },
+      },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, './src'),

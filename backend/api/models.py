@@ -103,6 +103,12 @@ class User(AbstractUser):
         help_text='Whether the user has completed the onboarding flow'
     )
 
+    # Featured badges: up to 2 badge IDs the user has earned that they want to highlight
+    featured_badges = models.JSONField(
+        default=list,
+        blank=True,
+    )
+
     objects = CustomUserManager()
 
     USERNAME_FIELD = 'email'
@@ -110,6 +116,26 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+    def clean(self):
+        super().clean()
+        ids = self.featured_badges
+        if not isinstance(ids, list):
+            raise ValidationError({'featured_badges': ['Must be a list.']})
+        if len(ids) > 2:
+            raise ValidationError({'featured_badges': ['At most 2 featured badges are allowed.']})
+        for entry in ids:
+            if not isinstance(entry, str):
+                raise ValidationError({'featured_badges': ['All entries must be strings.']})
+        if len(ids) != len(set(ids)):
+            raise ValidationError({'featured_badges': ['Duplicate badge IDs are not allowed.']})
+        if ids:
+            # UserBadge is defined later in this module; access via apps to avoid forward-ref issues
+            from django.apps import apps
+            UserBadgeModel = apps.get_model('api', 'UserBadge')
+            earned_count = UserBadgeModel.objects.filter(user=self, badge_id__in=ids).count()
+            if earned_count != len(ids):
+                raise ValidationError({'featured_badges': ['One or more badge IDs have not been earned by this user.']})
 
     def save(self, *args, **kwargs):
         if self.timebank_balance is None:

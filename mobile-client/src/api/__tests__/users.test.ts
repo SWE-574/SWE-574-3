@@ -20,8 +20,23 @@ import {
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
 
 describe("users", () => {
+  const originalApiUrl = process.env.EXPO_PUBLIC_API_URL;
+
   beforeEach(() => {
     (global as unknown as { fetch: unknown }).fetch = jest.fn();
+    if (originalApiUrl === undefined) {
+      delete process.env.EXPO_PUBLIC_API_URL;
+    } else {
+      process.env.EXPO_PUBLIC_API_URL = originalApiUrl;
+    }
+  });
+
+  afterAll(() => {
+    if (originalApiUrl === undefined) {
+      delete process.env.EXPO_PUBLIC_API_URL;
+    } else {
+      process.env.EXPO_PUBLIC_API_URL = originalApiUrl;
+    }
   });
 
   it("getMe GETs /users/me/", async () => {
@@ -50,6 +65,65 @@ describe("users", () => {
     mockFetchResolve(user);
     expect(await getUser("u2")).toEqual(user);
     expect(getLastFetchCall().url).toContain("/users/u2/");
+  });
+
+  it("normalizes public profile cover URLs from local storage hosts", async () => {
+    mockFetchResolve({
+      id: "u2",
+      first_name: "C",
+      banner_url: "http://minio:9000/hive-media/banners/cover.jpg",
+    });
+
+    const user = await getUser("u2");
+
+    expect(user.banner_url).toBe(
+      "https://apiary.selmangunes.com/hive-media/banners/cover.jpg",
+    );
+  });
+
+  it("keeps local MinIO media on port 9000 for mobile device runtimes", async () => {
+    process.env.EXPO_PUBLIC_API_URL = "http://10.0.2.2:8000/api";
+    mockFetchResolve({
+      id: "u2",
+      first_name: "C",
+      avatar_url: "http://localhost:9000/hive-media/avatars/user.jpg",
+      banner_url: "http://minio:9000/hive-media/banners/cover.jpg",
+    });
+
+    const user = await getUser("u2");
+
+    expect(user.avatar_url).toBe("http://10.0.2.2:9000/hive-media/avatars/user.jpg");
+    expect(user.banner_url).toBe("http://10.0.2.2:9000/hive-media/banners/cover.jpg");
+  });
+
+  it("preserves a non-default local media port when rewriting profile media", async () => {
+    process.env.EXPO_PUBLIC_API_URL = "http://10.0.2.2:8000/api";
+    mockFetchResolve({
+      id: "u2",
+      first_name: "C",
+      avatar_url: "http://localhost:9010/hive-media/avatars/user.jpg",
+      banner_url: "http://localhost:9010/hive-media/banners/cover.jpg",
+    });
+
+    const user = await getUser("u2");
+
+    expect(user.avatar_url).toBe("http://10.0.2.2:9010/hive-media/avatars/user.jpg");
+    expect(user.banner_url).toBe("http://10.0.2.2:9010/hive-media/banners/cover.jpg");
+  });
+
+  it("normalizes relative local media URLs to the mobile-accessible MinIO port", async () => {
+    process.env.EXPO_PUBLIC_API_URL = "http://10.0.2.2:8000/api";
+    mockFetchResolve({
+      id: "u2",
+      first_name: "C",
+      avatar_url: "/hive-media/avatars/user.jpg",
+      banner_url: "/hive-media/banners/cover.jpg",
+    });
+
+    const user = await getUser("u2");
+
+    expect(user.avatar_url).toBe("http://10.0.2.2:9000/hive-media/avatars/user.jpg");
+    expect(user.banner_url).toBe("http://10.0.2.2:9000/hive-media/banners/cover.jpg");
   });
 
   it("updateUser PUTs to /users/:id/", async () => {

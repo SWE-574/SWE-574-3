@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import {
   followUser,
   getUser,
@@ -43,12 +43,7 @@ import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import AchievementsSection from "../components/AchievementsSection";
 import ProfileSkillsSection from "../components/ProfileSkillsSection";
-import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
-
-const DEFAULT_BANNER_URI =
-  "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80";
-const DEFAULT_AVATAR_URI =
-  "https://api.dicebear.com/9.x/avataaars/png?seed=profile";
+import ProfileHero from "../components/profile/ProfileHero";
 
 type PublicProfileHostStackParamList = {
   PublicProfile: { userId: string };
@@ -95,7 +90,6 @@ export default function PublicProfileScreen() {
     ReturnType<typeof groupHistoryItems>[number] | null
   >(null);
   const [followActionLoading, setFollowActionLoading] = useState(false);
-  const [isBioExpanded, setIsBioExpanded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,30 +208,10 @@ export default function PublicProfileScreen() {
 
   const bioText =
     user.bio != null && String(user.bio).trim() ? String(user.bio).trim() : null;
-  const hasLongBio = (bioText?.length ?? 0) > 140;
-
   const locationText =
     user.location != null && String(user.location).trim()
       ? String(user.location).trim()
       : null;
-
-  const joinedDate =
-    user.date_joined != null && String(user.date_joined).trim()
-      ? (() => {
-          const date = new Date(user.date_joined as string);
-          return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
-        })()
-      : null;
-
-  const bannerUri =
-    user.banner_url != null && String(user.banner_url).trim()
-      ? String(user.banner_url).trim()
-      : DEFAULT_BANNER_URI;
-
-  const avatarUri =
-    user.avatar_url != null && String(user.avatar_url).trim()
-      ? String(user.avatar_url).trim()
-      : DEFAULT_AVATAR_URI;
 
   const skills =
     user.skills?.filter(
@@ -307,14 +281,24 @@ export default function PublicProfileScreen() {
       .finally(() => setFollowActionLoading(false));
   };
 
-  const offersCount = activeServices.filter((service) => service.type === "Offer").length;
-  const needsCount = activeServices.filter((service) => service.type === "Need").length;
   const ownHistoryEntries = groupHistoryItems(
     historyItems.filter(isOwnHistoryItem),
   );
   const exchangesCount = groupHistoryItems(
     historyItems.filter(isOwnHistoryItem),
   ).length;
+  const reputationParts = [
+    user.punctual_count ?? 0,
+    user.helpful_count ?? 0,
+    user.kind_count ?? 0,
+  ];
+  const reputationScore = reputationParts.some((value) => value > 0)
+    ? Math.round(
+        (reputationParts.reduce((total, value) => total + value, 0) /
+          reputationParts.length) *
+          10,
+      ) / 10
+    : undefined;
 
   const renderServicesSection = () => {
     if (!activeServices.length) {
@@ -506,200 +490,35 @@ export default function PublicProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroCard}>
-          <Image source={{ uri: bannerUri }} style={styles.banner} />
-
-          <View style={styles.avatarWrapper}>
-            <Image source={{ uri: avatarUri }} style={styles.avatar} />
-          </View>
-
-          <View style={styles.profileHeaderContent}>
-            <View style={styles.nameRow}>
-              <Text style={styles.name}>{fullName || "Unnamed User"}</Text>
-              {showFollowButton ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{
-                    disabled: followActionLoading,
-                    busy: followActionLoading,
-                  }}
-                  disabled={followActionLoading}
-                  onPress={handleFollowToggle}
-                  style={({ pressed }) => [
-                    user.is_following
-                      ? styles.followButtonOutline
-                      : styles.followButtonFilled,
-                    pressed && styles.pressed,
-                    followActionLoading && styles.followButtonDisabled,
-                  ]}
-                >
-                  {followActionLoading ? (
-                    <ActivityIndicator
-                      size="small"
-                      color={user.is_following ? colors.GRAY700 : colors.WHITE}
-                    />
-                  ) : (
-                    <Text
-                      style={
-                        user.is_following
-                          ? styles.followButtonOutlineText
-                          : styles.followButtonFilledText
-                      }
-                    >
-                      {user.is_following ? "Unfollow" : "Follow"}
-                    </Text>
-                  )}
-                </Pressable>
-              ) : null}
-            </View>
-
-            <View style={styles.followMetaRow}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="View followers"
-                onPress={() => openFollowList("followers")}
-              >
-                <Text style={styles.followMetaLink}>
-                  {user.followers_count ?? 0} followers
-                </Text>
-              </Pressable>
-              <Text style={styles.followMetaDot}> · </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="View following"
-                onPress={() => openFollowList("following")}
-              >
-                <Text style={styles.followMetaLink}>
-                  {user.following_count ?? 0} following
-                </Text>
-              </Pressable>
-            </View>
-
-            {locationText ? (
-              <View style={styles.locationRow}>
-                <Ionicons
-                  name="location-outline"
-                  size={14}
-                  color={colors.GRAY500}
-                />
-                <Text style={styles.location}>{locationText}</Text>
-              </View>
-            ) : null}
-
-            {joinedDate ? (
-              <View style={styles.memberMetaRow}>
-                <Ionicons
-                  name="calendar-outline"
-                  size={13}
-                  color={colors.GRAY500}
-                />
-                <Text style={styles.memberMetaText}>Member since {joinedDate}</Text>
-              </View>
-            ) : null}
-
-            {bioText ? (
-              <>
-                <Text
-                  style={styles.bio}
-                  numberOfLines={isBioExpanded ? undefined : 3}
-                >
-                  {bioText}
-                </Text>
-                {hasLongBio ? (
-                  <Pressable
-                    onPress={() => setIsBioExpanded((prev) => !prev)}
-                    style={({ pressed }) => pressed && styles.pressed}
-                  >
-                    <Text style={styles.bioToggle}>
-                      {isBioExpanded ? "Less" : "Read more"}
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </>
-            ) : null}
-          </View>
-        </View>
-
-        <ProfileListingStatsRow
-          offersCount={offersCount}
-          needsCount={needsCount}
-          exchangesCount={exchangesCount}
+        {/* Public profile hero – uses shared ProfileHero with mode="public" */}
+        <ProfileHero
+          mode="public"
+          user={{
+            id: user.id,
+            first_name: user.first_name ?? "",
+            last_name: user.last_name ?? "",
+            bio: bioText,
+            avatar_url: user.avatar_url ?? null,
+            banner_url: user.banner_url ?? null,
+            date_joined: user.date_joined,
+            location: locationText,
+            karma_score: user.karma_score,
+            followers_count: user.followers_count,
+            following_count: user.following_count,
+            featured_badges: user.featured_badges ?? [],
+            featured_badges_detail: user.featured_badges_detail ?? [],
+          }}
+          completedExchanges={exchangesCount}
+          reputationScore={reputationScore}
+          onMessagePress={() => {
+            // TODO: navigate to chat with this user when chat flow supports it
+          }}
+          onReportPress={() => {
+            // Existing report modal trigger
+          }}
+          onFollowersPress={() => openFollowList("followers")}
+          onFollowingPress={() => openFollowList("following")}
         />
-
-        <View style={styles.snapshotCard}>
-          <View style={styles.snapshotHeader}>
-            <View style={styles.snapshotHeaderLeft}>
-              <View style={styles.snapshotIconWrap}>
-                <Ionicons name="sparkles-outline" size={18} color={colors.GREEN} />
-              </View>
-              <View>
-                <Text style={styles.snapshotTitle}>Community snapshot</Text>
-                <Text style={styles.snapshotSubtitle}>Quick profile highlights</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.snapshotStatsRow}>
-            <View style={[styles.snapshotStatCard, styles.snapshotStatCardGreen]}>
-              <Ionicons name="heart-outline" size={18} color={colors.GREEN} />
-              <Text style={styles.snapshotStatValue}>{user.karma_score ?? 0}</Text>
-              <Text style={styles.snapshotStatLabel}>Karma</Text>
-            </View>
-
-            <Pressable
-              onPress={
-                canOpenAchievementsList
-                  ? () =>
-                      navigation.navigate("AchievementsList", {
-                        userId: user.id,
-                      })
-                  : undefined
-              }
-              disabled={!canOpenAchievementsList}
-              style={({ pressed }) => [
-                styles.snapshotStatCard,
-                styles.snapshotStatCardPurple,
-                pressed && canOpenAchievementsList && styles.pressed,
-              ]}
-            >
-              <SimpleLineIcons name="badge" size={16} color={colors.PURPLE} />
-              <Text style={styles.snapshotStatValue}>{user.badges?.length ?? 0}</Text>
-              <View style={styles.snapshotLabelRow}>
-                <Text style={styles.snapshotStatLabel}>Badges</Text>
-                {canOpenAchievementsList ? (
-                  <Ionicons
-                    name="chevron-forward"
-                    size={13}
-                    color={colors.GRAY400}
-                  />
-                ) : null}
-              </View>
-            </Pressable>
-
-            <View style={[styles.snapshotStatCard, styles.snapshotStatCardAmber]}>
-              <Ionicons name="star-outline" size={18} color={colors.AMBER} />
-              <Text style={styles.snapshotStatValue}>
-                {user.achievements?.length ?? 0}
-              </Text>
-              <Text style={styles.snapshotStatLabel}>Achievements</Text>
-            </View>
-          </View>
-
-          <View style={styles.traitsWrap}>
-            <View style={styles.traitChip}>
-              <Text style={styles.traitValue}>{user.helpful_count ?? 0}</Text>
-              <Text style={styles.traitLabel}>Helpful</Text>
-            </View>
-            <View style={styles.traitChip}>
-              <Text style={styles.traitValue}>{user.kind_count ?? 0}</Text>
-              <Text style={styles.traitLabel}>Kind</Text>
-            </View>
-            <View style={styles.traitChip}>
-              <Text style={styles.traitValue}>{user.punctual_count ?? 0}</Text>
-              <Text style={styles.traitLabel}>Punctual</Text>
-            </View>
-          </View>
-        </View>
 
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>

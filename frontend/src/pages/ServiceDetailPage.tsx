@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import InterestRequesterRow from '@/components/service-detail/InterestRequesterRow'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Box, Flex, Grid, Stack, Text } from '@chakra-ui/react'
 import {
@@ -34,21 +35,7 @@ import {
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
-
-// ─── Handshake badge config ───────────────────────────────────────────────────
-
-const HS_BADGE: Record<Handshake['status'], { label: string; bg: string; color: string }> = {
-  pending:    { label: 'Pending',    bg: '#fef9c3', color: '#854d0e' },
-  accepted:   { label: 'Accepted',   bg: '#dcfce7', color: '#166534' },
-  completed:  { label: 'Completed',  bg: '#d1fae5', color: '#065f46' },
-  denied:     { label: 'Declined',   bg: '#fee2e2', color: '#991b1b' },
-  cancelled:  { label: 'Cancelled',  bg: '#f3f4f6', color: '#6b7280' },
-  reported:   { label: 'Reported',   bg: '#fee2e2', color: '#991b1b' },
-  paused:     { label: 'Paused',     bg: '#e0f2fe', color: '#0369a1' },
-  checked_in: { label: 'Checked In', bg: '#d1fae5', color: '#065f46' },
-  attended:   { label: 'Attended',   bg: '#d1fae5', color: '#065f46' },
-  no_show:    { label: 'No-Show',    bg: '#fee2e2', color: '#991b1b' },
-}
+import { HS_BADGE } from '@/constants/handshakeBadges'
 
 // ─── Report options ───────────────────────────────────────────────────────────
 
@@ -1913,44 +1900,30 @@ export default function ServiceDetailPage() {
                       {incoming.length === 0 ? (
                         <Text fontSize="13px" color={GRAY400} textAlign="center" py={3}>No requests yet.</Text>
                       ) : (
-                        <Stack gap={2}>
-                          {incoming.map((h) => {
-                            const cfg    = HS_BADGE[h.status] ?? { label: h.status, bg: GRAY100, color: GRAY500 }
-                            const active = ['pending', 'accepted'].includes(h.status)
-                            return (
-                              <Flex key={h.id} align="center" justify="space-between"
-                                p={3} bg={GRAY50} borderRadius="10px" gap={2}
-                                opacity={active ? 1 : 0.6}
-                              >
-                                <Box flex={1} minW={0}>
-                                  <Text fontSize="13px" fontWeight={600} color={GRAY800}
-                                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                  >
-                                    {h.requester_name}
-                                  </Text>
-                                  <Text fontSize="11px" color={GRAY400}>
-                                    {new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                  </Text>
-                                </Box>
-                                <Flex align="center" gap={2} flexShrink={0}>
-                                  <Box px="7px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700}
-                                    style={{ background: cfg.bg, color: cfg.color }}
-                                  >
-                                    {cfg.label}
-                                  </Box>
-                                  {active && (
-                                    <Box as="button" px="10px" py="5px" borderRadius="7px"
-                                      bg={GREEN} color={WHITE} fontSize="11px" fontWeight={700}
-                                      style={{ border: 'none', cursor: 'pointer' }}
-                                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigate(`/messages/${h.id}`) }}
-                                    >
-                                      Chat
-                                    </Box>
-                                  )}
-                                </Flex>
-                              </Flex>
-                            )
-                          })}
+                        <Stack gap={0}>
+                          {incoming.map((h) => (
+                            <InterestRequesterRow
+                              key={h.id}
+                              handshake={h}
+                              isOwner={isOwn}
+                              onAccept={h.status === 'pending'
+                                ? async () => {
+                                    try {
+                                      await handshakeAPI.accept(h.id)
+                                      setHandshakes(await handshakeAPI.list())
+                                    } catch { /* errors handled via toast elsewhere */ }
+                                  }
+                                : undefined}
+                              onReject={h.status === 'pending'
+                                ? async () => {
+                                    try {
+                                      await handshakeAPI.deny(h.id)
+                                      setHandshakes(await handshakeAPI.list())
+                                    } catch { /* errors handled via toast elsewhere */ }
+                                  }
+                                : undefined}
+                            />
+                          ))}
                         </Stack>
                       )}
 

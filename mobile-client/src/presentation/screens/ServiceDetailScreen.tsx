@@ -831,6 +831,15 @@ export default function ServiceDetailScreen() {
     });
   };
 
+  const openRequesterPublicProfile = (handshake: Handshake) => {
+    const userId = getIdFromField(handshake.requester);
+    if (!userId) return;
+    navigation.navigate("Profile", {
+      screen: "PublicProfile",
+      params: { userId },
+    });
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
@@ -1457,31 +1466,50 @@ export default function ServiceDetailScreen() {
 
                 {ownerIncomingHandshakes.length > 0 ? (
                   <View style={styles.ownerList}>
-                    {ownerIncomingHandshakes.map((handshake) => (
-                      <View key={handshake.id} style={styles.ownerRequestRow}>
-                        <View style={styles.ownerRequestMeta}>
-                          <Text style={styles.ownerRequestName}>
-                            {getHandshakeRequesterName(handshake)}
-                          </Text>
-                          <Text style={styles.ownerRequestSub}>
-                            {formatScheduledDateTime(handshake.created_at)} · {handshake.status}
-                          </Text>
+                    {ownerIncomingHandshakes.map((handshake) => {
+                      const requesterId = getIdFromField(handshake.requester);
+                      const requesterName = getHandshakeRequesterName(handshake);
+
+                      return (
+                        <View key={handshake.id} style={styles.ownerRequestRow}>
+                          <TouchableOpacity
+                            style={styles.ownerRequestMeta}
+                            onPress={() => openRequesterPublicProfile(handshake)}
+                            activeOpacity={0.72}
+                            disabled={!requesterId}
+                            accessibilityRole={requesterId ? "link" : undefined}
+                            accessibilityLabel={
+                              requesterId ? `View ${requesterName} profile` : undefined
+                            }
+                          >
+                            <View style={styles.ownerRequestNameRow}>
+                              <Text style={styles.ownerRequestName}>
+                                {requesterName}
+                              </Text>
+                              {requesterId ? (
+                                <Ionicons name="chevron-forward" size={15} color={colors.GRAY400} />
+                              ) : null}
+                            </View>
+                            <Text style={styles.ownerRequestSub}>
+                              {formatScheduledDateTime(handshake.created_at)} · {handshake.status}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.chatActionButton}
+                            onPress={() =>
+                              openChatForHandshake(
+                                handshake,
+                                displayName,
+                                service.user.avatar_url,
+                              )
+                            }
+                          >
+                            <Ionicons name="chatbubble-ellipses-outline" size={15} color={colors.WHITE} />
+                            <Text style={styles.chatActionButtonText}>Chat</Text>
+                          </TouchableOpacity>
                         </View>
-                        <TouchableOpacity
-                          style={styles.chatActionButton}
-                          onPress={() =>
-                            openChatForHandshake(
-                              handshake,
-                              displayName,
-                              service.user.avatar_url,
-                            )
-                          }
-                        >
-                          <Ionicons name="chatbubble-ellipses-outline" size={15} color={colors.WHITE} />
-                          <Text style={styles.chatActionButtonText}>Chat</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
+                      );
+                    })}
                   </View>
                 ) : (
                   <Text style={styles.ownerEmptyText}>No incoming requests yet.</Text>
@@ -2617,6 +2645,11 @@ const getStyles = (topInset: number, bottomInset: number) =>
     },
     ownerRequestMeta: {
       flex: 1,
+    },
+    ownerRequestNameRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
     },
     ownerRequestName: {
       fontSize: 14,
