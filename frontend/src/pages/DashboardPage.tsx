@@ -306,7 +306,7 @@ function ServiceCard({
               </Flex>
             )}
             <Pill
-              label={isOffer ? 'Offer' : service.type === 'Event' ? 'Event' : 'Want'}
+              label={isOffer ? 'Offer' : service.type === 'Event' ? 'Event' : 'Need'}
               bg={isOffer ? GREEN_LT : service.type === 'Event' ? AMBER_LT : BLUE_LT}
               color={isOffer ? GREEN : service.type === 'Event' ? AMBER : BLUE}
             />
