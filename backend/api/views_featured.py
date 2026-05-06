@@ -6,7 +6,7 @@ from datetime import timedelta
 from django.core.cache import cache
 from django.db.models import Count, Q
 from django.utils import timezone
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -18,7 +18,6 @@ from api.ranking import calculate_hot_scores_batch
 TRENDING_WINDOW_DAYS = 30
 CACHE_TTL_SHARED = 120
 CACHE_TTL_PER_USER = 120
-CACHE_TTL_PUBLIC = 300  # Public landing page can tolerate stale data
 
 CONFIRMED_STATUSES = ['accepted', 'completed', 'checked_in', 'attended']
 
@@ -213,33 +212,3 @@ class FeaturedView(APIView):
             }
             for u in providers
         ]
-
-
-class PublicFeaturedView(APIView):
-    """Anonymous-safe subset of FeaturedView for the public landing page (#457).
-
-    Returns only the cohort-shared sections (trending services, top providers).
-    Friends-of-friends data is intentionally omitted because it is per-user
-    and would leak signal about who is logged in. Cached longer than the
-    authenticated variant (5 min) since this drives an unauthenticated page
-    that benefits from any safe staleness.
-    """
-
-    authentication_classes = []
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        trending = cache.get('featured:public:trending')
-        if trending is None:
-            trending = FeaturedView()._get_trending()
-            cache.set('featured:public:trending', trending, CACHE_TTL_PUBLIC)
-
-        top_providers = cache.get('featured:public:top_providers')
-        if top_providers is None:
-            top_providers = FeaturedView()._get_top_providers()
-            cache.set('featured:public:top_providers', top_providers, CACHE_TTL_PUBLIC)
-
-        return Response({
-            "trending": trending,
-            "top_providers": top_providers,
-        })

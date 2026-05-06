@@ -143,7 +143,6 @@ function EmailVerificationBanner() {
 // ─── Pages that render their own header (no global Navbar) ────────────────────
 // Pages where the global top Navbar is hidden (they render their own navigation)
 const PAGES_WITHOUT_NAVBAR = [
-  '/',
   '/login',
   '/register',
   '/forgot-password',
@@ -165,7 +164,7 @@ const FULL_SCREEN_PREFIXES = [
 ]
 
 // ─── Public pages where we skip the full-page spinner ─────────────────────────
-const PUBLIC_AUTH_PATHS = ['/login', '/register', '/', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
+const PUBLIC_AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
 
 function App() {
   const { checkAuth, isLoading, user } = useAuthStore()
