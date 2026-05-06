@@ -136,6 +136,7 @@ export interface Service {
   hot_score?: number;
   is_visible?: boolean;
   is_pinned?: boolean;
+  is_newcomer_owner?: boolean;
   requires_qr_checkin?: boolean;
   session_exact_location?: string | null;
   session_exact_location_lat?: string | null;
