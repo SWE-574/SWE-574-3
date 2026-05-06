@@ -459,6 +459,7 @@ def create_notification(
     message: str,
     handshake: Handshake | None = None,
     service: Service | None = None,
+    report=None,
 ) -> Notification:
     """Persist a notification and broadcast it via WebSocket."""
     notification = Notification.objects.create(
@@ -467,7 +468,8 @@ def create_notification(
         title=title,
         message=message,
         related_handshake=handshake,
-        related_service=service
+        related_service=service,
+        related_report=report,
     )
     transaction.on_commit(lambda: _broadcast_notification(notification))
     return notification
@@ -539,6 +541,7 @@ def _send_push_notification(notification: Notification) -> None:
         'related_handshake': str(notification.related_handshake_id) if notification.related_handshake_id else None,
         'related_service': str(notification.related_service_id) if notification.related_service_id else None,
         'related_service_type': notification.related_service.type if notification.related_service else None,
+        'related_report': str(notification.related_report_id) if notification.related_report_id else None,
     }
 
     messages = [

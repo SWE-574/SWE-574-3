@@ -92,8 +92,8 @@ export const NotificationItem = memo(function NotificationItem({
         >
           {notification.title}
         </Text>
-        {!compact && notification.message && (
-          <Text fontSize="12px" color={GRAY700} mt="2px" lineClamp={2}>
+        {notification.message && (
+          <Text fontSize="12px" color={GRAY700} mt="2px" lineClamp={compact ? 1 : 2}>
             {notification.message}
           </Text>
         )}

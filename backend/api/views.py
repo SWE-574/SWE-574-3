@@ -2641,7 +2641,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
             description=description,
         )
 
-        admins = User.objects.filter(role='admin')
+        admins = User.objects.filter(role__in=['admin', 'super_admin'], is_active=True)
         for admin in admins:
             create_notification(
                 user=admin,
@@ -2649,6 +2649,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 title='New Listing Report',
                 message=f"New {report.get_type_display()} report for service '{service.title}'",
                 service=service,
+                report=report,
             )
 
         return Response({'status': 'success', 'report_id': str(report.id)}, status=201)
@@ -3915,7 +3916,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         return (
             Notification.objects
             .filter(user=self.request.user)
-            .select_related('related_service')
+            .select_related('related_service', 'related_report')
             .order_by('-created_at')
         )
 
@@ -6571,13 +6572,14 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
             description=description,
         )
 
-        admins = User.objects.filter(role='admin', is_active=True)
+        admins = User.objects.filter(role__in=['admin', 'super_admin'], is_active=True)
         for admin in admins:
             create_notification(
                 user=admin,
                 notification_type='admin_warning',
                 title='New Forum Topic Report',
                 message=f"{request.user.first_name or request.user.email} reported topic '{topic.title}'.",
+                report=report,
             )
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
@@ -6847,13 +6849,14 @@ class ForumPostViewSet(viewsets.ViewSet):
             description=description,
         )
 
-        admins = User.objects.filter(role='admin', is_active=True)
+        admins = User.objects.filter(role__in=['admin', 'super_admin'], is_active=True)
         for admin in admins:
             create_notification(
                 user=admin,
                 notification_type='admin_warning',
                 title='New Forum Post Report',
                 message=f"{request.user.first_name or request.user.email} reported content in '{post.topic.title}'.",
+                report=report,
             )
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)

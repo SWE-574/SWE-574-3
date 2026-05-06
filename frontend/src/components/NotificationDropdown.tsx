@@ -45,12 +45,14 @@ export function NotificationDropdown() {
     (notification: Notification) => {
       if (!notification.is_read) markAsRead(notification.id)
       setOpen(false)
-      if (notification.related_service_type === 'Event' && notification.related_service) {
+      if (notification.related_report) {
+        navigate(`/admin?tab=reports&reportId=${notification.related_report}`)
+      } else if (notification.related_service_type === 'Event' && notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)
       } else if (notification.related_service && notification.type === 'positive_rep') {
         navigate(`/service-detail/${notification.related_service}`)
       } else if (notification.related_handshake) {
-        navigate(`/messages?handshake=${notification.related_handshake}`)
+        navigate(`/messages/${notification.related_handshake}`)
       } else if (notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)
       } else {
