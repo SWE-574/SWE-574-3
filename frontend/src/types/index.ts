@@ -200,6 +200,17 @@ export interface Service {
   comment_count?: number
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
+  source?: 'tag_match' | 'explore_topup' | 'for_you' | 'explore' | null
+  for_you_signals?: ForYouSignals | null
+  explore_pool?: 'cold_start' | 'undershown_quality' | 'stale_recurring' | null
+  is_newcomer_owner?: boolean
+}
+
+export interface ForYouSignals {
+  tag: number
+  follow: number
+  cooccur: number
+  recency_penalty: number
 }
 
 export interface EventEvaluationSummary {

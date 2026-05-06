@@ -882,3 +882,26 @@ RANKING_FEED_E2E_SLA_SECONDS = float(os.environ.get('RANKING_FEED_E2E_SLA_SECOND
 # multiplicative bump in Phase 2 score so brand-new members surface before
 # their reputation accumulates. Customer request, May 2026.
 RANKING_NEWCOMER_BOOST = float(os.environ.get('RANKING_NEWCOMER_BOOST', '1.2'))
+
+# For You feed (#481). Additive blend on top of hot_score:
+#   for_you_score = hot_score
+#                 + TAG * tag_overlap (Jaccard with viewer.skills)
+#                 + FOLLOW * follow_affinity (1.0 1st-degree, 0.5 2nd-degree)
+#                 + COOCCUR * cooccurrence_signal (k-anon item-item)
+#                 - RECENCY * recency_penalty (decay over hours since last seen)
+# TAG outweighs FOLLOW: a freshly onboarded user has declared skills but
+# few follows, so tag relevance is the strongest available signal.
+RANKING_FOR_YOU_TAG_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_TAG_WEIGHT', '0.5'))
+RANKING_FOR_YOU_FOLLOW_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_FOLLOW_WEIGHT', '0.3'))
+RANKING_FOR_YOU_COOCCUR_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_COOCCUR_WEIGHT', '0.2'))
+RANKING_FOR_YOU_RECENCY_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_RECENCY_WEIGHT', '0.1'))
+RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS = float(os.environ.get('RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS', '24'))
+RANKING_COOCCUR_MIN_USERS = int(os.environ.get('RANKING_COOCCUR_MIN_USERS', '3'))
+RANKING_FOR_YOU_LIMIT = int(os.environ.get('RANKING_FOR_YOU_LIMIT', '10'))
+# Click-to-handshake attribution window for the For You CTR proxy. A handshake
+# created within this many minutes of a `?from=for_you` click is attributed to
+# the For You feed in ForYouEvent.
+RANKING_FOR_YOU_ATTRIBUTION_MINUTES = int(os.environ.get('RANKING_FOR_YOU_ATTRIBUTION_MINUTES', '60'))
+# Cap on how many recent impressions to remember per viewer for the recency
+# penalty. Older entries are dropped.
+RANKING_FOR_YOU_IMPRESSION_HISTORY = int(os.environ.get('RANKING_FOR_YOU_IMPRESSION_HISTORY', '100'))

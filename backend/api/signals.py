@@ -212,6 +212,55 @@ def notify_on_new_chat_message(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=Handshake)
+def attribute_handshake_to_for_you_click(sender, instance, created, **kwargs):
+    """For You CTR proxy (#481): when a handshake is created, look up the
+    most recent For You click on this (viewer, service) within the
+    attribution window and emit a kind=handshake row tagged with the same
+    source. Lets the metrics endpoint compute click-to-handshake rate.
+
+    Fires only on initial Handshake creation. Status transitions
+    (pending -> accepted -> completed) are intentionally not attributed:
+    CTR is defined here as click -> handshake-creation, not click ->
+    completion. Completion-rate is a separate metric and is not measured
+    by this signal. The early return on `created is False` enforces that.
+    """
+    if not created:
+        return
+    try:
+        from datetime import timedelta
+        from django.conf import settings as _settings
+        from django.utils import timezone as _tz
+        from .models import ForYouEvent
+
+        attribution_minutes = int(getattr(
+            _settings, 'RANKING_FOR_YOU_ATTRIBUTION_MINUTES', 60,
+        ))
+        cutoff = _tz.now() - timedelta(minutes=attribution_minutes)
+        last_click = (
+            ForYouEvent.objects
+            .filter(
+                viewer=instance.requester,
+                service=instance.service,
+                kind=ForYouEvent.CLICK,
+                occurred_at__gte=cutoff,
+            )
+            .order_by('-occurred_at')
+            .first()
+        )
+        if last_click is not None:
+            ForYouEvent.objects.create(
+                service=instance.service,
+                viewer=instance.requester,
+                kind=ForYouEvent.HANDSHAKE,
+                source=last_click.source,
+            )
+    except Exception:
+        logger.exception(
+            'For You handshake attribution failed for handshake %s', instance.pk,
+        )
+
+
+@receiver(post_save, sender=Handshake)
 def notify_on_handshake_status_change(sender, instance, created, **kwargs):
     """Create notifications when a Handshake status transitions."""
     if created or not instance._status_changed:

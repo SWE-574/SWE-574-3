@@ -542,6 +542,14 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    # source / for_you_signals / explore_pool are transient: not stored on
+    # the Service model. They are attached to the instance by _list_for_you()
+    # and the explore-only list path in views.py before serialization.
+    # getattr(obj, ..., None) returns None for cards from non-personalized
+    # endpoints, which is the intended "absent" representation.
+    source = serializers.SerializerMethodField()
+    for_you_signals = serializers.SerializerMethodField()
+    explore_pool = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
@@ -552,8 +560,25 @@ class ServiceSerializer(serializers.ModelSerializer):
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
+            'source', 'for_you_signals', 'explore_pool',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
+        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned', 'source', 'for_you_signals', 'explore_pool']
+
+    def get_source(self, obj):
+        """Set transiently by the For You list view (#481) and the onboarding
+        fallback (#478). None when the card came from the regular feed."""
+        return getattr(obj, 'source', None)
+
+    def get_for_you_signals(self, obj):
+        """Per-card breakdown of the four For You signals (#481). None for
+        cards not served by the For You feed."""
+        return getattr(obj, 'for_you_signals', None)
+
+    def get_explore_pool(self, obj):
+        """Which Phase 3 sub-bucket this service was drawn from when served by
+        the explore-only list path. One of cold_start, undershown_quality,
+        stale_recurring, or None for non-explore responses."""
+        return getattr(obj, 'explore_pool', None)
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):

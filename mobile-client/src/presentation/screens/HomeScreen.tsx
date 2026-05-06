@@ -24,6 +24,8 @@ import { listServices, type ServicesListParams } from "../../api/services";
 import { Service } from "../../api/types";
 import ServiceCard from "../components/ServiceCard";
 import FeaturedSection from "../components/FeaturedSection";
+import ForYouSection from "../components/ForYouSection";
+import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
@@ -72,6 +74,8 @@ export default function HomeScreen() {
     useNavigation<NativeStackNavigationProp<HomeStackParamList, "HomeFeed">>();
   const tabNavigation =
     useNavigation<BottomTabNavigationProp<BottomTabParamList>>();
+  const { user, isAuthenticated } = useAuth();
+  const forYouEligible = isAuthenticated && Boolean(user?.is_onboarded);
   const [services, setServices] = useState<Service[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
@@ -366,13 +370,19 @@ export default function HomeScreen() {
   );
 
   const listHeader = (
-    <FeaturedSection
-      services={filteredServices}
-      onServicePress={handleServicePress}
-      userLocation={userLocation}
-      locationStatus={locationStatus}
-      maxNearbyKm={filters.distanceKm}
-    />
+    <>
+      <ForYouSection
+        enabled={forYouEligible}
+        onServicePress={handleServicePress}
+      />
+      <FeaturedSection
+        services={filteredServices}
+        onServicePress={handleServicePress}
+        userLocation={userLocation}
+        locationStatus={locationStatus}
+        maxNearbyKm={filters.distanceKm}
+      />
+    </>
   );
 
   const showNearbyStatus =

@@ -7,7 +7,6 @@ import {
   Text,
   Input,
   Grid,
-  HStack,
   Spinner,
 } from '@chakra-ui/react'
 import {
@@ -28,11 +27,15 @@ import {
   FiLayers,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
+import { MapInfoStrip } from '@/components/MapInfoStrip'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
+import ForYouCarousel from '@/components/ForYouCarousel'
+import ExploreCarousel from '@/components/ExploreCarousel'
+import { Avatar } from '@/components/Avatar'
 import type { Handshake } from '@/services/handshakeAPI'
 
 import {
@@ -40,10 +43,14 @@ import {
   AMBER, AMBER_LT,
   BLUE, BLUE_LT,
   RED, RED_LT,
-  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
+  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY800,
   WHITE,
 } from '@/theme/tokens'
 import { isNearlyFull } from '@/utils/eventUtils'
+import {
+  MAP_SCROLL_DEBOUNCE_MS,
+  nextMapCollapsedState,
+} from '@/utils/dashboardScroll'
 
 const TRANSPARENT = 'transparent'
 
@@ -51,6 +58,9 @@ const DEBOUNCE_SEARCH   = 400
 const DEBOUNCE_DISTANCE = 600
 const POLL_INTERVAL     = 60_000
 const GEO_TIMEOUT       = 10_000
+
+// Map collapse hysteresis constants are imported from utils/dashboardScroll
+// so they can be unit-tested without rendering the full dashboard.
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
@@ -92,13 +102,6 @@ function fmt(h: number | string | undefined | null) {
   const n = typeof h === 'string' ? parseFloat(h) : (h ?? 0)
   if (isNaN(n)) return '?'
   return Number.isInteger(n) ? String(n) : n.toFixed(1)
-}
-
-function initials(u?: { first_name?: string; last_name?: string; email?: string } | null) {
-  if (!u) return '?'
-  const f = u.first_name?.[0] ?? ''
-  const l = u.last_name?.[0] ?? ''
-  return (f || l) ? `${f}${l}`.toUpperCase() : (u.email?.[0] ?? '?').toUpperCase()
 }
 
 function fullName(u?: { first_name?: string; last_name?: string; email?: string } | null) {
@@ -144,22 +147,6 @@ function sortServicesByFeedPriority(a: Service, b: Service) {
 }
 
 // ─── Tiny reusable bits ───────────────────────────────────────────────────────
-
-function Avatar({ u, size = 36 }: { u?: { first_name?: string; last_name?: string; email?: string; avatar_url?: string } | null; size?: number }) {
-  return (
-    <Box
-      w={`${size}px`} h={`${size}px`} borderRadius="full" flexShrink={0}
-      bg={GREEN} color={WHITE} overflow="hidden"
-      display="flex" alignItems="center" justifyContent="center"
-      fontSize={`${Math.round(size * 0.34)}px`} fontWeight={700}
-    >
-      {u?.avatar_url
-        ? <img src={u.avatar_url} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        : initials(u)
-      }
-    </Box>
-  )
-}
 
 function Pill({ label, bg, color }: { label: string; bg: string; color: string }) {
   return (
@@ -398,6 +385,7 @@ const DashboardPage = () => {
   const [services, setServices]                     = useState<Service[]>([])
   const [allActiveServices, setAllActiveServices]   = useState<Service[]>([])
   const [mapOpen, setMapOpen]                       = useState(true)
+  const [mapCollapsed, setMapCollapsed]             = useState(false)
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
   const [userLocation, setUserLocation]             = useState<{ lat: number; lng: number } | null>(null)
@@ -414,7 +402,20 @@ const DashboardPage = () => {
 
   const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mapScrollTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const typeDropdownRef  = useRef<HTMLDivElement>(null)
+
+  const handleGridScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const top = e.currentTarget.scrollTop
+    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
+    mapScrollTimer.current = setTimeout(() => {
+      setMapCollapsed(prev => nextMapCollapsedState(prev, top))
+    }, MAP_SCROLL_DEBOUNCE_MS)
+  }, [])
+
+  useEffect(() => () => {
+    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
+  }, [])
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -788,30 +789,30 @@ const DashboardPage = () => {
             </Flex>
           </Box>
 
-          {/* Map panel */}
+          {/* Map panel — collapses to a slim info strip when the feed scrolls
+              past a small threshold, so the feed reclaims the 280px the map
+              would otherwise hold. Tap the strip (or scroll back to top) to
+              re-expand. */}
           {mapOpen && (
-            <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0}>
-              <Flex align="center" px={5} py="10px" gap={4}>
-                <Text fontSize="12px" fontWeight={600} color={GRAY700}>Map View</Text>
-                <HStack gap={3} fontSize="11px" color={GRAY500}>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={GREEN} />Offers</Flex>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={BLUE} />Wants</Flex>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={AMBER} />Events</Flex>
-                </HStack>
-                {isLoading && services.length > 0 && (
-                  <Flex align="center" gap="5px" ml="auto">
-                    <Spinner size="xs" color="gray.400" />
-                    <Text fontSize="11px" color={GRAY400}>Refreshing</Text>
-                  </Flex>
-                )}
-              </Flex>
-              <MapView
-                services={displayServices}
-                height="280px"
-                onServiceClick={(id) => navigate(`/service-detail/${id}`)}
-                userLocation={userLocation}
+            mapCollapsed ? (
+              <MapInfoStrip
+                area={displayServices[0]?.location_area || null}
+                offerCount={displayServices.filter(s => s.type === 'Offer').length}
+                needCount={displayServices.filter(s => s.type === 'Need').length}
+                eventCount={displayServices.filter(s => s.type === 'Event').length}
+                onExpand={() => setMapCollapsed(false)}
               />
-            </Box>
+            ) : (
+              <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
+                <MapView
+                  services={displayServices}
+                  height="280px"
+                  onServiceClick={(id) => navigate(`/service-detail/${id}`)}
+                  userLocation={userLocation}
+                  isRefreshing={isLoading && services.length > 0}
+                />
+              </Box>
+            )
           )}
 
           {/* Results count */}
@@ -822,7 +823,16 @@ const DashboardPage = () => {
           </Box>
 
           {/* Grid */}
-          <Box flex={1} overflowY="auto" px={{ base: 3, md: 6 }} pt={2} pb={8}>
+          <Box
+            flex={1}
+            overflowY="auto"
+            px={{ base: 3, md: 6 }}
+            pt={2}
+            pb={8}
+            onScroll={handleGridScroll}
+          >
+            <ForYouCarousel />
+            <ExploreCarousel />
             {isLoading && displayServices.length === 0 ? (
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
             ) : fetchError && displayServices.length === 0 ? (
