@@ -542,6 +542,7 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    source = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
@@ -551,9 +552,14 @@ class ServiceSerializer(serializers.ModelSerializer):
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
-            'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
+            'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary', 'source',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
+        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned', 'source']
+
+    def get_source(self, obj):
+        """Annotated by ServiceViewSet when the onboarding tag fallback (#478)
+        engages: 'tag_match' or 'explore_topup'. None otherwise."""
+        return getattr(obj, 'source', None)
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):
