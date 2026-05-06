@@ -102,9 +102,15 @@ jobs:
           restore-keys: npm-e2e-
 
       # ── 8. Install JS dependencies (includes @playwright/test) ───────────
+      # Stale tarball-extraction tmp files in ~/.npm/_cacache/tmp can cause
+      # `npm ci` to crash with `EEXIST: file already exists` after a cache
+      # restore. Wiping the tmp dir is safe and only adds a few ms.
+      - name: Clear npm cache tmp
+        run: rm -rf ~/.npm/_cacache/tmp
+
       - name: Install dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit
 
       # ── 9. Cache Playwright browsers ──────────────────────────────────────
       - name: Cache Playwright browsers
