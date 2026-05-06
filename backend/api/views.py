@@ -3912,7 +3912,12 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+        return (
+            Notification.objects
+            .filter(user=self.request.user)
+            .select_related('related_service')
+            .order_by('-created_at')
+        )
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())

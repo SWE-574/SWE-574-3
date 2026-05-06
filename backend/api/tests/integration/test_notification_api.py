@@ -4,7 +4,7 @@ Integration tests for notification API endpoints
 import pytest
 from rest_framework import status
 
-from api.tests.helpers.factories import UserFactory, NotificationFactory
+from api.tests.helpers.factories import UserFactory, NotificationFactory, ServiceFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Notification
 
@@ -116,3 +116,22 @@ class TestNotificationViewSet:
         response = client.get('/api/notifications/?page=1')
         ids = [r['id'] for r in response.data['results']]
         assert ids == [str(n2.id), str(n1.id)]
+
+    def test_related_service_type_exposed(self):
+        user = UserFactory()
+        event_service = ServiceFactory(type='Event')
+        offer_service = ServiceFactory(type='Offer')
+        n_event = NotificationFactory(user=user, related_service=event_service)
+        n_offer = NotificationFactory(user=user, related_service=offer_service)
+        n_no_service = NotificationFactory(user=user)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.get('/api/notifications/?page=1')
+        assert response.status_code == status.HTTP_200_OK
+        results_by_id = {r['id']: r for r in response.data['results']}
+
+        assert results_by_id[str(n_event.id)]['related_service_type'] == 'Event'
+        assert results_by_id[str(n_offer.id)]['related_service_type'] == 'Offer'
+        assert results_by_id[str(n_no_service.id)]['related_service_type'] is None

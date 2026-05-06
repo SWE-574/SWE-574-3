@@ -47,6 +47,7 @@ export function usePushNotifications(
           is_read: false,
           related_handshake: (data.related_handshake as string) ?? null,
           related_service: (data.related_service as string) ?? null,
+          related_service_type: (data.related_service_type as 'Offer' | 'Need' | 'Event') ?? null,
           created_at: '',
         },
         navigationRef,

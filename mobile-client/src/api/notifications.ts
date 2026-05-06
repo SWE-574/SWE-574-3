@@ -32,6 +32,7 @@ export interface Notification {
   is_read: boolean;
   related_handshake: string | null;
   related_service: string | null;
+  related_service_type: 'Offer' | 'Need' | 'Event' | null;
   created_at: string;
 }
 

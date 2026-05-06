@@ -538,6 +538,7 @@ def _send_push_notification(notification: Notification) -> None:
         'notification_id': str(notification.id),
         'related_handshake': str(notification.related_handshake_id) if notification.related_handshake_id else None,
         'related_service': str(notification.related_service_id) if notification.related_service_id else None,
+        'related_service_type': notification.related_service.type if notification.related_service else None,
     }
 
     messages = [

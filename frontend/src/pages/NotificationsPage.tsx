@@ -36,8 +36,9 @@ const NotificationsPage = () => {
   const handleClick = useCallback(
     (notification: Notification) => {
       if (!notification.is_read) markAsRead(notification.id)
-      const isFeedbackNotif = notification.type === 'positive_rep'
-      if (notification.related_service && isFeedbackNotif) {
+      if (notification.related_service_type === 'Event' && notification.related_service) {
+        navigate(`/service-detail/${notification.related_service}`)
+      } else if (notification.related_service && notification.type === 'positive_rep') {
         navigate(`/service-detail/${notification.related_service}`)
       } else if (notification.related_handshake) {
         navigate(`/messages?handshake=${notification.related_handshake}`)
