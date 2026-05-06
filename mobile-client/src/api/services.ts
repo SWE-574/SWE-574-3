@@ -45,6 +45,8 @@ export interface ServicesListParams {
   lat?: number;
   lng?: number;
   distance?: number;
+  /** Restrict to Phase 3 explore-eligible services for the "Try something new" carousel. */
+  explore_only?: boolean;
 }
 
 function normalizeService(service: Service): Service {
