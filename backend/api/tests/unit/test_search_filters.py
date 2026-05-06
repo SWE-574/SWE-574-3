@@ -1402,3 +1402,62 @@ class DateRangeStrategyTestCase(TestCase):
         self.assertIn('Today Event', titles)
         self.assertNotIn('Near Future Event', titles)
         self.assertNotIn('Far Future Event', titles)
+
+
+# ---------------------------------------------------------------------------
+# FR-17g / FR-SEA-01 -- weighted search ordering (#306, #324)
+# ---------------------------------------------------------------------------
+
+from api.search_filters import (
+    DESC_WEIGHT,
+    SOCIAL_PROXIMITY_WEIGHT,
+    TAG_WEIGHT,
+    TITLE_WEIGHT,
+    TextStrategy,
+)
+from api.tests.helpers.factories import ServiceFactory, TagFactory
+
+
+class TextStrategyWeightingTestCase(TestCase):
+    """Title (1.0) > tag (0.8) > description (0.4) ordering."""
+
+    def setUp(self):
+        self.strategy = TextStrategy()
+
+    def _ordered_ids(self, query):
+        return [s.id for s in self.strategy.apply(Service.objects.all(), {'search': query})]
+
+    def test_named_weight_constants_exist(self):
+        self.assertEqual(TITLE_WEIGHT, 1.0)
+        self.assertEqual(TAG_WEIGHT, 0.8)
+        self.assertEqual(DESC_WEIGHT, 0.4)
+        self.assertEqual(SOCIAL_PROXIMITY_WEIGHT, 0.0)
+
+    def test_title_match_outranks_description_match(self):
+        title_hit = ServiceFactory(
+            title='Carpentry weekend', description='Other content', status='Active',
+        )
+        desc_hit = ServiceFactory(
+            title='Other content', description='Carpentry weekend', status='Active',
+        )
+        ordered = self._ordered_ids('carpentry')
+        self.assertIn(title_hit.id, ordered)
+        self.assertIn(desc_hit.id, ordered)
+        self.assertLess(ordered.index(title_hit.id), ordered.index(desc_hit.id))
+
+    def test_tag_match_outranks_description_match(self):
+        tag = TagFactory(name='carpentry')
+        tag_hit = ServiceFactory(title='Other', description='Other', status='Active')
+        tag_hit.tags.add(tag)
+        desc_hit = ServiceFactory(
+            title='Other', description='carpentry stuff', status='Active',
+        )
+        ordered = self._ordered_ids('carpentry')
+        self.assertIn(tag_hit.id, ordered)
+        self.assertIn(desc_hit.id, ordered)
+        self.assertLess(ordered.index(tag_hit.id), ordered.index(desc_hit.id))
+
+    def test_no_match_excluded(self):
+        ServiceFactory(title='Pottery class', description='Clay work', status='Active')
+        ordered = self._ordered_ids('carpentry')
+        self.assertEqual(ordered, [])

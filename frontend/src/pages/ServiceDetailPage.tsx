@@ -16,6 +16,7 @@ import { MapView } from '@/components/MapView'
 import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import ReportModal, { type ReportOption } from '@/components/ReportModal'
+import { AdminConfirmModal, ModalBackdrop, ModalCard, ModalHeader, ModalFooter, ModalFieldLabel } from '@/components/AdminModals'
 import VerificationRequiredModal from '@/components/VerificationRequiredModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
@@ -488,7 +489,7 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
 export default function ServiceDetailPage() {
   const { id }     = useParams<{ id: string }>()
   const navigate   = useNavigate()
-  const { isAuthenticated, user } = useAuthStore()
+  const { isAuthenticated, user, refreshUser, updateUserOptimistically } = useAuthStore()
 
   const [service, setService]           = useState<Service | null>(null)
   const [loading, setLoading]           = useState(true)
@@ -515,6 +516,9 @@ export default function ServiceDetailPage() {
   const [attendanceCode, setAttendanceCode]   = useState('')
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [removeLoading, setRemoveLoading]   = useState(false)
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [showRemoveModal, setShowRemoveModal] = useState(false)
+  const [cancelReason, setCancelReason]     = useState('')
   const [commentRefreshKey, setCommentRefreshKey] = useState(0)
   const [isEventDetailModalOpen, setIsEventDetailModalOpen] = useState(false)
   const [eventDetailModalTab, setEventDetailModalTab] = useState<EventDetailModalTab>('details')
@@ -627,23 +631,27 @@ export default function ServiceDetailPage() {
   const reportedParticipantIds = new Set(
     incoming
       .filter((h) => h.status === 'reported')
-      .map((h) => h.requester),
+      .map((h) => exId(h.requester))
+      .filter((id): id is string => Boolean(id)),
   )
   const eventIncomingParticipants = isEvent
     ? Array.from(
       incoming
         .filter((h) => ['accepted', 'checked_in', 'attended', 'no_show', 'reported'].includes(h.status))
         .reduce((acc, h) => {
-          const existing = acc.get(h.requester)
+          const requesterId = exId(h.requester)
+          if (!requesterId) return acc
+
+          const existing = acc.get(requesterId)
           if (!existing) {
-            acc.set(h.requester, h)
+            acc.set(requesterId, h)
             return acc
           }
 
           const existingPriority = EVENT_PARTICIPANT_STATUS_PRIORITY[existing.status] ?? -1
           const candidatePriority = EVENT_PARTICIPANT_STATUS_PRIORITY[h.status] ?? -1
           if (candidatePriority > existingPriority) {
-            acc.set(h.requester, h)
+            acc.set(requesterId, h)
             return acc
           }
 
@@ -651,7 +659,7 @@ export default function ServiceDetailPage() {
             const existingTs = new Date(existing.updated_at ?? existing.created_at).getTime()
             const candidateTs = new Date(h.updated_at ?? h.created_at).getTime()
             if (candidateTs > existingTs) {
-              acc.set(h.requester, h)
+              acc.set(requesterId, h)
             }
           }
 
@@ -847,13 +855,14 @@ export default function ServiceDetailPage() {
 
   const handleReportParticipantBehavior = (participantHandshake: Handshake) => {
     if (reportingEventIssue) return
-    if (reportedParticipantIds.has(participantHandshake.requester)) {
+    const participantRequesterId = exId(participantHandshake.requester)
+    if (participantRequesterId && reportedParticipantIds.has(participantRequesterId)) {
       toast.info('You already reported this participant for this event.')
       return
     }
     openEventReportModal({
       handshakeId: participantHandshake.id,
-      reportedUserId: participantHandshake.requester,
+      reportedUserId: participantRequesterId,
       targetLabel: participantHandshake.requester_name,
     })
   }
@@ -873,7 +882,7 @@ export default function ServiceDetailPage() {
         toast.info('You already reported this participant for this event.')
         return
       }
-      const targetHandshake = eventIncomingParticipants.find((h) => h.requester === targetUserId)
+      const targetHandshake = eventIncomingParticipants.find((h) => exId(h.requester) === targetUserId)
       if (!targetHandshake) {
         toast.error('Could not find an active event participant to report.')
         return
@@ -959,7 +968,7 @@ export default function ServiceDetailPage() {
   }
 
   const handleCancelEvent = async () => {
-    if (!service) return
+    if (!service || !cancelReason.trim()) return
     // Prefer the API-provided edit_locked; fall back to client-side math
     // when an older payload doesn't include the field yet (#267).
     const inLockdown = service.edit_locked ?? isWithinLockdownWindow(service.scheduled_time)
@@ -969,8 +978,9 @@ export default function ServiceDetailPage() {
       : 'Are you sure you want to cancel this event? All participants will be notified.'
     if (!window.confirm(confirmMsg)) return
     setCancelLoading(true)
+    setShowCancelModal(false)
     try {
-      await serviceAPI.cancelEvent(service.id)
+      await serviceAPI.cancelEvent(service.id, cancelReason.trim())
       toast.success('Event cancelled.')
       navigate('/dashboard')
     } catch (e: unknown) {
@@ -981,10 +991,17 @@ export default function ServiceDetailPage() {
 
   const handleRemoveListing = async () => {
     if (!service || !isOwn) return
-    if (!window.confirm('Are you sure you want to remove this listing? This cannot be undone.')) return
     setRemoveLoading(true)
+    setShowRemoveModal(false)
     try {
       await serviceAPI.delete(service.id)
+      if (service.type === 'Need') {
+        const currentBalance = Number(user?.timebank_balance ?? 0)
+        updateUserOptimistically({
+          timebank_balance: currentBalance + Number(service.duration),
+        })
+        await refreshUser()
+      }
       toast.success('Listing removed.')
       navigate('/dashboard')
     } catch (e: unknown) {
@@ -1024,6 +1041,7 @@ export default function ServiceDetailPage() {
     ? Math.min(100, ((service.participant_count ?? 0) / service.max_participants) * 100) : 0
 
   return (
+    <>
     <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto"
       py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
       <Box maxW="1440px" mx="auto" py={{ base: 4, md: 5 }} px={{ base: 4, md: 5 }}>
@@ -1113,7 +1131,7 @@ export default function ServiceDetailPage() {
                       bg="rgba(255,255,255,0.2)" color={WHITE}
                       style={{ backdropFilter: 'blur(8px)' }}
                     >
-                      {isOffer ? 'Offer' : isEvent ? 'Event' : 'Want'}
+                      {isOffer ? 'Offer' : isEvent ? 'Event' : 'Need'}
                     </Box>
                     {isRecurr && !isEvent && (
                       <Box px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
@@ -1518,7 +1536,7 @@ export default function ServiceDetailPage() {
                       <Stack gap={2} maxH="200px" overflowY="auto">
                         {eventIncomingParticipants.map((h) => {
                           // Event reports should not alter owner-facing attendance/status display.
-                          const alreadyReportedParticipant = reportedParticipantIds.has(h.requester)
+                          const alreadyReportedParticipant = reportedParticipantIds.has(exId(h.requester) ?? '')
                           const displayStatus = h.status === 'reported' ? 'accepted' : h.status
                           const cfg = HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 }
                           return (
@@ -1613,7 +1631,7 @@ export default function ServiceDetailPage() {
                         <Box as="button" w="full" py="10px" borderRadius="10px"
                           bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
                           display="flex" alignItems="center" justifyContent="center" gap="6px"
-                          onClick={handleCancelEvent}
+                          onClick={() => { setCancelReason(''); setShowCancelModal(true) }}
                           style={{ border: `1px solid ${RED}30`, cursor: cancelLoading ? 'not-allowed' : 'pointer', opacity: cancelLoading ? 0.65 : 1 }}
                         >
                           {cancelLoading ? 'Cancelling…' : 'Cancel Event'}
@@ -1975,7 +1993,7 @@ export default function ServiceDetailPage() {
                         <Box as="button" w="full" py="10px" borderRadius="10px"
                           bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
                           display="flex" alignItems="center" justifyContent="center" gap="6px"
-                          onClick={handleRemoveListing}
+                          onClick={() => setShowRemoveModal(true)}
                           style={{ border: `1px solid ${RED}30`, cursor: removeLoading ? 'not-allowed' : 'pointer', opacity: removeLoading ? 0.65 : 1 }}
                         >
                           {removeLoading ? 'Removing…' : 'Remove Listing'}
@@ -2444,5 +2462,69 @@ export default function ServiceDetailPage() {
       )}
 
     </Box>
+
+    {/* ── Remove Listing confirmation modal (BUG-02) ─────────────────────── */}
+    <AdminConfirmModal
+      isOpen={showRemoveModal}
+      title="Remove Listing"
+      description="Are you sure you want to remove this listing?"
+      confirmLabel="Remove"
+      accent={RED} accentLt={RED_LT}
+      loading={removeLoading}
+      onConfirm={handleRemoveListing}
+      onClose={() => setShowRemoveModal(false)}
+    />
+
+    {/* ── Cancel Event modal with required reason (BUG-03) ───────────────── */}
+    {showCancelModal && service && (() => {
+      const inLockdown = isWithinLockdownWindow(service.scheduled_time)
+      const hasParticipants = (service.participant_count ?? 0) > 0
+      const canConfirm = cancelReason.trim().length > 0
+      return (
+        <ModalBackdrop onClick={() => setShowCancelModal(false)}>
+          <ModalCard onClick={(e) => e.stopPropagation()}>
+            <ModalHeader
+              icon={<FiAlertTriangle size={15} />}
+              iconBg={RED_LT} iconColor={RED}
+              title="Cancel Event"
+              subtitle="This will notify all participants and cannot be undone."
+            />
+            <Box px={5} py={4}>
+              {inLockdown && hasParticipants && (
+                <Box bg="#FFF7ED" borderRadius="10px" p={3} mb={4} border="1px solid #FDBA74">
+                  <Text fontSize="12px" fontWeight={700} color="#C2410C">30-day ban applies</Text>
+                  <Text fontSize="12px" color="#92400E" mt="2px">
+                    You are within the 24-hour lockdown window with active participants. Cancelling will apply a 30-day event creation ban.
+                  </Text>
+                </Box>
+              )}
+              <ModalFieldLabel>Reason for cancellation (required)</ModalFieldLabel>
+              <textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                rows={4}
+                placeholder="Let participants know why this event is being cancelled…"
+                style={{
+                  width: '100%', resize: 'vertical', padding: '10px 12px',
+                  borderRadius: '10px', border: `1px solid ${GRAY200}`,
+                  background: GRAY50, fontSize: '13px', color: GRAY800,
+                  outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <Text fontSize="11px" color={GRAY400} mt="4px">{cancelReason.trim().length} chars</Text>
+            </Box>
+            <ModalFooter
+              onClose={() => setShowCancelModal(false)}
+              confirmLabel="Cancel Event"
+              accent={RED} accentLt={RED_LT}
+              onConfirm={handleCancelEvent}
+              loading={cancelLoading}
+              disabled={!canConfirm}
+            />
+          </ModalCard>
+        </ModalBackdrop>
+      )
+    })()}
+    </>
   )
 }

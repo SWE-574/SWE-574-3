@@ -182,6 +182,7 @@ class TransactionHistoryFactory(factory.django.DjangoModelFactory):
     transaction_type = factory.Iterator(['transfer', 'provision', 'refund'])
     amount = Decimal('2.00')
     balance_after = Decimal('5.00')
+    service = None
     handshake = factory.SubFactory(HandshakeFactory)
     description = factory.Faker('sentence')
 
