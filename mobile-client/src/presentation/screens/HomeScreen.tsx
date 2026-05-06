@@ -36,6 +36,9 @@ import {
   isRecurringService,
   type Coordinates,
 } from "../../utils/discovery";
+import { useAuth } from "../../context/AuthContext";
+import { useScreenCache } from "../../hooks/useScreenCache";
+import { ApiNetworkError } from "../../api/client";
 
 type ServiceTypeFilter = "all" | "Offer" | "Need" | "Event";
 type LocationFilter = "all" | "nearby" | "in_person" | "online";
@@ -69,6 +72,21 @@ interface ChipDef {
   onPress: () => void;
 }
 
+function filtersAreDefault(
+  filters: DiscoveryFilters,
+  debouncedSearch: string,
+): boolean {
+  return (
+    debouncedSearch === "" &&
+    filters.serviceType === DEFAULT_FILTERS.serviceType &&
+    filters.locationMode === DEFAULT_FILTERS.locationMode &&
+    filters.sortBy === DEFAULT_FILTERS.sortBy &&
+    filters.distanceKm === DEFAULT_FILTERS.distanceKm &&
+    filters.recurringOnly === DEFAULT_FILTERS.recurringOnly &&
+    filters.nearlyFullOnly === DEFAULT_FILTERS.nearlyFullOnly
+  );
+}
+
 export default function HomeScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<HomeStackParamList, "HomeFeed">>();
@@ -76,6 +94,7 @@ export default function HomeScreen() {
     useNavigation<BottomTabNavigationProp<BottomTabParamList>>();
   const { user, isAuthenticated } = useAuth();
   const forYouEligible = isAuthenticated && Boolean(user?.is_onboarded);
+  const cache = useScreenCache<Service[]>(user?.id ?? null, "home-feed-default");
   const [services, setServices] = useState<Service[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
@@ -184,6 +203,7 @@ export default function HomeScreen() {
   ]);
 
   const fetchServices = useCallback(async () => {
+    const isDefault = filtersAreDefault(filters, debouncedSearch);
     try {
       setLoadError(null);
       setIsLoading(true);
@@ -205,15 +225,31 @@ export default function HomeScreen() {
       }
 
       const { results } = await listServices(params);
-      setServices(results ?? []);
+      const next = results ?? [];
+      setServices(next);
+      if (isDefault) cache.persist(next);
     } catch (error) {
-      setLoadError(
-        error instanceof Error ? error.message : "Unable to load services.",
-      );
+      const isNetwork = error instanceof ApiNetworkError;
+      // On a network failure with the default filter, fall back to whatever
+      // is on disk so the user sees their last-known feed instead of an
+      // empty state.
+      if (isNetwork && isDefault) {
+        const seed = await cache.hydrate();
+        if (seed) {
+          setServices(seed.data);
+          setLoadError(null);
+        } else {
+          setLoadError("You are offline.");
+        }
+      } else {
+        setLoadError(
+          error instanceof Error ? error.message : "Unable to load services.",
+        );
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch, filters, userLocation]);
+  }, [debouncedSearch, filters, userLocation, cache]);
 
   useEffect(() => {
     if (
@@ -225,6 +261,23 @@ export default function HomeScreen() {
     }
     fetchServices();
   }, [fetchServices, filters.locationMode, locationStatus, userLocation]);
+
+  // Cold-start cache hydration: show the previously cached feed immediately
+  // so the user is not staring at a spinner while the first network round-
+  // trip resolves (or never resolves, if offline).
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (!cache.enabled) return;
+    if (!filtersAreDefault(filters, debouncedSearch)) return;
+    if (services.length > 0) return;
+    hydratedRef.current = true;
+    cache.hydrate().then((seed) => {
+      if (seed && seed.data.length > 0) {
+        setServices((prev) => (prev.length === 0 ? seed.data : prev));
+      }
+    });
+  }, [cache, filters, debouncedSearch, services.length]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

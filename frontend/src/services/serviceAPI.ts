@@ -18,6 +18,9 @@ export interface ServiceListParams {
   page_size?: number
   user_id?: string
   explore_only?: boolean
+  // FR-12c — only honored when type='Event'. ISO-8601 dates.
+  date_from?: string
+  date_to?: string
 }
 
 export interface ServiceRankingDebugParams {
@@ -32,6 +35,37 @@ export interface ServiceRankingDebugParams {
 }
 
 type ServiceListResponse = Service[] | { results: Service[]; count?: number }
+
+export interface PublicFeaturedService {
+  id: string
+  title: string
+  type: 'Offer' | 'Need' | 'Event'
+  user: {
+    id: string
+    first_name: string
+    last_name: string
+    avatar_url?: string | null
+  }
+  tags: { id: string; name: string }[]
+  participant_count: number
+  max_participants: number
+  location_area?: string | null
+  created_at: string
+}
+
+export interface PublicFeaturedTopProvider {
+  id: string
+  first_name: string
+  last_name: string
+  avatar_url?: string | null
+  completed_count: number
+  positive_rep_count: number
+}
+
+export interface PublicFeaturedResponse {
+  trending: PublicFeaturedService[]
+  top_providers: PublicFeaturedTopProvider[]
+}
 
 export const serviceAPI = {
   list: async (params?: ServiceListParams, signal?: AbortSignal): Promise<Service[]> => {
@@ -50,6 +84,8 @@ export const serviceAPI = {
     if (params?.page_size) queryParams.set('page_size', String(params.page_size))
     if (params?.user_id) queryParams.set('user', params.user_id)
     if (params?.explore_only) queryParams.set('explore_only', 'true')
+    if (params?.date_from) queryParams.set('date_from', params.date_from)
+    if (params?.date_to) queryParams.set('date_to', params.date_to)
 
     const res = await apiClient.get<ServiceListResponse>('/services/', {
       params: queryParams,
@@ -160,6 +196,13 @@ export const serviceAPI = {
 
   getRankingDebugAvailability: async (signal?: AbortSignal): Promise<RecommendationDebugAvailabilityResponse> => {
     const res = await apiClient.get<RecommendationDebugAvailabilityResponse>('/services/debug-ranking-availability/', { signal })
+    return res.data
+  },
+
+  // Anonymous-safe trending feed for the public landing page.
+  // Tolerates the 5-minute server cache; caller should defensively handle [].
+  getPublicFeatured: async (signal?: AbortSignal): Promise<PublicFeaturedResponse> => {
+    const res = await apiClient.get<PublicFeaturedResponse>('/featured/public/', { signal })
     return res.data
   },
 }

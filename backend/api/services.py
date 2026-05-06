@@ -21,6 +21,8 @@ from .utils import (
     complete_timebank_transfer,
     cancel_timebank_transfer,
     get_provider_and_receiver,
+    notify_reporter_of_receipt,
+    notify_reporter_of_state_change,
 )
 from .cache_utils import invalidate_conversations, invalidate_transactions
 
@@ -1348,11 +1350,13 @@ class HandshakeService:
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Report Requires Review',
                 message=f"New {report.get_type_display()} report for service '{handshake.service.title}'",
                 handshake=handshake,
+                report=report,
             )
+        notify_reporter_of_receipt(report)
 
         return report
 
@@ -1968,10 +1972,12 @@ class EventNoShowAppealService:
                 service=locked_handshake.service,
             )
 
+            notify_reporter_of_receipt(report)
+
             for admin in User.objects.filter(role='admin').only('id'):
                 create_notification(
                     user=admin,
-                    notification_type='admin_warning',
+                    notification_type='new_report',
                     title='No-Show Appeal Requires Review',
                     message=(
                         f"New no-show appeal for event '{locked_handshake.service.title}' "
@@ -1979,6 +1985,7 @@ class EventNoShowAppealService:
                     ),
                     handshake=locked_handshake,
                     service=locked_handshake.service,
+                    report=report,
                 )
 
             return report
@@ -2028,6 +2035,7 @@ class EventNoShowAppealService:
                 locked_report.resolved_at = timezone.now()
                 locked_report.admin_notes = admin_notes or 'No-show appeal approved; handshake updated to attended.'
                 locked_report.save(update_fields=['status', 'resolved_by', 'resolved_at', 'admin_notes'])
+                notify_reporter_of_state_change(locked_report)
 
                 create_notification(
                     user=participant,
@@ -2057,6 +2065,7 @@ class EventNoShowAppealService:
                 locked_report.resolved_at = timezone.now()
                 locked_report.admin_notes = admin_notes or 'No-show appeal rejected; no-show status upheld.'
                 locked_report.save(update_fields=['status', 'resolved_by', 'resolved_at', 'admin_notes'])
+                notify_reporter_of_state_change(locked_report)
 
                 create_notification(
                     user=participant,
@@ -2455,3 +2464,46 @@ def get_social_proximity_boosts(viewer_id) -> dict:
         if uid_key not in boosts or boost > boosts[uid_key]:
             boosts[uid_key] = boost
     return boosts
+
+
+def get_social_neighbours(user, depth: int = 2) -> set:
+    """Return the set of user IDs reachable from `user` within `depth` hops
+    via the social graph (FR-17k / #318).
+
+    The graph edges combine `UserFollow` and completed `Handshake` records,
+    matching `get_social_proximity_boosts` so callers see a consistent view.
+    Self-loops are guarded against. Results are cached per (user, depth) for
+    SOCIAL_NEIGHBOURS_TTL seconds because the graph changes slowly.
+
+    `depth=1` returns only direct connections; `depth=2` adds their direct
+    connections (friends-of-friends). Higher depths fall back to depth 2 to
+    avoid the SQL CTE explosion this MVP implementation can't justify yet.
+    """
+    if user is None:
+        return set()
+    user_id = getattr(user, 'id', user)
+    if user_id is None:
+        return set()
+    user_id_str = str(user_id)
+
+    capped_depth = 1 if depth <= 1 else 2
+    cache_key = f'social_neighbours:{user_id_str}:{capped_depth}'
+
+    from django.core.cache import cache as _cache
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return set(cached)
+
+    boosts = get_social_proximity_boosts(user_id)
+    if capped_depth == 1:
+        # 1.0 weight is reserved for direct (1-hop) connections.
+        ids = {str(uid) for uid, boost in boosts.items() if boost >= 1.0}
+    else:
+        ids = {str(uid) for uid in boosts.keys()}
+    ids.discard(user_id_str)
+
+    _cache.set(cache_key, list(ids), SOCIAL_NEIGHBOURS_TTL)
+    return ids
+
+
+SOCIAL_NEIGHBOURS_TTL = 60 * 60  # 1h — social graph changes slowly
