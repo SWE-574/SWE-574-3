@@ -215,6 +215,9 @@ const ProfileHero = ({
   return (
     <Box
       mb={compact ? 0 : 4}
+      h={compact ? '100%' : undefined}
+      display={compact ? 'flex' : undefined}
+      flexDirection={compact ? 'column' : undefined}
       borderRadius={user.banner_url ? '16px' : '22px'}
       style={{
         boxShadow: '0 20px 52px rgba(15, 23, 42, 0.24), 0 2px 10px rgba(15, 23, 42, 0.08)',
@@ -240,6 +243,7 @@ const ProfileHero = ({
       borderRadius={user.banner_url ? '0 0 16px 16px' : undefined}
       boxShadow="none"
       p={compact ? { base: 3.5, md: 4 } : { base: 4, md: 5 }}
+      flex={compact ? 1 : undefined}
     >
       <Box
         position="absolute"

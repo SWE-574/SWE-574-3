@@ -9,9 +9,10 @@ type Props = {
   p?: number | string | object
   borderRadius?: string
   boxShadow?: string
+  flex?: number | string
 }
 
-const HeroSurface = ({ gradient, children, mb, mt, p, borderRadius, boxShadow }: Props) => {
+const HeroSurface = ({ gradient, children, mb, mt, p, borderRadius, boxShadow, flex }: Props) => {
   return (
     <Box
       position="relative"
@@ -23,6 +24,7 @@ const HeroSurface = ({ gradient, children, mb, mt, p, borderRadius, boxShadow }:
       mb={mb}
       mt={mt}
       p={p ?? { base: 5, md: 6 }}
+      flex={flex}
     >
       {/* Top-right decorative blob */}
       <Box
