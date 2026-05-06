@@ -116,6 +116,8 @@ export default function EventsPage() {
 
   useEffect(() => {
     const ac = new AbortController()
+    // Clear stale data so the spinner shows while filters refetch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null)
     setEvents(null)
 

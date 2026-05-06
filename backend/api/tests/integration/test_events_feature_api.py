@@ -85,7 +85,7 @@ class TestDateRangeStrategyAPI:
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         # Field-level error so the frontend can attach it to the right input.
-        assert 'date_from' in response.data
+        assert 'date_from' in response.data.get('field_errors', {})
 
     def test_filter_silently_skipped_for_non_event_type(self):
         """date_from/to on a non-Event query is ignored, not an error."""
