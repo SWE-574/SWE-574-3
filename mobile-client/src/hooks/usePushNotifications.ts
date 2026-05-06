@@ -5,17 +5,21 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { useAuth } from '../context/AuthContext';
 import { useNotificationStore } from '../store/useNotificationStore';
+import { useToastStore } from '../store/useToastStore';
 import { registerPushToken, deregisterPushToken } from '../api/notifications';
 import { navigateToNotificationTarget } from '../constants/notificationMappings';
 
-// Configure how notifications are presented when the app is in the foreground
+// Foreground delivery is handled by our custom in-app toast
+// (InAppNotificationToast). We suppress the OS banner / sound / list entry
+// for foreground pushes so we don't get double-notified — once by Expo and
+// once by the toast (#370).
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
+    shouldShowAlert: false,
+    shouldPlaySound: false,
     shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
+    shouldShowBanner: false,
+    shouldShowList: false,
   }),
 });
 
@@ -125,9 +129,26 @@ export function usePushNotifications(
     if (!isAuthenticated) return;
 
     notificationListenerRef.current =
-      Notifications.addNotificationReceivedListener(() => {
-        // Sync unread count when a push arrives while app is open
+      Notifications.addNotificationReceivedListener((received) => {
+        // Sync unread count when a push arrives while app is open.
         useNotificationStore.getState().fetchUnreadCount();
+
+        // Show our in-app toast since we suppressed the OS banner above.
+        const content = received.request.content;
+        const data = (content.data ?? {}) as Record<string, unknown>;
+        useToastStore.getState().push({
+          id: String(data.notification_id ?? received.request.identifier),
+          title: content.title ?? 'New notification',
+          body: content.body ?? undefined,
+          payload: data.type
+            ? {
+                type: String(data.type),
+                notification_id: data.notification_id ? String(data.notification_id) : undefined,
+                related_handshake: (data.related_handshake as string) ?? null,
+                related_service: (data.related_service as string) ?? null,
+              }
+            : undefined,
+        });
       });
 
     return () => {

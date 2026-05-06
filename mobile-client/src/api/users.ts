@@ -43,6 +43,35 @@ export interface UserProfileRequest {
   bio?: string;
   avatar_url?: string;
   banner_url?: string;
+  notification_preferences?: NotificationPreferences;
+}
+
+// Notification preference categories surfaced in the mobile settings screen
+// (#370). Missing keys default to ON; setting a key to false opts the user
+// out of that category.
+export interface NotificationPreferences {
+  push?: boolean;        // master switch — false silences every push channel
+  chat?: boolean;
+  handshakes?: boolean;
+  services?: boolean;
+  reputation?: boolean;
+  reports?: boolean;
+  system?: boolean;
+}
+
+export function getNotificationPreferences(): Promise<NotificationPreferences> {
+  return apiRequest<{ notification_preferences?: NotificationPreferences }>(
+    '/users/me/',
+  ).then((u) => u.notification_preferences ?? {});
+}
+
+export function patchNotificationPreferences(
+  prefs: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  return apiRequest<{ notification_preferences?: NotificationPreferences }>(
+    '/users/me/',
+    { method: 'PATCH', body: { notification_preferences: prefs } },
+  ).then((u) => u.notification_preferences ?? {});
 }
 
 export function getMe(): Promise<UserSummary> {
