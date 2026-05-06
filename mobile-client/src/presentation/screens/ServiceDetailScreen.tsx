@@ -58,6 +58,7 @@ import {
   isEventFull,
   spotsLeft,
   isEventBanned,
+  formatGroupOfferDateTime,
 } from "../../utils/eventUtils";
 import type { Service } from "../../api/types";
 import { useAuth } from "../../context/AuthContext";
@@ -947,6 +948,10 @@ export default function ServiceDetailScreen() {
       .join(" ") || "Unknown";
   const initials = getInitials(service.user.first_name, service.user.last_name);
   const isRecurring = service.schedule_type === "Recurrent";
+  const isFixedGroupOffer =
+    service.type === "Offer" &&
+    service.schedule_type === "One-Time" &&
+    service.max_participants > 1;
   const createdLabel = formatScheduledDateTime(service.created_at);
   const serviceStatusLower = service.status?.toLowerCase();
 
@@ -974,9 +979,14 @@ export default function ServiceDetailScreen() {
       ? {
           key: "schedule",
           icon: "calendar-outline" as const,
-          text: `${service.schedule_type ?? ""}${
-            service.schedule_details ? ` · ${service.schedule_details}` : ""
-          }`,
+          text:
+            isFixedGroupOffer && service.scheduled_time
+              ? `${formatGroupOfferDateTime(service.scheduled_time)}${
+                  service.schedule_details ? ` · ${service.schedule_details}` : ""
+                }`
+              : `${service.schedule_type ?? ""}${
+                  service.schedule_details ? ` · ${service.schedule_details}` : ""
+                }`,
         }
       : null,
     isEvent && service.scheduled_time

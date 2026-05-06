@@ -44,7 +44,7 @@ import {
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
-import { isNearlyFull } from '@/utils/eventUtils'
+import { formatGroupOfferDateTime, isNearlyFull } from '@/utils/eventUtils'
 
 const TRANSPARENT = 'transparent'
 
@@ -259,6 +259,7 @@ function ServiceCard({
   const owner     = service.user ?? service.provider
   const isOffer   = service.type === 'Offer'
   const isRecurr  = service.schedule_type === 'Recurrent'
+  const isFixedGroupOffer = isOffer && service.schedule_type === 'One-Time' && service.max_participants > 1
   const gradient  = pickGradient(service)
 
   const showBadge = handshake && !(isRecurr && handshake.status === 'completed')
@@ -348,6 +349,9 @@ function ServiceCard({
               <FiRefreshCw size={9} color="#7C3AED" />
               <Text fontSize="11px" color="#7C3AED" fontWeight={600} whiteSpace="nowrap">Recurring</Text>
             </Flex>
+          )}
+          {isFixedGroupOffer && service.scheduled_time && (
+            <MetaChip icon={<FiCalendar size={10} />} label={formatGroupOfferDateTime(service.scheduled_time)} maxW="120px" />
           )}
           {service.schedule_details && !isRecurr && (
             <MetaChip icon={<FiCalendar size={10} />} label={service.schedule_details} maxW="120px" />
