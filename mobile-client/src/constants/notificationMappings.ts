@@ -25,7 +25,16 @@ export function navigateToNotificationTarget(
   notification: Notification,
   navigation: { navigate: (screen: string, params?: object) => void },
 ): void {
-  const { type, related_handshake, related_service } = notification;
+  const { type, related_handshake, related_service, related_service_type } = notification;
+
+  // Event notifications → ServiceDetail (even if related_handshake is present)
+  if (related_service_type === 'Event' && related_service) {
+    navigation.navigate('Home', {
+      screen: 'ServiceDetail',
+      params: { id: related_service },
+    });
+    return;
+  }
 
   // Handshake-related and chat notifications → Chat screen
   if (

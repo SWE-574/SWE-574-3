@@ -14,6 +14,8 @@ function makeNotification(overrides: Partial<Notification>): Notification {
     is_read: false,
     related_handshake: null,
     related_service: null,
+    related_service_type: null,
+    related_report: null,
     created_at: "",
     ...overrides,
   };
@@ -105,18 +107,67 @@ describe("navigateToNotificationTarget", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("prefers handshake route over service route for handshake types", () => {
+  it("prefers handshake route over service route for non-event handshake types", () => {
     navigateToNotificationTarget(
       makeNotification({
         type: "handshake_accepted",
         related_handshake: "hs-3",
         related_service: "svc-5",
+        related_service_type: "Offer",
       }),
       { navigate },
     );
     expect(navigate).toHaveBeenCalledWith("Messages", {
       screen: "Chat",
       params: { handshakeId: "hs-3" },
+    });
+  });
+
+  it("routes event RSVP notification (handshake_request) to ServiceDetail, not Chat", () => {
+    navigateToNotificationTarget(
+      makeNotification({
+        type: "handshake_request",
+        related_handshake: "hs-10",
+        related_service: "evt-1",
+        related_service_type: "Event",
+      }),
+      { navigate },
+    );
+    expect(navigate).toHaveBeenCalledWith("Home", {
+      screen: "ServiceDetail",
+      params: { id: "evt-1" },
+    });
+  });
+
+  it("routes event check-in notification (handshake_accepted) to ServiceDetail, not Chat", () => {
+    navigateToNotificationTarget(
+      makeNotification({
+        type: "handshake_accepted",
+        related_handshake: "hs-11",
+        related_service: "evt-2",
+        related_service_type: "Event",
+      }),
+      { navigate },
+    );
+    expect(navigate).toHaveBeenCalledWith("Home", {
+      screen: "ServiceDetail",
+      params: { id: "evt-2" },
+    });
+  });
+
+  it("routes event RSVP-cancelled notification (handshake_cancelled) to ServiceDetail, not Chat", () => {
+    navigateToNotificationTarget(
+      makeNotification({
+        type: "handshake_cancelled",
+        related_handshake: "hs-12",
+        related_service: "evt-3",
+        related_service_type: "Event",
+      }),
+      { navigate },
+    );
+    expect(navigate).toHaveBeenCalledWith("Home", {
+      screen: "ServiceDetail",
+      params: { id: "evt-3" },
     });
   });
 });

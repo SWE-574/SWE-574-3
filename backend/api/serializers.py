@@ -1890,11 +1890,17 @@ class ChatMessageSerializer(serializers.ModelSerializer):
     ]
 )
 class NotificationSerializer(serializers.ModelSerializer):
+    related_service_type = serializers.SerializerMethodField()
+
+    def get_related_service_type(self, obj):
+        return obj.related_service.type if obj.related_service else None
+
     class Meta:
         model = Notification
         fields = [
             'id', 'type', 'title', 'message', 'is_read',
-            'related_handshake', 'related_service', 'related_report', 'created_at'
+            'related_handshake', 'related_service', 'related_service_type',
+            'related_report', 'created_at'
         ]
 
 class DevicePushTokenSerializer(serializers.Serializer):

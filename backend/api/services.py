@@ -924,6 +924,7 @@ class HandshakeService:
                         f"for {handshake.requester.first_name}?"
                     ),
                     handshake=handshake,
+                    service=handshake.service,
                 )
                 create_notification(
                     user=handshake.requester,
@@ -934,6 +935,7 @@ class HandshakeService:
                         f"for {handshake.service.user.first_name}?"
                     ),
                     handshake=handshake,
+                    service=handshake.service,
                 )
 
         return handshake
@@ -1346,7 +1348,7 @@ class HandshakeService:
             handshake.save(update_fields=['status', 'updated_at'])
 
         # Notify admins
-        admins = User.objects.filter(role='admin')
+        admins = User.objects.filter(role__in=['admin', 'super_admin'], is_active=True)
         for admin in admins:
             create_notification(
                 user=admin,
@@ -1972,9 +1974,7 @@ class EventNoShowAppealService:
                 service=locked_handshake.service,
             )
 
-            notify_reporter_of_receipt(report)
-
-            for admin in User.objects.filter(role='admin').only('id'):
+            for admin in User.objects.filter(role__in=['admin', 'super_admin'], is_active=True).only('id'):
                 create_notification(
                     user=admin,
                     notification_type='new_report',

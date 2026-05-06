@@ -43,6 +43,7 @@ export function useNotificationSocket() {
           if (data.type === 'notification' && data.notification) {
             const n: Notification = data.notification
             addNotification(n)
+            fetchUnreadCount()
             toast(n.title, { description: n.message || undefined })
           }
         } catch {

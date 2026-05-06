@@ -2668,7 +2668,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
             description=description,
         )
 
-        admins = User.objects.filter(role='admin')
+        admins = User.objects.filter(role__in=['admin', 'super_admin'], is_active=True)
         for admin in admins:
             create_notification(
                 user=admin,
@@ -3941,7 +3941,12 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+        return (
+            Notification.objects
+            .filter(user=self.request.user)
+            .select_related('related_service', 'related_report')
+            .order_by('-created_at')
+        )
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -6606,7 +6611,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
             description=description,
         )
 
-        admins = User.objects.filter(role='admin', is_active=True)
+        admins = User.objects.filter(role__in=['admin', 'super_admin'], is_active=True)
         for admin in admins:
             create_notification(
                 user=admin,
@@ -6884,7 +6889,7 @@ class ForumPostViewSet(viewsets.ViewSet):
             description=description,
         )
 
-        admins = User.objects.filter(role='admin', is_active=True)
+        admins = User.objects.filter(role__in=['admin', 'super_admin'], is_active=True)
         for admin in admins:
             create_notification(
                 user=admin,
