@@ -281,6 +281,27 @@ class TestActivityFeedEndpoint:
         assert len(rows) >= 1
         assert rows[0]['handshake_duration_hours'] == 2.5
 
+    def test_follow_event_appears_in_followed_users_feed(self):
+        """When A follows B, B should see the follow event in their own feed
+        even though B does not follow A back."""
+        from api.models import ActivityEvent, UserFollow
+
+        a = UserFactory()
+        b = UserFactory()
+        UserFollow.objects.create(follower=a, following=b)
+
+        client = APIClient()
+        client.force_authenticate(user=b)
+        resp = client.get('/api/activity/feed/')
+        assert resp.status_code == 200
+        follow_rows = [
+            r for r in resp.json()['results']
+            if r['verb'] == ActivityEvent.USER_FOLLOWED
+            and r['actor']['id'] == str(a.id)
+        ]
+        assert len(follow_rows) == 1
+        assert follow_rows[0]['target_user']['id'] == str(b.id)
+
     def test_days_param_bounds_window(self):
         from api.models import ActivityEvent, UserFollow
 

@@ -332,3 +332,57 @@ class TestUserFollowingListView:
         response = client.get(f'/api/users/{user.id}/following/')
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestUserFollowNotification:
+    """A new follow edge should notify the followed user (#review).
+
+    The notification is created via `transaction.on_commit` inside the
+    signal, so the tests patch on_commit to fire synchronously rather than
+    requiring a transactional test database.
+    """
+
+    def test_follow_creates_notification_for_target(self):
+        from unittest.mock import patch
+        from api.models import Notification
+
+        actor = UserFactory(first_name='Mira')
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(actor)
+
+        with patch(
+            'api.signals.transaction.on_commit',
+            side_effect=lambda callback: callback(),
+        ):
+            client.post(f'/api/users/{target.id}/follow/')
+
+        notes = Notification.objects.filter(user=target, type='user_followed')
+        assert notes.count() == 1
+        assert 'Mira' in notes.first().message
+
+    def test_unfollow_does_not_create_notification(self):
+        from unittest.mock import patch
+        from api.models import Notification
+
+        actor = UserFactory()
+        target = UserFactory()
+        with patch(
+            'api.signals.transaction.on_commit',
+            side_effect=lambda callback: callback(),
+        ):
+            UserFollow.objects.create(follower=actor, following=target)
+        Notification.objects.filter(user=target, type='user_followed').delete()
+
+        client = AuthenticatedAPIClient().authenticate_user(actor)
+        with patch(
+            'api.signals.transaction.on_commit',
+            side_effect=lambda callback: callback(),
+        ):
+            client.delete(f'/api/users/{target.id}/follow/')
+
+        assert not Notification.objects.filter(
+            user=target, type='user_followed',
+        ).exists()
+

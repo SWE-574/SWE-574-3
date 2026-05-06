@@ -120,7 +120,6 @@ export function ActivityHeroCard({ event, variant = 'default' }: ActivityHeroCar
             NEW
           </Flex>
         )}
-        <style>{`@keyframes activityPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.85); } }`}</style>
         <Text
           position="absolute"
           bottom="12px"

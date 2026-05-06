@@ -17,6 +17,7 @@ from .views import (
     UserHistoryView,
     UserBadgeProgressView,
     UserVerifiedReviewsView,
+    SuggestedUsersView,
     ActivityFeedView,
     UserFollowView,
     UserFollowersListView,
@@ -296,6 +297,7 @@ urlpatterns = [
     path('auth/send-verification/', SendVerificationEmailView.as_view(), name='send-verification'),
     path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
+    path('users/suggested/', SuggestedUsersView.as_view(), name='users-suggested'),
     # Nested /users/<id>/… routes must be registered before the generic user-detail path
     # so paths like …/follow/ are never mistaken for detail (defensive ordering).
     path('users/<uuid:id>/follow/', UserFollowView.as_view(), name='user-follow'),

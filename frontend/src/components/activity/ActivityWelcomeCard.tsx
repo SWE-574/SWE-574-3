@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { Box, Flex, HStack, Stack, Text } from '@chakra-ui/react'
-import { FiMapPin } from 'react-icons/fi'
+import { FiCheck, FiMapPin } from 'react-icons/fi'
 import { Link as RouterLink } from 'react-router-dom'
 import { Avatar } from '@/components/Avatar'
 import type { ActivityEvent } from '@/services/activityAPI'
+import { userAPI } from '@/services/userAPI'
 import { actorAvatarStub, actorName } from './shared'
 
 interface ActivityWelcomeCardProps {
@@ -12,6 +14,21 @@ interface ActivityWelcomeCardProps {
 export function ActivityWelcomeCard({ event }: ActivityWelcomeCardProps) {
   const skills = event.actor_skills ?? []
   const location = event.actor_location
+  const [following, setFollowing] = useState(false)
+  const [pending, setPending] = useState(false)
+
+  const handleFollow = async () => {
+    if (following || pending) return
+    setPending(true)
+    setFollowing(true)
+    try {
+      await userAPI.followUser(event.actor.id)
+    } catch {
+      setFollowing(false)
+    } finally {
+      setPending(false)
+    }
+  }
 
   return (
     <Box
@@ -78,25 +95,32 @@ export function ActivityWelcomeCard({ event }: ActivityWelcomeCardProps) {
             Say hi
           </Box>
         </RouterLink>
-        <RouterLink
-          to={`/public-profile/${event.actor.id}`}
-          style={{ flex: 1, textDecoration: 'none' }}
+        <Box
+          as="button"
+          onClick={handleFollow}
+          aria-disabled={following || pending}
+          flex={1}
+          textAlign="center"
+          py="7px"
+          borderRadius="9px"
+          bg={following ? 'teal.50' : 'white'}
+          borderWidth="1px"
+          borderColor="teal.300"
+          color="teal.700"
+          fontSize="12px"
+          fontWeight={700}
+          cursor={following ? 'default' : 'pointer'}
+          _hover={following ? undefined : { bg: 'teal.50' }}
         >
-          <Box
-            textAlign="center"
-            py="7px"
-            borderRadius="9px"
-            bg="white"
-            borderWidth="1px"
-            borderColor="teal.300"
-            color="teal.700"
-            fontSize="12px"
-            fontWeight={700}
-            _hover={{ bg: 'teal.50' }}
-          >
-            Follow
-          </Box>
-        </RouterLink>
+          {following ? (
+            <Flex align="center" justify="center" gap="4px">
+              <Box as={FiCheck} />
+              Following
+            </Flex>
+          ) : (
+            'Follow'
+          )}
+        </Box>
       </Flex>
     </Box>
   )

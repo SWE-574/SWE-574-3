@@ -373,3 +373,24 @@ def notify_on_handshake_status_change(sender, instance, created, **kwargs):
             ))
     except Exception:
         logger.exception('Failed to queue handshake notification for %s', instance.pk)
+
+
+@receiver(post_save, sender=UserFollow)
+def notify_on_user_follow(sender, instance, created, **kwargs):
+    """Notify the followed user when a new follow edge is created."""
+    if not created:
+        return
+    from .utils import create_notification
+    follower = instance.follower
+    followed = instance.following
+    follower_name = (follower.first_name or follower.email or 'Someone').strip()
+    try:
+        transaction.on_commit(lambda: create_notification(
+            user=followed,
+            notification_type='user_followed',
+            title='New follower',
+            message=f"{follower_name} started following you.",
+        ))
+    except Exception:
+        logger.exception('Failed to queue follow notification for %s', instance.pk)
+

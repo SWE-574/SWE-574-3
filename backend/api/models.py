@@ -537,6 +537,7 @@ class Notification(models.Model):
         ('positive_rep', 'Positive Reputation'),
         ('admin_warning', 'Admin Warning'),
         ('dispute_resolved', 'Dispute Resolved'),
+        ('user_followed', 'New Follower'),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

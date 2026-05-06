@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Box, Flex, HStack, Skeleton, Stack, Text } from '@chakra-ui/react'
-import { FiActivity, FiChevronDown, FiChevronUp, FiMapPin, FiNavigation } from 'react-icons/fi'
+import { FiActivity, FiChevronDown, FiChevronUp, FiMapPin, FiNavigation, FiUserPlus } from 'react-icons/fi'
 import { Link as RouterLink } from 'react-router-dom'
 import { Avatar } from '@/components/Avatar'
 import { activityAPI, type ActivityEvent } from '@/services/activityAPI'
+import { userAPI } from '@/services/userAPI'
+import type { UserSummary } from '@/types'
 import { actorAvatarStub, actorName, distanceLabel } from './shared'
 
 const REFRESH_MS = 60_000
@@ -47,10 +49,25 @@ function timeAgo(iso: string): string {
 }
 
 export function ActivityPulseRail({ lat, lng }: ActivityPulseRailProps) {
-  const hasLoc = lat != null && lng != null && (lat !== 0 || lng !== 0)
+  const hasLoc = lat != null && lng != null
   const [pulses, setPulses] = useState<ActivityEvent[]>([])
   const [loading, setLoading] = useState(hasLoc)
   const [collapsed, setCollapsed] = useState(false)
+  const [suggested, setSuggested] = useState<UserSummary[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    userAPI
+      .getSuggested()
+      .then(({ results }) => {
+        if (cancelled) return
+        setSuggested(results.slice(0, 3))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!hasLoc) return
@@ -190,6 +207,38 @@ export function ActivityPulseRail({ lat, lng }: ActivityPulseRailProps) {
                 </RouterLink>
               ))}
             </Stack>
+          )}
+
+          {suggested.length > 0 && (
+            <Box mt="14px" pt="12px" borderTopWidth="1px" borderColor="gray.100">
+              <Flex align="center" gap={2} mb="10px">
+                <Box as={FiUserPlus} color="teal.500" />
+                <Text fontSize="12px" fontWeight={700} color="gray.900" flex={1}>
+                  People you might know
+                </Text>
+              </Flex>
+              <Stack gap="8px">
+                {suggested.map(s => (
+                  <RouterLink
+                    key={s.id}
+                    to={`/public-profile/${s.id}`}
+                    style={{ textDecoration: 'none', display: 'block' }}
+                  >
+                    <Flex align="center" gap="8px" p="6px" mx="-6px" borderRadius="9px" _hover={{ bg: 'gray.50' }}>
+                      <Avatar u={s} size={28} />
+                      <Text fontSize="12px" fontWeight={600} color="gray.900" lineClamp={1} flex={1}>
+                        {[s.first_name, s.last_name].filter(Boolean).join(' ') || s.email}
+                      </Text>
+                    </Flex>
+                  </RouterLink>
+                ))}
+              </Stack>
+              <RouterLink to="/users/suggested" style={{ textDecoration: 'none' }}>
+                <Text fontSize="11px" fontWeight={600} color="teal.600" mt="8px" _hover={{ color: 'teal.700' }}>
+                  See more →
+                </Text>
+              </RouterLink>
+            </Box>
           )}
         </>
       )}

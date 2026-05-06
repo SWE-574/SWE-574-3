@@ -6,6 +6,8 @@ import { useNavigate } from 'react-router-dom'
 import { useGeoStore } from '@/store/useGeoStore'
 import { useAuthStore } from '@/store/useAuthStore'
 import { activityAPI, type ActivityEvent } from '@/services/activityAPI'
+import { userAPI } from '@/services/userAPI'
+import { useAcquireLocation } from '@/hooks/useAcquireLocation'
 
 import { ActivityFilterChips, type ActivityFilter } from '@/components/activity/ActivityFilterChips'
 import { ActivityDayHeader } from '@/components/activity/ActivityDayHeader'
@@ -55,6 +57,7 @@ function groupByDay(events: ActivityEvent[]): DayGroup[] {
 
 export default function ActivityPage() {
   const navigate = useNavigate()
+  useAcquireLocation()
   const geoLocation = useGeoStore(state => state.geoLocation)
   const user = useAuthStore(state => state.user)
 
@@ -62,11 +65,26 @@ export default function ActivityPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<ActivityFilter>('all')
-  const [followingIds] = useState<Set<string>>(new Set())
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set())
 
   const lat = geoLocation?.latitude
   const lng = geoLocation?.longitude
-  const hasLocation = lat != null && lng != null && (lat !== 0 || lng !== 0)
+  const hasLocation = geoLocation != null
+
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    userAPI
+      .getFollowing(user.id)
+      .then(rows => {
+        if (cancelled) return
+        setFollowingIds(new Set(rows.map(r => r.id)))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
 
   useEffect(() => {
     let cancelled = false
@@ -163,7 +181,7 @@ export default function ActivityPage() {
               </Text>
               <Box
                 as="button"
-                onClick={() => navigate('/users')}
+                onClick={() => navigate('/users/suggested')}
                 px="14px"
                 py="7px"
                 borderRadius="9px"

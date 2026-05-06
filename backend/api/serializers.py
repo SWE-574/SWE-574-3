@@ -3154,15 +3154,21 @@ class ActivityEventSerializer(serializers.ModelSerializer):
 
     def get_event_capacity_pct(self, obj):
         """Percentage of the event's max_participants that have committed.
-        Only meaningful for service.type=='Event'; None elsewhere."""
-        from .models import Handshake
+        Only meaningful for service.type=='Event'; None elsewhere.
+
+        Reads from `_committed_count`, annotated on the queryset by
+        ActivityFeedView.get_queryset to keep this O(1) per card.
+        """
         svc = obj.service
         if svc is None or svc.type != 'Event' or not svc.max_participants:
             return None
-        committed = Handshake.objects.filter(
-            service=svc,
-            status__in=('accepted', 'completed', 'checked_in', 'attended'),
-        ).count()
+        committed = getattr(obj, '_committed_count', None)
+        if committed is None:
+            from .models import Handshake
+            committed = Handshake.objects.filter(
+                service=svc,
+                status__in=('accepted', 'completed', 'checked_in', 'attended'),
+            ).count()
         return round(100.0 * committed / svc.max_participants, 1)
 
     def get_event_starts_in_seconds(self, obj):
@@ -3175,18 +3181,21 @@ class ActivityEventSerializer(serializers.ModelSerializer):
         return int(delta.total_seconds())
 
     def get_handshake_duration_hours(self, obj):
-        """Banked hours flourish for handshake_completed cards. Looks up the
-        most recently completed handshake on (service, requester=actor) so we
-        do not need a direct FK on ActivityEvent. Returns None if not found."""
-        from .models import ActivityEvent, Handshake
+        """Banked hours flourish for handshake_completed cards. Reads from
+        `_completed_handshake`, batch-fetched on the page by
+        ActivityFeedView._annotate_extras."""
+        from .models import ActivityEvent
         if obj.verb != ActivityEvent.HANDSHAKE_COMPLETED or obj.service_id is None:
             return None
-        hs = (
-            Handshake.objects
-            .filter(service_id=obj.service_id, requester=obj.actor, status='completed')
-            .order_by('-updated_at')
-            .first()
-        )
+        hs = getattr(obj, '_completed_handshake', None)
+        if hs is None:
+            from .models import Handshake
+            hs = (
+                Handshake.objects
+                .filter(service_id=obj.service_id, requester=obj.actor, status='completed')
+                .order_by('-updated_at')
+                .first()
+            )
         if hs is None:
             return None
         hours = hs.exact_duration if hs.exact_duration is not None else hs.provisioned_hours
