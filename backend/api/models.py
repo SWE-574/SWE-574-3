@@ -301,6 +301,33 @@ class Service(models.Model):
         from datetime import timedelta
         return timezone.now() >= self.scheduled_time - timedelta(hours=24)
 
+    @property
+    def edit_lock_reason(self) -> str | None:
+        """Human-readable reason the service is currently edit-locked, or None.
+
+        Canonical rule (#267, FR-11f / FR-11n):
+          - Terminal status (Completed / Cancelled): locked, no further edits.
+          - Event within 24h of scheduled_time and beyond: locked.
+          - Anything else: not locked.
+
+        Frontend should consume `edit_locked` / `edit_lock_reason` from the
+        service payload directly; do NOT reimplement the date math client-side.
+        """
+        if self.status in ('Completed', 'Cancelled'):
+            return f"Service is {self.status.lower()} — no further edits allowed."
+        if self.type == 'Event' and self.scheduled_time:
+            from django.utils import timezone
+            now = timezone.now()
+            if now >= self.scheduled_time:
+                return 'Event has started — edits are locked.'
+            if self.is_in_lockdown_window:
+                return 'Event is within the 24-hour lockdown window — edits are locked.'
+        return None
+
+    @property
+    def edit_locked(self) -> bool:
+        return self.edit_lock_reason is not None
+
     def save(self, *args, **kwargs):
         """
         Auto-populate PointField from lat/lng for geospatial queries.
@@ -551,6 +578,10 @@ class Notification(models.Model):
         ('positive_rep', 'Positive Reputation'),
         ('admin_warning', 'Admin Warning'),
         ('dispute_resolved', 'Dispute Resolved'),
+        ('new_report', 'New Report'),
+        ('report_received', 'Report Received'),
+        ('report_resolved', 'Report Resolved'),
+        ('report_dismissed', 'Report Dismissed'),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -561,6 +592,7 @@ class Notification(models.Model):
     is_read = models.BooleanField(default=False)
     related_handshake = models.ForeignKey(Handshake, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     related_service = models.ForeignKey(Service, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    related_report = models.ForeignKey('Report', on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -568,6 +600,7 @@ class Notification(models.Model):
             models.Index(fields=['user', 'is_read', 'created_at']),
             models.Index(fields=['related_handshake']),
             models.Index(fields=['related_service']),
+            models.Index(fields=['related_report']),
         ]
         ordering = ['-created_at']
 

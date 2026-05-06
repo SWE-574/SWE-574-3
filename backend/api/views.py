@@ -62,6 +62,7 @@ from .serializers import (
     DevicePushTokenSerializer,
     ReputationRepSerializer,
     ReportSerializer,
+    MyReportSerializer,
     TransactionHistorySerializer,
     ChatRoomSerializer,
     PublicChatMessageSerializer,
@@ -80,6 +81,7 @@ from .achievement_utils import get_achievement_progress
 from .utils import (
     can_user_post_offer, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
+    notify_reporter_of_receipt, notify_reporter_of_state_change,
     reserve_timebank_for_need_service, release_timebank_for_need_service,
 )
 from .services import (
@@ -91,7 +93,7 @@ from .services import (
 from .ranking_debug import build_service_debug_payload
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
-from .search_filters import SearchEngine
+from .search_filters import InvalidSearchParam, SearchEngine
 from .performance import track_performance
 from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
 from django.db.models.functions import Coalesce
@@ -1230,6 +1232,31 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         return UserProfileSerializer
 
 
+class MyReportsView(generics.ListAPIView):
+    """
+    Reports filed by the current user.
+
+    **GET /api/users/me/reports/** — paginated list of the requester's reports
+    with status (`pending`, `resolved`, `dismissed`). Used by the "Your reports"
+    surface so users can see whether their reports were acted on.
+
+    Moderator identity is intentionally omitted from the payload.
+    """
+    serializer_class = MyReportSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            Report.objects
+            .filter(reporter=self.request.user)
+            .select_related(
+                'reported_service', 'reported_user',
+                'reported_forum_topic', 'reported_forum_post',
+            )
+            .order_by('-created_at')
+        )
+
+
 class UserHistoryView(APIView):
     """
     User Transaction History
@@ -1909,9 +1936,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
             'distance': self.request.query_params.get('distance', 10),
+            # FR-12c — event date-range filter (only fires when type=Event).
+            'date_from': self.request.query_params.get('date_from'),
+            'date_to': self.request.query_params.get('date_to'),
         }
-        
-        queryset = search_engine.search(queryset, search_params)
+
+        try:
+            queryset = search_engine.search(queryset, search_params)
+        except InvalidSearchParam as exc:
+            # Surface the field-level error instead of swallowing it.
+            raise drf_serializers.ValidationError({exc.field: exc.message})
 
         user_param = self.request.query_params.get('user')
         # Filter by owner user (for profile pages)
@@ -2645,11 +2679,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Listing Report',
                 message=f"New {report.get_type_display()} report for service '{service.title}'",
                 service=service,
+                report=report,
             )
+        notify_reporter_of_receipt(report)
 
         return Response({'status': 'success', 'report_id': str(report.id)}, status=201)
 
@@ -4262,9 +4298,11 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
 
         queryset = Report.objects.all()
 
-        # For retrieve (single object by PK), skip the status filter so resolved/dismissed
-        # reports can still be fetched for the detail panel.
-        if self.action == 'retrieve':
+        # For retrieve (single object by PK) and the resolve action, skip the status
+        # filter so resolved/dismissed reports can still be fetched for the detail
+        # panel and so re-resolving a closed report hits the idempotency guard
+        # (HTTP 400) rather than a 404 from get_object().
+        if self.action in ('retrieve', 'resolve_report'):
             return queryset.order_by('-created_at')
 
         # For list, filter by status (default: pending)
@@ -4391,6 +4429,7 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                 report.resolved_at = timezone.now()
                 report.admin_notes = admin_notes or 'Reported participant removed from event by admin moderation'
                 report.save()
+                notify_reporter_of_state_change(report)
 
                 create_notification(
                     user=target_handshake.requester,
@@ -4400,16 +4439,6 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                     handshake=target_handshake,
                     service=target_handshake.service,
                 )
-
-                if report.reporter_id and report.reporter_id != target_handshake.requester_id:
-                    create_notification(
-                        user=report.reporter,
-                        notification_type='dispute_resolved',
-                        title='Report Resolved',
-                        message=f'Your report was upheld and the participant was removed from "{target_handshake.service.title}".',
-                        handshake=target_handshake,
-                        service=target_handshake.service,
-                    )
 
                 if target_handshake.service.user_id not in [target_handshake.requester_id, report.reporter_id]:
                     create_notification(
@@ -4514,21 +4543,12 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                         handshake=handshake
                     )
                 
-                # If reporter is different from both parties, also notify them
-                if report.reporter.id not in [provider.id, receiver.id]:
-                    create_notification(
-                        user=report.reporter,
-                        notification_type='dispute_resolved',
-                        title='Your Report Has Been Resolved',
-                        message=f'Your no-show report has been confirmed and the dispute has been resolved.',
-                        handshake=handshake
-                    )
-
                 report.status = 'resolved'
                 report.resolved_by = request.user
                 report.resolved_at = timezone.now()
                 report.admin_notes = admin_notes or f'No-show confirmed - hours {financial_action} after investigation'
                 report.save()
+                notify_reporter_of_state_change(report)
 
             log_admin_action(
                 request.user,
@@ -4576,20 +4596,12 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                         handshake=handshake
                     )
                 
-                # Notify the reporter
-                create_notification(
-                    user=report.reporter,
-                    notification_type='dispute_resolved',
-                    title='Report Dismissed',
-                    message=f'Your report has been reviewed and dismissed. The service has been marked as completed.',
-                    handshake=handshake
-                )
-
                 report.status = 'dismissed'
                 report.resolved_by = request.user
                 report.resolved_at = timezone.now()
                 report.admin_notes = admin_notes or 'Report dismissed after investigation'
                 report.save()
+                notify_reporter_of_state_change(report)
 
             log_admin_action(
                 request.user,
@@ -4599,9 +4611,44 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                 admin_notes or action_type,
             )
         
+        elif action_type in {'mark_resolved', 'mark_dismissed'}:
+            # Plain "Mark as Resolved" / "Mark as Dismissed" — no TimeBank or
+            # handshake side effects. Used when an admin has reviewed a report
+            # and wants to close the case without touching the related transfer.
+            # Safe even when the linked service has reached a terminal status
+            # (Completed / Cancelled), unlike confirm_no_show / dismiss which
+            # require an active handshake.
+            if report.status != 'pending':
+                return create_error_response(
+                    f'Report is already {report.status}; cannot change status.',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            new_status = 'resolved' if action_type == 'mark_resolved' else 'dismissed'
+            default_note = (
+                'Report marked as resolved by admin without TimeBank action.'
+                if new_status == 'resolved'
+                else 'Report dismissed by admin without TimeBank action.'
+            )
+            with transaction.atomic():
+                report.status = new_status
+                report.resolved_by = request.user
+                report.resolved_at = timezone.now()
+                report.admin_notes = admin_notes or default_note
+                report.save(update_fields=['status', 'resolved_by', 'resolved_at', 'admin_notes'])
+                notify_reporter_of_state_change(report)
+
+            log_admin_action(
+                request.user,
+                'resolve_report',
+                'report',
+                report,
+                admin_notes or action_type,
+            )
+
         else:
             return create_error_response(
-                'Invalid action. Use "confirm_no_show", "dismiss", or "remove_from_event".',
+                'Invalid action. Use "confirm_no_show", "dismiss", "remove_from_event", "mark_resolved", or "mark_dismissed".',
                 code=ErrorCodes.VALIDATION_ERROR,
                 status_code=status.HTTP_400_BAD_REQUEST
             )
@@ -6570,10 +6617,12 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Forum Topic Report',
                 message=f"{request.user.first_name or request.user.email} reported topic '{topic.title}'.",
+                report=report,
             )
+        notify_reporter_of_receipt(report)
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
 
@@ -6846,10 +6895,12 @@ class ForumPostViewSet(viewsets.ViewSet):
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Forum Post Report',
                 message=f"{request.user.first_name or request.user.email} reported content in '{post.topic.title}'.",
+                report=report,
             )
+        notify_reporter_of_receipt(report)
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
 

@@ -36,6 +36,20 @@ const NotificationsPage = () => {
   const handleClick = useCallback(
     (notification: Notification) => {
       if (!notification.is_read) markAsRead(notification.id)
+
+      if (notification.type === 'new_report' && notification.related_report) {
+        navigate(`/admin?tab=reports&reportId=${notification.related_report}`)
+        return
+      }
+      if (
+        notification.type === 'report_received'
+        || notification.type === 'report_resolved'
+        || notification.type === 'report_dismissed'
+      ) {
+        navigate('/profile?tab=reports')
+        return
+      }
+
       const isFeedbackNotif = notification.type === 'positive_rep'
       if (notification.related_service && isFeedbackNotif) {
         navigate(`/service-detail/${notification.related_service}`)

@@ -200,6 +200,10 @@ export interface Service {
   comment_count?: number
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
+  // FR-11f / FR-11n: backend-canonical edit-lock state. Frontend should
+  // consume these directly instead of re-deriving the date math (#267).
+  edit_locked?: boolean
+  edit_lock_reason?: string | null
 }
 
 export interface EventEvaluationSummary {
@@ -369,6 +373,10 @@ export type NotificationType =
   | 'positive_rep'
   | 'admin_warning'
   | 'dispute_resolved'
+  | 'new_report'
+  | 'report_received'
+  | 'report_resolved'
+  | 'report_dismissed'
 
 export interface Notification {
   id: string
@@ -378,6 +386,7 @@ export interface Notification {
   is_read: boolean
   related_handshake: string | null
   related_service: string | null
+  related_report: string | null
   created_at: string
 }
 
@@ -519,6 +528,7 @@ export interface AdminReport {
   reported_service_owner_name?: string | null
   reported_service_owner_email?: string | null
   reported_service_owner_karma_score?: number | null
+  reported_service_has_active_handshakes?: boolean | null
   reported_forum_topic?: string | null
   reported_forum_topic_title?: string | null
   reported_forum_post?: string | null

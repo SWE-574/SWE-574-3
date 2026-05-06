@@ -6,6 +6,7 @@ import { useNotificationSocket } from "../hooks/useNotificationSocket";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import BottomTabNavigator from "./BottomTabNavigator";
 import InAppNotificationToast from "../presentation/components/InAppNotificationToast";
+import AppOfflineBanner from "../presentation/components/AppOfflineBanner";
 
 export default function RootNavigator() {
   const { isLoading } = useAuth();
@@ -22,8 +23,11 @@ export default function RootNavigator() {
   }
 
   return (
-    <View style={styles.container}>
-      <BottomTabNavigator />
+    <View style={styles.root}>
+      <AppOfflineBanner />
+      <View style={styles.flex}>
+        <BottomTabNavigator />
+      </View>
       <InAppNotificationToast />
     </View>
   );
@@ -38,5 +42,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#fff",
+  },
+  root: {
+    flex: 1,
+  },
+  flex: {
+    flex: 1,
   },
 });
