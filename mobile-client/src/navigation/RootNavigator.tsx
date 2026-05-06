@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useNotificationSocket } from "../hooks/useNotificationSocket";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import BottomTabNavigator from "./BottomTabNavigator";
+import AppOfflineBanner from "../presentation/components/AppOfflineBanner";
 
 export default function RootNavigator() {
   const { isLoading } = useAuth();
@@ -20,7 +21,14 @@ export default function RootNavigator() {
     );
   }
 
-  return <BottomTabNavigator />;
+  return (
+    <View style={styles.root}>
+      <AppOfflineBanner />
+      <View style={styles.flex}>
+        <BottomTabNavigator />
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -29,5 +37,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#fff",
+  },
+  root: {
+    flex: 1,
+  },
+  flex: {
+    flex: 1,
   },
 });

@@ -61,6 +61,8 @@ import {
 } from "../../utils/eventUtils";
 import type { Service } from "../../api/types";
 import { useAuth } from "../../context/AuthContext";
+import { useScreenCache } from "../../hooks/useScreenCache";
+import { ApiNetworkError } from "../../api/client";
 import { getMapboxToken } from "../../constants/env";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -264,6 +266,11 @@ export default function ServiceDetailScreen() {
   );
 
   const { id } = route.params;
+  const cache = useScreenCache<Service>(
+    currentUser?.id ?? null,
+    `service-detail-${id}`,
+  );
+  const hydratedRef = useRef(false);
   const [service, setService] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -297,13 +304,26 @@ export default function ServiceDetailScreen() {
       setError(null);
       const next = await getService(id);
       setService(next);
+      cache.persist(next);
       return next;
     } catch (e) {
+      // Network failure: try the disk cache so the user sees the last
+      // version of this service they viewed instead of an error.
+      if (e instanceof ApiNetworkError) {
+        const seed = await cache.hydrate();
+        if (seed) {
+          setService(seed.data);
+          setError(null);
+          return seed.data;
+        }
+        setError("You are offline.");
+        throw e;
+      }
       const message = e instanceof Error ? e.message : "Failed to load";
       setError(message);
       throw e;
     }
-  }, [id]);
+  }, [id, cache]);
 
   const loadHandshakes = useCallback(async (targetService?: Service | null) => {
     const activeService = targetService;
@@ -355,8 +375,23 @@ export default function ServiceDetailScreen() {
 
   useEffect(() => {
     loadService()
+      .catch(() => {
+        /* loadService already wrote setError; nothing else to do */
+      })
       .finally(() => setLoading(false));
   }, [loadService]);
+
+  // Cold-start: paint the cached service immediately so the screen is not
+  // blank while the network round-trip resolves.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (!cache.enabled) return;
+    if (service) return;
+    hydratedRef.current = true;
+    cache.hydrate().then((seed) => {
+      if (seed) setService((prev) => prev ?? seed.data);
+    });
+  }, [cache, service]);
 
   useEffect(() => {
     if (!service) return;

@@ -10,8 +10,20 @@ import {
   getRefreshToken,
   clearAuth,
   BASE_URL,
+  ApiNetworkError,
+  ApiHttpError,
+  OfflineMutationError,
 } from "../client";
 import { mockFetchResolve, mockFetchReject, getLastFetchCall, getLastFetchBody } from "./helpers";
+import { useConnectivityStore } from "../../store/connectivityStore";
+
+function setOnline(isOnline: boolean) {
+  useConnectivityStore.setState({
+    isOnline,
+    isInternetReachable: isOnline,
+    lastChangeAt: Date.now(),
+  });
+}
 
 describe("client", () => {
   beforeEach(() => {
@@ -20,6 +32,7 @@ describe("client", () => {
     setAuthToken(null);
     setAuthTokens("", "");
     setAuthToken(null); // ensure null after setAuthTokens clears in-memory state
+    setOnline(true);
   });
 
   describe("apiRequest", () => {
@@ -127,6 +140,62 @@ describe("client", () => {
         text: () => Promise.resolve(JSON.stringify({ message: "Server error" })),
       });
       await expect(apiRequest("/x/")).rejects.toThrow("Server error");
+    });
+
+    it("throws ApiHttpError with status on non-ok responses", async () => {
+      mockFetchReject("Unauthorized", 401);
+      try {
+        await apiRequest("/users/me/");
+        throw new Error("expected throw");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ApiHttpError);
+        expect((e as ApiHttpError).status).toBe(401);
+      }
+    });
+
+    it("throws ApiNetworkError when fetch itself rejects", async () => {
+      (global.fetch as jest.Mock).mockRejectedValueOnce(new TypeError("Network request failed"));
+      try {
+        await apiRequest("/users/me/");
+        throw new Error("expected throw");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ApiNetworkError);
+      }
+    });
+  });
+
+  describe("offline mutation gate", () => {
+    it("blocks POST when offline without calling fetch", async () => {
+      setOnline(false);
+      await expect(
+        apiRequest("/services/", { method: "POST", body: { title: "x" } }),
+      ).rejects.toBeInstanceOf(OfflineMutationError);
+      expect((global.fetch as jest.Mock)).not.toHaveBeenCalled();
+    });
+
+    it.each(["PUT", "PATCH", "DELETE"])(
+      "blocks %s when offline",
+      async (method) => {
+        setOnline(false);
+        await expect(
+          apiRequest(`/services/1/`, { method }),
+        ).rejects.toBeInstanceOf(OfflineMutationError);
+      },
+    );
+
+    it("allows GET while offline (cached fetch logic decides what to do)", async () => {
+      setOnline(false);
+      // GET passes the gate; the underlying fetch will then fail with a
+      // network error, which callers handle separately.
+      (global.fetch as jest.Mock).mockRejectedValueOnce(new TypeError("offline"));
+      await expect(apiRequest("/services/")).rejects.toBeInstanceOf(ApiNetworkError);
+    });
+
+    it("does not block mutations when back online", async () => {
+      setOnline(true);
+      mockFetchResolve({ id: "1" });
+      await apiRequest("/services/", { method: "POST", body: {} });
+      expect((global.fetch as jest.Mock)).toHaveBeenCalledTimes(1);
     });
   });
 

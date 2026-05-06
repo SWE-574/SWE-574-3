@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -20,6 +20,8 @@ import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useScreenCache } from "../../hooks/useScreenCache";
+import { ApiNetworkError } from "../../api/client";
 
 type Nav = NativeStackNavigationProp<MessagesStackParamList, "MessagesList">;
 
@@ -241,6 +243,8 @@ export default function MessagesScreen() {
   const [showClosedGroup, setShowClosedGroup] = useState(false);
   const [showClosedEvents, setShowClosedEvents] = useState(false);
   const { user } = useAuth();
+  const cache = useScreenCache<Chat[]>(user?.id ?? null, "messages-chats");
+  const hydratedRef = useRef(false);
 
   const fetchChats = useCallback(
     async (isRefresh = false) => {
@@ -259,6 +263,7 @@ export default function MessagesScreen() {
           listHandshakes({ page_size: 200 }),
         ]);
         setChats(data);
+        cache.persist(data);
 
         const relevantEventHandshakes = handshakePage.results.filter((handshake) =>
           EVENT_TAB_HANDSHAKE_STATUSES.has(handshake.status?.toLowerCase() ?? ""),
@@ -345,8 +350,22 @@ export default function MessagesScreen() {
         );
       } catch (err) {
         console.error("Failed to load chats:", err);
-        setError("Failed to load messages.");
-        setChats([]);
+        // Network failure: fall back to cached chats so the conversation
+        // list survives going offline. Event/joined-event derivations stay
+        // empty — they require network round-trips we cannot replay here.
+        if (err instanceof ApiNetworkError) {
+          const seed = await cache.hydrate();
+          if (seed && seed.data.length > 0) {
+            setChats(seed.data);
+            setError(null);
+          } else {
+            setChats([]);
+            setError("You are offline.");
+          }
+        } else {
+          setError("Failed to load messages.");
+          setChats([]);
+        }
         setEventServices([]);
         setJoinedEventServices([]);
       } finally {
@@ -354,8 +373,21 @@ export default function MessagesScreen() {
         setRefreshing(false);
       }
     },
-    [user],
+    [user, cache],
   );
+
+  // Cold-start hydration so the conversation list renders immediately.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (!cache.enabled) return;
+    if (chats.length > 0) return;
+    hydratedRef.current = true;
+    cache.hydrate().then((seed) => {
+      if (seed && seed.data.length > 0) {
+        setChats((prev) => (prev.length === 0 ? seed.data : prev));
+      }
+    });
+  }, [cache, chats.length]);
 
   useEffect(() => {
     if (!user) {

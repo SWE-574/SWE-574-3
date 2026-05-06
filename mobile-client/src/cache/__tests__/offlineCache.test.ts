@@ -16,7 +16,7 @@ jest.mock(
     class MockFile {
       readonly uri: string;
       get exists(): boolean {
-        return memory[this.uri]?.text != null;
+        return memory[this.uri]?.text != null && memory[this.uri]?.text !== '__dir__';
       }
       constructor(...parts: any[]) {
         const segments: string[] = [];
@@ -37,6 +37,10 @@ jest.mock(
       }
       delete() {
         delete memory[this.uri];
+      }
+      get name(): string {
+        const segs = this.uri.split('/');
+        return segs[segs.length - 1] ?? '';
       }
     }
 
@@ -62,6 +66,28 @@ jest.mock(
           if (key.startsWith(this.uri)) delete memory[key];
         }
       }
+      list(): Array<MockFile | MockDirectory> {
+        const prefix = this.uri.endsWith('/') ? this.uri : `${this.uri}/`;
+        const result: Array<MockFile | MockDirectory> = [];
+        for (const key of Object.keys(memory)) {
+          if (!key.startsWith(prefix)) continue;
+          // Direct children only (no further '/').
+          const rest = key.slice(prefix.length);
+          if (!rest || rest.includes('/')) continue;
+          const entry = memory[key];
+          if (entry.text === '__dir__') {
+            result.push(new MockDirectory(this.uri, rest));
+          } else {
+            const file = new MockFile(this.uri, rest);
+            result.push(file);
+          }
+        }
+        return result;
+      }
+      get name(): string {
+        const segs = this.uri.split('/');
+        return segs[segs.length - 1] ?? '';
+      }
     }
 
     return {
@@ -82,7 +108,17 @@ const {
   formatLastSynced,
   readCache,
   saveCache,
+  saveCurrentUser,
+  readCurrentUser,
+  clearCurrentUser,
+  clearAllUserCaches,
 } = offlineCache as typeof import('../offlineCache');
+
+const stubUser = (id: string) => ({
+  id,
+  first_name: 'Test',
+  last_name: 'User',
+});
 
 describe('offlineCache', () => {
   beforeEach(() => {
@@ -177,6 +213,56 @@ describe('offlineCache', () => {
 
     it('reports days at the high end', () => {
       expect(formatLastSynced(now - 3 * 86400_000, now)).toBe('3 days ago');
+    });
+  });
+
+  describe('current-user snapshot', () => {
+    it('round-trips the signed-in user via the dedicated slot', async () => {
+      saveCurrentUser(stubUser('alice') as any);
+      const got = await readCurrentUser();
+      expect(got).not.toBeNull();
+      expect(got!.data.id).toBe('alice');
+    });
+
+    it('clears the current-user slot on logout', async () => {
+      saveCurrentUser(stubUser('alice') as any);
+      clearCurrentUser();
+      expect(await readCurrentUser()).toBeNull();
+    });
+
+    it('does not expire the current-user snapshot — it lives until logout', async () => {
+      saveCurrentUser(stubUser('alice') as any);
+      // Force the timestamp far into the past.
+      const fileKey = Object.keys(memory).find((k) => k.endsWith('current-user-snapshot.json'))!;
+      const parsed = JSON.parse(memory[fileKey].text!) as { cachedAt: number };
+      parsed.cachedAt = Date.now() - 30 * 86400_000;
+      memory[fileKey].text = JSON.stringify(parsed);
+
+      const got = await readCurrentUser();
+      expect(got).not.toBeNull();
+      expect(got!.fresh).toBe(true);
+    });
+  });
+
+  describe('clearAllUserCaches', () => {
+    it('removes only the target user\'s per-user files', async () => {
+      saveCache(cacheKeyFor('alice', 'home-feed-default'), [{ id: 'a1' }]);
+      saveCache(cacheKeyFor('alice', 'messages-chats'), [{ id: 'c1' }]);
+      saveCache(cacheKeyFor('bob', 'home-feed-default'), [{ id: 'b1' }]);
+      saveCurrentUser(stubUser('alice') as any);
+
+      clearAllUserCaches('alice');
+
+      expect(await readCache(cacheKeyFor('alice', 'home-feed-default'))).toBeNull();
+      expect(await readCache(cacheKeyFor('alice', 'messages-chats'))).toBeNull();
+      // Bob's cache survives.
+      expect(await readCache(cacheKeyFor('bob', 'home-feed-default'))).not.toBeNull();
+      // The current-user slot is in a separate namespace and is untouched.
+      expect(await readCurrentUser()).not.toBeNull();
+    });
+
+    it('is a no-op when the user has nothing cached', () => {
+      expect(() => clearAllUserCaches('nobody')).not.toThrow();
     });
   });
 });

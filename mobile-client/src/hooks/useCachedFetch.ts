@@ -20,6 +20,7 @@ import {
   saveCache,
   type CachedRead,
 } from '../cache/offlineCache';
+import { useConnectivityStore } from '../store/connectivityStore';
 
 export interface CachedFetchState<T> {
   data: T | null;
@@ -127,7 +128,7 @@ export function useCachedFetch<T>(
   }, [userId, slug, enabled, ttlMs]);
 
   // Refetch on foreground transitions — closest thing to "online again"
-  // without taking on a NetInfo dependency for now.
+  // for backgrounded apps where the connectivity listener was suspended.
   useEffect(() => {
     if (!enabled || !refetchOnForeground || !userId) return;
     const handler = (next: AppStateStatus) => {
@@ -138,6 +139,20 @@ export function useCachedFetch<T>(
     const sub = AppState.addEventListener('change', handler);
     return () => sub.remove();
   }, [enabled, refetchOnForeground, userId, runFetch]);
+
+  // Refetch when connectivity transitions offline -> online so cached
+  // surfaces resync without the user pulling-to-refresh.
+  useEffect(() => {
+    if (!enabled || !userId) return;
+    let prevOnline = useConnectivityStore.getState().isOnline;
+    const unsub = useConnectivityStore.subscribe((next) => {
+      if (!prevOnline && next.isOnline) {
+        void runFetch();
+      }
+      prevOnline = next.isOnline;
+    });
+    return unsub;
+  }, [enabled, userId, runFetch]);
 
   // Memoised refresh handle for the consumer's pull-to-refresh button.
   const refresh = useCallback(async () => {

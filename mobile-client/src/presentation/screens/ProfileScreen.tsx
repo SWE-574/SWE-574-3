@@ -585,6 +585,19 @@ export default function ProfileScreen() {
               <Pressable
                 onPress={() => {
                   setMenuOpen(false);
+                  navigation.navigate("MyCommitments");
+                }}
+                style={({ pressed }) => [
+                  styles.overflowMenuItem,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Ionicons name="checkmark-done-outline" size={17} color={colors.GRAY700} />
+                <Text style={styles.overflowMenuText}>My commitments</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setMenuOpen(false);
                   void logout();
                 }}
                 style={({ pressed }) => [

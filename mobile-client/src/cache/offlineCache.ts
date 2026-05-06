@@ -11,6 +11,7 @@
  * banner without each caller reimplementing the math.
  */
 import { Directory, File, Paths } from 'expo-file-system';
+import type { UserSummary } from '../api/types';
 
 export interface CacheEntry<T> {
   data: T;
@@ -86,6 +87,45 @@ export function clearCache(key?: string): void {
   }
   const dir = rootDir();
   if (dir.exists) dir.delete();
+}
+
+/**
+ * Singleton key for the currently signed-in user's snapshot.
+ *
+ * Lives outside the per-user (`u_{userId}__...`) namespace because at app
+ * startup we have tokens in SecureStore but do not yet know the user id —
+ * so the shell hydrates from this slot before `getMe()` resolves.
+ */
+const CURRENT_USER_KEY = 'current-user-snapshot';
+
+export function saveCurrentUser(user: UserSummary): void {
+  saveCache(CURRENT_USER_KEY, user);
+}
+
+export function readCurrentUser(): Promise<CachedRead<UserSummary> | null> {
+  // No TTL — staleness is signalled separately via AuthContext.isStale.
+  return readCache<UserSummary>(CURRENT_USER_KEY, Number.POSITIVE_INFINITY);
+}
+
+export function clearCurrentUser(): void {
+  clearCache(CURRENT_USER_KEY);
+}
+
+/**
+ * Wipe every per-user cache file for `userId`. Used on logout / account
+ * switch so a new user does not see the previous account's data.
+ */
+export function clearAllUserCaches(userId: string): void {
+  const dir = rootDir();
+  if (!dir.exists) return;
+  const prefix = `u_${userId}__`;
+  // expo-file-system Directory exposes `list()` returning Files/Directories.
+  for (const entry of dir.list()) {
+    const name = entry.name ?? '';
+    if (name.startsWith(prefix) && entry instanceof File) {
+      entry.delete();
+    }
+  }
 }
 
 export function formatLastSynced(cachedAt: number, now: number = Date.now()): string {
