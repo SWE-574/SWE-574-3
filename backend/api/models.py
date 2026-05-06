@@ -262,8 +262,17 @@ class Service(models.Model):
     event_completed_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Timestamp when organizer marked an event as completed')
     tags = models.ManyToManyField(Tag, blank=True)
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
+    score_updated_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    is_stale_recurring = models.BooleanField(default=False, db_index=True)
+    last_growth_check_at = models.DateTimeField(null=True, blank=True)
     is_visible = models.BooleanField(default=True, help_text='Admin can hide inappropriate services')
     is_pinned = models.BooleanField(default=False, help_text='Admin can pin events to the top of the feed')
+    reserved_timebank_hours = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text='Hours reserved up front for active Need services before completion or cancellation.',
+    )
     requires_qr_checkin = models.BooleanField(
         default=False,
         help_text='Require QR code scan or attendance code for attendance verification (Events only)',
@@ -609,6 +618,7 @@ class TransactionHistory(models.Model):
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
     amount = models.DecimalField(max_digits=10, decimal_places=2, help_text='Positive for credits, negative for debits')
     balance_after = models.DecimalField(max_digits=10, decimal_places=2, help_text='User balance after this transaction')
+    service = models.ForeignKey(Service, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
     handshake = models.ForeignKey(Handshake, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
     description = models.TextField(help_text='Human-readable description of the transaction')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -619,6 +629,7 @@ class TransactionHistory(models.Model):
             models.Index(fields=['transaction_type', 'created_at']),
             models.Index(fields=['user', 'transaction_type', 'created_at']),
             models.Index(fields=['handshake']),
+            models.Index(fields=['service']),
         ]
         ordering = ['-created_at']
 
@@ -1224,3 +1235,36 @@ class ServiceMedia(models.Model):
             models.Index(fields=['service', 'display_order']),
             models.Index(fields=['service', 'media_type']),
         ]
+
+
+class ScoreAuditLog(models.Model):
+    """
+    Append-only audit trail of every hot-score recalculation. Closes NFR-17c (#308).
+    Retention managed by the update_hot_scores command (30-day window).
+    """
+    SERVICE = 'service'
+    EVENT = 'event'
+    KIND_CHOICES = [(SERVICE, 'service'), (EVENT, 'event')]
+
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='score_audit_logs'
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    positive_rep_count = models.IntegerField(default=0)
+    negative_rep_count = models.IntegerField(default=0)
+    comment_count = models.IntegerField(default=0)
+    hours_exchanged = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    quality = models.FloatField(default=0.0)
+    activity = models.FloatField(default=0.0)
+    capacity_multiplier = models.FloatField(default=1.0)
+    newcomer_boost = models.FloatField(default=1.0)
+    final_score = models.FloatField(default=0.0)
+    formula_version = models.CharField(max_length=20)
+    formula_kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=SERVICE)
+
+    class Meta:
+        indexes = [models.Index(fields=['service', '-recorded_at'])]
+        ordering = ['-recorded_at']
+
+    def __str__(self):
+        return f'Audit({self.service_id}, {self.recorded_at}, {self.final_score:.4f})'

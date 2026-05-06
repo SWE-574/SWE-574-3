@@ -17,7 +17,7 @@ from .models import (
 )
 from .utils import (
     create_notification,
-    provision_timebank,
+    ensure_accepted_handshake_reservation,
     complete_timebank_transfer,
     cancel_timebank_transfer,
     get_provider_and_receiver,
@@ -135,12 +135,22 @@ class HandshakeService:
         if pending_requests >= 50:
             return False, 'Service has reached the maximum number of pending requests (50). Please wait for some requests to be processed.'
         
-        # Determine payer and check balance
+        # Determine payer and check balance against the allowed TimeBank debt floor.
+        # Need services are reserved when the Need is created, so interest must not
+        # subtract the same duration again.
         payer = HandshakeService._determine_payer(service, user)
-        if payer.timebank_balance < service.duration:
+        projected_balance = (
+            payer.timebank_balance
+            if service.type == 'Need'
+            else payer.timebank_balance - service.duration
+        )
+        if projected_balance < Decimal("-10.00"):
             payer_name = "You" if payer == user else f"{payer.first_name} {payer.last_name}"
             verb = "need" if payer == user else "needs"
-            return False, f'Insufficient TimeBank balance. {payer_name} {verb} {service.duration} hours, have {payer.timebank_balance}'
+            return False, (
+                f'Insufficient TimeBank balance. {payer_name} {verb} {service.duration} hours, '
+                f'have {payer.timebank_balance}'
+            )
         
         return True, None
     
@@ -294,8 +304,13 @@ class HandshakeService:
     
     @staticmethod
     def _check_balance(payer: User, service: Service, requester: User) -> None:
-        """Validates payer has sufficient balance using Decimal."""
-        if payer.timebank_balance < service.duration:
+        """Validate payer stays within the allowed -10h TimeBank debt floor."""
+        projected_balance = (
+            payer.timebank_balance
+            if service.type == 'Need'
+            else payer.timebank_balance - service.duration
+        )
+        if projected_balance < Decimal("-10.00"):
             payer_name = "You" if payer == requester else f"{payer.first_name} {payer.last_name}"
             verb = "need" if payer == requester else "needs"
             raise ValueError(
@@ -596,107 +611,115 @@ class HandshakeService:
         """
         from .exceptions import ErrorCodes
 
-        if handshake.requester != user:
-            raise HandshakeServiceError(
-                'Only the requester can approve the handshake',
-                code=ErrorCodes.PERMISSION_DENIED, status_code=403,
+        with transaction.atomic():
+            handshake = (
+                Handshake.objects
+                .select_for_update()
+                .select_related('service', 'requester', 'service__user')
+                .get(pk=handshake.pk)
             )
-        if handshake.status != 'pending':
-            raise HandshakeServiceError('Handshake is not pending', code=ErrorCodes.INVALID_STATE)
-        if not handshake.provider_initiated:
-            raise HandshakeServiceError(
-                'Provider must initiate the handshake first', code=ErrorCodes.INVALID_STATE,
-            )
-        # Online sessions do not share an exact location, but in-person sessions still require it.
-        requires_exact_location = handshake.service.location_type != 'Online'
-        if requires_exact_location:
-            missing = (
-                not handshake.exact_location
-                or not handshake.exact_duration
-                or not handshake.scheduled_time
-            )
-            msg = 'Provider must provide exact location, duration, and scheduled time before approval'
-        else:
-            missing = not handshake.exact_duration or not handshake.scheduled_time
-            msg = 'Provider must provide duration and scheduled time before approval'
 
-        if missing:
-            err = HandshakeServiceError(msg, code=ErrorCodes.INVALID_STATE)
-            err.extra = {'requires_details': True}
-            raise err
-
-        if handshake.service.type in ('Offer', 'Need') and handshake.exact_duration is not None:
-            handshake.provisioned_hours = handshake.exact_duration
-            handshake.save(update_fields=['provisioned_hours'])
-
-        try:
-            provision_timebank(handshake)
-        except ValueError as exc:
-            raise HandshakeServiceError(
-                str(exc), code=ErrorCodes.INSUFFICIENT_BALANCE,
-            ) from exc
-
-        handshake.status = 'accepted'
-        handshake.requester_initiated = True
-        handshake.save()
-
-        from django.utils import timezone as tz
-        from datetime import timedelta as _timedelta
-
-        summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
-        loc = handshake.exact_location or ''
-        approve_body = f"Session approved! See you on {summary_time}."
-        if loc:
-            approve_body = f"Session approved! See you on {summary_time} at {loc}."
-        approve_msg = ChatMessage.objects.create(
-            handshake=handshake,
-            sender=user,
-            body=approve_body,
-        )
-
-        create_notification(
-            user=handshake.service.user,
-            notification_type='handshake_accepted',
-            title='Handshake Approved',
-            message=(
-                f"{user.first_name} has approved the handshake for "
-                f"'{handshake.service.title}'. The handshake is now accepted."
-            ),
-            handshake=handshake,
-            service=handshake.service,
-        )
-
-        service_time = handshake.scheduled_time
-        duration_hours = float(handshake.exact_duration)
-        completion_time = service_time + _timedelta(hours=duration_hours)
-
-        if service_time > timezone.now():
-            for party in (handshake.service.user, handshake.requester):
-                create_notification(
-                    user=party,
-                    notification_type='service_reminder',
-                    title='Service Reminder',
-                    message=(
-                        f"Your service '{handshake.service.title}' is scheduled for "
-                        f"{service_time.strftime('%Y-%m-%d %H:%M')}"
-                    ),
-                    handshake=handshake,
-                    service=handshake.service,
+            if handshake.requester != user:
+                raise HandshakeServiceError(
+                    'Only the requester can approve the handshake',
+                    code=ErrorCodes.PERMISSION_DENIED, status_code=403,
                 )
-
-        if completion_time > timezone.now():
-            for party in (handshake.service.user, handshake.requester):
-                create_notification(
-                    user=party,
-                    notification_type='service_confirmation',
-                    title='Service Completion Reminder',
-                    message=(
-                        f"Please confirm completion of '{handshake.service.title}' "
-                        f"after {completion_time.strftime('%Y-%m-%d %H:%M')}"
-                    ),
-                    handshake=handshake,
-                    service=handshake.service,
+            if handshake.status != 'pending':
+                raise HandshakeServiceError('Handshake is not pending', code=ErrorCodes.INVALID_STATE)
+            if not handshake.provider_initiated:
+                raise HandshakeServiceError(
+                    'Provider must initiate the handshake first', code=ErrorCodes.INVALID_STATE,
                 )
+            # Online sessions do not share an exact location, but in-person sessions still require it.
+            requires_exact_location = handshake.service.location_type != 'Online'
+            if requires_exact_location:
+                missing = (
+                    not handshake.exact_location
+                    or not handshake.exact_duration
+                    or not handshake.scheduled_time
+                )
+                msg = 'Provider must provide exact location, duration, and scheduled time before approval'
+            else:
+                missing = not handshake.exact_duration or not handshake.scheduled_time
+                msg = 'Provider must provide duration and scheduled time before approval'
+
+            if missing:
+                err = HandshakeServiceError(msg, code=ErrorCodes.INVALID_STATE)
+                err.extra = {'requires_details': True}
+                raise err
+
+            if handshake.service.type in ('Offer', 'Need') and handshake.exact_duration is not None:
+                handshake.provisioned_hours = handshake.exact_duration
+                handshake.save(update_fields=['provisioned_hours'])
+
+            try:
+                ensure_accepted_handshake_reservation(handshake)
+            except ValueError as exc:
+                raise HandshakeServiceError(
+                    str(exc), code=ErrorCodes.INSUFFICIENT_BALANCE,
+                ) from exc
+
+            handshake.status = 'accepted'
+            handshake.requester_initiated = True
+            handshake.save()
+
+            from django.utils import timezone as tz
+            from datetime import timedelta as _timedelta
+
+            summary_time = tz.localtime(handshake.scheduled_time).strftime('%b %d, %Y %I:%M %p')
+            loc = handshake.exact_location or ''
+            approve_body = f"Session approved! See you on {summary_time}."
+            if loc:
+                approve_body = f"Session approved! See you on {summary_time} at {loc}."
+            approve_msg = ChatMessage.objects.create(
+                handshake=handshake,
+                sender=user,
+                body=approve_body,
+            )
+
+            create_notification(
+                user=handshake.service.user,
+                notification_type='handshake_accepted',
+                title='Handshake Approved',
+                message=(
+                    f"{user.first_name} has approved the handshake for "
+                    f"'{handshake.service.title}'. The handshake is now accepted."
+                ),
+                handshake=handshake,
+                service=handshake.service,
+            )
+
+            service_time = handshake.scheduled_time
+            duration_hours = float(handshake.exact_duration)
+            completion_time = service_time + _timedelta(hours=duration_hours)
+
+            if service_time > timezone.now():
+                for party in (handshake.service.user, handshake.requester):
+                    create_notification(
+                        user=party,
+                        notification_type='service_reminder',
+                        title='Service Reminder',
+                        message=(
+                            f"Your service '{handshake.service.title}' is scheduled for "
+                            f"{service_time.strftime('%Y-%m-%d %H:%M')}"
+                        ),
+                        handshake=handshake,
+                        service=handshake.service,
+                    )
+
+            if completion_time > timezone.now():
+                for party in (handshake.service.user, handshake.requester):
+                    create_notification(
+                        user=party,
+                        notification_type='service_confirmation',
+                        title='Service Completion Reminder',
+                        message=(
+                            f"Please confirm completion of '{handshake.service.title}' "
+                            f"after {completion_time.strftime('%Y-%m-%d %H:%M')}"
+                        ),
+                        handshake=handshake,
+                        service=handshake.service,
+                    )
 
         return handshake, approve_msg
 
@@ -720,7 +743,7 @@ class HandshakeService:
             raise HandshakeServiceError('Handshake is not pending', code=ErrorCodes.INVALID_STATE)
 
         try:
-            provision_timebank(handshake)
+            ensure_accepted_handshake_reservation(handshake)
         except ValueError as exc:
             raise HandshakeServiceError(
                 str(exc), code=ErrorCodes.INSUFFICIENT_BALANCE,
@@ -1831,7 +1854,7 @@ class EventHandshakeService:
                 )
 
     @staticmethod
-    def cancel_event(service: Service, organizer: User) -> None:
+    def cancel_event(service: Service, organizer: User, reason: str = '') -> None:
         """
         Organizer cancels an Event.
 
@@ -1872,7 +1895,7 @@ class EventHandshakeService:
             participant_ids = list(
                 active_participants_qs.values_list('requester_id', flat=True)
             )
-            active_participants_qs.update(status='cancelled', updated_at=timezone.now())
+            active_participants_qs.update(status='cancelled', cancellation_reason=reason, updated_at=timezone.now())
 
             for user_id in participant_ids:
                 participant = User.objects.get(pk=user_id)

@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Image,
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import type { Service } from "../../api/types";
@@ -57,7 +58,7 @@ export default function FeaturedServiceCard({
       <View style={[styles.headerStrip, { backgroundColor: typeColor }]}>
         <View style={styles.typeBadge}>
           <Text style={[styles.typeBadgeText, { color: typeColor }]}>
-            {service.type === "Need" ? "WANT" : service.type.toUpperCase()}
+            {service.type.toUpperCase()}
           </Text>
         </View>
       </View>
@@ -85,9 +86,13 @@ export default function FeaturedServiceCard({
         </View>
 
         <View style={styles.userRow}>
-          <View style={[styles.avatar, { backgroundColor: typeColor }]}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
+          {service.user.avatar_url ? (
+            <Image source={{ uri: service.user.avatar_url }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, { backgroundColor: typeColor }]}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
+          )}
           <Text style={styles.userName} numberOfLines={1}>
             {displayName}
           </Text>

@@ -78,8 +78,9 @@ from .serializers import (
 )
 from .achievement_utils import get_achievement_progress
 from .utils import (
-    can_user_post_offer, provision_timebank, complete_timebank_transfer,
+    can_user_post_offer, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
+    reserve_timebank_for_need_service, release_timebank_for_need_service,
 )
 from .services import (
     HandshakeService, HandshakeServiceError,
@@ -96,7 +97,7 @@ from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, U
 from django.db.models.functions import Coalesce
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
-    get_cached_user_profile, cache_user_profile, invalidate_user_profile,
+    invalidate_user_profile,
     get_cached_service_list, cache_service_list, invalidate_service_lists,
     get_cached_conversations, cache_conversations, invalidate_conversations,
     get_cached_transactions, cache_transactions, invalidate_transactions,
@@ -402,6 +403,15 @@ class RegistrationThrottle(AnonRateThrottle):
     rate = '20/hour'
 
 
+class LoginThrottle(AnonRateThrottle):
+    """Per-IP throttle for /api/auth/login/ — sits in front of the per-account
+    lockout in CustomTokenObtainPairView so a single attacker cannot fan out
+    across many usernames from one IP.
+    """
+    scope = 'login'
+    rate = '30/hour'
+
+
 def _validate_event_feedback_window(service: Service) -> tuple[bool, str | None]:
     """Validate fixed feedback window after event completion."""
     if service.type != 'Event':
@@ -567,8 +577,11 @@ class CustomTokenRefreshView(TokenRefreshView):
 class CustomTokenObtainPairView(TokenObtainPairView):
     MAX_FAILED_ATTEMPTS = 5
     LOCKOUT_DURATION_MINUTES = 30
-    
+    throttle_classes = [LoginThrottle]
+
     def post(self, request, *args, **kwargs):
+        from django.contrib.auth.signals import user_logged_in, user_login_failed
+
         email = request.data.get('email')
         
         # Check for account lockout before attempting authentication
@@ -621,13 +634,19 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 except User.DoesNotExist:
                     pass  # Don't reveal if user exists
             
+            user_login_failed.send(
+                sender=self.__class__,
+                credentials={'email': email},
+                request=request,
+            )
             return Response(
                 {'detail': 'No active account found with the given credentials'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
-        
+
         user = serializer.user
-        
+        user_logged_in.send(sender=self.__class__, request=request, user=user)
+
         # Reset failed login attempts on successful login
         if user.failed_login_attempts > 0 or user.locked_until:
             user.failed_login_attempts = 0
@@ -1176,27 +1195,15 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         user_id = self.kwargs.get('id')
         if user_id:
             return self.get_queryset().get(id=user_id)
-        
-        cached_user = get_cached_user_profile(str(self.request.user.id))
-        if cached_user:
-            user = User.objects.get(id=self.request.user.id)
-            user._cached_data = cached_user
-            return user
-            
+
         return self.get_queryset().get(id=self.request.user.id)
     
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         
-        if hasattr(instance, '_cached_data'):
-            return Response(instance._cached_data)
-            
         response_data = serializer.data
         response_data['event_comments_history'] = _build_event_comments_history(instance, request)
-        
-        if not kwargs.get('id'):
-            cache_user_profile(str(request.user.id), response_data)
         
         return Response(response_data)
     
@@ -1809,29 +1816,48 @@ class ServiceViewSet(viewsets.ModelViewSet):
         
         sort_param = request.query_params.get('sort', 'latest')
         # Don't cache location-based queries (results vary by user location).
-        # Also skip cache for hot-sort by authenticated users — social boost is per-user.
+        # Also skip cache for hot-sort by authenticated users -- social boost is per-user.
+        # And skip cache when sort=hot AND exploration is enabled, since Phase 3
+        # mixing is per-request randomised (#316) and caching would defeat it.
+        from .ranking import should_explore, select_exploration_candidate, inject_exploration_slot
+        from django.conf import settings as _ranking_settings
+        explore_enabled = (
+            sort_param == 'hot'
+            and getattr(_ranking_settings, 'RANKING_EXPLORATION_RATE', 0.0) > 0
+        )
         use_cache = not (
             (request.query_params.get('lat') and request.query_params.get('lng'))
             or (sort_param == 'hot' and request.user.is_authenticated)
+            or explore_enabled
         )
-        
+
         if use_cache:
             cached_result = get_cached_service_list(cache_key_params)
             if cached_result is not None:
                 return Response(cached_result)
-        
+
         queryset = self.filter_queryset(self.get_queryset())
         paginator = self.pagination_class()
-        
+
         page = paginator.paginate_queryset(queryset, request)
-        
+
+        # Phase 3 (FR-17i / #316): mix in an exploration candidate at the
+        # configured slot for hot-sorted requests. The candidate is drawn from
+        # cold-start, under-shown-quality, and stale-recurring sub-buckets.
+        if page is not None and explore_enabled and should_explore(request):
+            explore_pool = list(queryset[:200])  # cap pool size for the eligibility query
+            explore = select_exploration_candidate(explore_pool, request.user if request.user.is_authenticated else None)
+            if explore is not None and explore not in page:
+                slot = getattr(_ranking_settings, 'RANKING_EXPLORATION_SLOT_INDEX', 5)
+                page = inject_exploration_slot(page, explore, slot_index=slot)
+
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = paginator.get_paginated_response(serializer.data)
             if use_cache:
                 cache_service_list(cache_key_params, response.data, ttl=CACHE_TTL_SHORT)
             return response
-        
+
         serializer = self.get_serializer(queryset[:100], many=True)
         response_data = serializer.data
         if use_cache:
@@ -1891,11 +1917,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
         # Filter by owner user (for profile pages)
         if user_param:
             queryset = queryset.filter(user_id=user_param)
-        else:
+        elif self.action == 'list':
             queryset = queryset.exclude(
                 type='Offer',
                 schedule_type='One-Time',
                 max_participants__gt=1,
+                scheduled_time__isnull=False,
+                scheduled_time__lte=timezone.now(),
+            )
+            queryset = queryset.exclude(
+                type='Event',
                 scheduled_time__isnull=False,
                 scheduled_time__lte=timezone.now(),
             )
@@ -2128,7 +2159,18 @@ class ServiceViewSet(viewsets.ModelViewSet):
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
 
-        response = super().create(request, *args, **kwargs)
+        try:
+            with transaction.atomic():
+                response = super().create(request, *args, **kwargs)
+                if service_type == 'Need':
+                    created_service = Service.objects.get(id=response.data['id'])
+                    reserve_timebank_for_need_service(created_service)
+        except ValueError as e:
+            return create_error_response(
+                str(e),
+                code=ErrorCodes.INSUFFICIENT_BALANCE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         invalidate_service_lists()
         
         # Award karma for posting a service (+2)
@@ -2191,8 +2233,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
 
         # Soft-delete: mark as Cancelled instead of removing the row.
-        instance.status = 'Cancelled'
-        instance.save(update_fields=['status', 'updated_at'])
+        with transaction.atomic():
+            if instance.type == 'Need':
+                release_timebank_for_need_service(instance)
+            instance.status = 'Cancelled'
+            instance.save(update_fields=['status', 'updated_at'])
         invalidate_service_lists()
         invalidate_user_services(str(instance.user.id))
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -2357,8 +2402,15 @@ class ServiceViewSet(viewsets.ModelViewSet):
         POST /api/services/{id}/cancel-event/
         """
         service = self.get_object()
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return create_error_response(
+                'A cancellation reason is required.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            EventHandshakeService.cancel_event(service, request.user)
+            EventHandshakeService.cancel_event(service, request.user, reason=reason)
         except PermissionError as e:
             return create_error_response(
                 str(e), code=ErrorCodes.PERMISSION_DENIED,
@@ -2466,9 +2518,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['get'],
         url_path='debug-ranking-availability',
-        permission_classes=[permissions.IsAuthenticated],
+        permission_classes=[permissions.IsAdminUser],
     )
     def debug_ranking_availability(self, request):
+        # Admin-only per #371. The PlatformSetting flag remains as a master
+        # on/off but is now redundant with the IsAdminUser gate; left for
+        # backwards compatibility with the existing admin UI toggle.
         platform_settings = PlatformSetting.get_solo()
         return Response({'enabled': platform_settings.ranking_debug_enabled})
 
@@ -2476,9 +2531,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['post'],
         url_path='debug-ranking',
-        permission_classes=[permissions.IsAuthenticated],
+        permission_classes=[permissions.IsAdminUser],
     )
     def debug_ranking(self, request):
+        # Admin-only per #371. Optional simulated_user_id lets an admin compute
+        # the payload from another user's perspective (read-only -- no access to
+        # the simulated user's messages, settings, or other private state).
         platform_settings = PlatformSetting.get_solo()
         if not platform_settings.ranking_debug_enabled:
             return create_error_response(
@@ -2505,10 +2563,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             except (TypeError, ValueError):
                 return None
 
+        simulated_user_id = request.data.get('simulated_user_id')
+
         payload = build_service_debug_payload(
             service_ids=service_ids,
             selected_service_id=request.data.get('selected_service_id'),
             request_user=request.user,
+            simulated_user_id=str(simulated_user_id) if simulated_user_id else None,
             search=(request.data.get('search') or '').strip(),
             tag_ids=[str(tag_id) for tag_id in (request.data.get('tags') or []) if tag_id],
             lat=_to_float(request.data.get('lat')),
@@ -2516,7 +2577,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
             distance=_to_float(request.data.get('distance')),
             active_filter=(request.data.get('active_filter') or 'all').strip() or 'all',
         )
-        return Response(payload)
+        response = Response(payload)
+        response['X-Ranking-Debug-Debounce'] = '300'
+        return response
 
     @action(
         detail=True,
@@ -5273,7 +5336,8 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
 
         direction = self._get_direction_filter()
         page = request.query_params.get('page', '1')
-        cached_result = get_cached_transactions(str(user.id), page=page, direction=direction)
+        page_size = request.query_params.get('page_size', str(self.pagination_class.page_size))
+        cached_result = get_cached_transactions(str(user.id), page=page, direction=direction, page_size=page_size)
         if cached_result is not None:
             return Response(cached_result)
 
@@ -5284,7 +5348,14 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
             response.data['summary'] = summary
-            cache_transactions(str(user.id), response.data, page=request.query_params.get('page', '1'), direction=direction, ttl=CACHE_TTL_SHORT)
+            cache_transactions(
+                str(user.id),
+                response.data,
+                page=request.query_params.get('page', '1'),
+                direction=direction,
+                page_size=page_size,
+                ttl=CACHE_TTL_SHORT,
+            )
             return response
 
         serializer = self.get_serializer(queryset, many=True)
@@ -5295,11 +5366,19 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             'results': serializer.data,
             'summary': summary,
         }
-        cache_transactions(str(user.id), response_data, page=request.query_params.get('page', '1'), direction=direction, ttl=CACHE_TTL_SHORT)
+        cache_transactions(
+            str(user.id),
+            response_data,
+            page=request.query_params.get('page', '1'),
+            direction=direction,
+            page_size=page_size,
+            ttl=CACHE_TTL_SHORT,
+        )
         return Response(response_data)
 
     def get_queryset(self):
         queryset = TransactionHistory.objects.filter(user=self.request.user).select_related(
+            'service__user',
             'handshake__service__user',
             'handshake__requester',
         )
@@ -5309,12 +5388,14 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(amount__gt=0)
         elif direction == 'debit':
             queryset = queryset.filter(amount__lt=0)
+        elif direction == 'reservation':
+            queryset = queryset.filter(transaction_type__in=['provision', 'refund'])
 
         return queryset.order_by('-created_at')
 
     def _get_direction_filter(self):
         direction = self.request.query_params.get('direction', 'all').strip().lower()
-        if direction not in {'all', 'credit', 'debit'}:
+        if direction not in {'all', 'credit', 'debit', 'reservation'}:
             return 'all'
         return direction
 

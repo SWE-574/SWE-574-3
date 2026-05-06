@@ -58,6 +58,7 @@ def build_service_debug_payload(
     service_ids: list[str],
     selected_service_id: str | None,
     request_user: User,
+    simulated_user_id: str | None = None,
     search: str = '',
     tag_ids: list[str] | None = None,
     lat: float | None = None,
@@ -65,6 +66,15 @@ def build_service_debug_payload(
     distance: float | None = None,
     active_filter: str = 'all',
 ) -> dict:
+    # #371 -- admin-only "simulate as user" override. When provided, the payload
+    # is computed from the simulated user's perspective (their social graph,
+    # location, and lifetime handshake count). The admin endpoint enforces that
+    # only admins can pass this; this function only swaps the viewer.
+    if simulated_user_id:
+        try:
+            request_user = User.objects.get(pk=simulated_user_id)
+        except User.DoesNotExist:
+            pass
     if not service_ids:
         return {
             'selected_service': None,

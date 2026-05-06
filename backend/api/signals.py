@@ -1,7 +1,13 @@
+import logging
+
+from django.contrib.auth.signals import user_logged_in, user_login_failed
 from django.db.models.signals import post_save, post_delete, pre_delete
 from django.dispatch import receiver
 from django.db import transaction
-from .models import Service, User, Tag, ChatRoom, Comment, ReputationRep, NegativeRep, Handshake, ChatMessage, Notification
+from django.utils import timezone
+
+logger = logging.getLogger(__name__)
+from .models import Service, User, Tag, ChatRoom, Comment, ReputationRep, NegativeRep, Handshake, ChatMessage, Notification, ScoreAuditLog
 from .cache_utils import (
     invalidate_on_service_change,
     invalidate_on_user_change,
@@ -12,7 +18,41 @@ from .cache_utils import (
     invalidate_service_detail,
     invalidate_hot_services
 )
-from .ranking import calculate_hot_score
+from .ranking import (
+    FORMULA_VERSION,
+    _compute_event_factors,
+    _compute_service_factors,
+)
+
+security_logger = logging.getLogger('api.security')
+
+
+def _client_ip(request) -> str:
+    if request is None:
+        return 'unknown'
+    forwarded = request.META.get('HTTP_X_FORWARDED_FOR') if hasattr(request, 'META') else None
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', 'unknown') if hasattr(request, 'META') else 'unknown'
+
+
+@receiver(user_logged_in)
+def log_user_logged_in(sender, request, user, **kwargs):
+    security_logger.info(
+        'auth.login.success user_id=%s email=%s ip=%s',
+        getattr(user, 'id', None), getattr(user, 'email', None), _client_ip(request),
+    )
+
+
+@receiver(user_login_failed)
+def log_user_login_failed(sender, credentials, request=None, **kwargs):
+    # `credentials` may include the email but never the password thanks to
+    # Django stripping it before dispatching the signal. Still, only log the
+    # email key to avoid accidental exposure if Django's behaviour changes.
+    email = (credentials or {}).get('email') or (credentials or {}).get('username')
+    security_logger.warning(
+        'auth.login.failed email=%s ip=%s', email, _client_ip(request),
+    )
 
 
 @receiver(post_save, sender=Service)
@@ -49,14 +89,52 @@ def invalidate_handshake_cache(sender, instance, **kwargs):
 
 
 def _update_service_hot_score(service):
-    """Update hot_score for a service."""
+    """Update hot_score + score_updated_at for a service and append a
+    ScoreAuditLog row (NFR-17c / #308). Uses the same factor helpers as the
+    update_hot_scores cron command so signal-driven and batch-driven recalcs
+    write identical audit data.
+    """
     if service and service.status == 'Active':
         try:
-            new_score = calculate_hot_score(service)
+            if service.type == 'Event':
+                f = _compute_event_factors(service)
+                audit = ScoreAuditLog(
+                    service=service,
+                    positive_rep_count=f['positive_rep_count'],
+                    negative_rep_count=f['negative_rep_count'],
+                    comment_count=0,
+                    quality=f['organiser_quality'],
+                    activity=f['velocity'],
+                    capacity_multiplier=f['capacity_multiplier'],
+                    final_score=f['final_score'],
+                    formula_version=FORMULA_VERSION,
+                    formula_kind=ScoreAuditLog.EVENT,
+                )
+            else:
+                f = _compute_service_factors(service)
+                audit = ScoreAuditLog(
+                    service=service,
+                    positive_rep_count=f['positive_rep_count'],
+                    negative_rep_count=f['negative_rep_count'],
+                    comment_count=f['comment_count'],
+                    hours_exchanged=f['hours_exchanged'],
+                    quality=f['quality'],
+                    activity=f['activity'],
+                    capacity_multiplier=f['capacity_multiplier'],
+                    final_score=f['final_score'],
+                    formula_version=FORMULA_VERSION,
+                    formula_kind=ScoreAuditLog.SERVICE,
+                )
             # Use update() to avoid triggering save() signals recursively
-            Service.objects.filter(pk=service.pk).update(hot_score=new_score)
+            Service.objects.filter(pk=service.pk).update(
+                hot_score=f['final_score'],
+                score_updated_at=timezone.now(),
+            )
+            audit.save()
         except Exception:
-            pass
+            logger.exception(
+                "hot_score update failed for service %s", service.pk
+            )
 
 
 @receiver([post_save, post_delete], sender=Comment)
@@ -65,8 +143,13 @@ def update_hot_score_on_comment_change(sender, instance, **kwargs):
     if hasattr(instance, 'service') and instance.service:
         # Invalidate caches
         invalidate_on_comment_change(instance)
-        # Use transaction.on_commit to ensure the comment change is committed first
-        transaction.on_commit(lambda: _update_service_hot_score(instance.service))
+        # Recalc synchronously so the audit row + score_updated_at land in the
+        # same transaction as the trigger. on_commit was previously used here
+        # but pytest-django @django_db tests never fire on_commit callbacks,
+        # which silently dropped audit writes (NFR-17c / #308). post_save
+        # already runs after the row is INSERTed and is visible to subsequent
+        # SELECTs in the same connection, so synchronous is correct.
+        _update_service_hot_score(instance.service)
 
 
 @receiver([post_save, post_delete], sender=ReputationRep)
@@ -76,19 +159,13 @@ def update_hot_score_on_reputation_change(sender, instance, **kwargs):
         # Invalidate caches
         invalidate_on_reputation_change(instance)
         # Get all active services owned by this user
-        services = list(Service.objects.filter(
+        services = Service.objects.filter(
             user=instance.receiver,
-            status='Active'
-        ).values_list('pk', flat=True))
-        # Use transaction.on_commit to ensure the reputation change is committed first
-        def update_scores():
-            for service_id in services:
-                try:
-                    service = Service.objects.get(pk=service_id)
-                    _update_service_hot_score(service)
-                except Service.DoesNotExist:
-                    pass
-        transaction.on_commit(update_scores)
+            status='Active',
+        )
+        # Synchronous (see comment in update_hot_score_on_comment_change).
+        for service in services:
+            _update_service_hot_score(service)
 
 
 @receiver([post_save, post_delete], sender=NegativeRep)
@@ -98,27 +175,16 @@ def update_hot_score_on_negative_rep_change(sender, instance, **kwargs):
         # Invalidate caches
         invalidate_on_reputation_change(instance)
         # Get all active services owned by this user
-        services = list(Service.objects.filter(
+        services = Service.objects.filter(
             user=instance.receiver,
-            status='Active'
-        ).values_list('pk', flat=True))
-        # Use transaction.on_commit to ensure the negative rep change is committed first
-        def update_scores():
-            for service_id in services:
-                try:
-                    service = Service.objects.get(pk=service_id)
-                    _update_service_hot_score(service)
-                except Service.DoesNotExist:
-                    pass
-        transaction.on_commit(update_scores)
+            status='Active',
+        )
+        # Synchronous (see comment in update_hot_score_on_comment_change).
+        for service in services:
+            _update_service_hot_score(service)
 
 
-# ── Notification signals ────────────────────────────────────────────────────
-
-import logging
-
-logger = logging.getLogger(__name__)
-
+# -- Notification signals --
 
 @receiver(post_save, sender=ChatMessage)
 def notify_on_new_chat_message(sender, instance, created, **kwargs):
