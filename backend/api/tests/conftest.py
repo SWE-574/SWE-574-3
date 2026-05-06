@@ -23,6 +23,22 @@ def clear_django_cache():
 
 
 @pytest.fixture(autouse=True)
+def _propagate_api_security_logs():
+    """Production has propagate=False on the api / api.security loggers so
+    Docker log scraping does not see duplicates. pytest's caplog only attaches
+    a handler to root, so without propagation the security-signal tests cannot
+    observe the records they emit. Restore propagation for the test only."""
+    import logging
+    loggers = [logging.getLogger(name) for name in ('api', 'api.security')]
+    originals = [logger.propagate for logger in loggers]
+    for logger in loggers:
+        logger.propagate = True
+    yield
+    for logger, original in zip(loggers, originals):
+        logger.propagate = original
+
+
+@pytest.fixture(autouse=True)
 def disable_drf_throttling(settings):
     """Disable DRF throttling for test stability.
 
