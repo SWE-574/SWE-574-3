@@ -395,6 +395,8 @@ export interface Transaction {
   service_type?: 'Offer' | 'Need' | 'Event' | null
   schedule_type?: 'One-Time' | 'Recurrent' | null
   max_participants?: number | null
+  handshake_status?: string | null
+  service_status?: string | null
   is_current_user_provider?: boolean
   counterpart: {
     id: string

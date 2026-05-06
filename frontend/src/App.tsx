@@ -169,7 +169,7 @@ const FULL_SCREEN_PREFIXES = [
 const PUBLIC_AUTH_PATHS = ['/login', '/register', '/', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
 
 function App() {
-  const { checkAuth, isLoading, user } = useAuthStore()
+  const { checkAuth, refreshUser, isLoading, user } = useAuthStore()
   const location = useLocation()
 
   const isPublicAuthPage = PUBLIC_AUTH_PATHS.includes(location.pathname)
@@ -211,8 +211,13 @@ function App() {
     // triggering the /users/me/ → 401 → refresh-fail cycle on every keystroke.
     if (PUBLIC_AUTH_PATHS.includes(location.pathname)) return
 
-    // On protected route changes, verify session once.
-    checkAuth()
+    // On protected route changes, keep fast-changing profile fields such as
+    // time balance fresh while still bootstrapping anonymous sessions normally.
+    if (user) {
+      refreshUser()
+    } else {
+      checkAuth()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
 

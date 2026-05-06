@@ -257,7 +257,7 @@ export default function ServiceDetailScreen() {
   const insets = useSafeAreaInsets();
   const route = useRoute<RouteProp<ServiceDetailRouteParams, "ServiceDetail">>();
   const navigation = useNavigation<ServiceDetailNavigation>();
-  const { user: currentUser, isAuthenticated } = useAuth();
+  const { user: currentUser, isAuthenticated, refreshUser } = useAuth();
 
   const styles = useMemo(
     () => getStyles(insets.top, insets.bottom),
@@ -686,6 +686,9 @@ export default function ServiceDetailScreen() {
           setOwnerActionLoading("delete");
           try {
             await deleteService(service.id);
+            if (service.type === "Need") {
+              await refreshUser();
+            }
             Alert.alert("Removed", "The listing has been removed.");
             navigation.navigate("Home", { screen: "HomeFeed" } as never);
           } catch (e) {
@@ -1449,6 +1452,16 @@ export default function ServiceDetailScreen() {
                 </View>
                 {ownerEditLockReason ? (
                   <Text style={styles.lockReasonText}>{ownerEditLockReason}</Text>
+                ) : null}
+
+                {service.type === "Need" ? (
+                  <View style={styles.needReservationNote}>
+                    <Text style={styles.needReservationTitle}>Time reserved for this request</Text>
+                    <Text style={styles.needReservationBody}>
+                      This listing itself is your request. The reserved time appears in Time Activity;
+                      incoming requests will show here only after another member offers help.
+                    </Text>
+                  </View>
                 ) : null}
 
                 {ownerIncomingHandshakes.length > 0 ? (
@@ -2627,6 +2640,26 @@ const getStyles = (topInset: number, bottomInset: number) =>
     ownerEmptyText: {
       fontSize: 13,
       color: colors.GRAY500,
+    },
+    needReservationNote: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: `${colors.BLUE}22`,
+      backgroundColor: colors.BLUE_LT,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      marginBottom: 10,
+    },
+    needReservationTitle: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: colors.BLUE,
+    },
+    needReservationBody: {
+      marginTop: 4,
+      fontSize: 12,
+      lineHeight: 17,
+      color: colors.GRAY700,
     },
     chatActionButton: {
       flexDirection: "row",
