@@ -57,3 +57,42 @@ jobs:
       - name: Run unit tests
         working-directory: mobile-client
         run: npm test -- --ci --forceExit --coverage
+
+  build:
+    name: EAS Preview Build (Android)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ vars.ENABLE_MOBILE_BUILD == 'true' && github.event_name == 'pull_request' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: mobile-client/node_modules
+          key: mobile-node-${{ hashFiles('mobile-client/package-lock.json') }}
+          restore-keys: mobile-node-
+
+      - name: Clear npm cache tmp
+        run: rm -rf ~/.npm/_cacache/tmp
+
+      - name: Install dependencies
+        working-directory: mobile-client
+        run: npm ci --prefer-offline --no-audit
+
+      - name: EAS preview build (Android)
+        working-directory: mobile-client
+        run: eas build --profile preview --platform android --non-interactive
