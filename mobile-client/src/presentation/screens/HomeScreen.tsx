@@ -25,6 +25,7 @@ import { Service } from "../../api/types";
 import ServiceCard from "../components/ServiceCard";
 import FeaturedSection from "../components/FeaturedSection";
 import ForYouSection from "../components/ForYouSection";
+import ExploreCarousel from "../components/ExploreCarousel";
 import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -427,6 +428,7 @@ export default function HomeScreen() {
         enabled={forYouEligible}
         onServicePress={handleServicePress}
       />
+      <ExploreCarousel onServicePress={handleServicePress} />
       <FeaturedSection
         services={filteredServices}
         onServicePress={handleServicePress}
