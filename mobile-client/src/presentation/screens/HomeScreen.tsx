@@ -609,7 +609,7 @@ export default function HomeScreen() {
               {(["all", "Offer", "Need", "Event"] as const).map((type) => {
                 const selected = draftFilters.serviceType === type;
                 const label =
-                  type === "all" ? "All" : type === "Need" ? "Want" : type;
+                  type === "all" ? "All" : type === "Need" ? "Need" : type;
                 return (
                   <TouchableOpacity
                     key={type}
