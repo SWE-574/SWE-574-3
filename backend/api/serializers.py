@@ -552,6 +552,7 @@ class ServiceSerializer(serializers.ModelSerializer):
     explore_pool = serializers.SerializerMethodField()
     edit_locked = serializers.BooleanField(read_only=True)
     edit_lock_reason = serializers.CharField(read_only=True, allow_null=True)
+    source = serializers.SerializerMethodField()
 
     class Meta:
         model = Service

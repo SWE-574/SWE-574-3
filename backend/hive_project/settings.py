@@ -922,3 +922,9 @@ RANKING_SOCIAL_PROXIMITY_PROBABILITY = float(os.environ.get('RANKING_SOCIAL_PROX
 # life distance keeps half its score. Skipped when the viewer has no
 # location (multiplier = 1.0).
 RANKING_PROXIMITY_HALF_LIFE_KM = float(os.environ.get('RANKING_PROXIMITY_HALF_LIFE_KM', '10.0'))
+
+# Onboarding tag fallback (#478). When an onboarded viewer with declared
+# skills hits the hot feed and fewer than this many services match those
+# skills, the tail is filled from the Phase 3 explore pool (cold start,
+# undershown quality, stale recurring) so the feed never feels empty.
+RANKING_ONBOARDING_MIN_RESULTS = int(os.environ.get('RANKING_ONBOARDING_MIN_RESULTS', '10'))
