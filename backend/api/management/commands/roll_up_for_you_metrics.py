@@ -22,9 +22,19 @@ class Command(BaseCommand):
             '--days', type=int, default=2,
             help='How many days back to roll up (default 2 to cover yesterday + today).',
         )
+        parser.add_argument(
+            '--prune-days', type=int, default=None,
+            help=(
+                'Optional. After rollup, delete ForYouEvent rows older than '
+                'this many days. The append-only event log otherwise grows '
+                'unbounded. Pruning runs in its own transaction so a delete '
+                'failure does not roll back the rollup.'
+            ),
+        )
 
     def handle(self, *args, **options):
         days = options['days']
+        prune_days = options.get('prune_days')
         end = timezone.now().date()
         start = end - timedelta(days=days - 1)
 
@@ -37,7 +47,10 @@ class Command(BaseCommand):
                 ForYouEvent.objects
                 .filter(occurred_at__date__gte=start, occurred_at__date__lte=end)
                 .values('occurred_at__date', 'kind', 'source')
-                .annotate(count=Count('id'))
+                .annotate(
+                    count=Count('id'),
+                    unique_viewers=Count('viewer_id', distinct=True),
+                )
             )
 
             ForYouDailyMetric.objects.bulk_create([
@@ -46,6 +59,7 @@ class Command(BaseCommand):
                     kind=row['kind'],
                     source=row['source'],
                     count=row['count'],
+                    unique_viewers=row['unique_viewers'],
                 )
                 for row in rows
             ])
@@ -53,3 +67,13 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f'Rolled up For You metrics from {start} through {end}.'
         ))
+
+        if prune_days is not None and prune_days > 0:
+            cutoff = end - timedelta(days=prune_days)
+            with transaction.atomic():
+                deleted, _ = ForYouEvent.objects.filter(
+                    occurred_at__date__lt=cutoff,
+                ).delete()
+            self.stdout.write(self.style.SUCCESS(
+                f'Pruned {deleted} ForYouEvent row(s) older than {cutoff}.'
+            ))

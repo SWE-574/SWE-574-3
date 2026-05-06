@@ -47,6 +47,10 @@ import {
   WHITE,
 } from '@/theme/tokens'
 import { isNearlyFull } from '@/utils/eventUtils'
+import {
+  MAP_SCROLL_DEBOUNCE_MS,
+  nextMapCollapsedState,
+} from '@/utils/dashboardScroll'
 
 const TRANSPARENT = 'transparent'
 
@@ -54,6 +58,9 @@ const DEBOUNCE_SEARCH   = 400
 const DEBOUNCE_DISTANCE = 600
 const POLL_INTERVAL     = 60_000
 const GEO_TIMEOUT       = 10_000
+
+// Map collapse hysteresis constants are imported from utils/dashboardScroll
+// so they can be unit-tested without rendering the full dashboard.
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
@@ -395,7 +402,20 @@ const DashboardPage = () => {
 
   const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mapScrollTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const typeDropdownRef  = useRef<HTMLDivElement>(null)
+
+  const handleGridScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const top = e.currentTarget.scrollTop
+    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
+    mapScrollTimer.current = setTimeout(() => {
+      setMapCollapsed(prev => nextMapCollapsedState(prev, top))
+    }, MAP_SCROLL_DEBOUNCE_MS)
+  }, [])
+
+  useEffect(() => () => {
+    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
+  }, [])
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -809,11 +829,7 @@ const DashboardPage = () => {
             px={{ base: 3, md: 6 }}
             pt={2}
             pb={8}
-            onScroll={(e) => {
-              const top = e.currentTarget.scrollTop
-              if (top > 80 && !mapCollapsed) setMapCollapsed(true)
-              else if (top < 20 && mapCollapsed) setMapCollapsed(false)
-            }}
+            onScroll={handleGridScroll}
           >
             <ForYouCarousel />
             <ExploreCarousel />

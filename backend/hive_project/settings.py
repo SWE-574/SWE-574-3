@@ -871,8 +871,10 @@ RANKING_NEWCOMER_BOOST = float(os.environ.get('RANKING_NEWCOMER_BOOST', '1.2'))
 #                 + FOLLOW * follow_affinity (1.0 1st-degree, 0.5 2nd-degree)
 #                 + COOCCUR * cooccurrence_signal (k-anon item-item)
 #                 - RECENCY * recency_penalty (decay over hours since last seen)
-RANKING_FOR_YOU_TAG_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_TAG_WEIGHT', '0.3'))
-RANKING_FOR_YOU_FOLLOW_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_FOLLOW_WEIGHT', '0.4'))
+# TAG outweighs FOLLOW: a freshly onboarded user has declared skills but
+# few follows, so tag relevance is the strongest available signal.
+RANKING_FOR_YOU_TAG_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_TAG_WEIGHT', '0.5'))
+RANKING_FOR_YOU_FOLLOW_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_FOLLOW_WEIGHT', '0.3'))
 RANKING_FOR_YOU_COOCCUR_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_COOCCUR_WEIGHT', '0.2'))
 RANKING_FOR_YOU_RECENCY_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_RECENCY_WEIGHT', '0.1'))
 RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS = float(os.environ.get('RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS', '24'))

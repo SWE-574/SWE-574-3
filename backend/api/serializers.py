@@ -541,6 +541,11 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    # source / for_you_signals / explore_pool are transient: not stored on
+    # the Service model. They are attached to the instance by _list_for_you()
+    # and the explore-only list path in views.py before serialization.
+    # getattr(obj, ..., None) returns None for cards from non-personalized
+    # endpoints, which is the intended "absent" representation.
     source = serializers.SerializerMethodField()
     for_you_signals = serializers.SerializerMethodField()
     explore_pool = serializers.SerializerMethodField()

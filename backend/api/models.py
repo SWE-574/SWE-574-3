@@ -1359,6 +1359,7 @@ class ForYouDailyMetric(models.Model):
         default=ForYouEvent.SOURCE_FOR_YOU,
     )
     count = models.PositiveIntegerField(default=0)
+    unique_viewers = models.PositiveIntegerField(default=0)
 
     class Meta:
         constraints = [

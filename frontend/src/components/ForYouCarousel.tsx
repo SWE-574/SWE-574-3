@@ -176,7 +176,8 @@ export default function ForYouCarousel() {
       .then(results => {
         if (!cancelled) setServices(diversifyByChip(results))
       })
-      .catch(() => {
+      .catch(err => {
+        console.error('ForYouCarousel: failed to load For You feed', err)
         if (!cancelled) setServices([])
       })
       .finally(() => {

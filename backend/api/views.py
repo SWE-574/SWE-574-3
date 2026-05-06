@@ -2657,6 +2657,20 @@ class ServiceViewSet(viewsets.ModelViewSet):
         bucketed by source ('for_you' vs 'hot'). Aggregated nightly by
         roll_up_for_you_metrics; today's row is computed live so the
         admin sees fresh numbers without waiting for the cron.
+
+        Each row exposes both `count` (raw event count - one row per
+        card per viewer per page load) and `unique_viewers` (distinct
+        viewer ids). count >> unique_viewers when one viewer reloads
+        the feed; the two fields are not interchangeable.
+
+        Re-running roll_up_for_you_metrics within the same day is
+        normally safe: the (date, kind, source) UniqueConstraint plus
+        the delete-then-insert pattern in the command keeps history
+        clean. The one edge case is calling the rollup mid-day when
+        today's row is also being computed live here - the response
+        will then include both today's rolled row and the live row,
+        double-counting today. The nightly cron runs after midnight
+        so this only matters if rollup is invoked manually.
         """
         from datetime import timedelta
         from django.db.models import Count
@@ -2676,31 +2690,41 @@ class ServiceViewSet(viewsets.ModelViewSet):
         rolled = list(
             ForYouDailyMetric.objects
             .filter(date__gte=start, date__lt=end)
-            .values('date', 'kind', 'source', 'count')
+            .values('date', 'kind', 'source', 'count', 'unique_viewers')
             .order_by('date')
         )
         today_live = list(
             ForYouEvent.objects
             .filter(occurred_at__date=end)
             .values('kind', 'source')
-            .annotate(count=Count('id'))
+            .annotate(
+                count=Count('id'),
+                unique_viewers=Count('viewer_id', distinct=True),
+            )
         )
         for row in today_live:
             rolled.append({
                 'date': end, 'kind': row['kind'],
                 'source': row['source'], 'count': row['count'],
+                'unique_viewers': row['unique_viewers'],
             })
 
         return Response({
             'days': days,
             'start': start.isoformat(),
             'end': end.isoformat(),
+            'note': (
+                'count is total card impressions/clicks/handshakes (one row '
+                'per card per viewer per page load). unique_viewers is the '
+                'number of distinct viewer ids contributing to that count.'
+            ),
             'rows': [
                 {
                     'date': row['date'].isoformat() if hasattr(row['date'], 'isoformat') else row['date'],
                     'kind': row['kind'],
                     'source': row['source'],
                     'count': row['count'],
+                    'unique_viewers': row.get('unique_viewers', 0),
                 }
                 for row in rolled
             ],

@@ -61,10 +61,10 @@ describe('diversifyByChip', () => {
 
 describe('weighted chip picker', () => {
   // Reaches into the picker by checking that the diversifier sees the picker's
-  // output: when tag*0.3 > follow*0.4 the tag-strong card should not collide
-  // with a true follow card next to it.
+  // output: when tag*W_TAG > follow*W_FOLLOW the tag-strong card should not
+  // collide with a true follow card next to it.
   it('lets a strong tag overlap win the chip over a moderate follow signal', () => {
-    // tag=0.8 -> 0.24 weighted; follow=0.5 -> 0.20 weighted -> tag wins.
+    // tag=0.8 -> 0.40 weighted; follow=0.5 -> 0.15 weighted -> tag wins.
     const tagStrong = svc('tag', { tag: 0.8, follow: 0.5, cooccur: 0, recency_penalty: 0 })
     const followStrong = svc('follow', { tag: 0, follow: 1, cooccur: 0, recency_penalty: 0 })
     const followStrong2 = svc('follow2', { tag: 0, follow: 1, cooccur: 0, recency_penalty: 0 })
@@ -75,10 +75,10 @@ describe('weighted chip picker', () => {
     expect(out.map(s => s.id)).toEqual(['follow', 'tag', 'follow2'])
   })
 
-  it('treats follow as winning when raw values are comparable', () => {
-    // tag=0.3 -> 0.09; follow=0.5 -> 0.20 -> follow wins.
-    const followLeaning = svc('a', { tag: 0.3, follow: 0.5, cooccur: 0, recency_penalty: 0 })
-    const followLeaning2 = svc('b', { tag: 0.3, follow: 0.5, cooccur: 0, recency_penalty: 0 })
+  it('treats follow as winning when raw follow value is much higher', () => {
+    // tag=0.1 -> 0.05; follow=0.8 -> 0.24 -> follow wins each.
+    const followLeaning = svc('a', { tag: 0.1, follow: 0.8, cooccur: 0, recency_penalty: 0 })
+    const followLeaning2 = svc('b', { tag: 0.1, follow: 0.8, cooccur: 0, recency_penalty: 0 })
     const tagPure = svc('c', { tag: 0.9, follow: 0, cooccur: 0, recency_penalty: 0 })
 
     // Both leaning-follow cards collide; diversifier should swap in 'c'.

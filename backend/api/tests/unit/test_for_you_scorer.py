@@ -399,3 +399,39 @@ class TestCooccurrenceBuilder:
         with override_settings(RANKING_COOCCUR_MIN_USERS=3):
             rebuild_cooccurrence_matrix()
         assert HandshakeCooccurrence.objects.count() == 0
+
+    def test_builder_atomic_on_bulk_create_failure(self):
+        """If bulk_create raises mid-rebuild, the prior matrix must survive
+        intact. Without the transaction.atomic() wrap, the delete would have
+        emptied the table before the failure and left zero rows.
+        """
+        from unittest.mock import patch
+
+        from django.test import override_settings
+        from api.models import HandshakeCooccurrence
+        from api.ranking_personalized import rebuild_cooccurrence_matrix
+
+        a = ServiceFactory(type='Offer', status='Active')
+        b = ServiceFactory(type='Offer', status='Active')
+        # Pre-existing matrix the rebuild must not destroy on failure.
+        HandshakeCooccurrence.objects.create(service_a=a, service_b=b, count=42)
+
+        # Seed three viewers so the new build would otherwise have rows.
+        for _ in range(3):
+            viewer = UserFactory()
+            self._completed(viewer, a)
+            self._completed(viewer, b)
+
+        with override_settings(RANKING_COOCCUR_MIN_USERS=3):
+            with patch.object(
+                HandshakeCooccurrence.objects,
+                'bulk_create',
+                side_effect=RuntimeError('simulated DB failure'),
+            ):
+                with pytest.raises(RuntimeError):
+                    rebuild_cooccurrence_matrix()
+
+        # Original row is preserved; transaction rolled back the delete.
+        assert HandshakeCooccurrence.objects.count() == 1
+        surviving = HandshakeCooccurrence.objects.get()
+        assert surviving.count == 42

@@ -195,10 +195,20 @@ class TestForYouMetricsEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert body['days'] == 7
+        # Top-level note documents what `count` actually represents so admins
+        # don't read it as user-count or page-view-count.
+        assert 'note' in body
+        assert 'count' in body['note']
+        assert 'unique_viewers' in body['note']
         # Today's live rows should include both kinds
         kinds = {row['kind'] for row in body['rows']}
         assert 'impression' in kinds
         assert 'click' in kinds
+        # Each row exposes both raw count and a distinct-viewer count.
+        for row in body['rows']:
+            assert 'count' in row
+            assert 'unique_viewers' in row
+            assert row['unique_viewers'] <= row['count']
 
     def test_non_admin_blocked(self):
         viewer = UserFactory()

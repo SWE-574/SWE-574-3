@@ -203,6 +203,11 @@ def rebuild_cooccurrence_matrix() -> int:
 _IMPRESSION_TTL_SECONDS = 7 * 24 * 3600
 
 
+# Impression history is stored in Django's default cache, which is the
+# Redis backend in any environment with REDIS_URL set (see settings.py
+# CACHES block). Multi-worker deployments share state through Redis so
+# the recency penalty stays coherent across Daphne workers; do not swap
+# this for an in-process dict.
 def _impression_cache_key(viewer_id) -> str:
     return f'forYou:impressions:{viewer_id}'
 

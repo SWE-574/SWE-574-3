@@ -11,7 +11,7 @@ export interface SignalChip {
 // Argmax on raw values made follow (flat 1.0) always win over Jaccard tag
 // overlap (typically a small float); weighting matches the actual ranking blend
 // so the chip reflects what moved the score.
-export const FOR_YOU_WEIGHTS = { tag: 0.3, follow: 0.4, cooccur: 0.2 } as const
+export const FOR_YOU_WEIGHTS = { tag: 0.5, follow: 0.3, cooccur: 0.2 } as const
 
 export const DEFAULT_CHIP: SignalChip = {
   name: 'default',
@@ -45,6 +45,11 @@ export function chipForSignals(signals?: ForYouSignals | null): SignalChip {
 // when position i would collide with i-1, swap in the first card within the
 // next `lookahead` positions whose chip differs. Caps total swaps so the
 // ranking signal isn't wiped out by aggressive rotation.
+//
+// `lookahead = 3` is tuned for the 10-card web carousel (ForYouCarousel).
+// Mobile renders 5 cards via ForYouSection and currently does not call
+// this helper; if it ever does, drop `lookahead` to 2 so we don't search
+// beyond half the visible row.
 export function diversifyByChip(services: Service[], lookahead = 3): Service[] {
   const out = services.slice()
   const chipName = (s: Service) => chipForSignals(s.for_you_signals).name

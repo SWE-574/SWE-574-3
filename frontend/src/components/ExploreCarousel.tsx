@@ -157,7 +157,8 @@ export default function ExploreCarousel() {
       .then(results => {
         if (!cancelled) setServices(results)
       })
-      .catch(() => {
+      .catch(err => {
+        console.error('ExploreCarousel: failed to load Explore feed', err)
         if (!cancelled) setServices([])
       })
       .finally(() => {

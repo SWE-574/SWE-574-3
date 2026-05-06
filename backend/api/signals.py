@@ -186,6 +186,12 @@ def attribute_handshake_to_for_you_click(sender, instance, created, **kwargs):
     most recent For You click on this (viewer, service) within the
     attribution window and emit a kind=handshake row tagged with the same
     source. Lets the metrics endpoint compute click-to-handshake rate.
+
+    Fires only on initial Handshake creation. Status transitions
+    (pending -> accepted -> completed) are intentionally not attributed:
+    CTR is defined here as click -> handshake-creation, not click ->
+    completion. Completion-rate is a separate metric and is not measured
+    by this signal. The early return on `created is False` enforces that.
     """
     if not created:
         return
