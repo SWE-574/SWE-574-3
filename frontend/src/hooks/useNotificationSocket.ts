@@ -20,6 +20,7 @@ export function useNotificationSocket() {
   const attemptsRef = useRef(0)
   const enabledRef = useRef(false)
   const connectRef = useRef<() => void>(undefined)
+  const seenIdsRef = useRef(new Set<string>())
 
   const connect = useCallback(() => {
     if (!enabledRef.current) return
@@ -42,6 +43,8 @@ export function useNotificationSocket() {
           const data = JSON.parse(event.data as string)
           if (data.type === 'notification' && data.notification) {
             const n: Notification = data.notification
+            if (seenIdsRef.current.has(n.id)) return
+            seenIdsRef.current.add(n.id)
             addNotification(n)
             fetchUnreadCount()
             toast(n.title, { description: n.message || undefined })
@@ -85,6 +88,7 @@ export function useNotificationSocket() {
       wsRef.current = null
     }
     attemptsRef.current = 0
+    seenIdsRef.current.clear()
   }, [])
 
   useEffect(() => {

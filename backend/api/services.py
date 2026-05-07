@@ -937,6 +937,21 @@ class HandshakeService:
                     handshake=handshake,
                     service=handshake.service,
                 )
+        else:
+            # One side confirmed — nudge the other party to confirm their side
+            other = handshake.requester if is_provider else handshake.service.user
+            confirmer_name = user.first_name
+            create_notification(
+                user=other,
+                notification_type='service_confirmation',
+                title='Completion Confirmed',
+                message=(
+                    f"{confirmer_name} confirmed completion of "
+                    f"'{handshake.service.title}'. Please confirm your side to finish the exchange."
+                ),
+                handshake=handshake,
+                service=handshake.service,
+            )
 
         return handshake
 
@@ -2367,6 +2382,14 @@ class ReputationService:
                 notification_type='positive_rep',
                 title='Feedback Received',
                 message=f"{giver.first_name} left feedback for '{handshake.service.title}'.",
+                handshake=handshake,
+                service=handshake.service,
+            )
+            create_notification(
+                user=giver,
+                notification_type='positive_rep',
+                title='Feedback Submitted',
+                message=f"You left feedback for '{handshake.service.title}'.",
                 handshake=handshake,
                 service=handshake.service,
             )
