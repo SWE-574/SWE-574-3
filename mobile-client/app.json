@@ -2,6 +2,7 @@
   "expo": {
     "name": "the-hive",
     "slug": "the-hive",
+    "scheme": "thehive",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./src/assets/icon.png",
@@ -15,7 +16,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.apiary.thehive",
-      "googleServicesFile": "./GoogleService-Info.plist",
       "entitlements": {
         "aps-environment": "production"
       },
@@ -30,8 +30,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.apiary.thehive",
-      "googleServicesFile": "./google-services.json"
+      "package": "com.apiary.thehive"
     },
     "web": {
       "favicon": "./src/assets/icon.png"
@@ -50,8 +49,7 @@
         {
           "icon": "./src/assets/icon.png"
         }
-      ],
-      "./plugins/withModularHeaders"
+      ]
     ],
     "extra": {
       "eas": {

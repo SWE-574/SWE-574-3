@@ -38,19 +38,9 @@ pointing somewhere unexpected.
 
 Push goes through Expo end-to-end. The client gets an `ExponentPushToken[...]`
 via `expo-notifications`; the backend sends through `exponent-server-sdk` and
-Expo forwards to FCM (Android) or APNs (iOS).
-
-For Android dev builds you still need `google-services.json`, and for iOS dev
-builds you need `GoogleService-Info.plist`. Both are gitignored. Ask in the
-team chat for the current files, then drop them in via:
-
-```bash
-make mobile-firebase ANDROID=/path/to/google-services.json IOS=/path/to/GoogleService-Info.plist
-```
-
-For most local dev (the simulator/emulator iterating on UI) you don't need
-the credentials. You only need them when you're building a native binary that
-will register a real push token.
+Expo forwards to FCM (Android) or APNs (iOS) using Expo's credentials. No
+local Firebase config files are needed for development or for the EAS-built
+production app.
 
 ## Tests
 

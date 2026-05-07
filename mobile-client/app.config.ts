@@ -48,32 +48,14 @@ const apiUrl =
 if (!apiUrl) {
   throw new Error(
     "EXPO_PUBLIC_API_URL is not set. Run `make env` at the repo root, or " +
-      "use one of the start:local:* scripts which set it inline."
+      "use `npm run ios` / `npm run android` which set it inline."
   );
 }
 
 const mapboxToken = rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || "";
 
-const androidFirebaseFile =
-  process.env.EXPO_GOOGLE_SERVICES_JSON ||
-  rootEnv.EXPO_GOOGLE_SERVICES_JSON;
-const iosFirebaseFile =
-  process.env.EXPO_GOOGLE_SERVICES_PLIST ||
-  rootEnv.EXPO_GOOGLE_SERVICES_PLIST;
-
-const androidConfig = {
-  ...(mobileConfig.android ?? {}),
-  ...(androidFirebaseFile ? { googleServicesFile: androidFirebaseFile } : {}),
-};
-const iosConfig = {
-  ...(mobileConfig.ios ?? {}),
-  ...(iosFirebaseFile ? { googleServicesFile: iosFirebaseFile } : {}),
-};
-
 module.exports = {
   ...mobileConfig,
-  ios: iosConfig,
-  android: androidConfig,
   plugins: [
     ...(mobileConfig.plugins ?? []),
     "@react-native-community/datetimepicker",

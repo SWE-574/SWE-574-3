@@ -1,6 +1,6 @@
 .PHONY: help env env-local env-prod env-status \
         setup setup-demo dev dev-all stop reset install migrate makemigrations lint build clean \
-        mobile mobile-setup mobile-firebase mobile-build-android mobile-build-ios \
+        mobile mobile-setup mobile-build-android mobile-build-ios \
         db-shell db-time db-time-reset \
         infra-up infra-down infra-reset infra-demo \
         docker-up docker-down docker-logs docker-build docker-reset docker-demo \
@@ -142,10 +142,6 @@ env-status: ## Show active profile and config status
 	@[ -f .env.local ]      && printf '    .env.local       \033[1;32m✓\033[0m\n' || printf '    .env.local       \033[0;90m✗ missing\033[0m\n'
 	@[ -f .env.production ] && printf '    .env.production  \033[1;32m✓\033[0m\n' || printf '    .env.production  \033[0;90m✗ missing\033[0m\n'
 	@echo ""
-	@echo "  Firebase (mobile push notifications):"
-	@[ -f mobile-client/google-services.json ]     && printf '    google-services.json      \033[1;32m✓\033[0m\n' || printf '    google-services.json      \033[0;90m✗ missing\033[0m\n'
-	@[ -f mobile-client/GoogleService-Info.plist ]  && printf '    GoogleService-Info.plist   \033[1;32m✓\033[0m\n' || printf '    GoogleService-Info.plist   \033[0;90m✗ missing\033[0m\n'
-	@echo ""
 	@if [ -f .env ]; then \
 	  printf '  Key values:\n'; \
 	  printf '    DB_HOST=%s\n' "$${DB_HOST:-<unset>}"; \
@@ -180,9 +176,6 @@ setup: _check_env ## One-time local setup: venv, deps, infra, migrate, mobile de
 	@echo ""
 	$(call _ok,"Setup complete! Run  make dev  to start.")
 	@echo "  Tip: Run  make setup-demo  to also seed demo data."
-	@if [ ! -f mobile-client/google-services.json ] || [ ! -f mobile-client/GoogleService-Info.plist ]; then \
-	  printf '  \033[1;33m⚠  Firebase files missing — run  make mobile-firebase  for push notifications.\033[0m\n'; \
-	fi
 
 setup-demo: setup ## One-time local setup + seed demo data
 	$(call _log,"Seeding demo data...")
@@ -288,46 +281,10 @@ mobile: _check_env ## Start Expo dev server for mobile
 	$(call _log,"Starting Expo dev server...")
 	@cd mobile-client && npx expo start
 
-mobile-setup: ## Install mobile dependencies + check Firebase files
+mobile-setup: ## Install mobile dependencies
 	$(call _log,"Installing mobile dependencies...")
 	@cd mobile-client && npm install
-	@echo ""
-	@echo "  Firebase status:"
-	@[ -f mobile-client/google-services.json ]    && printf '    google-services.json      \033[1;32m✓\033[0m\n' || printf '    google-services.json      \033[1;33m✗ missing\033[0m  (Android push)\n'
-	@[ -f mobile-client/GoogleService-Info.plist ] && printf '    GoogleService-Info.plist   \033[1;32m✓\033[0m\n' || printf '    GoogleService-Info.plist   \033[1;33m✗ missing\033[0m  (iOS push)\n'
-	@echo ""
-	@if [ ! -f mobile-client/google-services.json ] || [ ! -f mobile-client/GoogleService-Info.plist ]; then \
-	  printf '  Run \033[1mmake mobile-firebase ANDROID=<path> IOS=<path>\033[0m to set up Firebase.\n\n'; \
-	fi
 	$(call _ok,"Mobile setup complete.")
-
-mobile-firebase: ## Copy Firebase credential files (ANDROID=<path> IOS=<path>)
-ifdef ANDROID
-	@if [ ! -f "$(ANDROID)" ]; then \
-	  printf '\033[1;31mERROR: File not found: %s\033[0m\n' "$(ANDROID)"; exit 1; \
-	fi
-	@cp "$(ANDROID)" mobile-client/google-services.json
-	$(call _ok,"Copied google-services.json → mobile-client/")
-endif
-ifdef IOS
-	@if [ ! -f "$(IOS)" ]; then \
-	  printf '\033[1;31mERROR: File not found: %s\033[0m\n' "$(IOS)"; exit 1; \
-	fi
-	@cp "$(IOS)" mobile-client/GoogleService-Info.plist
-	$(call _ok,"Copied GoogleService-Info.plist → mobile-client/")
-endif
-ifndef ANDROID
-ifndef IOS
-	@echo "Usage: make mobile-firebase ANDROID=<path-to-google-services.json> IOS=<path-to-GoogleService-Info.plist>"
-	@echo ""
-	@echo "  Either or both arguments accepted."
-	@echo ""
-	@echo "  Example:"
-	@echo "    make mobile-firebase ANDROID=~/Downloads/google-services.json"
-	@echo "    make mobile-firebase IOS=~/Downloads/GoogleService-Info.plist"
-	@echo "    make mobile-firebase ANDROID=~/Downloads/google-services.json IOS=~/Downloads/GoogleService-Info.plist"
-endif
-endif
 
 mobile-build-android: ## EAS build for Android
 	@cd mobile-client && npx eas build --platform android

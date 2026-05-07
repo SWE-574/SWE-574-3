@@ -13,7 +13,6 @@
 		9356F9677BF4E4D3C6A92EEF /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF2E6BFF128B72B87E0A23DD /* ExpoModulesProvider.swift */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		D91875722C9B0B06D81828E9 /* libPods-thehive.a in Frameworks */ = {isa = PBXBuildFile; fileRef = CC658A3643F29591EDF925F7 /* libPods-thehive.a */; };
-		E0942EF66B6047C3AAC6A585 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 15CDE5317147488080765DA1 /* GoogleService-Info.plist */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
 
@@ -21,7 +20,6 @@
 		13B07F961A680F5B00A75B9A /* thehive.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = thehive.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = thehive/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = thehive/Info.plist; sourceTree = "<group>"; };
-		15CDE5317147488080765DA1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = "GoogleService-Info.plist"; path = "thehive/GoogleService-Info.plist"; sourceTree = "<group>"; };
 		909F33995D9E0FAEF5BD4D33 /* Pods-thehive.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-thehive.debug.xcconfig"; path = "Target Support Files/Pods-thehive/Pods-thehive.debug.xcconfig"; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = thehive/SplashScreen.storyboard; sourceTree = "<group>"; };
 		B9CF881AB65E1A56BAB252A1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = thehive/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -55,7 +53,6 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				15CDE5317147488080765DA1 /* GoogleService-Info.plist */,
 				B9CF881AB65E1A56BAB252A1 /* PrivacyInfo.xcprivacy */,
 			);
 			name = thehive;
@@ -199,7 +196,6 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				E0942EF66B6047C3AAC6A585 /* GoogleService-Info.plist in Resources */,
 				112DE48463B2A8B3C9C20A23 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
