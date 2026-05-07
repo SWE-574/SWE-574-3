@@ -1,4 +1,5 @@
 import logging
+import threading
 
 from django.contrib.auth.signals import user_logged_in, user_login_failed
 from django.db.models.signals import post_save, post_delete, pre_delete
@@ -88,6 +89,25 @@ def invalidate_handshake_cache(sender, instance, **kwargs):
     invalidate_on_handshake_change(instance)
 
 
+_service_deletes_in_flight = threading.local()
+
+
+def _services_being_deleted():
+    if not hasattr(_service_deletes_in_flight, 'ids'):
+        _service_deletes_in_flight.ids = set()
+    return _service_deletes_in_flight.ids
+
+
+@receiver(pre_delete, sender=Service)
+def _track_service_delete_start(sender, instance, **kwargs):
+    _services_being_deleted().add(instance.pk)
+
+
+@receiver(post_delete, sender=Service)
+def _track_service_delete_end(sender, instance, **kwargs):
+    _services_being_deleted().discard(instance.pk)
+
+
 def _update_service_hot_score(service):
     """Update hot_score + score_updated_at for a service and append a
     ScoreAuditLog row (NFR-17c / #308). Uses the same factor helpers as the
@@ -95,6 +115,12 @@ def _update_service_hot_score(service):
     write identical audit data.
     """
     if service and service.status == 'Active':
+        # Skip when the parent Service is mid-deletion — cascaded child deletes
+        # (Comment, ReputationRep, NegativeRep) fire post_delete before the
+        # Service row is removed, and writing an audit row here would violate
+        # the FK at COMMIT time once the cascade finishes.
+        if service.pk in _services_being_deleted():
+            return
         try:
             if service.type == 'Event':
                 f = _compute_event_factors(service)

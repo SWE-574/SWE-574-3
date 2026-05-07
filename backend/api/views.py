@@ -95,8 +95,8 @@ from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
 from .search_filters import InvalidSearchParam, SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
-from django.db.models.functions import Coalesce
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max, Subquery
+from django.db.models.functions import Coalesce, Greatest
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     invalidate_user_profile,
@@ -6502,7 +6502,16 @@ class CommentViewSet(viewsets.ViewSet):
             # Only show verified reviews *about the service owner* (service.user).
             # For both Offer and Need handshakes, the review about service.user is written by handshake.requester.
             related_handshake__requester=F('user')
-        ).select_related('user', 'related_handshake', 'service').prefetch_related(
+        ).select_related(
+            # related_handshake__service + __requester are needed by
+            # get_reviewed_user_role()'s call to get_provider_and_receiver();
+            # without them each verified review fans out two extra queries.
+            'user',
+            'service',
+            'related_handshake',
+            'related_handshake__service',
+            'related_handshake__requester',
+        ).prefetch_related(
             user_badges_prefetch,
             Prefetch(
                 'replies',
@@ -6805,17 +6814,36 @@ class ForumCategoryViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         queryset = ForumCategory.objects.all()
-        
+
         # For public views, only show active categories
         if not self.request.user.is_staff:
             queryset = queryset.filter(is_active=True)
-        
-        # Annotate with counts for efficiency
+
+        # Annotate counts and last_activity inline so the serializer doesn't fan
+        # out into per-category queries. Subqueries keep this O(1) total.
+        latest_post_at = (
+            ForumPost.objects
+            .filter(topic__category=OuterRef('pk'), is_deleted=False)
+            .order_by('-created_at')
+            .values('created_at')[:1]
+        )
+        latest_topic_at = (
+            ForumTopic.objects
+            .filter(category=OuterRef('pk'))
+            .order_by('-created_at')
+            .values('created_at')[:1]
+        )
         queryset = queryset.annotate(
             topic_count_annotated=Count('topics', distinct=True),
-            post_count_annotated=Count('topics__posts', filter=Q(topics__posts__is_deleted=False), distinct=True)
+            post_count_annotated=Count('topics__posts', filter=Q(topics__posts__is_deleted=False), distinct=True),
+            last_activity_annotated=Coalesce(
+                Greatest(Subquery(latest_post_at), Subquery(latest_topic_at)),
+                Subquery(latest_post_at),
+                Subquery(latest_topic_at),
+                F('created_at'),
+            ),
         )
-        
+
         return queryset.order_by('display_order', 'name')
     
     @track_performance
