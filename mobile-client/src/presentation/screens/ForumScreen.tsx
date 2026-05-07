@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -13,7 +19,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import type { ForumCategory, ForumTopic } from "../../api/forum";
+import type {
+  ForumCategory,
+  ForumTopic,
+  TopicSortOption,
+} from "../../api/forum";
 import { getMyActivity, listCategories, listTopics } from "../../api/forum";
 import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
@@ -21,7 +31,7 @@ import TopicCard from "../components/TopicCard";
 import type { ForumStackParamList } from "../../navigation/ForumStack";
 
 type ForumNavProp = NativeStackNavigationProp<ForumStackParamList, "ForumFeed">;
-type SortOption = "newest" | "most_active";
+type SortOption = TopicSortOption;
 
 type CategoryFilterItem = {
   id: string;
@@ -36,14 +46,15 @@ type CategoryFilterItem = {
 const PAGE_SIZE = 20;
 const FEATURED_TOPICS_LIMIT = 5;
 
-function sortTopics(topics: ForumTopic[], sort: SortOption): ForumTopic[] {
+/** Client-side ordering for endpoints that do not accept sort (e.g. my-activity open topics). */
+function sortOpenTopicsByLastActivity(topics: ForumTopic[]): ForumTopic[] {
   const pinned = topics.filter((topic) => topic.is_pinned);
   const rest = topics
     .filter((topic) => !topic.is_pinned)
-    .sort((a, b) =>
-      sort === "most_active"
-        ? new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime()
-        : new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    .sort(
+      (a, b) =>
+        new Date(b.last_activity).getTime() -
+        new Date(a.last_activity).getTime(),
     );
   return [...pinned, ...rest];
 }
@@ -124,8 +135,8 @@ export default function ForumScreen() {
         setCategories(
           data
             .filter((category) => category.is_active)
-            .sort((a, b) => a.display_order - b.display_order)
-        )
+            .sort((a, b) => a.display_order - b.display_order),
+        ),
       )
       .catch(() => {
         // categories are non-critical
@@ -144,11 +155,14 @@ export default function ForumScreen() {
         const response = await listTopics({
           page: pageNum,
           page_size: PAGE_SIZE,
+          sort: currentSort,
           ...(selectedCategory ? { category: selectedCategory } : {}),
         });
 
-        const nextResults = sortTopics(response.results, currentSort);
-        setTopics((prev) => (replace ? nextResults : [...prev, ...nextResults]));
+        const nextResults = response.results;
+        setTopics((prev) =>
+          replace ? nextResults : [...prev, ...nextResults],
+        );
         setHasMore(response.next !== null);
         setPage(pageNum);
       } catch {
@@ -158,7 +172,7 @@ export default function ForumScreen() {
         fetchingRef.current = false;
       }
     },
-    [selectedCategory]
+    [selectedCategory],
   );
 
   const fetchTrendingTopics = useCallback(async () => {
@@ -166,8 +180,9 @@ export default function ForumScreen() {
       const response = await listTopics({
         page: 1,
         page_size: FEATURED_TOPICS_LIMIT,
+        sort: "most_active",
       });
-      setTrendingTopics(sortTopics(response.results, "most_active"));
+      setTrendingTopics(response.results);
     } catch {
       setTrendingTopics([]);
     }
@@ -183,7 +198,9 @@ export default function ForumScreen() {
 
     try {
       const activity = await getMyActivity();
-      setOwnActiveTopics(sortTopics(activity.open_topic_items ?? [], "most_active"));
+      setOwnActiveTopics(
+        sortOpenTopicsByLastActivity(activity.open_topic_items ?? []),
+      );
       setMyTopicCount(activity.my_topics);
       setMyReplyCount(activity.my_replies);
     } catch {
@@ -198,7 +215,7 @@ export default function ForumScreen() {
       fetchTopics(1, true, sort);
       fetchTrendingTopics();
       fetchOwnActiveTopics();
-    }, [fetchOwnActiveTopics, fetchTopics, fetchTrendingTopics, sort])
+    }, [fetchOwnActiveTopics, fetchTopics, fetchTrendingTopics, sort]),
   );
 
   const handleRefresh = useCallback(async () => {
@@ -218,13 +235,14 @@ export default function ForumScreen() {
   }, [fetchTopics, hasMore, loading, page, showOwnActiveTopics, sort]);
 
   const selectedCategoryInfo = useMemo(
-    () => categories.find((category) => category.slug === selectedCategory) ?? null,
-    [categories, selectedCategory]
+    () =>
+      categories.find((category) => category.slug === selectedCategory) ?? null,
+    [categories, selectedCategory],
   );
 
   const totalTopicCount = useMemo(
     () => categories.reduce((sum, category) => sum + category.topic_count, 0),
-    [categories]
+    [categories],
   );
 
   const categoryData = useMemo<CategoryFilterItem[]>(
@@ -248,7 +266,7 @@ export default function ForumScreen() {
         description: category.description,
       })),
     ],
-    [categories, totalTopicCount]
+    [categories, totalTopicCount],
   );
 
   const scrollToCategories = useCallback(() => {
@@ -260,7 +278,9 @@ export default function ForumScreen() {
 
   const openCreateTopic = useCallback(() => {
     if (selectedCategoryInfo) {
-      navigation.navigate("CreateTopic", { categoryId: selectedCategoryInfo.id });
+      navigation.navigate("CreateTopic", {
+        categoryId: selectedCategoryInfo.id,
+      });
       return;
     }
     navigation.navigate("CreateTopic");
@@ -268,7 +288,7 @@ export default function ForumScreen() {
 
   const displayTopics = useMemo(
     () => (showOwnActiveTopics ? ownActiveTopics : topics),
-    [ownActiveTopics, showOwnActiveTopics, topics]
+    [ownActiveTopics, showOwnActiveTopics, topics],
   );
 
   const scrollCategoryIntoView = useCallback((index: number) => {
@@ -284,7 +304,9 @@ export default function ForumScreen() {
   const renderCategoryCard = useCallback(
     ({ item, index }: { item: CategoryFilterItem; index: number }) => {
       const isSelected =
-        item.slug === null ? selectedCategory === null : selectedCategory === item.slug;
+        item.slug === null
+          ? selectedCategory === null
+          : selectedCategory === item.slug;
       const tone = getCategoryTone(item.color);
 
       return (
@@ -321,7 +343,6 @@ export default function ForumScreen() {
                 styles.categoryCardTitle,
                 isSelected && { color: tone.bg },
               ]}
-              numberOfLines={1}
             >
               {item.name}
             </Text>
@@ -332,20 +353,24 @@ export default function ForumScreen() {
         </Pressable>
       );
     },
-    [selectedCategory]
+    [selectedCategory],
   );
 
   const renderFeaturedTopic = useCallback(
     ({ item }: { item: ForumTopic }) => {
       const tone = getCategoryTone(
-        categories.find((category) => category.slug === item.category_slug)?.color ?? "green"
+        categories.find((category) => category.slug === item.category_slug)
+          ?.color ?? "green",
       );
 
       return (
         <Pressable
           style={[styles.featuredCard, { borderColor: tone.light }]}
           onPress={() =>
-            navigation.navigate("TopicDetail", { id: item.id, title: item.title })
+            navigation.navigate("TopicDetail", {
+              id: item.id,
+              title: item.title,
+            })
           }
         >
           <View style={styles.featuredCardTop}>
@@ -410,7 +435,7 @@ export default function ForumScreen() {
         </Pressable>
       );
     },
-    [categories, navigation]
+    [categories, navigation],
   );
 
   const renderFooter = () => {
@@ -447,15 +472,15 @@ export default function ForumScreen() {
           {showOwnActiveTopics
             ? "No active topics yet"
             : selectedCategoryInfo
-            ? `No topics in ${selectedCategoryInfo.name} yet`
-            : "No topics yet"}
+              ? `No topics in ${selectedCategoryInfo.name} yet`
+              : "No topics yet"}
         </Text>
         <Text style={styles.emptyText}>
           {showOwnActiveTopics
             ? "Your currently open discussions will appear here."
             : selectedCategoryInfo
-            ? "Try another category or start the first discussion here."
-            : "Community discussions will appear here once members begin posting."}
+              ? "Try another category or start the first discussion here."
+              : "Community discussions will appear here once members begin posting."}
         </Text>
         {isAuthenticated ? (
           <Pressable style={styles.emptyButton} onPress={openCreateTopic}>
@@ -502,9 +527,7 @@ export default function ForumScreen() {
               Topics
             </Text>
           </Pressable>
-          <View
-            style={[styles.heroStatCard, styles.heroStatCardWithDivider]}
-          >
+          <View style={[styles.heroStatCard, styles.heroStatCardWithDivider]}>
             <Text style={styles.heroStatValue}>{myReplyCount}</Text>
             <Text style={styles.heroStatLabel}>Replies</Text>
           </View>
@@ -560,13 +583,18 @@ export default function ForumScreen() {
         <View
           style={[
             styles.selectedCategoryCard,
-            { backgroundColor: getCategoryTone(selectedCategoryInfo.color).light },
+            {
+              backgroundColor: getCategoryTone(selectedCategoryInfo.color)
+                .light,
+            },
           ]}
         >
           <View
             style={[
               styles.selectedCategoryIcon,
-              { backgroundColor: getCategoryTone(selectedCategoryInfo.color).bg },
+              {
+                backgroundColor: getCategoryTone(selectedCategoryInfo.color).bg,
+              },
             ]}
           >
             <Ionicons
@@ -587,14 +615,14 @@ export default function ForumScreen() {
       ) : null}
 
       <View style={styles.listToolbar}>
-        <View>
+        <View style={styles.listToolbarTitle}>
           <Text style={styles.sectionEyebrow}>Browse</Text>
           <Text style={styles.sectionTitle}>
             {showOwnActiveTopics
               ? "Your active topics"
               : selectedCategoryInfo
-              ? "Topics in this category"
-              : "Latest discussions"}
+                ? "Topics in this category"
+                : "Latest discussions"}
           </Text>
         </View>
 
@@ -675,11 +703,15 @@ export default function ForumScreen() {
           <TopicCard
             topic={item}
             categoryTone={getCategoryTone(
-              categories.find((category) => category.slug === item.category_slug)?.color ??
-                "green"
+              categories.find(
+                (category) => category.slug === item.category_slug,
+              )?.color ?? "green",
             )}
             onPress={() =>
-              navigation.navigate("TopicDetail", { id: item.id, title: item.title })
+              navigation.navigate("TopicDetail", {
+                id: item.id,
+                title: item.title,
+              })
             }
           />
         )}
@@ -824,7 +856,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   featuredList: {
-    paddingHorizontal:12,
+    paddingHorizontal: 12,
     paddingVertical: 3,
     gap: 12,
   },
@@ -956,13 +988,14 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   categoryCard: {
-    width: 152,
-    minHeight: 88,
+    width: 154,
+    height: 80,
     borderRadius: 18,
     backgroundColor: colors.WHITE,
     borderWidth: 1,
     borderColor: colors.GRAY200,
-    padding: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
@@ -1017,7 +1050,12 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     color: colors.GRAY600,
   },
+  listToolbarTitle: {
+    flex: 0.5,
+    paddingRight: 12,
+  },
   listToolbar: {
+    flex: 1,
     paddingHorizontal: 16,
     marginBottom: 12,
     flexDirection: "row",
@@ -1033,13 +1071,14 @@ const styles = StyleSheet.create({
     borderColor: colors.GRAY200,
     padding: 4,
     gap: 4,
+    flex: 0.5,
   },
   sortSegmentButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderRadius: 999,
   },
   sortSegmentButtonActive: {
@@ -1047,7 +1086,7 @@ const styles = StyleSheet.create({
   },
   sortSegmentText: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "600",
     color: colors.GRAY600,
   },
   sortSegmentTextActive: {
