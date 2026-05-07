@@ -907,14 +907,16 @@ export default function ServiceDetailPage() {
     })
   }
 
-  const handleSubmitEventBehaviorReport = async (issueType: EventBehaviorIssueType, _statement = '') => {
+  const handleSubmitEventBehaviorReport = async (issueType: EventBehaviorIssueType, statement = '') => {
     if (!eventReportTarget) return
     setReportingEventIssue(true)
     try {
       const selectedIssue = EVENT_BEHAVIOR_REPORT_OPTIONS.find((option) => option.value === issueType)
-      const autoDescription = selectedIssue
-        ? `${selectedIssue.label}. ${selectedIssue.desc}`
-        : `${issueType}`
+      const autoDescription = statement.trim()
+        ? statement.trim()
+        : selectedIssue
+          ? `${selectedIssue.label}. ${selectedIssue.desc}`
+          : `${issueType}`
 
       await handshakeAPI.report(
         eventReportTarget.handshakeId,

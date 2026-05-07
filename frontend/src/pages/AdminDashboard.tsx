@@ -722,7 +722,7 @@ const AdminDashboard = () => {
         } finally { setOpenReportActionLoading(false) }
       },
     })
-  }, [closeOpenReport, loadDashboard, loadReports, openReport])
+  }, [openReport])
 
   const closeOpenReportedService = useCallback(async () => {
     if (!openReport) return

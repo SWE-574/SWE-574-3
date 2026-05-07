@@ -2058,15 +2058,17 @@ export default function ChatPage() {
     }
   }, [isReportingNoShow, refreshConversations, selectedId])
 
-  const handleSubmitReportIssue = useCallback(async (issueType: string, _statement = '') => {
+  const handleSubmitReportIssue = useCallback(async (issueType: string, statement = '') => {
     if (!selectedId || isReportingIssue) return
     setIsReportingIssue(true)
     try {
       const selectedIssue = CHAT_REPORT_OPTIONS.find((option) => option.value === issueType)
       const selectedIssueType = (selectedIssue?.value ?? 'service_issue') as ChatReportIssueType
-      const autoDescription = selectedIssue
-        ? `${selectedIssue.label}. ${selectedIssue.desc}`
-        : 'Service issue reported by participant'
+      const autoDescription = statement.trim()
+        ? statement.trim()
+        : selectedIssue
+          ? `${selectedIssue.label}. ${selectedIssue.desc}`
+          : 'Service issue reported by participant'
       await handshakeAPI.report(selectedId, selectedIssueType, autoDescription)
       toast.success('Issue report submitted for admin review.')
       setShowReportIssueModal(false)
@@ -2402,7 +2404,7 @@ export default function ChatPage() {
       {showReportIssueModal && selectedConv && (
         <ReportModal
           onClose={() => !isReportingIssue && setShowReportIssueModal(false)}
-          onSubmit={handleSubmitReportIssue}
+          onSubmit={(issueType, statement) => handleSubmitReportIssue(issueType, statement)}
           loading={isReportingIssue}
           options={CHAT_REPORT_OPTIONS}
           title={`Report ${selectedConv.other_user.name}`}
