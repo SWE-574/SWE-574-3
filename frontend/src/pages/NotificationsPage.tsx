@@ -61,7 +61,7 @@ const NotificationsPage = () => {
 
   return (
     <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto">
-    <Box maxW="640px" mx="auto" py="32px" px="16px">
+      <Box maxW="640px" mx="auto" py="32px" px="16px">
       {/* Header */}
       <Flex align="center" justify="space-between" mb="24px">
         <Flex align="center" gap="10px">
@@ -169,7 +169,7 @@ const NotificationsPage = () => {
       <Text fontSize="12px" color={GRAY500} textAlign="center" mt="16px">
         Notifications older than 90 days may be removed
       </Text>
-    </Box>
+      </Box>
     </Box>
   )
 }
