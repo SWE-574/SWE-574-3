@@ -937,7 +937,7 @@ class HandshakeService:
                     handshake=handshake,
                     service=handshake.service,
                 )
-        else:
+        elif handshake.status != 'Completed':
             # One side confirmed — nudge the other party to confirm their side
             other = handshake.requester if is_provider else handshake.service.user
             confirmer_name = user.first_name

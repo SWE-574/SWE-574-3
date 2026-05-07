@@ -7,7 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
-from .models import Service, User, Tag, ChatRoom, Comment, ReputationRep, NegativeRep, Handshake, ChatMessage, Notification, ScoreAuditLog
+from .models import Service, User, Tag, ChatRoom, Comment, ReputationRep, NegativeRep, Handshake, ChatMessage, Notification, ScoreAuditLog, ServiceGroupChatMessage
 from .cache_utils import (
     invalidate_on_service_change,
     invalidate_on_user_change,
@@ -197,9 +197,11 @@ def notify_on_new_chat_message(sender, instance, created, **kwargs):
         msg_sender = instance.sender
         other_user = (
             handshake.requester
-            if handshake.service.user == msg_sender
+            if handshake.service.user_id == msg_sender.pk
             else handshake.service.user
         )
+        if other_user.pk == msg_sender.pk:
+            return
         transaction.on_commit(lambda: create_notification(
             user=other_user,
             notification_type='chat_message',
@@ -242,3 +244,47 @@ def notify_on_handshake_status_change(sender, instance, created, **kwargs):
             ))
     except Exception:
         logger.exception('Failed to queue handshake notification for %s', instance.pk)
+
+
+@receiver(post_save, sender=ServiceGroupChatMessage)
+def notify_on_group_chat_message(sender, instance, created, **kwargs):
+    """Notify group chat participants (except the sender) when a new message is posted."""
+    if not created:
+        return
+    from .utils import create_notification
+    try:
+        service = instance.service
+        msg_sender = instance.sender
+
+        # Statuses that mean the user is an active participant
+        ACTIVE_STATUSES = ('accepted', 'checked_in', 'attended')
+
+        participant_ids = set(
+            Handshake.objects
+            .filter(service=service, status__in=ACTIVE_STATUSES)
+            .exclude(requester_id=msg_sender.pk)
+            .values_list('requester_id', flat=True)
+        )
+
+        # Also notify the organiser if they are not the sender
+        if service.user_id != msg_sender.pk:
+            participant_ids.add(service.user_id)
+
+        if not participant_ids:
+            return
+
+        recipients = list(User.objects.filter(pk__in=participant_ids))
+
+        def _notify(recipients=recipients, msg_sender=msg_sender, service=service):
+            for user in recipients:
+                create_notification(
+                    user=user,
+                    notification_type='chat_message',
+                    title='New Message',
+                    message=f"{msg_sender.first_name} sent a message in '{service.title}'",
+                    service=service,
+                )
+
+        transaction.on_commit(_notify)
+    except Exception:
+        logger.exception('Failed to queue group chat notification for message %s', instance.pk)

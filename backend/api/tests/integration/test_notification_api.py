@@ -4,7 +4,10 @@ Integration tests for notification API endpoints
 import pytest
 from rest_framework import status
 
-from api.tests.helpers.factories import UserFactory, NotificationFactory, ServiceFactory
+from api.tests.helpers.factories import (
+    UserFactory, NotificationFactory, ServiceFactory,
+    HandshakeFactory, ServiceGroupChatMessageFactory,
+)
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Notification
 
@@ -135,3 +138,58 @@ class TestNotificationViewSet:
         assert results_by_id[str(n_event.id)]['related_service_type'] == 'Event'
         assert results_by_id[str(n_offer.id)]['related_service_type'] == 'Offer'
         assert results_by_id[str(n_no_service.id)]['related_service_type'] is None
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.integration
+class TestGroupChatNotificationSignal:
+    """Test that ServiceGroupChatMessage creates notifications for the right recipients."""
+
+    def _make_service_with_participants(self):
+        organizer = UserFactory()
+        service = ServiceFactory(user=organizer, type='Offer', schedule_type='One-Time', max_participants=5)
+        participant1 = UserFactory()
+        participant2 = UserFactory()
+        HandshakeFactory(service=service, requester=participant1, status='accepted')
+        HandshakeFactory(service=service, requester=participant2, status='accepted')
+        return organizer, service, participant1, participant2
+
+    def test_participants_notified_on_group_message(self):
+        organizer, service, participant1, participant2 = self._make_service_with_participants()
+
+        ServiceGroupChatMessageFactory(service=service, sender=organizer)
+
+        notified_users = set(Notification.objects.values_list('user_id', flat=True))
+        assert participant1.pk in notified_users
+        assert participant2.pk in notified_users
+
+    def test_sender_not_notified(self):
+        organizer, service, participant1, participant2 = self._make_service_with_participants()
+
+        ServiceGroupChatMessageFactory(service=service, sender=organizer)
+
+        assert not Notification.objects.filter(user=organizer).exists()
+
+    def test_organizer_notified_when_participant_sends(self):
+        organizer, service, participant1, participant2 = self._make_service_with_participants()
+
+        ServiceGroupChatMessageFactory(service=service, sender=participant1)
+
+        notified_users = set(Notification.objects.values_list('user_id', flat=True))
+        assert organizer.pk in notified_users
+        assert participant2.pk in notified_users
+        assert participant1.pk not in notified_users
+
+    def test_pending_handshake_not_notified(self):
+        organizer = UserFactory()
+        service = ServiceFactory(user=organizer, type='Offer', schedule_type='One-Time', max_participants=5)
+        active = UserFactory()
+        pending = UserFactory()
+        HandshakeFactory(service=service, requester=active, status='accepted')
+        HandshakeFactory(service=service, requester=pending, status='pending')
+
+        ServiceGroupChatMessageFactory(service=service, sender=organizer)
+
+        notified_users = set(Notification.objects.values_list('user_id', flat=True))
+        assert active.pk in notified_users
+        assert pending.pk not in notified_users
