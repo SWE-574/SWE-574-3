@@ -637,6 +637,7 @@ function TopicDetailView({
   const [editingPost, setEditingPost] = useState<ForumPost | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [confirmDeleteTopic, setConfirmDeleteTopic] = useState(false)
+  const [deletingTopic, setDeletingTopic] = useState(false)
   const [editingTopic, setEditingTopic] = useState(false)
   const [reportTarget, setReportTarget] = useState<{ type: 'topic' } | { type: 'post'; post: ForumPost } | null>(null)
   const [reportLoading, setReportLoading] = useState(false)
@@ -720,12 +721,13 @@ function TopicDetailView({
   }
 
   const modDeleteTopic = async () => {
-    if (!topic) return
+    if (!topic || deletingTopic) return
+    setDeletingTopic(true)
     try {
       await forumAPI.deleteTopic(topic.id)
       toast.success('Topic deleted')
       navigate('/forum')
-    } catch { toast.error('Failed to delete topic') }
+    } catch { toast.error('Failed to delete topic') } finally { setDeletingTopic(false) }
   }
 
   const submitReport = async (reportType: string, statement: string) => {
@@ -760,6 +762,7 @@ function TopicDetailView({
   }
   if (error) return <Box flex={1} p={8} textAlign="center"><Text color={RED}>{error}</Text></Box>
   if (!topic) return null
+  const isMod = user?.role === 'moderator' || user?.role === 'admin' || user?.is_admin
 
   return (
     <Box flex={1} overflowY="auto" bg={GRAY50} p={{ base: 3, md: 5 }}>
@@ -804,11 +807,14 @@ function TopicDetailView({
               {isAuthenticated && (user?.role === 'moderator' || user?.role === 'admin' || user?.is_admin) && topic.author_id !== user?.id && (
                 confirmDeleteTopic ? (
                   <Flex align="center" gap={2}>
-                    <Text fontSize="11px" color={RED}>Delete topic?</Text>
-                    <Box as="button" p={1} borderRadius="6px" bg={RED_LT} color={RED} onClick={modDeleteTopic}>
+                    <Text fontSize="11px" color={RED}>{deletingTopic ? 'Deleting…' : 'Delete topic?'}</Text>
+                    <Box as="button" p={1} borderRadius="6px" bg={RED_LT} color={RED} onClick={modDeleteTopic}
+                      style={{ opacity: deletingTopic ? 0.5 : 1, pointerEvents: deletingTopic ? 'none' : 'auto' }}>
                       <FiCheck size={11} />
                     </Box>
-                    <Box as="button" p={1} borderRadius="6px" bg={GRAY100} color={GRAY600} onClick={() => setConfirmDeleteTopic(false)}>
+                    <Box as="button" p={1} borderRadius="6px" bg={GRAY100} color={GRAY600}
+                      onClick={() => !deletingTopic && setConfirmDeleteTopic(false)}
+                      style={{ opacity: deletingTopic ? 0.5 : 1, pointerEvents: deletingTopic ? 'none' : 'auto' }}>
                       <FiX size={11} />
                     </Box>
                   </Flex>
@@ -860,7 +866,6 @@ function TopicDetailView({
           {posts.map((post) => {
             const isOwn = user?.id && post.author_id === user.id
             const isAuthor = post.author_id === topic.author_id
-            const isMod = user?.role === 'moderator' || user?.role === 'admin' || user?.is_admin
             if (post.is_deleted) {
               return (
                 <Box key={post.id} px={4} py="12px" borderBottom={`1px solid ${GRAY100}`} _last={{ borderBottom: 'none' }}>
