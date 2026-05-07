@@ -2280,7 +2280,42 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 capacity_handshakes_prefetch,
             )
         )
-        
+
+        # Save / Endorse list-time annotations (#483) so the serializer's
+        # is_saved / is_endorsed / endorsement_count fields don't fire one
+        # query per service in list responses. Detail view uses the per-row
+        # fallback in the serializer (one query is fine there).
+        from .models import Endorsement, SavedService
+        if self.request.user.is_authenticated:
+            queryset = queryset.annotate(
+                is_saved_anno=Exists(
+                    SavedService.objects.filter(
+                        user=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_endorsed_anno=Exists(
+                    Endorsement.objects.filter(
+                        endorser=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+            )
+        endorsement_count_subquery = (
+            Endorsement.objects
+            .filter(service=OuterRef('pk'))
+            .order_by()
+            .values('service')
+            .annotate(c=Count('id'))
+            .values('c')
+        )
+        from django.db.models import IntegerField
+        from django.db.models.functions import Coalesce
+        queryset = queryset.annotate(
+            endorsement_count_anno=Coalesce(
+                Subquery(endorsement_count_subquery, output_field=IntegerField()),
+                Value(0, output_field=IntegerField()),
+            ),
+        )
+
         # Filter by visibility - admins can see all, others only visible
         if not (self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES):
             queryset = queryset.filter(is_visible=True)
@@ -2713,6 +2748,133 @@ class ServiceViewSet(viewsets.ModelViewSet):
         invalidate_service_lists()
         invalidate_user_services(str(instance.user.id))
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(
+        detail=True,
+        methods=['post', 'delete'],
+        url_path='save',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def save_service(self, request, pk=None):
+        """Toggle a private save bookmark on a service (#483).
+
+        POST creates a SavedService row (idempotent on the unique constraint).
+        DELETE removes it. Returns the new is_saved state.
+        """
+        from .models import SavedService
+
+        service = self.get_object()
+        if request.method == 'DELETE':
+            SavedService.objects.filter(
+                user=request.user, service=service,
+            ).delete()
+            return Response({'is_saved': False})
+
+        SavedService.objects.get_or_create(
+            user=request.user, service=service,
+        )
+        return Response({'is_saved': True})
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='saved',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def saved(self, request):
+        """List the viewer's saved services, newest first (#483)."""
+        from .models import Endorsement, SavedService
+        from django.db.models import BooleanField, DateTimeField, IntegerField
+
+        user_badges_prefetch = Prefetch(
+            'user__badges',
+            queryset=UserBadge.objects.select_related('badge'),
+        )
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused', 'checked_in', 'attended', 'no_show']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+        saved_at_sq = (
+            SavedService.objects
+            .filter(user=request.user, service=OuterRef('pk'))
+            .values('created_at')[:1]
+        )
+        endorsement_count_sq = (
+            Endorsement.objects
+            .filter(service=OuterRef('pk'))
+            .order_by()
+            .values('service')
+            .annotate(c=Count('id'))
+            .values('c')
+        )
+        queryset = (
+            Service.objects
+            .filter(savers__user=request.user)
+            .select_related('user', 'event_evaluation_summary')
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
+            .annotate(
+                comment_count=Count('comments', filter=Q(comments__is_deleted=False)),
+                is_saved_anno=Value(True, output_field=BooleanField()),
+                is_endorsed_anno=Exists(
+                    Endorsement.objects.filter(
+                        endorser=request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                endorsement_count_anno=Coalesce(
+                    Subquery(endorsement_count_sq, output_field=IntegerField()),
+                    Value(0, output_field=IntegerField()),
+                ),
+                saved_at=Subquery(saved_at_sq, output_field=DateTimeField()),
+            )
+            .order_by('-saved_at')
+        )
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=['post', 'delete'],
+        url_path='endorse',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def endorse(self, request, pk=None):
+        """Toggle a public endorsement of the service's provider (#483).
+
+        Endorsements are public. Their integration into Wilson quality is a
+        planned follow-up; this PR ships the model, endpoints, and counts.
+        """
+        from .models import Endorsement
+
+        service = self.get_object()
+        if service.user_id == request.user.id:
+            return Response(
+                {'detail': 'You cannot endorse your own service.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if request.method == 'DELETE':
+            Endorsement.objects.filter(
+                endorser=request.user, service=service,
+            ).delete()
+            count = Endorsement.objects.filter(service=service).count()
+            return Response({'is_endorsed': False, 'endorsement_count': count})
+
+        Endorsement.objects.get_or_create(
+            endorser=request.user, service=service,
+        )
+        count = Endorsement.objects.filter(service=service).count()
+        return Response({'is_endorsed': True, 'endorsement_count': count})
 
     @action(detail=True, methods=['post'], url_path='toggle-visibility')
     def toggle_visibility(self, request, pk=None):

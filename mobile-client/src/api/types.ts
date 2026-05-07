@@ -153,6 +153,9 @@ export interface Service {
   hot_score?: number;
   is_visible?: boolean;
   is_pinned?: boolean;
+  is_saved?: boolean;
+  is_endorsed?: boolean;
+  endorsement_count?: number;
   is_newcomer_owner?: boolean;
   source?: "tag_match" | "explore_topup" | "for_you" | null;
   for_you_signals?: ForYouSignals | null;
