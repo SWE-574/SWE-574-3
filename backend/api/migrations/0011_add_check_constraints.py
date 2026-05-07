@@ -13,21 +13,21 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name='service',
             constraint=models.CheckConstraint(
-                check=models.Q(duration__gt=0),
+                condition=models.Q(duration__gt=0),
                 name='service_duration_positive',
             ),
         ),
         migrations.AddConstraint(
             model_name='service',
             constraint=models.CheckConstraint(
-                check=models.Q(max_participants__gt=0),
+                condition=models.Q(max_participants__gt=0),
                 name='service_max_participants_positive',
             ),
         ),
         migrations.AddConstraint(
             model_name='handshake',
             constraint=models.CheckConstraint(
-                check=models.Q(provisioned_hours__gt=0),
+                condition=models.Q(provisioned_hours__gt=0),
                 name='handshake_provisioned_hours_positive',
             ),
         ),
