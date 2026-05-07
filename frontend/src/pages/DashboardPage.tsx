@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { usePolling } from '@/hooks/usePolling'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -7,7 +7,6 @@ import {
   Text,
   Input,
   Grid,
-  HStack,
   Spinner,
 } from '@chakra-ui/react'
 import {
@@ -25,14 +24,19 @@ import {
   FiWifi,
   FiMenu,
   FiX,
+  FiLayers,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
-import RecommendationDebugBar from '@/components/RecommendationDebugBar'
+import { MapInfoStrip } from '@/components/MapInfoStrip'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
+import ForYouCarousel from '@/components/ForYouCarousel'
+import ExploreCarousel from '@/components/ExploreCarousel'
+import { Avatar } from '@/components/Avatar'
+import RecommendationDebugBar from '@/components/RecommendationDebugBar'
 import type { Handshake } from '@/services/handshakeAPI'
 import DashboardTour from '@/components/dashboard-tour/DashboardTour'
 
@@ -41,10 +45,14 @@ import {
   AMBER, AMBER_LT,
   BLUE, BLUE_LT,
   RED, RED_LT,
-  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
+  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY800,
   WHITE,
 } from '@/theme/tokens'
 import { isNearlyFull } from '@/utils/eventUtils'
+import {
+  MAP_SCROLL_DEBOUNCE_MS,
+  nextMapCollapsedState,
+} from '@/utils/dashboardScroll'
 
 const TRANSPARENT = 'transparent'
 
@@ -52,6 +60,9 @@ const DEBOUNCE_SEARCH   = 400
 const DEBOUNCE_DISTANCE = 600
 const POLL_INTERVAL     = 60_000
 const GEO_TIMEOUT       = 10_000
+
+// Map collapse hysteresis constants are imported from utils/dashboardScroll
+// so they can be unit-tested without rendering the full dashboard.
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
@@ -61,6 +72,12 @@ const FILTERS = [
   { id: 'online',    label: 'Online',     icon: <FiWifi size={12} /> },
   { id: 'recurrent', label: 'Recurrent',  icon: <FiRefreshCw size={12} /> },
   { id: 'weekend',   label: 'Weekend',    icon: <FiCalendar size={12} /> },
+]
+
+const TYPE_FILTERS = [
+  { id: 'Offer' as const, label: 'Offers', activeBg: GREEN, activeColor: WHITE, dotColor: GREEN },
+  { id: 'Need'  as const, label: 'Needs',  activeBg: BLUE,  activeColor: WHITE, dotColor: BLUE  },
+  { id: 'Event' as const, label: 'Events', activeBg: AMBER, activeColor: WHITE, dotColor: AMBER },
 ]
 
 // ─── Handshake badge ──────────────────────────────────────────────────────────
@@ -87,13 +104,6 @@ function fmt(h: number | string | undefined | null) {
   const n = typeof h === 'string' ? parseFloat(h) : (h ?? 0)
   if (isNaN(n)) return '?'
   return Number.isInteger(n) ? String(n) : n.toFixed(1)
-}
-
-function initials(u?: { first_name?: string; last_name?: string; email?: string } | null) {
-  if (!u) return '?'
-  const f = u.first_name?.[0] ?? ''
-  const l = u.last_name?.[0] ?? ''
-  return (f || l) ? `${f}${l}`.toUpperCase() : (u.email?.[0] ?? '?').toUpperCase()
 }
 
 function fullName(u?: { first_name?: string; last_name?: string; email?: string } | null) {
@@ -139,22 +149,6 @@ function sortServicesByFeedPriority(a: Service, b: Service) {
 }
 
 // ─── Tiny reusable bits ───────────────────────────────────────────────────────
-
-function Avatar({ u, size = 36 }: { u?: { first_name?: string; last_name?: string; email?: string; avatar_url?: string } | null; size?: number }) {
-  return (
-    <Box
-      w={`${size}px`} h={`${size}px`} borderRadius="full" flexShrink={0}
-      bg={GREEN} color={WHITE} overflow="hidden"
-      display="flex" alignItems="center" justifyContent="center"
-      fontSize={`${Math.round(size * 0.34)}px`} fontWeight={700}
-    >
-      {u?.avatar_url
-        ? <img src={u.avatar_url} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        : initials(u)
-      }
-    </Box>
-  )
-}
 
 function Pill({ label, bg, color }: { label: string; bg: string; color: string }) {
   return (
@@ -302,7 +296,7 @@ function ServiceCard({
               </Flex>
             )}
             <Pill
-              label={isOffer ? 'Offer' : service.type === 'Event' ? 'Event' : 'Want'}
+              label={isOffer ? 'Offer' : service.type === 'Event' ? 'Event' : 'Need'}
               bg={isOffer ? GREEN_LT : service.type === 'Event' ? AMBER_LT : BLUE_LT}
               color={isOffer ? GREEN : service.type === 'Event' ? AMBER : BLUE}
             />
@@ -389,11 +383,13 @@ const DashboardPage = () => {
   const { isAuthenticated, user } = useAuthStore()
 
   const [activeFilter, setActiveFilter]             = useState('all')
+  const [activeTypes, setActiveTypes]               = useState<Set<'Offer' | 'Need' | 'Event'>>(new Set())
   const [searchQuery, setSearchQuery]               = useState('')
   const [debouncedSearch, setDebouncedSearch]       = useState('')
   const [services, setServices]                     = useState<Service[]>([])
   const [allActiveServices, setAllActiveServices]   = useState<Service[]>([])
   const [mapOpen, setMapOpen]                       = useState(true)
+  const [mapCollapsed, setMapCollapsed]             = useState(false)
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
   const [userLocation, setUserLocation]             = useState<{ lat: number; lng: number } | null>(null)
@@ -406,11 +402,26 @@ const DashboardPage = () => {
 
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
+  const [typeDropdownOpen, setTypeDropdownOpen]           = useState(false)
   const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
-  const [rankingDebugAvailable, setRankingDebugAvailable] = useState(false)
+  const [rankingDebugEnabled, setRankingDebugEnabled] = useState(false)
 
-  const searchTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const distanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mapScrollTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const typeDropdownRef  = useRef<HTMLDivElement>(null)
+
+  const handleGridScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const top = e.currentTarget.scrollTop
+    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
+    mapScrollTimer.current = setTimeout(() => {
+      setMapCollapsed(prev => nextMapCollapsedState(prev, top))
+    }, MAP_SCROLL_DEBOUNCE_MS)
+  }, [])
+
+  useEffect(() => () => {
+    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
+  }, [])
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -424,24 +435,25 @@ const DashboardPage = () => {
     return () => { if (distanceTimer.current) clearTimeout(distanceTimer.current) }
   }, [distanceKm])
 
+  // Ranking debug bar (#476) lives back on the dashboard so admins can hover
+  // a card and see its Phase 2/3 breakdown live. The availability endpoint
+  // is admin-only per #371, so non-admins quietly get no result and the bar
+  // stays hidden. The PlatformSetting flag (toggled in the admin panel)
+  // controls whether the bar appears at all even for admins.
   useEffect(() => {
-    if (!isAuthenticated) {
-      setRankingDebugAvailable(false)
-      return
+    let cancelled = false
+    serviceAPI
+      .getRankingDebugAvailability()
+      .then(({ enabled }) => {
+        if (!cancelled) setRankingDebugEnabled(Boolean(enabled))
+      })
+      .catch(() => {
+        if (!cancelled) setRankingDebugEnabled(false)
+      })
+    return () => {
+      cancelled = true
     }
-
-    const controller = new AbortController()
-    serviceAPI.getRankingDebugAvailability(controller.signal)
-      .then((response) => {
-        setRankingDebugAvailable(response.enabled)
-      })
-      .catch((error) => {
-        if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') return
-        setRankingDebugAvailable(false)
-      })
-
-    return () => controller.abort()
-  }, [isAuthenticated, user?.id])
+  }, [])
 
   const fetchServices = useCallback(async (signal: AbortSignal) => {
     let raw: typeof services
@@ -527,19 +539,52 @@ const DashboardPage = () => {
     else { requestLocation() }
   }, [locationEnabled, userLocation, requestLocation])
 
+  const toggleType = useCallback((t: 'Offer' | 'Need' | 'Event') => {
+    setActiveTypes((prev) => {
+      const next = new Set(prev)
+      if (next.has(t)) next.delete(t); else next.add(t)
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!typeDropdownOpen) return
+    function handler(e: MouseEvent) {
+      if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target as Node)) {
+        setTypeDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [typeDropdownOpen])
+
   // ── Derived ───────────────────────────────────────────────────────────────
-  const ownServiceHandshakes = Array.from(incomingMap.values()).flat()
-  const myServices         = allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id })
+  const ownServiceHandshakes = useMemo(() => Array.from(incomingMap.values()).flat(), [incomingMap])
+  const myServices = useMemo(
+    () => allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id }),
+    [allActiveServices, user],
+  )
 
   // Hide events from the browse feed where the logged-in user was removed
   // (i.e. their handshake was cancelled by an admin after a report).
-  const displayServices = isAuthenticated
+  const displayServices = useMemo(() => (isAuthenticated
     ? services.filter((s) => {
         if (s.type !== 'Event') return true
         const hs = handshakeMap.get(s.id)
         return hs?.status !== 'cancelled'
       })
     : services
+  )
+    .filter((s) => {
+      if (s.type === 'Event' && s.scheduled_time && new Date(s.scheduled_time).getTime() <= Date.now()) return false
+      return activeTypes.size === 0 || activeTypes.has(s.type)
+    })
+    .sort((a, b) => {
+      const aInactive = ['denied', 'cancelled'].includes(handshakeMap.get(a.id)?.status ?? '')
+      const bInactive = ['denied', 'cancelled'].includes(handshakeMap.get(b.id)?.status ?? '')
+      if (aInactive === bInactive) return 0
+      return aInactive ? 1 : -1
+    }), [services, isAuthenticated, handshakeMap, activeTypes])
   const pendingHs          = myServices.filter((service) => {
     const incoming = incomingMap.get(service.id) ?? []
     return incoming.some((h) => h.status === 'pending')
@@ -547,7 +592,6 @@ const DashboardPage = () => {
   const acceptedHs         = myServices.length
   const completedHs        = ownServiceHandshakes.filter((h) => h.status === 'completed').length
   const distanceLabel      = distanceKm <= 5 ? 'Nearby' : distanceKm <= 15 ? 'Local' : distanceKm <= 30 ? 'Wider' : 'City-wide'
-  const showRankingDebug   = rankingDebugAvailable
 
   const sidebarProps = {
     pendingHs, acceptedHs, completedHs,
@@ -569,18 +613,6 @@ const DashboardPage = () => {
         overflow="hidden"
         position="relative"
       >
-        {showRankingDebug ? (
-          <RecommendationDebugBar
-            services={displayServices}
-            hoveredServiceId={hoveredServiceId}
-            activeFilter={activeFilter}
-            search={debouncedSearch}
-            lat={locationEnabled ? userLocation?.lat : undefined}
-            lng={locationEnabled ? userLocation?.lng : undefined}
-            distance={locationEnabled ? debouncedDistance : undefined}
-          />
-        ) : null}
-
         {/* ── Sidebar (desktop always visible; mobile: overlay) ───────────── */}
         <Box
           display={{ base: sidebarOpen ? 'flex' : 'none', lg: 'flex' }}
@@ -651,7 +683,7 @@ const DashboardPage = () => {
                 data-tour="filters"
                 gap="3px" bg={GRAY100} p="3px" borderRadius="10px"
                 display={{ base: 'none', sm: 'flex' }}
-                flexShrink={0}
+                flexShrink={0} align="center"
               >
                 {FILTERS.map((f) => (
                   <Box
@@ -669,6 +701,54 @@ const DashboardPage = () => {
                     <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
                   </Box>
                 ))}
+                {/* Divider */}
+                <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
+                {/* Type filter icon button + dropdown */}
+                <Box position="relative" ref={typeDropdownRef as never}>
+                  <Box
+                    as="button"
+                    onClick={() => setTypeDropdownOpen((v) => !v)}
+                    px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
+                    fontSize="12px" fontWeight={activeTypes.size > 0 ? 700 : 500}
+                    bg={activeTypes.size > 0 ? GREEN : 'transparent'}
+                    color={activeTypes.size > 0 ? WHITE : GRAY500}
+                    boxShadow={activeTypes.size > 0 ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                    cursor="pointer" transition="all 0.12s"
+                    display="flex" alignItems="center" gap="4px"
+                  >
+                    <FiLayers size={12} />
+                    {activeTypes.size > 0 && (
+                      <Box as="span" fontSize="10px" fontWeight={700}>{activeTypes.size}</Box>
+                    )}
+                  </Box>
+                  {typeDropdownOpen && (
+                    <Box
+                      position="absolute" top="calc(100% + 6px)" right={0}
+                      bg={WHITE} borderRadius="10px" border={`1px solid ${GRAY200}`}
+                      boxShadow="0 4px 16px rgba(0,0,0,0.10)"
+                      p="4px" zIndex={100} minW="120px"
+                    >
+                      {TYPE_FILTERS.map((tf) => {
+                        const isActive = activeTypes.has(tf.id)
+                        return (
+                          <Box
+                            key={tf.id} as="button"
+                            onClick={() => toggleType(tf.id)}
+                            px="10px" py="6px" borderRadius="7px" w="full"
+                            fontSize="12px" fontWeight={isActive ? 700 : 500}
+                            bg={isActive ? tf.activeBg : 'transparent'}
+                            color={isActive ? tf.activeColor : GRAY600}
+                            cursor="pointer" transition="all 0.12s"
+                            display="flex" alignItems="center" gap="6px"
+                          >
+                            <Box w="7px" h="7px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                            {tf.label}
+                          </Box>
+                        )
+                      })}
+                    </Box>
+                  )}
+                </Box>
               </Flex>
 
               {/* Map toggle */}
@@ -689,10 +769,10 @@ const DashboardPage = () => {
               </Box>
             </Flex>
 
-            {/* Filter pills row on mobile (below search bar) */}
+            {/* Filter + type chips row — mobile only */}
             <Flex
               display={{ base: 'flex', sm: 'none' }}
-              gap="5px" mt="8px" overflowX="auto"
+              gap="5px" mt="8px" overflowX="auto" align="center"
               style={{ scrollbarWidth: 'none' }}
             >
               {FILTERS.map((f) => (
@@ -711,32 +791,52 @@ const DashboardPage = () => {
                   {f.label}
                 </Box>
               ))}
+              {/* Divider */}
+              <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
+              {/* Type filter icon button — shares the same dropdown ref as desktop */}
+              <Box
+                as="button" flexShrink={0}
+                onClick={() => setTypeDropdownOpen((v) => !v)}
+                px="10px" py="5px" borderRadius="20px"
+                fontSize="12px" fontWeight={activeTypes.size > 0 ? 700 : 500}
+                bg={activeTypes.size > 0 ? GREEN : WHITE}
+                color={activeTypes.size > 0 ? WHITE : GRAY600}
+                border={`1px solid ${activeTypes.size > 0 ? GREEN : GRAY200}`}
+                cursor="pointer" transition="all 0.12s"
+                display="flex" alignItems="center" gap="4px"
+              >
+                <FiLayers size={12} />
+                {activeTypes.size > 0 && (
+                  <Box as="span" fontSize="10px" fontWeight={700}>{activeTypes.size}</Box>
+                )}
+              </Box>
             </Flex>
           </Box>
 
-          {/* Map panel */}
+          {/* Map panel — collapses to a slim info strip when the feed scrolls
+              past a small threshold, so the feed reclaims the 280px the map
+              would otherwise hold. Tap the strip (or scroll back to top) to
+              re-expand. */}
           {mapOpen && (
-            <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0}>
-              <Flex align="center" px={5} py="10px" gap={4}>
-                <Text fontSize="12px" fontWeight={600} color={GRAY700}>Map View</Text>
-                <HStack gap={3} fontSize="11px" color={GRAY500}>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={GREEN} />Offers</Flex>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={BLUE} />Wants</Flex>
-                </HStack>
-                {isLoading && services.length > 0 && (
-                  <Flex align="center" gap="5px" ml="auto">
-                    <Spinner size="xs" color="gray.400" />
-                    <Text fontSize="11px" color={GRAY400}>Refreshing</Text>
-                  </Flex>
-                )}
-              </Flex>
-              <MapView
-                services={displayServices}
-                height="280px"
-                onServiceClick={(id) => navigate(`/service-detail/${id}`)}
-                userLocation={userLocation}
+            mapCollapsed ? (
+              <MapInfoStrip
+                area={displayServices[0]?.location_area || null}
+                offerCount={displayServices.filter(s => s.type === 'Offer').length}
+                needCount={displayServices.filter(s => s.type === 'Need').length}
+                eventCount={displayServices.filter(s => s.type === 'Event').length}
+                onExpand={() => setMapCollapsed(false)}
               />
-            </Box>
+            ) : (
+              <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
+                <MapView
+                  services={displayServices}
+                  height="280px"
+                  onServiceClick={(id) => navigate(`/service-detail/${id}`)}
+                  userLocation={userLocation}
+                  isRefreshing={isLoading && services.length > 0}
+                />
+              </Box>
+            )
           )}
 
           {/* Results count */}
@@ -747,7 +847,16 @@ const DashboardPage = () => {
           </Box>
 
           {/* Grid */}
-          <Box flex={1} overflowY="auto" px={{ base: 3, md: 6 }} pt={2} pb={8}>
+          <Box
+            flex={1}
+            overflowY="auto"
+            px={{ base: 3, md: 6 }}
+            pt={2}
+            pb={8}
+            onScroll={handleGridScroll}
+          >
+            <ForYouCarousel />
+            <ExploreCarousel />
             {isLoading && displayServices.length === 0 ? (
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
             ) : fetchError && displayServices.length === 0 ? (
@@ -793,7 +902,11 @@ const DashboardPage = () => {
                       incomingCount={aCount}
                       pendingCount={pCount}
                       onClick={() => navigate(`/service-detail/${service.id}`)}
-                      onHover={() => setHoveredServiceId(service.id)}
+                      onHover={
+                        rankingDebugEnabled
+                          ? () => setHoveredServiceId(service.id)
+                          : undefined
+                      }
                       dataTour={idx === 0 ? 'listing-card' : undefined}
                     />
                   )
@@ -804,6 +917,17 @@ const DashboardPage = () => {
         </Flex>
       </Box>
       <DashboardTour />
+      {rankingDebugEnabled && (
+        <RecommendationDebugBar
+          services={displayServices}
+          hoveredServiceId={hoveredServiceId}
+          activeFilter={activeFilter}
+          search={debouncedSearch}
+          lat={userLocation?.lat}
+          lng={userLocation?.lng}
+          distance={debouncedDistance}
+        />
+      )}
     </Box>
   )
 }

@@ -52,6 +52,19 @@ const EVENT_TRAITS: TraitOption[] = [
   { key: 'unwelcoming', label: 'Unwelcoming', tone: 'negative', icon: 'alert' },
 ]
 
+const MAX_IMAGE_SIZE_MB = 10
+const MAX_IMAGES = 3
+
+// Pairs of traits that directly contradict each other and cannot both be selected.
+const OPPOSITE_PAIRS: Record<string, string> = {
+  punctual: 'is_late',       is_late: 'punctual',
+  helpful: 'is_unhelpful',   is_unhelpful: 'helpful',
+  kindness: 'is_rude',       is_rude: 'kindness',
+  well_organized: 'disorganized', disorganized: 'well_organized',
+  engaging: 'boring',        boring: 'engaging',
+  welcoming: 'unwelcoming',  unwelcoming: 'welcoming',
+}
+
 function TraitIcon({ icon, color }: { icon: TraitOption['icon']; color: string }) {
   if (icon === 'clock') return <FiClock size={14} color={color} />
   if (icon === 'users') return <FiUsers size={14} color={color} />
@@ -75,6 +88,7 @@ export default function ServiceEvaluationModal({
   const [images, setImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [evaluationSubmitted, setEvaluationSubmitted] = useState(false)
 
   const traitSet = isEventEvaluation ? EVENT_TRAITS : SERVICE_TRAITS
 
@@ -88,7 +102,13 @@ export default function ServiceEvaluationModal({
   if (!isOpen) return null
 
   const toggle = (key: string) => {
-    setSelected((prev) => ({ ...prev, [key]: !prev[key] }))
+    setSelected((prev) => {
+      const nowActive = !prev[key]
+      if (!nowActive) return { ...prev, [key]: false }
+      // Deselect only the direct opposite trait, if it was selected
+      const opposite = OPPOSITE_PAIRS[key]
+      return { ...prev, ...(opposite ? { [opposite]: false } : {}), [key]: true }
+    })
   }
 
   const reset = () => {
@@ -96,18 +116,37 @@ export default function ServiceEvaluationModal({
     setComment('')
     setImages([])
     setImagePreviews([])
+    setEvaluationSubmitted(false)
   }
 
   const handleImageAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || images.length >= 3) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      setImagePreviews((p) => [...p, ev.target?.result as string])
-    }
-    reader.readAsDataURL(file)
-    setImages((prev) => [...prev, file])
+    const incoming = Array.from(e.target.files ?? [])
     e.target.value = ''
+    if (!incoming.length) return
+
+    const slots = MAX_IMAGES - images.length
+    if (slots <= 0) return
+
+    if (incoming.length > slots) {
+      toast.error(`You can upload at most ${MAX_IMAGES} images. Only the first ${slots} ${slots === 1 ? 'file was' : 'files were'} added.`)
+    }
+    const toAdd = incoming.slice(0, slots)
+
+    const oversized = toAdd.filter((f) => f.size > MAX_IMAGE_SIZE_MB * 1024 * 1024)
+    if (oversized.length > 0) {
+      toast.error(`Each image must be under ${MAX_IMAGE_SIZE_MB} MB. ${oversized.map((f) => f.name).join(', ')} ${oversized.length === 1 ? 'was' : 'were'} skipped.`)
+    }
+    const valid = toAdd.filter((f) => f.size <= MAX_IMAGE_SIZE_MB * 1024 * 1024)
+    if (!valid.length) return
+
+    valid.forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        setImagePreviews((p) => [...p, ev.target?.result as string])
+      }
+      reader.readAsDataURL(file)
+    })
+    setImages((prev) => [...prev, ...valid])
   }
 
   const removeImage = (idx: number) => {
@@ -124,63 +163,77 @@ export default function ServiceEvaluationModal({
 
   const handleSubmit = async () => {
     if (submitting || alreadyReviewed) return
-    if (selectedCount === 0) {
+    if (selectedCount === 0 && !evaluationSubmitted) {
       toast.error('Please select at least one trait.')
       return
     }
 
     setSubmitting(true)
-    try {
-      if (isEventEvaluation) {
-        await reputationAPI.submitCombinedEvent({
-          handshake_id: handshakeId,
-          positive: {
-            well_organized: Boolean(selected.well_organized),
-            engaging: Boolean(selected.engaging),
-            welcoming: Boolean(selected.welcoming),
-          },
-          negative: {
-            disorganized: Boolean(selected.disorganized),
-            boring: Boolean(selected.boring),
-            unwelcoming: Boolean(selected.unwelcoming),
-          },
-          comment,
-        })
-      } else {
-        await reputationAPI.submitCombined({
-          handshake_id: handshakeId,
-          positive: {
-            punctual: Boolean(selected.punctual),
-            helpful: Boolean(selected.helpful),
-            kindness: Boolean(selected.kindness),
-          },
-          negative: {
-            is_late: Boolean(selected.is_late),
-            is_unhelpful: Boolean(selected.is_unhelpful),
-            is_rude: Boolean(selected.is_rude),
-          },
-          comment,
-        })
-      }
 
-      toast.success('Evaluation submitted. Thank you for your feedback!')
-      // Attach images after the main evaluation — a failure here should not block the flow.
-      if (images.length > 0) {
-        try {
-          await reputationAPI.attachReviewImages(handshakeId, images)
-        } catch {
-          toast.warning('Evaluation saved, but photo upload failed. You can re-upload photos later.')
+    // Skip if evaluation was already saved in a previous attempt (e.g. after a photo retry).
+    if (!evaluationSubmitted) {
+      try {
+        if (isEventEvaluation) {
+          await reputationAPI.submitCombinedEvent({
+            handshake_id: handshakeId,
+            positive: {
+              well_organized: Boolean(selected.well_organized),
+              engaging: Boolean(selected.engaging),
+              welcoming: Boolean(selected.welcoming),
+            },
+            negative: {
+              disorganized: Boolean(selected.disorganized),
+              boring: Boolean(selected.boring),
+              unwelcoming: Boolean(selected.unwelcoming),
+            },
+            comment,
+          })
+        } else {
+          await reputationAPI.submitCombined({
+            handshake_id: handshakeId,
+            positive: {
+              punctual: Boolean(selected.punctual),
+              helpful: Boolean(selected.helpful),
+              kindness: Boolean(selected.kindness),
+            },
+            negative: {
+              is_late: Boolean(selected.is_late),
+              is_unhelpful: Boolean(selected.is_unhelpful),
+              is_rude: Boolean(selected.is_rude),
+            },
+            comment,
+          })
         }
+        setEvaluationSubmitted(true)
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Failed to submit evaluation.'
+        toast.error(msg)
+        setSubmitting(false)
+        return
       }
-      await onSubmitted?.()
-      reset()
-      onClose()
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to submit evaluation.'
-      toast.error(msg)
-    } finally {
-      setSubmitting(false)
     }
+
+    // Upload photos. On failure keep the modal open so the user can adjust and retry.
+    if (images.length > 0) {
+      try {
+        await reputationAPI.attachReviewImages(handshakeId, images)
+      } catch (error) {
+        const status = (error as { response?: { status?: number } })?.response?.status
+        if (status === 413) {
+          toast.error('Photos could not be uploaded because the files are too large. Remove or replace them and try again.')
+        } else {
+          toast.error('Photo upload failed. Remove the images or try again.')
+        }
+        setSubmitting(false)
+        return
+      }
+    }
+
+    toast.success('Evaluation submitted. Thank you for your feedback!')
+    await onSubmitted?.()
+    reset()
+    onClose()
+    setSubmitting(false)
   }
 
   return (
@@ -240,9 +293,6 @@ export default function ServiceEvaluationModal({
             </Box>
           ) : (
             <>
-              <Text fontSize="12px" fontWeight={700} color={GRAY700} mb={3}>
-                Select trait(s)
-              </Text>
               <Box mb={4}>
                 <Text fontSize="12px" fontWeight={700} color={GREEN} mb={2}>Nice Traits</Text>
                 <SimpleGrid columns={{ base: 1, md: 3 }} gap={2} mb={3}>
@@ -382,6 +432,7 @@ export default function ServiceEvaluationModal({
                       <input
                         type="file"
                         accept="image/jpeg,image/png,image/gif,image/webp"
+                        multiple
                         style={{ display: 'none' }}
                         onChange={handleImageAdd}
                       />

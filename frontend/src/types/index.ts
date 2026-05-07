@@ -50,6 +50,14 @@ export interface MeResponse {
 
 // ─── User Types ───────────────────────────────────────────────────────────────
 
+export interface BadgeDetail {
+  id: string
+  name: string
+  description: string
+  icon_url: string | null
+  earned_at: string
+}
+
 export const UserRole = {
   ANONYMOUS: 'anonymous',
   REGISTERED: 'registered',
@@ -69,7 +77,8 @@ export interface User {
   date_joined?: string
   timebank_balance?: number
   karma_score?: number
-  featured_badge?: string | null
+  featured_badges: string[]
+  featured_badges_detail: BadgeDetail[]
   featured_achievement_id?: string | null
   achievements?: string[]
   badges?: string[]
@@ -159,6 +168,7 @@ export interface ServiceFormData {
   tags?: string[]
   tag_names?: string[]
   scheduled_time?: string | null
+  requires_qr_checkin?: boolean
 }
 
 export interface Service {
@@ -195,9 +205,25 @@ export interface Service {
   interest_count?: number
   is_visible?: boolean
   is_pinned?: boolean
+  requires_qr_checkin?: boolean
   comment_count?: number
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
+  source?: 'tag_match' | 'explore_topup' | 'for_you' | 'explore' | null
+  for_you_signals?: ForYouSignals | null
+  explore_pool?: 'cold_start' | 'undershown_quality' | 'stale_recurring' | null
+  is_newcomer_owner?: boolean
+  // FR-11f / FR-11n: backend-canonical edit-lock state. Frontend should
+  // consume these directly instead of re-deriving the date math (#267).
+  edit_locked?: boolean
+  edit_lock_reason?: string | null
+}
+
+export interface ForYouSignals {
+  tag: number
+  follow: number
+  cooccur: number
+  recency_penalty: number
 }
 
 export interface EventEvaluationSummary {
@@ -257,6 +283,54 @@ export interface RecommendationDebugBreakdown {
   social_reason: string
 }
 
+export interface RecommendationDebugFactorsService {
+  kind: 'service'
+  positive_count: number
+  negative_count: number
+  comment_count: number
+  hours_exchanged: number
+  quality: number
+  activity: number
+  capacity_multiplier: number
+  newcomer_boost: number
+  is_newcomer: boolean
+  final_score: number
+}
+
+export interface RecommendationDebugFactorsEvent {
+  kind: 'event'
+  positive_count: number
+  negative_count: number
+  rsvps_last_7d: number
+  organiser_quality: number
+  velocity: number
+  capacity_multiplier: number
+  newcomer_boost: number
+  is_newcomer: boolean
+  final_score: number
+}
+
+export type RecommendationDebugFactors =
+  | RecommendationDebugFactorsService
+  | RecommendationDebugFactorsEvent
+
+export type RecommendationDebugPhase3Pool =
+  | 'cold_start'
+  | 'undershown_quality'
+  | 'stale_recurring'
+  | null
+
+export interface RecommendationDebugPhase3 {
+  pool: RecommendationDebugPhase3Pool
+  exploration_rate: number
+  lifetime_completed_handshakes: number
+  days_since_last_completed_handshake: number | null
+  is_stale_recurring: boolean
+  cold_start_threshold: number
+  undershown_quality_threshold: number
+  undershown_stale_days: number
+}
+
 export interface RecommendationDebugSelectedService {
   id: string
   title: string
@@ -274,6 +348,8 @@ export interface RecommendationDebugSelectedService {
   distance_km: number | null
   participant_count: number
   max_participants: number
+  factors: RecommendationDebugFactors
+  phase3: RecommendationDebugPhase3
   breakdown: RecommendationDebugBreakdown
   formula_lines: string[]
   notes: string[]
@@ -367,6 +443,10 @@ export type NotificationType =
   | 'positive_rep'
   | 'admin_warning'
   | 'dispute_resolved'
+  | 'new_report'
+  | 'report_received'
+  | 'report_resolved'
+  | 'report_dismissed'
 
 export interface Notification {
   id: string
@@ -376,6 +456,7 @@ export interface Notification {
   is_read: boolean
   related_handshake: string | null
   related_service: string | null
+  related_report: string | null
   created_at: string
 }
 
@@ -390,6 +471,8 @@ export interface Transaction {
   service_type?: 'Offer' | 'Need' | 'Event' | null
   schedule_type?: 'One-Time' | 'Recurrent' | null
   max_participants?: number | null
+  handshake_status?: string | null
+  service_status?: string | null
   is_current_user_provider?: boolean
   counterpart: {
     id: string
@@ -515,6 +598,7 @@ export interface AdminReport {
   reported_service_owner_name?: string | null
   reported_service_owner_email?: string | null
   reported_service_owner_karma_score?: number | null
+  reported_service_has_active_handshakes?: boolean | null
   reported_forum_topic?: string | null
   reported_forum_topic_title?: string | null
   reported_forum_post?: string | null
@@ -831,6 +915,68 @@ export interface TransactionSummary {
 
 export interface PaginatedTransactionResponse extends PaginatedResponse<Transaction> {
   summary: TransactionSummary
+}
+
+// ─── Calendar Types ───────────────────────────────────────────────────────────
+
+export type CalendarItemKind =
+  | 'service_session'
+  | 'event_organized'
+  | 'event_joined'
+  | 'scheduled_commitment'
+
+export type CalendarAccentToken = 'GREEN' | 'BLUE' | 'TEAL'
+export type CalendarLinkType = 'service' | 'event' | 'chat'
+
+/**
+ * Status values the backend can return in a CalendarItem (spec §6.1).
+ *
+ * Handshake-sourced items (service_session, event_joined):
+ *   'accepted' | 'checked_in' | 'attended'
+ *
+ * Service-sourced items (event_organized, scheduled_commitment — owner only,
+ *   derived from Service.status which uses STATUS_CHOICES Active/Agreed):
+ *   'Active' | 'Agreed'
+ *
+ * See backend/api/views.py MeCalendarView._serialize_interval and
+ *     backend/api/models.py Service.STATUS_CHOICES.
+ */
+export type CalendarItemStatus =
+  | 'accepted'
+  | 'checked_in'
+  | 'attended'
+  | 'Active'
+  | 'Agreed'
+
+export interface CalendarItem {
+  id: string
+  kind: CalendarItemKind
+  title: string
+  start: string
+  end: string
+  duration_hours: number
+  location_type: 'In-Person' | 'Online' | null
+  location_label: string | null
+  service_type: 'Offer' | 'Need' | 'Event' | null
+  service_id: string | null
+  handshake_id: string | null
+  chat_id: string | null
+  counterpart: { id: string; name: string; avatar_url: string | null } | null
+  is_owner: boolean
+  status: CalendarItemStatus
+  accent_token: CalendarAccentToken
+  link: { type: CalendarLinkType; id: string }
+}
+
+export interface CalendarConflict {
+  item_id: string
+  overlaps_with: string[]
+}
+
+export interface CalendarResponse {
+  items: CalendarItem[]
+  conflicts: CalendarConflict[]
+  range: { from: string; to: string }
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────

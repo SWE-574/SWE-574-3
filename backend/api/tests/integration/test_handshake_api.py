@@ -13,7 +13,7 @@ from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Handshake, ChatMessage
+from api.models import Handshake, ChatMessage, TransactionHistory
 
 
 @pytest.mark.django_db
@@ -37,11 +37,70 @@ class TestExpressInterestView:
             requester=requester,
             status='pending'
         ).exists()
+
+    # ── Email verification gate for express-interest ────────────────────
+    # Applicants must be verified to request an Offer or offer help on a Need.
+    # The same gate is enforced on /api/handshakes/services/<id>/interest/.
+
+    def test_express_interest_blocked_for_unverified_user(self):
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(
+            timebank_balance=Decimal('3.00'), is_verified=False
+        )
+        service = ServiceFactory(
+            user=provider, type='Offer', duration=Decimal('2.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+
+        response = client.post(f'/api/services/{service.id}/interest/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Handshake.objects.filter(
+            service=service, requester=requester
+        ).exists()
+
+    def test_express_interest_blocked_for_unverified_user_on_need(self):
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(
+            timebank_balance=Decimal('3.00'), is_verified=False
+        )
+        need = ServiceFactory(
+            user=provider, type='Need', duration=Decimal('1.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+
+        response = client.post(f'/api/services/{need.id}/interest/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Handshake.objects.filter(
+            service=need, requester=requester
+        ).exists()
+
+    def test_express_interest_router_action_blocked_for_unverified_user(self):
+        """The /handshakes/services/<id>/interest/ alias must apply the same gate."""
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(
+            timebank_balance=Decimal('3.00'), is_verified=False
+        )
+        service = ServiceFactory(
+            user=provider, type='Offer', duration=Decimal('2.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+
+        response = client.post(f'/api/handshakes/services/{service.id}/interest/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
     
     def test_express_interest_insufficient_balance(self):
-        """Test expressing interest with insufficient balance"""
+        """Test expressing interest is blocked only past the -10h debt floor."""
         provider = UserFactory()
-        requester = UserFactory(timebank_balance=Decimal('1.00'))
+        requester = UserFactory(timebank_balance=Decimal('-9.00'))
         service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
         
         client = AuthenticatedAPIClient()
@@ -416,6 +475,49 @@ class TestHandshakeViewSet:
         requester.refresh_from_db()
         assert requester.timebank_balance == Decimal('3.00')
 
+    def test_need_approved_cancellation_keeps_service_reservation(self):
+        """Cancelling a Need agreement must not return hours unless the Need is cancelled."""
+        owner = UserFactory(timebank_balance=Decimal('1.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('2.00'),
+            reserved_timebank_hours=Decimal('2.00'),
+            status='Agreed',
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='accepted',
+            provisioned_hours=Decimal('2.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
+            'reason': 'Cannot help anymore',
+        })
+        assert request_response.status_code == status.HTTP_200_OK
+
+        client.authenticate_user(owner)
+        response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
+        assert response.status_code == status.HTTP_200_OK
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+        handshake.refresh_from_db()
+        assert handshake.status == 'cancelled'
+        assert service.status == 'Active'
+        assert owner.timebank_balance == Decimal('1.00')
+        assert service.reserved_timebank_hours == Decimal('2.00')
+        assert not TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=handshake,
+            transaction_type='refund',
+        ).exists()
+
     def test_reject_cancellation_request_keeps_handshake_active(self):
         provider = UserFactory()
         requester = UserFactory(timebank_balance=Decimal('4.00'))
@@ -705,6 +807,39 @@ class TestInitiateApproveServiceOwnerModel:
         assert resp.status_code == status.HTTP_200_OK
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
+
+    def test_need_approve_reuses_existing_request_reservation(self):
+        """Approving a Need must not deduct again when creation already reserved hours."""
+        service_owner = UserFactory(timebank_balance=Decimal('2.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=service_owner,
+            type='Need',
+            duration=Decimal('1.00'),
+            reserved_timebank_hours=Decimal('1.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='pending',
+            provider_initiated=True,
+            exact_location='Need Location',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+            provisioned_hours=Decimal('1.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert resp.status_code == status.HTTP_200_OK
+
+        service_owner.refresh_from_db()
+        service.refresh_from_db()
+        handshake.refresh_from_db()
+        assert handshake.status == 'accepted'
+        assert service_owner.timebank_balance == Decimal('2.00')
+        assert service.reserved_timebank_hours == Decimal('1.00')
 
     def test_confirm_rejects_fractional_hours_adjustment(self):
         """Completion confirmation must reject fractional hour adjustments."""
@@ -1061,6 +1196,28 @@ class TestEventHandshakeEndpoints:
         assert handshake.status == 'accepted'
         assert handshake.provisioned_hours == Decimal('0.00')
 
+    def test_join_event_blocked_for_unverified_user(self):
+        """Unverified users may not RSVP to an Event."""
+        organizer = UserFactory()
+        participant = UserFactory(is_verified=False)
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(days=2),
+            max_participants=3,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.post(f'/api/handshakes/services/{service.id}/join-event/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Handshake.objects.filter(
+            service=service, requester=participant
+        ).exists()
+
     def test_checkin_after_start_returns_invalid_state(self):
         organizer = UserFactory()
         participant = UserFactory()
@@ -1385,4 +1542,94 @@ class TestMarkAttendedAndCompleteEvent:
             status.HTTP_400_BAD_REQUEST,
             status.HTTP_409_CONFLICT,
             status.HTTP_404_NOT_FOUND,  # completed events may be filtered from active queryset
+        )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestHandshakeInterestsPanelRequesterDetail:
+    """
+    Tests for the requester_detail field in HandshakeSerializer.
+    This field powers the owner-side Interests panel (#298).
+    """
+
+    def test_owner_sees_requester_detail_with_id(self):
+        """Service owner's handshake list must include requester_detail.id."""
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', duration=Decimal('2.00'))
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+        resp = client.get('/api/handshakes/')
+        assert resp.status_code == status.HTTP_200_OK
+        results = resp.json()
+        # Find our handshake in the list
+        hs_data = next(
+            (h for h in results if str(h.get('service_id')) == str(service.id)),
+            None
+        )
+        assert hs_data is not None, "Handshake not found in owner's list"
+        assert 'requester_detail' in hs_data
+        detail = hs_data['requester_detail']
+        assert detail is not None
+        assert 'id' in detail
+        assert str(detail['id']) == str(requester.id)
+        assert 'first_name' in detail
+        assert 'last_name' in detail
+        assert 'avatar_url' in detail
+        assert 'member_since' in detail
+        # member_since must be an ISO string (not an int year) so the frontend
+        # can call new Date(detail.member_since).getFullYear() correctly.
+        if detail['member_since'] is not None:
+            assert isinstance(detail['member_since'], str), (
+                "member_since must be an ISO datetime string, not an int"
+            )
+
+    def test_non_owner_gets_null_requester_detail(self):
+        """Non-owner (requester) must NOT see requester_detail — it should be null."""
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', duration=Decimal('2.00'))
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        resp = client.get('/api/handshakes/')
+        assert resp.status_code == status.HTTP_200_OK
+        results = resp.json()
+        hs_data = next(
+            (h for h in results if str(h.get('service_id')) == str(service.id)),
+            None
+        )
+        assert hs_data is not None, "Handshake not found in requester's list"
+        # requester_detail must be null for the non-owner
+        assert hs_data.get('requester_detail') is None
+
+    def test_requester_detail_does_not_include_username(self):
+        """
+        requester_detail must NOT include a 'username' key.
+
+        This project's custom User model sets username=None (AbstractUser field
+        removed) and the team direction is to not use username anywhere —
+        the frontend now shows first/last name + member-since year only.
+        """
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', duration=Decimal('2.00'))
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+        resp = client.get('/api/handshakes/')
+        assert resp.status_code == status.HTTP_200_OK
+        results = resp.json()
+        hs_data = next(
+            (h for h in results if str(h.get('service_id')) == str(service.id)),
+            None
+        )
+        assert hs_data is not None, "Handshake not found in owner's list"
+        detail = hs_data.get('requester_detail')
+        assert detail is not None, "requester_detail should not be null for the owner"
+        assert 'username' not in detail, (
+            "requester_detail must NOT include 'username' — the User model has no "
+            "username field and the frontend no longer uses it."
         )

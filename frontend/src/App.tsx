@@ -4,6 +4,7 @@ import { Box } from '@chakra-ui/react'
 import { useAuthStore } from '@/store/useAuthStore'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import AdminProtectedRoute from '@/components/AdminProtectedRoute'
+import RequireVerifiedEmail from '@/components/RequireVerifiedEmail'
 import Navbar from '@/components/Navbar'
 import { authAPI } from '@/services/authAPI'
 import { toast } from 'sonner'
@@ -167,7 +168,7 @@ const FULL_SCREEN_PREFIXES = [
 const PUBLIC_AUTH_PATHS = ['/login', '/register', '/', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
 
 function App() {
-  const { checkAuth, isLoading, user } = useAuthStore()
+  const { checkAuth, refreshUser, isLoading, user } = useAuthStore()
   const location = useLocation()
 
   const isPublicAuthPage = PUBLIC_AUTH_PATHS.includes(location.pathname)
@@ -209,8 +210,13 @@ function App() {
     // triggering the /users/me/ → 401 → refresh-fail cycle on every keystroke.
     if (PUBLIC_AUTH_PATHS.includes(location.pathname)) return
 
-    // On protected route changes, verify session once.
-    checkAuth()
+    // On protected route changes, keep fast-changing profile fields such as
+    // time balance fresh while still bootstrapping anonymous sessions normally.
+    if (user) {
+      refreshUser()
+    } else {
+      checkAuth()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
 
@@ -267,15 +273,33 @@ function App() {
           {/* ── Authenticated ────────────────────────────────────────── */}
           <Route
             path="/post-offer"
-            element={<ProtectedRoute><PostOfferForm /></ProtectedRoute>}
+            element={
+              <ProtectedRoute>
+                <RequireVerifiedEmail actionLabel="post an Offer">
+                  <PostOfferForm />
+                </RequireVerifiedEmail>
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/post-need"
-            element={<ProtectedRoute><PostNeedForm /></ProtectedRoute>}
+            element={
+              <ProtectedRoute>
+                <RequireVerifiedEmail actionLabel="post a Need">
+                  <PostNeedForm />
+                </RequireVerifiedEmail>
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/post-event"
-            element={<ProtectedRoute><PostEventForm /></ProtectedRoute>}
+            element={
+              <ProtectedRoute>
+                <RequireVerifiedEmail actionLabel="post an Event">
+                  <PostEventForm />
+                </RequireVerifiedEmail>
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/edit-service/:id"
@@ -296,6 +320,10 @@ function App() {
           <Route
             path="/transaction-history"
             element={<ProtectedRoute><TransactionHistoryPage /></ProtectedRoute>}
+          />
+          <Route
+            path="/profile/reports"
+            element={<ProtectedRoute><UserProfile /></ProtectedRoute>}
           />
           <Route
             path="/notifications"

@@ -6,6 +6,7 @@ allowing users to find services by distance, semantic tags, and text.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime, time, timezone as dt_timezone
 from typing import Any
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
@@ -14,6 +15,28 @@ from django.db.models import (
     Q, QuerySet, Case, When, Value, FloatField, Sum, Exists, OuterRef,
     Subquery,
 )
+
+
+class InvalidSearchParam(ValueError):
+    """Raised when a query parameter is malformed (e.g. unparseable date).
+
+    Caught by ServiceViewSet.get_queryset and turned into a 400 with the
+    field name + reason, instead of silently ignoring the param (#285).
+    """
+
+    def __init__(self, field: str, message: str):
+        super().__init__(message)
+        self.field = field
+        self.message = message
+
+
+# Search ordering weights (FR-17g / FR-SEA-01 / #306, #324).
+# Title matches outrank tag matches outrank description-only matches.
+# Social proximity is gated on FR-DIS-05 (social graph) -- placeholder until then.
+TITLE_WEIGHT = 1.0
+TAG_WEIGHT = 0.8
+DESC_WEIGHT = 0.4
+SOCIAL_PROXIMITY_WEIGHT = 0.0  # TODO: wire when social graph lands (FR-DIS-05)
 
 
 class SearchStrategy(ABC):
@@ -130,31 +153,121 @@ class TextStrategy(SearchStrategy):
         if not search:
             return queryset
 
-        # Search in title, description, and tag names
-        queryset = queryset.filter(
-            Q(title__icontains=search) |
-            Q(description__icontains=search) |
-            Q(tags__name__icontains=search)
-        ).distinct()
+        # Weighted scoring: title (1.0) > tag (0.8) > description (0.4).
+        # Tie-break by hot_score so Phase 2 still matters on equal-quality matches.
+        # FR-17g / FR-SEA-01 / #306, #324.
+        queryset = queryset.annotate(
+            _match_score=(
+                Case(
+                    When(title__icontains=search, then=Value(TITLE_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(tags__name__icontains=search, then=Value(TAG_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(description__icontains=search, then=Value(DESC_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+            )
+        ).filter(_match_score__gt=0).order_by('-_match_score', '-hot_score').distinct()
 
         return queryset
 
 
 class TypeStrategy(SearchStrategy):
     """
-    Filter services by type (Offer or Need).
+    Filter services by type (Offer, Need, or Event).
 
     Parameters:
-        - type: 'Offer' or 'Need'
+        - type: 'Offer', 'Need', or 'Event'
     """
 
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         service_type = params.get('type')
 
-        if service_type and service_type in ['Offer', 'Need']:
+        if service_type and service_type in ['Offer', 'Need', 'Event']:
             queryset = queryset.filter(type=service_type)
 
         return queryset
+
+
+class DateRangeStrategy(SearchStrategy):
+    """
+    Filter Events by scheduled_time falling between date_from and date_to.
+
+    Both bounds are optional ISO-8601 dates (YYYY-MM-DD). The filter only
+    applies when the queryset is already scoped to type=Event — non-event
+    services have no meaningful scheduled_time, so we silently skip rather
+    than match-or-miss against a NULL column.
+
+    Parameters:
+        - type: must be 'Event' for the filter to fire
+        - date_from: inclusive lower bound (ISO-8601 date)
+        - date_to:   inclusive upper bound (ISO-8601 date)
+
+    Raises:
+        InvalidSearchParam — if either date is non-empty and unparseable.
+        ServiceViewSet should turn this into a 400 with the field name.
+    """
+
+    def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        if params.get('type') != 'Event':
+            return queryset
+
+        date_from = self._parse(params.get('date_from'), 'date_from', end_of_day=False)
+        date_to = self._parse(params.get('date_to'), 'date_to', end_of_day=True)
+
+        if date_from is None and date_to is None:
+            return queryset
+
+        # When the filter is active, exclude rows without a scheduled_time
+        # entirely — they have no meaningful date.
+        queryset = queryset.filter(scheduled_time__isnull=False)
+
+        if date_from is not None:
+            queryset = queryset.filter(scheduled_time__gte=date_from)
+        if date_to is not None:
+            queryset = queryset.filter(scheduled_time__lte=date_to)
+
+        return queryset
+
+    @staticmethod
+    def _parse(raw, field_name: str, end_of_day: bool) -> datetime | None:
+        if raw in (None, ''):
+            return None
+        if isinstance(raw, datetime):
+            return raw
+        text = str(raw).strip()
+        if not text:
+            return None
+
+        # Accept either bare date (YYYY-MM-DD) or full ISO datetime.
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            try:
+                parsed = datetime.strptime(text, '%Y-%m-%d')
+            except ValueError as exc:
+                raise InvalidSearchParam(
+                    field_name,
+                    f"Invalid date format for '{field_name}'. Expected ISO-8601 (YYYY-MM-DD).",
+                ) from exc
+
+        # Bare-date inputs default to midnight; date_to should cover the
+        # full target day so a user picking "today" sees today's events.
+        if parsed.time() == time(0, 0) and end_of_day:
+            parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999_999)
+
+        # Make naive datetimes UTC-aware so we can safely compare against
+        # Service.scheduled_time which is stored as timezone-aware.
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_timezone.utc)
+        return parsed
 
 
 class SearchEngine:
@@ -176,10 +289,11 @@ class SearchEngine:
     def __init__(self):
         """Initialize with default strategy order"""
         self.strategies: list[SearchStrategy] = [
-            TypeStrategy(),      # Filter by type first (most selective)
-            TagStrategy(),       # Then by tags
-            TextStrategy(),      # Then by text search
-            LocationStrategy(),  # Location last (adds ordering by distance)
+            TypeStrategy(),       # Filter by type first (most selective)
+            DateRangeStrategy(),  # Event-only: scheduled_time window
+            TagStrategy(),        # Then by tags
+            TextStrategy(),       # Then by text search
+            LocationStrategy(),   # Location last (adds ordering by distance)
         ]
 
     def search(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:

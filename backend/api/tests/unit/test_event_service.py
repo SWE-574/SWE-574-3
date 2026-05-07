@@ -382,85 +382,225 @@ class TestCancelEvent:
             EventHandshakeService.cancel_event(service, service.user)
 
 
-# ─── FR-19i: QR + GPS dual-factor check-in (xfail — not yet implemented) ──────
+# ─── QR attendance verification ───────────────────────────────────────────────
 
-try:
-    from api.services import EventHandshakeService as _EHS_qr
-    _qr_checkin = getattr(_EHS_qr, 'checkin_with_qr', None)
-    _gps_checkin = getattr(_EHS_qr, 'checkin_with_proximity', None)
-except ImportError:
-    _qr_checkin = None
-    _gps_checkin = None
+
+def _qr_event(organizer=None, *, max_participants=10, hours_until_start=12):
+    """Create an active Event with requires_qr_checkin=True, within lockdown."""
+    return ServiceFactory(
+        user=organizer or UserFactory(),
+        type='Event',
+        status='Active',
+        max_participants=max_participants,
+        schedule_type='One-Time',
+        scheduled_time=timezone.now() + timedelta(hours=hours_until_start),
+        duration=Decimal('1.00'),
+        requires_qr_checkin=True,
+    )
 
 
 @pytest.mark.django_db
 @pytest.mark.unit
-@pytest.mark.xfail(
-    reason="FR-19i: QR token validation not yet implemented in EventHandshakeService",
-    strict=False,
-)
+class TestGenerateQRToken:
+
+    def test_organizer_generates_token(self):
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        token = EventHandshakeService.generate_qr_token(service, organizer)
+        assert token.token
+        assert token.attendance_code
+        assert len(token.attendance_code) == 6
+        assert not token.is_expired
+
+    def test_non_organizer_rejected(self):
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        other = UserFactory()
+        with pytest.raises(PermissionError, match='organizer'):
+            EventHandshakeService.generate_qr_token(service, other)
+
+    def test_regenerate_replaces_old_token(self):
+        from api.models import EventQRToken
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        t1 = EventHandshakeService.generate_qr_token(service, organizer)
+        old_value = t1.token
+        t2 = EventHandshakeService.generate_qr_token(service, organizer)
+        assert t2.token != old_value
+        assert EventQRToken.objects.filter(service=service).count() == 1
+
+    def test_cannot_generate_when_qr_not_required(self):
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        assert not service.requires_qr_checkin
+        with pytest.raises(ValueError, match='does not require'):
+            EventHandshakeService.generate_qr_token(service, organizer)
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
 class TestCheckinQRValidation:
-    """
-    FR-19i requires a valid QR token as the first factor of attendance verification.
 
-    These tests are xfail because:
-    - No QR token is generated when a handshake is accepted.
-    - EventHandshakeService has no checkin_with_qr() method.
-    - The check-in endpoint does not validate any token.
-    """
+    def test_qr_checkin_sets_attended(self):
+        """Full token from QR code → status becomes 'attended'."""
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
 
-    def setUp(self):
-        if _qr_checkin is None:
-            pytest.xfail("checkin_with_qr not yet implemented — FR-19i")
+        token = EventHandshakeService.generate_qr_token(service, organizer)
+        result = EventHandshakeService.checkin_with_qr(hs, participant, qr_token=token.token)
+        assert result.status == 'attended'
 
-    def test_checkin_with_valid_qr_token_succeeds(self):
-        """Valid QR token issued for the handshake should allow check-in."""
+    def test_attendance_code_checkin_works(self):
+        """Short attendance code (web entry) → status becomes 'attended'."""
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        token = EventHandshakeService.generate_qr_token(service, organizer)
+        result = EventHandshakeService.checkin_with_qr(
+            hs, participant, qr_token=token.attendance_code,
+        )
+        assert result.status == 'attended'
+
+    def test_attendance_code_case_insensitive(self):
+        """Attendance code should work regardless of case."""
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        token = EventHandshakeService.generate_qr_token(service, organizer)
+        result = EventHandshakeService.checkin_with_qr(
+            hs, participant, qr_token=token.attendance_code.lower(),
+        )
+        assert result.status == 'attended'
+
+    def test_invalid_token_rejected(self):
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+        EventHandshakeService.generate_qr_token(service, organizer)
+
+        with pytest.raises(ValueError, match='[Ii]nvalid'):
+            EventHandshakeService.checkin_with_qr(hs, participant, qr_token='bad-token')
+
+    def test_expired_token_rejected(self):
+        from api.models import EventQRToken
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        token = EventHandshakeService.generate_qr_token(service, organizer)
+        # Force expiry
+        EventQRToken.objects.filter(pk=token.pk).update(
+            expires_at=timezone.now() - timedelta(minutes=1)
+        )
+        with pytest.raises(ValueError, match='[Ii]nvalid|[Ee]xpired'):
+            EventHandshakeService.checkin_with_qr(hs, participant, qr_token=token.token)
+
+    def test_same_participant_cannot_scan_twice(self):
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        token = EventHandshakeService.generate_qr_token(service, organizer)
+        EventHandshakeService.checkin_with_qr(hs, participant, qr_token=token.token)
+
+        with pytest.raises(ValueError, match='already'):
+            EventHandshakeService.checkin_with_qr(hs, participant, qr_token=token.token)
+
+    def test_multiple_participants_same_token(self):
+        """Two different participants can use the same event-scoped token."""
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        p1 = UserFactory()
+        p2 = UserFactory()
+        hs1 = EventHandshakeService.join_event(service, p1)
+        hs2 = EventHandshakeService.join_event(service, p2)
+
+        token = EventHandshakeService.generate_qr_token(service, organizer)
+        r1 = EventHandshakeService.checkin_with_qr(hs1, p1, qr_token=token.token)
+        r2 = EventHandshakeService.checkin_with_qr(hs2, p2, qr_token=token.token)
+        assert r1.status == 'attended'
+        assert r2.status == 'attended'
+
+    def test_self_checkin_blocked_when_qr_required(self):
+        """Normal checkin() must be rejected when event requires QR."""
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        with pytest.raises(ValueError, match='QR'):
+            EventHandshakeService.checkin(hs, participant)
+
+    def test_self_checkin_works_when_qr_not_required(self):
+        """Normal checkin() still works for non-QR events."""
         organizer = UserFactory()
         service = _event_service(organizer=organizer, hours_until_start=12)
         participant = UserFactory()
         hs = EventHandshakeService.join_event(service, participant)
 
-        # The token should have been generated when the handshake was accepted
-        assert hasattr(hs, 'qr_token') and hs.qr_token, "No QR token generated on accepted handshake."
-        result = _qr_checkin(hs, participant, qr_token=hs.qr_token)
+        result = EventHandshakeService.checkin(hs, participant)
         assert result.status == 'checked_in'
 
-    def test_checkin_with_invalid_qr_token_raises(self):
-        """An incorrect QR token must be rejected."""
+    def test_qr_works_after_event_start_time(self):
+        """QR check-in should work even after event's scheduled_time (unlike normal checkin)."""
+        organizer = UserFactory()
+        # Create event 2h in future, join, then move scheduled_time to past
+        service = _qr_event(organizer=organizer, hours_until_start=2)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        # Simulate event has started: move scheduled_time to 1 hour ago
+        Service.objects.filter(pk=service.pk).update(
+            scheduled_time=timezone.now() - timedelta(hours=1),
+        )
+        service.refresh_from_db()
+
+        token = EventHandshakeService.generate_qr_token(service, organizer)
+        result = EventHandshakeService.checkin_with_qr(hs, participant, qr_token=token.token)
+        assert result.status == 'attended'
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestMarkAttendedQRFallback:
+
+    def test_mark_attended_from_accepted_when_qr_required(self):
+        """Organizer can mark directly from 'accepted' as fallback for QR events."""
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer)
+        participant = UserFactory()
+        hs = EventHandshakeService.join_event(service, participant)
+
+        result = EventHandshakeService.mark_attended(hs, organizer)
+        assert result.status == 'attended'
+
+    def test_mark_attended_from_accepted_blocked_when_qr_not_required(self):
+        """Normal events still require 'checked_in' before mark_attended."""
         organizer = UserFactory()
         service = _event_service(organizer=organizer, hours_until_start=12)
         participant = UserFactory()
         hs = EventHandshakeService.join_event(service, participant)
+        # Status is 'accepted', not 'checked_in'
+        with pytest.raises(ValueError, match='Cannot mark attended'):
+            EventHandshakeService.mark_attended(hs, organizer)
 
-        with pytest.raises((ValueError, PermissionError), match='[Ii]nvalid.*[Tt]oken|[Qq][Rr]'):
-            _qr_checkin(hs, participant, qr_token='bad-token-value')
 
-    def test_qr_token_is_single_use(self):
-        """Using the same QR token twice must fail on the second attempt."""
-        organizer = UserFactory()
-        service = _event_service(organizer=organizer, hours_until_start=12)
-        p1 = UserFactory()
-        p2 = UserFactory()
-        hs1 = EventHandshakeService.join_event(service, p1)
-        hs2 = EventHandshakeService.join_event(service, p2)
+# ─── FR-19i: GPS proximity check (xfail — out of scope) ─────────────────────
 
-        _qr_checkin(hs1, p1, qr_token=hs1.qr_token)
-
-        # Reusing hs1's token for a different handshake must fail
-        with pytest.raises((ValueError, PermissionError)):
-            _qr_checkin(hs2, p2, qr_token=hs1.qr_token)
-
-    def test_qr_token_belongs_to_correct_handshake(self):
-        """A token generated for one handshake cannot be used for a different participant."""
-        organizer = UserFactory()
-        service = _event_service(organizer=organizer, hours_until_start=12)
-        p1 = UserFactory()
-        p2 = UserFactory()
-        hs1 = EventHandshakeService.join_event(service, p1)
-        hs2 = EventHandshakeService.join_event(service, p2)
-
-        with pytest.raises((ValueError, PermissionError)):
-            _qr_checkin(hs2, p2, qr_token=hs1.qr_token)
+try:
+    from api.services import EventHandshakeService as _EHS_qr
+    _gps_checkin = getattr(_EHS_qr, 'checkin_with_proximity', None)
+except ImportError:
+    _gps_checkin = None
 
 
 @pytest.mark.django_db

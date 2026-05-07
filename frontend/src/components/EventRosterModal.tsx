@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useState, useEffect, useRef, useCallback } from 'react'
 import { Box, Flex, Stack, Text } from '@chakra-ui/react'
 import { FiX, FiCheckCircle, FiAlertCircle, FiUsers } from 'react-icons/fi'
+import { QRCodeSVG } from 'qrcode.react'
 import type { Service } from '@/types'
 import type { Handshake } from '@/services/handshakeAPI'
+import { serviceAPI } from '@/services/serviceAPI'
 
 import {
   GREEN, GREEN_LT,
@@ -21,6 +23,7 @@ const STATUS_BADGE: Record<string, { label: string; bg: string; color: string; i
 }
 
 interface EventRosterPanelProps {
+  service: Service
   handshakes: Handshake[]
   onComplete: () => void
   onMarkAttended: (handshakeId: string) => void
@@ -46,12 +49,43 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-export function EventRosterPanel({ handshakes, onComplete, onMarkAttended, markingHandshakeId, completing, onClose }: EventRosterPanelProps) {
+export function EventRosterPanel({ service, handshakes, onComplete, onMarkAttended, markingHandshakeId, completing, onClose }: EventRosterPanelProps) {
   const active = handshakes.filter((handshake) => ['accepted', 'checked_in', 'attended', 'no_show'].includes(handshake.status))
   const checkedIn = active.filter((handshake) => handshake.status === 'checked_in').length
   const attended = active.filter((handshake) => handshake.status === 'attended').length
   const registered = active.filter((handshake) => handshake.status === 'accepted').length
   const willBeNoShow = registered + checkedIn
+
+  // ── QR token state ──
+  const [qrData, setQrData] = useState<{ qr_payload: string; attendance_code: string; expires_at: string } | null>(null)
+  const [qrLoading, setQrLoading] = useState(false)
+  const [qrVisible, setQrVisible] = useState(false)
+  const qrTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const generateQr = useCallback(async () => {
+    setQrLoading(true)
+    try {
+      const data = await serviceAPI.generateQRToken(service.id)
+      setQrData({ qr_payload: data.qr_payload, attendance_code: data.attendance_code, expires_at: data.expires_at })
+      setQrVisible(true)
+      // Auto-regenerate 10 seconds before expiry
+      const msUntilExpiry = new Date(data.expires_at).getTime() - Date.now() - 10_000
+      if (qrTimerRef.current) clearTimeout(qrTimerRef.current)
+      if (msUntilExpiry > 0) {
+        qrTimerRef.current = setTimeout(() => generateQr(), msUntilExpiry)
+      }
+    } catch {
+      // silent — user can retry
+    } finally {
+      setQrLoading(false)
+    }
+  }, [service.id])
+
+  useEffect(() => () => { if (qrTimerRef.current) clearTimeout(qrTimerRef.current) }, [])
+
+  // When QR is required, organizer can mark 'accepted' directly (fallback)
+  const canMarkAttended = (status: string) =>
+    status === 'checked_in' || (service.requires_qr_checkin && status === 'accepted')
 
   return (
     <Flex direction="column" h="100%" minH={0}>
@@ -70,6 +104,54 @@ export function EventRosterPanel({ handshakes, onComplete, onMarkAttended, marki
           <Text fontSize="11px" color={AMBER} fontWeight={700}>{checkedIn} checked in</Text>
         </Flex>
       </Flex>
+
+      {/* ── QR attendance panel (organizer) ── */}
+      {service.requires_qr_checkin && service.status === 'Active' && (
+        <Box mx={6} mt={4}>
+          {!qrVisible ? (
+            <Box
+              as="button" w="100%" py="12px" borderRadius="12px"
+              bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+              display="flex" alignItems="center" justifyContent="center" gap="8px"
+              onClick={() => generateQr()}
+              style={{ border: 'none', cursor: qrLoading ? 'not-allowed' : 'pointer', opacity: qrLoading ? 0.7 : 1 }}
+            >
+              {qrLoading ? 'Generating…' : 'Show Attendance QR'}
+            </Box>
+          ) : qrData && (
+            <Flex direction="column" align="center" gap={3} p={5} bg={WHITE}
+              borderRadius="16px" border={`1px solid ${GRAY200}`}
+              boxShadow="0 2px 12px rgba(0,0,0,0.06)"
+            >
+              <QRCodeSVG value={qrData.qr_payload} size={200} />
+              <Text fontSize="28px" fontWeight={800} letterSpacing="0.15em" color={GRAY800} fontFamily="monospace">
+                {qrData.attendance_code}
+              </Text>
+              <Text fontSize="11px" color={GRAY500}>
+                Participants scan QR or enter code above
+              </Text>
+              <Flex gap={2} w="100%">
+                <Box
+                  as="button" flex={1} py="8px" borderRadius="8px"
+                  bg={GRAY100} color={GRAY700} fontSize="12px" fontWeight={600}
+                  onClick={() => { setQrVisible(false); if (qrTimerRef.current) clearTimeout(qrTimerRef.current) }}
+                  style={{ border: 'none', cursor: 'pointer' }}
+                >
+                  Hide
+                </Box>
+                <Box
+                  as="button" flex={1} py="8px" borderRadius="8px"
+                  bg={GREEN} color={WHITE} fontSize="12px" fontWeight={600}
+                  onClick={() => generateQr()}
+                  style={{ border: 'none', cursor: qrLoading ? 'not-allowed' : 'pointer', opacity: qrLoading ? 0.7 : 1 }}
+                >
+                  {qrLoading ? 'Regenerating…' : 'Regenerate'}
+                </Box>
+              </Flex>
+            </Flex>
+          )}
+        </Box>
+      )}
 
       {willBeNoShow > 0 && (
         <Box mx={6} mt={4} bg={AMBER_LT} border={`1px solid ${AMBER}40`} borderRadius="12px" p={4}>
@@ -110,7 +192,7 @@ export function EventRosterPanel({ handshakes, onComplete, onMarkAttended, marki
                   >
                     {badge.label}
                   </Box>
-                  {handshake.status === 'checked_in' && (
+                  {canMarkAttended(handshake.status) && (
                     <Box
                       as="button"
                       px="10px"
@@ -196,6 +278,7 @@ export default function EventRosterModal({ isOpen, onClose, service, handshakes,
 
         <Box flex={1} minH={0}>
           <EventRosterPanel
+            service={service}
             handshakes={handshakes}
             onComplete={onComplete}
             onMarkAttended={onMarkAttended}

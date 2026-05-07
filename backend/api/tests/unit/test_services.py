@@ -5,11 +5,13 @@ Tests business logic for expressing interest in services, including
 validation for max_participants, balance checks, and duplicate interest prevention.
 """
 from decimal import Decimal
+from datetime import timedelta
 from django.test import TestCase
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
-from api.models import Service, Handshake
-from api.services import HandshakeService
+from api.models import Service, Handshake, TransactionHistory
+from api.services import HandshakeService, HandshakeServiceError
 
 User = get_user_model()
 
@@ -83,8 +85,8 @@ class HandshakeServiceTestCase(TestCase):
         self.assertIn('own service', error)
     
     def test_can_express_interest_insufficient_balance_offer(self):
-        """Test cannot express interest with insufficient balance for Offer service."""
-        self.user2.timebank_balance = Decimal('1.00')
+        """Test cannot express interest when Offer request would exceed -10h."""
+        self.user2.timebank_balance = Decimal('-9.00')
         self.user2.save()
         
         is_valid, error = HandshakeService.can_express_interest(self.service_offer, self.user2)
@@ -92,13 +94,36 @@ class HandshakeServiceTestCase(TestCase):
         self.assertIn('Insufficient TimeBank balance', error)
     
     def test_can_express_interest_insufficient_balance_need(self):
-        """Test cannot express interest with insufficient balance for Need service."""
-        self.user1.timebank_balance = Decimal('1.00')
-        self.user1.save()
+        """Test cannot express interest when Need owner is already past the debt floor."""
+        self.user1.timebank_balance = Decimal('-10.01')
         
         is_valid, error = HandshakeService.can_express_interest(self.service_need, self.user2)
         self.assertFalse(is_valid)
         self.assertIn('Insufficient TimeBank balance', error)
+
+    def test_can_express_interest_allows_offer_debt_within_limit(self):
+        """Offer interest may use available debt as long as projected balance stays >= -10h."""
+        self.user2.timebank_balance = Decimal('-1.00')
+        self.user2.save()
+        self.service_offer.duration = Decimal('6.00')
+        self.service_offer.save(update_fields=['duration'])
+
+        is_valid, error = HandshakeService.can_express_interest(self.service_offer, self.user2)
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    def test_can_express_interest_need_uses_existing_reservation_balance(self):
+        """Need interest checks the already-reserved balance without subtracting duration again."""
+        self.user1.timebank_balance = Decimal('-1.00')
+        self.user1.save()
+        self.service_need.duration = Decimal('6.00')
+        self.service_need.save(update_fields=['duration'])
+
+        is_valid, error = HandshakeService.can_express_interest(self.service_need, self.user2)
+
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
     
     def test_can_express_interest_valid_need(self):
         """Test can_express_interest returns True for valid Need service case."""
@@ -198,6 +223,28 @@ class HandshakeServiceTestCase(TestCase):
         self.assertEqual(handshake.requester, self.user2)
         self.assertEqual(handshake.status, 'pending')
         self.assertEqual(handshake.provisioned_hours, Decimal('2.00'))
+
+    def test_approve_refetches_locked_handshake_state(self):
+        """A stale pending instance must not approve after another request cancels it."""
+        handshake = Handshake.objects.create(
+            service=self.service_offer,
+            requester=self.user2,
+            provisioned_hours=Decimal('1.00'),
+            status='pending',
+            provider_initiated=True,
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=1),
+        )
+        stale_pending = Handshake.objects.get(pk=handshake.pk)
+        Handshake.objects.filter(pk=handshake.pk).update(status='cancelled')
+
+        with self.assertRaises(HandshakeServiceError) as context:
+            HandshakeService.approve(stale_pending, self.user2)
+
+        self.assertIn('not pending', str(context.exception))
+        handshake.refresh_from_db()
+        self.assertEqual(handshake.status, 'cancelled')
+        self.assertFalse(TransactionHistory.objects.filter(handshake=handshake).exists())
     
     def test_express_interest_success_need(self):
         """Test successful express_interest for Need service."""
@@ -284,7 +331,7 @@ class HandshakeServiceTestCase(TestCase):
     
     def test_payer_determination_offer(self):
         """Test payer determination for Offer service - requester pays."""
-        self.user2.timebank_balance = Decimal('1.00')
+        self.user2.timebank_balance = Decimal('-9.00')
         self.user2.save()
         self.user1.timebank_balance = Decimal('10.00')
         self.user1.save()
@@ -295,16 +342,15 @@ class HandshakeServiceTestCase(TestCase):
         self.assertIn('Insufficient TimeBank balance', error)
     
     def test_payer_determination_need(self):
-        """Test payer determination for Need service - service owner pays."""
-        self.user1.timebank_balance = Decimal('1.00')
+        """Test Need interest checks the service owner's reserved balance."""
+        self.user1.timebank_balance = Decimal('-9.00')
         self.user1.save()
         self.user2.timebank_balance = Decimal('10.00')
         self.user2.save()
         
         is_valid, error = HandshakeService.can_express_interest(self.service_need, self.user2)
-        self.assertFalse(is_valid)
-        self.assertIn('User One', error)
-        self.assertIn('Insufficient TimeBank balance', error)
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
     
     def test_lock_ordering_prevents_deadlock(self):
         """Test that locks are acquired in consistent order to prevent deadlocks."""

@@ -24,6 +24,7 @@ class ErrorCodes:
     INVALID_INPUT = 'INVALID_INPUT'
     RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED'
     SERVER_ERROR = 'SERVER_ERROR'
+    EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED'
 
 
 class AuditLogImmutabilityError(Exception):

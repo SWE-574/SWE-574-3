@@ -1,5 +1,22 @@
 import apiClient from './api'
-import type { User, UserSummary, BadgeProgress, AchievementProgressItem, ProfileReviewsResponse } from '@/types'
+import type { User, UserSummary, BadgeProgress, AchievementProgressItem, ProfileReviewsResponse, PaginatedResponse } from '@/types'
+
+export type MyReportStatus = 'pending' | 'resolved' | 'dismissed'
+export type MyReportTargetKind = 'forum_post' | 'forum_topic' | 'service' | 'user' | 'other'
+
+export interface MyReport {
+  id: string
+  type: string
+  type_display: string
+  status: MyReportStatus
+  status_display: string
+  description: string
+  target_kind: MyReportTargetKind
+  target_id: string | null
+  target_summary: string | null
+  created_at: string
+  resolved_at: string | null
+}
 
 export interface UserHistoryItem {
   service_id: string
@@ -121,6 +138,12 @@ export const userAPI = {
   getMe: async (signal?: AbortSignal): Promise<User> => {
     const res = await apiClient.get<User>('/users/me/', { signal })
     return res.data
+  },
+
+  getMyReports: async (signal?: AbortSignal): Promise<MyReport[]> => {
+    const res = await apiClient.get<PaginatedResponse<MyReport> | MyReport[]>('/users/me/reports/', { signal })
+    if (Array.isArray(res.data)) return res.data
+    return res.data.results
   },
 
   /**

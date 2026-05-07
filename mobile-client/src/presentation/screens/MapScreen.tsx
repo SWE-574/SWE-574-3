@@ -373,7 +373,7 @@ const TYPE_COLOR: Record<string, string> = {
 
 const TYPE_LABEL: Record<string, string> = {
   Offer: "Offer",
-  Need: "Want",
+  Need: "Need",
   Event: "Event",
 };
 

@@ -72,6 +72,14 @@ class User(AbstractUser):
         blank=True,
         help_text='Array of portfolio image URLs/paths (max 5)'
     )
+    # Notification preferences (#370). Empty / None means all categories ON.
+    # Keys are NOTIFICATION_CATEGORY_* values; the master "push" key controls
+    # the entire push channel without losing per-category state.
+    notification_preferences = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Per-category notification opt-outs; {"push": false} disables all push notifications.',
+    )
     show_history = models.BooleanField(
         default=True,
         help_text='Whether to show transaction history publicly'
@@ -103,6 +111,12 @@ class User(AbstractUser):
         help_text='Whether the user has completed the onboarding flow'
     )
 
+    # Featured badges: up to 2 badge IDs the user has earned that they want to highlight
+    featured_badges = models.JSONField(
+        default=list,
+        blank=True,
+    )
+
     objects = CustomUserManager()
 
     USERNAME_FIELD = 'email'
@@ -110,6 +124,26 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+    def clean(self):
+        super().clean()
+        ids = self.featured_badges
+        if not isinstance(ids, list):
+            raise ValidationError({'featured_badges': ['Must be a list.']})
+        if len(ids) > 2:
+            raise ValidationError({'featured_badges': ['At most 2 featured badges are allowed.']})
+        for entry in ids:
+            if not isinstance(entry, str):
+                raise ValidationError({'featured_badges': ['All entries must be strings.']})
+        if len(ids) != len(set(ids)):
+            raise ValidationError({'featured_badges': ['Duplicate badge IDs are not allowed.']})
+        if ids:
+            # UserBadge is defined later in this module; access via apps to avoid forward-ref issues
+            from django.apps import apps
+            UserBadgeModel = apps.get_model('api', 'UserBadge')
+            earned_count = UserBadgeModel.objects.filter(user=self, badge_id__in=ids).count()
+            if earned_count != len(ids):
+                raise ValidationError({'featured_badges': ['One or more badge IDs have not been earned by this user.']})
 
     def save(self, *args, **kwargs):
         if self.timebank_balance is None:
@@ -262,8 +296,21 @@ class Service(models.Model):
     event_completed_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Timestamp when organizer marked an event as completed')
     tags = models.ManyToManyField(Tag, blank=True)
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
+    score_updated_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    is_stale_recurring = models.BooleanField(default=False, db_index=True)
+    last_growth_check_at = models.DateTimeField(null=True, blank=True)
     is_visible = models.BooleanField(default=True, help_text='Admin can hide inappropriate services')
     is_pinned = models.BooleanField(default=False, help_text='Admin can pin events to the top of the feed')
+    reserved_timebank_hours = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text='Hours reserved up front for active Need services before completion or cancellation.',
+    )
+    requires_qr_checkin = models.BooleanField(
+        default=False,
+        help_text='Require QR code scan or attendance code for attendance verification (Events only)',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -279,6 +326,33 @@ class Service(models.Model):
         from django.utils import timezone
         from datetime import timedelta
         return timezone.now() >= self.scheduled_time - timedelta(hours=24)
+
+    @property
+    def edit_lock_reason(self) -> str | None:
+        """Human-readable reason the service is currently edit-locked, or None.
+
+        Canonical rule (#267, FR-11f / FR-11n):
+          - Terminal status (Completed / Cancelled): locked, no further edits.
+          - Event within 24h of scheduled_time and beyond: locked.
+          - Anything else: not locked.
+
+        Frontend should consume `edit_locked` / `edit_lock_reason` from the
+        service payload directly; do NOT reimplement the date math client-side.
+        """
+        if self.status in ('Completed', 'Cancelled'):
+            return f"Service is {self.status.lower()} — no further edits allowed."
+        if self.type == 'Event' and self.scheduled_time:
+            from django.utils import timezone
+            now = timezone.now()
+            if now >= self.scheduled_time:
+                return 'Event has started — edits are locked.'
+            if self.is_in_lockdown_window:
+                return 'Event is within the 24-hour lockdown window — edits are locked.'
+        return None
+
+    @property
+    def edit_locked(self) -> bool:
+        return self.edit_lock_reason is not None
 
     def save(self, *args, **kwargs):
         """
@@ -385,6 +459,40 @@ class Service(models.Model):
                 name='service_max_participants_positive',
             ),
         ]
+
+class EventQRToken(models.Model):
+    """Short-lived, event-scoped QR token for attendance verification."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.OneToOneField(
+        Service,
+        on_delete=models.CASCADE,
+        related_name='qr_token',
+        limit_choices_to={'type': 'Event'},
+    )
+    token = models.CharField(max_length=64, unique=True, db_index=True,
+                             help_text='Full token encoded in QR code')
+    attendance_code = models.CharField(max_length=6, unique=True, db_index=True,
+                                       help_text='Short 6-char code for manual entry on web')
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_by = models.ManyToManyField(
+        'Handshake',
+        blank=True,
+        related_name='qr_token_uses',
+        help_text='Handshakes that have checked in with this token',
+    )
+
+    class Meta:
+        verbose_name = 'Event QR Token'
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return timezone.now() >= self.expires_at
+
+    def __str__(self):
+        return f'QRToken for {self.service_id} (code={self.attendance_code})'
+
 
 class Handshake(models.Model):  # noqa: E302
     STATUS_CHOICES = (
@@ -496,6 +604,10 @@ class Notification(models.Model):
         ('positive_rep', 'Positive Reputation'),
         ('admin_warning', 'Admin Warning'),
         ('dispute_resolved', 'Dispute Resolved'),
+        ('new_report', 'New Report'),
+        ('report_received', 'Report Received'),
+        ('report_resolved', 'Report Resolved'),
+        ('report_dismissed', 'Report Dismissed'),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -506,6 +618,7 @@ class Notification(models.Model):
     is_read = models.BooleanField(default=False)
     related_handshake = models.ForeignKey(Handshake, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     related_service = models.ForeignKey(Service, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    related_report = models.ForeignKey('Report', on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -513,6 +626,7 @@ class Notification(models.Model):
             models.Index(fields=['user', 'is_read', 'created_at']),
             models.Index(fields=['related_handshake']),
             models.Index(fields=['related_service']),
+            models.Index(fields=['related_report']),
         ]
         ordering = ['-created_at']
 
@@ -571,6 +685,7 @@ class TransactionHistory(models.Model):
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
     amount = models.DecimalField(max_digits=10, decimal_places=2, help_text='Positive for credits, negative for debits')
     balance_after = models.DecimalField(max_digits=10, decimal_places=2, help_text='User balance after this transaction')
+    service = models.ForeignKey(Service, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
     handshake = models.ForeignKey(Handshake, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
     description = models.TextField(help_text='Human-readable description of the transaction')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -581,6 +696,7 @@ class TransactionHistory(models.Model):
             models.Index(fields=['transaction_type', 'created_at']),
             models.Index(fields=['user', 'transaction_type', 'created_at']),
             models.Index(fields=['handshake']),
+            models.Index(fields=['service']),
         ]
         ordering = ['-created_at']
 
@@ -1186,3 +1302,147 @@ class ServiceMedia(models.Model):
             models.Index(fields=['service', 'display_order']),
             models.Index(fields=['service', 'media_type']),
         ]
+
+
+class ScoreAuditLog(models.Model):
+    """
+    Append-only audit trail of every hot-score recalculation. Closes NFR-17c (#308).
+    Retention managed by the update_hot_scores command (30-day window).
+    """
+    SERVICE = 'service'
+    EVENT = 'event'
+    KIND_CHOICES = [(SERVICE, 'service'), (EVENT, 'event')]
+
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='score_audit_logs'
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    positive_rep_count = models.IntegerField(default=0)
+    negative_rep_count = models.IntegerField(default=0)
+    comment_count = models.IntegerField(default=0)
+    hours_exchanged = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    quality = models.FloatField(default=0.0)
+    activity = models.FloatField(default=0.0)
+    capacity_multiplier = models.FloatField(default=1.0)
+    capacity_boost_applied = models.BooleanField(default=False)
+    newcomer_boost = models.FloatField(default=1.0)
+    newcomer_boost_applied = models.BooleanField(default=False)
+    final_score = models.FloatField(default=0.0)
+    formula_version = models.CharField(max_length=20)
+    formula_kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=SERVICE)
+
+    class Meta:
+        indexes = [models.Index(fields=['service', '-recorded_at'])]
+        ordering = ['-recorded_at']
+
+    def __str__(self):
+        return f'Audit({self.service_id}, {self.recorded_at}, {self.final_score:.4f})'
+
+
+class HandshakeCooccurrence(models.Model):
+    """Anonymized item-item cooccurrence matrix for the For You ranking signal.
+
+    A pair of services lands in this table when at least
+    settings.RANKING_COOCCUR_MIN_USERS distinct users have completed handshakes
+    on both. No user ids are stored; the table is k-anonymous by construction.
+    Rebuilt nightly by the build_handshake_cooccurrence management command.
+    """
+    service_a = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='cooccurrence_a',
+    )
+    service_b = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='cooccurrence_b',
+    )
+    count = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['service_a', 'service_b'], name='cooccur_pair_unique',
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(service_a=models.F('service_b')),
+                name='cooccur_pair_distinct',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['service_a', '-count']),
+            models.Index(fields=['service_b', '-count']),
+        ]
+
+    def __str__(self):
+        return f'Cooccur({self.service_a_id}, {self.service_b_id}, {self.count})'
+
+
+class ForYouEvent(models.Model):
+    """Append only log of For You feed engagement events.
+
+    impression: a service was returned in a For You response to viewer.
+    click: viewer opened the service detail page from a For You card
+           (?from=for_you).
+    handshake: viewer created a handshake on a service that was last clicked
+               from For You within the attribution window (default 1h).
+    Rolled up nightly into ForYouDailyMetric for the admin metrics endpoint.
+    """
+    IMPRESSION = 'impression'
+    CLICK = 'click'
+    HANDSHAKE = 'handshake'
+    KIND_CHOICES = [
+        (IMPRESSION, 'impression'),
+        (CLICK, 'click'),
+        (HANDSHAKE, 'handshake'),
+    ]
+
+    SOURCE_FOR_YOU = 'for_you'
+    SOURCE_HOT = 'hot'
+    SOURCE_CHOICES = [
+        (SOURCE_FOR_YOU, 'for_you'),
+        (SOURCE_HOT, 'hot'),
+    ]
+
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='for_you_events',
+    )
+    viewer = models.ForeignKey(
+        'User', on_delete=models.CASCADE, related_name='for_you_events',
+    )
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    source = models.CharField(
+        max_length=20, choices=SOURCE_CHOICES, default=SOURCE_FOR_YOU,
+    )
+    occurred_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['viewer', '-occurred_at']),
+            models.Index(fields=['service', '-occurred_at']),
+            models.Index(fields=['kind', '-occurred_at']),
+        ]
+        ordering = ['-occurred_at']
+
+
+class ForYouDailyMetric(models.Model):
+    """Daily aggregates from ForYouEvent. Cheap to read for the admin endpoint.
+
+    Roll up via the roll_up_for_you_metrics management command.
+    """
+    date = models.DateField(db_index=True)
+    kind = models.CharField(
+        max_length=20, choices=ForYouEvent.KIND_CHOICES,
+    )
+    source = models.CharField(
+        max_length=20, choices=ForYouEvent.SOURCE_CHOICES,
+        default=ForYouEvent.SOURCE_FOR_YOU,
+    )
+    count = models.PositiveIntegerField(default=0)
+    unique_viewers = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['date', 'kind', 'source'],
+                name='for_you_daily_metric_unique',
+            ),
+        ]
+        ordering = ['-date']

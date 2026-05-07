@@ -62,6 +62,7 @@ from .serializers import (
     DevicePushTokenSerializer,
     ReputationRepSerializer,
     ReportSerializer,
+    MyReportSerializer,
     TransactionHistorySerializer,
     ChatRoomSerializer,
     PublicChatMessageSerializer,
@@ -78,8 +79,10 @@ from .serializers import (
 )
 from .achievement_utils import get_achievement_progress
 from .utils import (
-    can_user_post_offer, provision_timebank, complete_timebank_transfer,
+    can_user_post_offer, complete_timebank_transfer,
     cancel_timebank_transfer, create_notification, get_verified_reviews_role_filter,
+    notify_reporter_of_receipt, notify_reporter_of_state_change,
+    reserve_timebank_for_need_service, release_timebank_for_need_service,
 )
 from .services import (
     HandshakeService, HandshakeServiceError,
@@ -90,17 +93,18 @@ from .services import (
 from .ranking_debug import build_service_debug_payload
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
-from .search_filters import SearchEngine
+from .search_filters import InvalidSearchParam, SearchEngine
 from .performance import track_performance
 from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
 from django.db.models.functions import Coalesce
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
-    get_cached_user_profile, cache_user_profile, invalidate_user_profile,
+    invalidate_user_profile,
     get_cached_service_list, cache_service_list, invalidate_service_lists,
     get_cached_conversations, cache_conversations, invalidate_conversations,
     get_cached_transactions, cache_transactions, invalidate_transactions,
-    invalidate_user_services, CACHE_TTL_SHORT
+    invalidate_user_services, invalidate_user_calendar, CACHE_TTL_SHORT,
+    register_calendar_cache_key,
 )
 
 from django.contrib.auth import authenticate
@@ -126,6 +130,35 @@ def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
     """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS."""
     response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=True))
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
+
+
+def _indefinite_article(noun: str) -> str:
+    """Return 'a' or 'an' for the given noun (used in user-facing error copy)."""
+    if not noun:
+        return 'a'
+    return 'an' if noun[0].lower() in 'aeiou' else 'a'
+
+
+def _require_verified_email(request, action_clause: str = 'to continue'):
+    """Return a 403 error response when the user's email is not verified.
+
+    Returns ``None`` when the user is verified, so callers can early-return:
+
+        err = _require_verified_email(request, 'before requesting this service')
+        if err:
+            return err
+
+    The error response carries ``code=EMAIL_NOT_VERIFIED`` so the frontend
+    can route the user to the resend / verification flow consistently.
+    """
+    if getattr(request.user, 'is_verified', False):
+        return None
+    return create_error_response(
+        f'Please verify your email address {action_clause}. '
+        'Check your inbox for the verification link, or request a new one.',
+        code=ErrorCodes.EMAIL_NOT_VERIFIED,
+        status_code=status.HTTP_403_FORBIDDEN,
+    )
 
 
 # Roles that may access admin / moderation endpoints.
@@ -373,6 +406,15 @@ class RegistrationThrottle(AnonRateThrottle):
     rate = '20/hour'
 
 
+class LoginThrottle(AnonRateThrottle):
+    """Per-IP throttle for /api/auth/login/ — sits in front of the per-account
+    lockout in CustomTokenObtainPairView so a single attacker cannot fan out
+    across many usernames from one IP.
+    """
+    scope = 'login'
+    rate = '30/hour'
+
+
 def _validate_event_feedback_window(service: Service) -> tuple[bool, str | None]:
     """Validate fixed feedback window after event completion."""
     if service.type != 'Event':
@@ -538,8 +580,11 @@ class CustomTokenRefreshView(TokenRefreshView):
 class CustomTokenObtainPairView(TokenObtainPairView):
     MAX_FAILED_ATTEMPTS = 5
     LOCKOUT_DURATION_MINUTES = 30
-    
+    throttle_classes = [LoginThrottle]
+
     def post(self, request, *args, **kwargs):
+        from django.contrib.auth.signals import user_logged_in, user_login_failed
+
         email = request.data.get('email')
         
         # Check for account lockout before attempting authentication
@@ -592,13 +637,19 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 except User.DoesNotExist:
                     pass  # Don't reveal if user exists
             
+            user_login_failed.send(
+                sender=self.__class__,
+                credentials={'email': email},
+                request=request,
+            )
             return Response(
                 {'detail': 'No active account found with the given credentials'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
-        
+
         user = serializer.user
-        
+        user_logged_in.send(sender=self.__class__, request=request, user=user)
+
         # Reset failed login attempts on successful login
         if user.failed_login_attempts > 0 or user.locked_until:
             user.failed_login_attempts = 0
@@ -1147,27 +1198,15 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         user_id = self.kwargs.get('id')
         if user_id:
             return self.get_queryset().get(id=user_id)
-        
-        cached_user = get_cached_user_profile(str(self.request.user.id))
-        if cached_user:
-            user = User.objects.get(id=self.request.user.id)
-            user._cached_data = cached_user
-            return user
-            
+
         return self.get_queryset().get(id=self.request.user.id)
     
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         
-        if hasattr(instance, '_cached_data'):
-            return Response(instance._cached_data)
-            
         response_data = serializer.data
         response_data['event_comments_history'] = _build_event_comments_history(instance, request)
-        
-        if not kwargs.get('id'):
-            cache_user_profile(str(request.user.id), response_data)
         
         return Response(response_data)
     
@@ -1192,6 +1231,258 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             from .serializers import PublicUserProfileSerializer
             return PublicUserProfileSerializer
         return UserProfileSerializer
+
+
+class MyReportsView(generics.ListAPIView):
+    """
+    Reports filed by the current user.
+
+    **GET /api/users/me/reports/** — paginated list of the requester's reports
+    with status (`pending`, `resolved`, `dismissed`). Used by the "Your reports"
+    surface so users can see whether their reports were acted on.
+
+    Moderator identity is intentionally omitted from the payload.
+    """
+    serializer_class = MyReportSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            Report.objects
+            .filter(reporter=self.request.user)
+            .select_related(
+                'reported_service', 'reported_user',
+                'reported_forum_topic', 'reported_forum_post',
+            )
+            .order_by('-created_at')
+        )
+
+
+class MeCalendarView(APIView):
+    """
+    GET /api/users/me/calendar/?from=YYYY-MM-DD&to=YYYY-MM-DD
+
+    Returns the authenticated user's scheduled items within the given date window.
+    Defaults to today → today+365d. Window is capped at 3650 days.
+
+    Response shape (contract for Teams B, C, D):
+    {
+        "items": [
+            {
+                "id": "uuid",
+                "kind": "service_session" | "event_organized" | "event_joined" | "scheduled_commitment",
+                "title": "...",
+                "start": "ISO8601",
+                "end": "ISO8601",
+                "duration_hours": 2.0,
+                "location_type": "In-Person" | "Online" | null,
+                "location_label": "..." | null,
+                "service_type": "Offer" | "Need" | "Event" | null,
+                "service_id": "uuid" | null,
+                "handshake_id": "uuid" | null,
+                "chat_id": "uuid" | null,
+                "counterpart": {"id": "uuid", "name": "...", "avatar_url": "..."} | null,
+                "is_owner": true,
+                "status": "...",
+                "accent_token": "GREEN" | "BLUE" | "TEAL",
+                "link": {"type": "service" | "event" | "chat", "id": "uuid"}
+            }
+        ],
+        "conflicts": [{"item_id": "uuid", "overlaps_with": ["uuid", ...]}],
+        "range": {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}
+    }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    _CALENDAR_CACHE_TTL = 60  # 60 seconds — short TTL, supplemented by explicit invalidation
+
+    def get(self, request, *args, **kwargs):
+        from datetime import date
+        from django.core.cache import cache
+        from .schedule_utils import _user_scheduled_intervals, find_overlapping_pairs
+
+        today = timezone.now().date()
+
+        from_str = request.query_params.get('from')
+        to_str = request.query_params.get('to')
+
+        try:
+            from_date = date.fromisoformat(from_str) if from_str else today
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid "from" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            to_date = date.fromisoformat(to_str) if to_str else today + timedelta(days=365)
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid "to" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if to_date < from_date:
+            return Response({'detail': '"to" must not be before "from".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        max_days = 3650
+        if (to_date - from_date).days > max_days:
+            return Response(
+                {'detail': f'Date window exceeds maximum of {max_days} days.', 'max_days': max_days},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cache_key = f"user_calendar:{request.user.id}:{from_date.isoformat()}:{to_date.isoformat()}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        window_start = timezone.make_aware(
+            timezone.datetime.combine(from_date, timezone.datetime.min.time())
+        )
+        window_end = timezone.make_aware(
+            timezone.datetime.combine(to_date, timezone.datetime.max.time())
+        )
+
+        user = request.user
+        intervals = self._dedupe_calendar_intervals(
+            list(_user_scheduled_intervals(user, window_start, window_end))
+        )
+        items = [self._serialize_interval(iv, user) for iv in intervals]
+        conflicts = find_overlapping_pairs(intervals)
+
+        response_data = {
+            'items': items,
+            'conflicts': conflicts,
+            'range': {
+                'from': from_date.isoformat(),
+                'to': to_date.isoformat(),
+            },
+        }
+        cache.set(cache_key, response_data, self._CALENDAR_CACHE_TTL)
+        # Register this key in the per-user tracking set so invalidate_user_calendar
+        # can find and delete it without pattern-delete support (spec §6.1).
+        # register_calendar_cache_key uses a bounded retry loop to reduce the
+        # read-modify-write race on concurrent requests (H2 fix).
+        register_calendar_cache_key(str(user.id), cache_key)
+        return Response(response_data)
+
+    def _dedupe_calendar_intervals(self, intervals):
+        """
+        Collapse group/event participant rows into one visible calendar item.
+
+        Service owners can have one Service interval plus one accepted Handshake
+        interval per participant for the same fixed group offer or event. The
+        calendar should show the session once, not once per participant.
+        """
+        deduped = {}
+        passthrough = []
+
+        def service_for(iv):
+            source = iv.source_obj
+            return source.service if iv.source_kind == 'handshake' else source
+
+        def dedupe_key(iv):
+            svc = service_for(iv)
+            if svc.type != 'Event' and int(getattr(svc, 'max_participants', 1) or 1) <= 1:
+                return None
+            source_status = getattr(iv.source_obj, 'status', None)
+            if source_status in ('Completed', 'completed'):
+                return (str(svc.id), 'completed', iv.end.date())
+            return (str(svc.id), iv.start, iv.end)
+
+        def priority(iv):
+            return 0 if iv.source_kind == 'service' else 1
+
+        for iv in intervals:
+            key = dedupe_key(iv)
+            if key is None:
+                passthrough.append(iv)
+                continue
+            current = deduped.get(key)
+            if current is None or priority(iv) < priority(current):
+                deduped[key] = iv
+
+        return sorted(
+            [*passthrough, *deduped.values()],
+            key=lambda iv: (iv.start, iv.end, str(iv.source_obj.id)),
+        )
+
+    def _serialize_interval(self, iv, user) -> dict:
+        from .schedule_utils import ScheduledInterval
+
+        source = iv.source_obj
+        is_handshake = iv.source_kind == 'handshake'
+
+        if is_handshake:
+            h = source
+            svc = h.service
+            service_id = str(svc.id)
+            handshake_id = str(h.id)
+            title = svc.title
+            location_type = svc.location_type
+            location_label = svc.location_area or None
+            service_type = svc.type
+            item_status = h.status
+
+            is_owner = (svc.user_id == user.id)
+            # counterpart is the other party
+            if is_owner:
+                cp = h.requester
+            else:
+                cp = svc.user
+            counterpart = {
+                'id': str(cp.id),
+                'name': f"{cp.first_name} {cp.last_name}".strip(),
+                'avatar_url': cp.avatar_url,
+            }
+
+            # Accent token
+            if svc.type == 'Event':
+                accent_token = 'BLUE'
+            else:
+                accent_token = 'GREEN'
+
+            # Calendar cards should open the service/event detail page; chat stays
+            # available from detail/messages surfaces, not from the calendar.
+            chat_id = handshake_id  # The chat channel is keyed by handshake id
+            link = {'type': 'service', 'id': service_id}
+
+        else:
+            svc = source
+            service_id = str(svc.id)
+            handshake_id = None
+            chat_id = None
+            title = svc.title
+            location_type = svc.location_type
+            location_label = svc.location_area or None
+            service_type = svc.type
+            item_status = svc.status
+            is_owner = True
+            counterpart = None
+
+            if svc.type == 'Event':
+                accent_token = 'BLUE'
+                link = {'type': 'service', 'id': service_id}
+            else:
+                accent_token = 'TEAL'
+                link = {'type': 'service', 'id': service_id}
+
+        duration_hours = (iv.end - iv.start).total_seconds() / 3600.0
+
+        return {
+            'id': str(source.id),
+            'kind': iv.kind,
+            'title': title,
+            'start': iv.start.isoformat(),
+            'end': iv.end.isoformat(),
+            'duration_hours': round(duration_hours, 2),
+            'location_type': location_type,
+            'location_label': location_label,
+            'service_type': service_type,
+            'service_id': service_id,
+            'handshake_id': handshake_id,
+            'chat_id': chat_id,
+            'counterpart': counterpart,
+            'is_owner': is_owner,
+            'status': item_status,
+            'accent_token': accent_token,
+            'link': link,
+        }
 
 
 class UserHistoryView(APIView):
@@ -1780,34 +2071,185 @@ class ServiceViewSet(viewsets.ModelViewSet):
         
         sort_param = request.query_params.get('sort', 'latest')
         # Don't cache location-based queries (results vary by user location).
-        # Also skip cache for hot-sort by authenticated users — social boost is per-user.
+        # Also skip cache for hot-sort by authenticated users -- social boost is per-user.
+        # And skip cache when sort=hot AND exploration is enabled, since Phase 3
+        # mixing is per-request randomised (#316) and caching would defeat it.
+        from .ranking import should_explore, select_exploration_candidate, inject_exploration_slot
+        from django.conf import settings as _ranking_settings
+        explore_enabled = (
+            sort_param == 'hot'
+            and getattr(_ranking_settings, 'RANKING_EXPLORATION_RATE', 0.0) > 0
+        )
+        explore_only_param = request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes')
         use_cache = not (
             (request.query_params.get('lat') and request.query_params.get('lng'))
             or (sort_param == 'hot' and request.user.is_authenticated)
+            or sort_param == 'for_you'
+            or explore_enabled
+            or explore_only_param
         )
-        
+
         if use_cache:
             cached_result = get_cached_service_list(cache_key_params)
             if cached_result is not None:
                 return Response(cached_result)
-        
+
+        # For You feed (#481): viewer-specific re-ranking of the top hot
+        # candidates by tag overlap, follow affinity, handshake cooccurrence,
+        # and recency-of-viewing. Only authenticated, onboarded users with
+        # declared skills get a populated response; everyone else gets [].
+        if sort_param == 'for_you':
+            return self._list_for_you(request)
+
+        # Explore-only feed: surfaces Phase 3 candidates (cold-start,
+        # under-shown quality, stale recurring) as a standalone list rather
+        # than mixed into hot at slot 5. Powers the web "Try something new"
+        # carousel and any client that wants the rotation pool directly.
+        if request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes'):
+            return self._list_explore_only(request)
+
         queryset = self.filter_queryset(self.get_queryset())
         paginator = self.pagination_class()
-        
+
         page = paginator.paginate_queryset(queryset, request)
-        
+
+        # Phase 3 (FR-17i / #316): mix in an exploration candidate at the
+        # configured slot for hot-sorted requests. The candidate is drawn from
+        # cold-start, under-shown-quality, and stale-recurring sub-buckets.
+        if page is not None and explore_enabled and should_explore(request):
+            explore_pool = list(queryset[:200])  # cap pool size for the eligibility query
+            explore = select_exploration_candidate(explore_pool, request.user if request.user.is_authenticated else None)
+            if explore is not None and explore not in page:
+                slot = getattr(_ranking_settings, 'RANKING_EXPLORATION_SLOT_INDEX', 5)
+                page = inject_exploration_slot(page, explore, slot_index=slot)
+
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = paginator.get_paginated_response(serializer.data)
             if use_cache:
                 cache_service_list(cache_key_params, response.data, ttl=CACHE_TTL_SHORT)
             return response
-        
+
         serializer = self.get_serializer(queryset[:100], many=True)
         response_data = serializer.data
         if use_cache:
             cache_service_list(cache_key_params, response_data, ttl=CACHE_TTL_SHORT)
         return Response(response_data)
+
+    def _list_explore_only(self, request):
+        """Return Phase 3 explore candidates flat, tagged with their pool.
+
+        Mixes the three sub-buckets (cold-start, under-shown quality, stale
+        recurring) round-robin so the carousel surfaces all three pools when
+        each is non-empty. Caps at RANKING_EXPLORE_LIMIT (default 10).
+        """
+        from .ranking import _eligible_exploration
+
+        # Build the candidate pool from the same hot-sorted queryset the
+        # explore slot picks from at request time, capped to keep the
+        # eligibility scan bounded.
+        request.query_params._mutable = True if hasattr(request.query_params, '_mutable') else None
+        try:
+            request.query_params['sort'] = 'hot'
+        except Exception:
+            pass
+
+        queryset = self.filter_queryset(self.get_queryset())
+        candidates = list(queryset[:200])
+        cold, undershown, stale = _eligible_exploration(candidates)
+
+        for s in cold:
+            s.explore_pool = 'cold_start'
+            s.source = 'explore'
+        for s in undershown:
+            s.explore_pool = 'undershown_quality'
+            s.source = 'explore'
+        for s in stale:
+            s.explore_pool = 'stale_recurring'
+            s.source = 'explore'
+
+        # Round-robin across the three pools so the response surfaces each
+        # vocabulary when available, rather than draining cold first.
+        limit = int(getattr(settings, 'RANKING_EXPLORE_LIMIT', 10))
+        pools = [list(cold), list(undershown), list(stale)]
+        mixed = []
+        seen = set()
+        while len(mixed) < limit and any(pools):
+            for pool in pools:
+                if not pool:
+                    continue
+                item = pool.pop(0)
+                if item.id in seen:
+                    continue
+                mixed.append(item)
+                seen.add(item.id)
+                if len(mixed) >= limit:
+                    break
+
+        serializer = self.get_serializer(mixed, many=True)
+        return Response({
+            'count': len(mixed),
+            'next': None,
+            'previous': None,
+            'results': serializer.data,
+        })
+
+    def _list_for_you(self, request):
+        """For You feed (#481). Re-rank top hot candidates with viewer-specific
+        signals; cap at RANKING_FOR_YOU_LIMIT; record impressions for the
+        recency penalty and CTR proxy.
+        """
+        from .models import ForYouEvent
+        from .ranking_personalized import record_impressions, score_for_you
+
+        viewer = request.user
+        is_eligible = (
+            viewer.is_authenticated
+            and getattr(viewer, 'is_onboarded', False)
+            and viewer.skills.exists()
+        )
+        if not is_eligible:
+            return Response({'count': 0, 'next': None, 'previous': None, 'results': []})
+
+        # Force sort to hot when building the candidate pool so we re-rank a
+        # principled top slice rather than the chronological list.
+        request.query_params._mutable = True if hasattr(request.query_params, '_mutable') else None
+        try:
+            request.query_params['sort'] = 'hot'
+        except Exception:
+            pass
+
+        queryset = self.filter_queryset(self.get_queryset())
+        candidates = list(queryset[:200])
+        scored = score_for_you(candidates, viewer)
+        limit = int(getattr(settings, 'RANKING_FOR_YOU_LIMIT', 10))
+        top = scored[:limit]
+
+        # Stash signals on the model instance for the serializer to pick up.
+        services = []
+        for svc, score, signals in top:
+            svc.for_you_signals = signals
+            svc.source = 'for_you'
+            services.append(svc)
+
+        # Record impressions for recency-of-viewing decay AND for the
+        # CTR proxy (one ForYouEvent per impression, source=for_you).
+        record_impressions(viewer.id, [s.id for s in services])
+        ForYouEvent.objects.bulk_create([
+            ForYouEvent(
+                service=s, viewer=viewer,
+                kind=ForYouEvent.IMPRESSION, source=ForYouEvent.SOURCE_FOR_YOU,
+            )
+            for s in services
+        ])
+
+        serializer = self.get_serializer(services, many=True)
+        return Response({
+            'count': len(services),
+            'next': None,
+            'previous': None,
+            'results': serializer.data,
+        })
 
     @track_performance
     def get_queryset(self):
@@ -1854,19 +2296,58 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
             'distance': self.request.query_params.get('distance', 10),
+            # FR-12c — event date-range filter (only fires when type=Event).
+            'date_from': self.request.query_params.get('date_from'),
+            'date_to': self.request.query_params.get('date_to'),
         }
-        
-        queryset = search_engine.search(queryset, search_params)
+
+        try:
+            queryset = search_engine.search(queryset, search_params)
+        except InvalidSearchParam as exc:
+            # Surface the field-level error instead of swallowing it.
+            raise drf_serializers.ValidationError({exc.field: exc.message})
+
+        # Onboarding tag fallback (#478): when an onboarded viewer with
+        # declared skills hits the feed without an explicit tag filter,
+        # prefer services tagged with their skills and top up from the
+        # explore pool when too few match. Annotates `source` for the UI.
+        explicit_tag = (
+            self.request.query_params.get('tag')
+            or self.request.query_params.getlist('tags')
+        )
+        if not explicit_tag:
+            from .ranking import apply_onboarding_fallback
+            queryset, _ = apply_onboarding_fallback(
+                queryset,
+                self.request.user,
+                getattr(settings, 'RANKING_ONBOARDING_MIN_RESULTS', 10),
+            )
+
+        # explore_only=true (#480): restrict the feed to Phase 3 eligible
+        # services (cold-start, undershown quality, stale recurring) so the
+        # mobile "Try something new" carousel can fetch them in one call.
+        explore_only_raw = self.request.query_params.get('explore_only', '')
+        if str(explore_only_raw).strip().lower() in {'1', 'true', 'yes'}:
+            from .ranking import _eligible_exploration
+            sample = list(queryset[:200])
+            cold, under, stale = _eligible_exploration(sample)
+            eligible_ids = [s.id for s in (*cold, *under, *stale)]
+            queryset = queryset.filter(id__in=eligible_ids)
 
         user_param = self.request.query_params.get('user')
         # Filter by owner user (for profile pages)
         if user_param:
             queryset = queryset.filter(user_id=user_param)
-        else:
+        elif self.action == 'list':
             queryset = queryset.exclude(
                 type='Offer',
                 schedule_type='One-Time',
                 max_participants__gt=1,
+                scheduled_time__isnull=False,
+                scheduled_time__lte=timezone.now(),
+            )
+            queryset = queryset.exclude(
+                type='Event',
                 scheduled_time__isnull=False,
                 scheduled_time__lte=timezone.now(),
             )
@@ -1886,33 +2367,65 @@ class ServiceViewSet(viewsets.ModelViewSet):
         lng_param = self.request.query_params.get('lng')
         sort_param = self.request.query_params.get('sort', 'latest')
         
-        # If location-based search, distance ordering takes priority
-        if is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
-            queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
-        elif sort_param == 'hot':
+        # Hot sort wraps both viewer-aware factors (proximity + social).
+        # When the viewer has a location, hot_score is multiplied by a
+        # distance-decay factor so closer services rank higher even when
+        # base scores are equal. When the viewer has no location, the
+        # multiplier is 1.0 and ordering matches today's hot behavior.
+        if sort_param == 'hot':
+            from .ranking import apply_stochastic_social_proximity
+
+            proximity_active = (
+                is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param)
+            )
+            half_life_km = getattr(settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0)
+            if proximity_active and half_life_km > 0:
+                # PostGIS Distance annotation is in metres (srid=4326).
+                proximity_expr = ExpressionWrapper(
+                    Value(1.0, output_field=FloatField()) / (
+                        Value(1.0, output_field=FloatField())
+                        + F('distance') / Value(
+                            1000.0 * half_life_km, output_field=FloatField()
+                        )
+                    ),
+                    output_field=FloatField(),
+                )
+            else:
+                proximity_expr = Value(1.0, output_field=FloatField())
+            queryset = queryset.annotate(proximity_factor=proximity_expr)
+
+            social_addend = Value(0.0, output_field=FloatField())
             if self.request.user.is_authenticated:
-                # Apply social proximity boost (weight 0.5) for authenticated users.
-                # composite_score = hot_score + 0.5 * social_boost
-                # social_boost: 1.0 (1st-degree) or 0.5 (2nd-degree), 0 otherwise.
-                # Single SQL CTE call — no pre-evaluation of the service queryset.
                 boosts = get_social_proximity_boosts(self.request.user.id)
+                boosts = apply_stochastic_social_proximity(
+                    boosts,
+                    getattr(settings, 'RANKING_SOCIAL_PROXIMITY_PROBABILITY', 1.0),
+                )
                 if boosts:
-                    # boosts keys are UUID objects; user_id on Service is also UUID — no coercion needed.
                     whens = [
                         When(user_id=uid, then=Value(boost, output_field=FloatField()))
                         for uid, boost in boosts.items()
                     ]
                     queryset = queryset.annotate(
-                        social_boost=Case(*whens, default=Value(0.0, output_field=FloatField()), output_field=FloatField()),
-                        composite_score=ExpressionWrapper(
-                            F('hot_score') + Value(0.5, output_field=FloatField()) * F('social_boost'),
+                        social_boost=Case(
+                            *whens,
+                            default=Value(0.0, output_field=FloatField()),
                             output_field=FloatField(),
                         ),
-                    ).order_by('-is_pinned', '-composite_score', '-created_at')
-                else:
-                    queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
-            else:
-                queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
+                    )
+                    social_addend = Value(
+                        0.5, output_field=FloatField()
+                    ) * F('social_boost')
+
+            queryset = queryset.annotate(
+                composite_score=ExpressionWrapper(
+                    F('hot_score') * F('proximity_factor') + social_addend,
+                    output_field=FloatField(),
+                ),
+            ).order_by('-is_pinned', '-composite_score', '-created_at')
+        elif is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
+            # Non-hot sorts with a location: distance-only ordering, as before.
+            queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         else:
             # Default: sort by latest (created_at descending)
             queryset = queryset.order_by('-is_pinned', '-created_at')
@@ -2036,6 +2549,25 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
         )
         instance = get_object_or_404(queryset, pk=kwargs['pk'])
+
+        # For You click attribution (#481): when the detail page is reached
+        # via ?from=for_you (or ?from=hot for CTR comparison), log a
+        # ForYouEvent click row. Used by the daily metrics rollup.
+        from_param = (request.query_params.get('from') or '').lower()
+        if (
+            request.user.is_authenticated
+            and from_param in ('for_you', 'hot')
+        ):
+            from .models import ForYouEvent
+            ForYouEvent.objects.create(
+                service=instance, viewer=request.user,
+                kind=ForYouEvent.CLICK,
+                source=(
+                    ForYouEvent.SOURCE_FOR_YOU if from_param == 'for_you'
+                    else ForYouEvent.SOURCE_HOT
+                ),
+            )
+
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
@@ -2079,6 +2611,18 @@ class ServiceViewSet(viewsets.ModelViewSet):
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
+        # Email verification gate: only verified users may publish any
+        # service (Offer / Need / Event). Backend is the source of truth;
+        # the frontend has matching guards on /post-offer, /post-need and
+        # /post-event so users see a clear CTA before they fill the form.
+        if service_type in ('Offer', 'Need', 'Event'):
+            verification_error = _require_verified_email(
+                request,
+                f'before posting {_indefinite_article(service_type)} {service_type}',
+            )
+            if verification_error:
+                return verification_error
+
         if service_type == 'Offer':
             if not can_user_post_offer(request.user):
                 return create_error_response(
@@ -2087,7 +2631,18 @@ class ServiceViewSet(viewsets.ModelViewSet):
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
 
-        response = super().create(request, *args, **kwargs)
+        try:
+            with transaction.atomic():
+                response = super().create(request, *args, **kwargs)
+                if service_type == 'Need':
+                    created_service = Service.objects.get(id=response.data['id'])
+                    reserve_timebank_for_need_service(created_service)
+        except ValueError as e:
+            return create_error_response(
+                str(e),
+                code=ErrorCodes.INSUFFICIENT_BALANCE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         invalidate_service_lists()
         
         # Award karma for posting a service (+2)
@@ -2150,8 +2705,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
 
         # Soft-delete: mark as Cancelled instead of removing the row.
-        instance.status = 'Cancelled'
-        instance.save(update_fields=['status', 'updated_at'])
+        with transaction.atomic():
+            if instance.type == 'Need':
+                release_timebank_for_need_service(instance)
+            instance.status = 'Cancelled'
+            instance.save(update_fields=['status', 'updated_at'])
         invalidate_service_lists()
         invalidate_user_services(str(instance.user.id))
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -2316,8 +2874,15 @@ class ServiceViewSet(viewsets.ModelViewSet):
         POST /api/services/{id}/cancel-event/
         """
         service = self.get_object()
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return create_error_response(
+                'A cancellation reason is required.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            EventHandshakeService.cancel_event(service, request.user)
+            EventHandshakeService.cancel_event(service, request.user, reason=reason)
         except PermissionError as e:
             return create_error_response(
                 str(e), code=ErrorCodes.PERMISSION_DENIED,
@@ -2332,13 +2897,191 @@ class ServiceViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(service)
         return Response(serializer.data)
 
+    # ── QR attendance token endpoints ──────────────────────────────────
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='generate-qr-token',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def generate_qr_token(self, request, pk=None):
+        """Generate (or rotate) a QR attendance token for an event.
+
+        POST /api/services/{id}/generate-qr-token/
+
+        Returns the token, short attendance code, expiry, and a QR payload
+        string suitable for encoding into a QR image.
+        """
+        import json
+        service = self.get_object()
+        try:
+            token_obj = EventHandshakeService.generate_qr_token(
+                service, request.user,
+            )
+        except PermissionError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        except ValueError as e:
+            return create_error_response(
+                str(e), code=ErrorCodes.INVALID_STATE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        qr_payload = json.dumps({
+            'event_id': str(service.pk),
+            'token': token_obj.token,
+        })
+        return Response({
+            'id': str(token_obj.pk),
+            'token': token_obj.token,
+            'attendance_code': token_obj.attendance_code,
+            'created_at': token_obj.created_at.isoformat(),
+            'expires_at': token_obj.expires_at.isoformat(),
+            'qr_payload': qr_payload,
+        })
+
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='qr-token',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def get_qr_token(self, request, pk=None):
+        """Get the current active QR token for an event (organizer only).
+
+        GET /api/services/{id}/qr-token/
+        """
+        import json
+        service = self.get_object()
+        if service.user_id != request.user.pk:
+            return create_error_response(
+                'Only the event organizer can view the QR token.',
+                code=ErrorCodes.PERMISSION_DENIED,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+        from .models import EventQRToken
+        try:
+            token_obj = EventQRToken.objects.get(
+                service=service,
+                expires_at__gt=timezone.now(),
+            )
+        except EventQRToken.DoesNotExist:
+            return create_error_response(
+                'No active QR token found. Generate one first.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        qr_payload = json.dumps({
+            'event_id': str(service.pk),
+            'token': token_obj.token,
+        })
+        return Response({
+            'id': str(token_obj.pk),
+            'token': token_obj.token,
+            'attendance_code': token_obj.attendance_code,
+            'created_at': token_obj.created_at.isoformat(),
+            'expires_at': token_obj.expires_at.isoformat(),
+            'qr_payload': qr_payload,
+        })
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='for-you-metrics',
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def for_you_metrics(self, request):
+        """Admin-only CTR proxy for the For You feed (#481).
+
+        Returns the last N days of impressions, clicks, and handshakes
+        bucketed by source ('for_you' vs 'hot'). Aggregated nightly by
+        roll_up_for_you_metrics; today's row is computed live so the
+        admin sees fresh numbers without waiting for the cron.
+
+        Each row exposes both `count` (raw event count - one row per
+        card per viewer per page load) and `unique_viewers` (distinct
+        viewer ids). count >> unique_viewers when one viewer reloads
+        the feed; the two fields are not interchangeable.
+
+        Re-running roll_up_for_you_metrics within the same day is
+        normally safe: the (date, kind, source) UniqueConstraint plus
+        the delete-then-insert pattern in the command keeps history
+        clean. The one edge case is calling the rollup mid-day when
+        today's row is also being computed live here - the response
+        will then include both today's rolled row and the live row,
+        double-counting today. The nightly cron runs after midnight
+        so this only matters if rollup is invoked manually.
+        """
+        from datetime import timedelta
+        from django.db.models import Count
+        from .models import ForYouDailyMetric, ForYouEvent
+
+        try:
+            days = int(request.query_params.get('days', '7'))
+        except ValueError:
+            days = 7
+        days = max(1, min(days, 90))
+
+        end = timezone.now().date()
+        start = end - timedelta(days=days - 1)
+
+        # Yesterday and earlier from the rolled-up table; today computed live
+        # to avoid the visible lag between events and the nightly rollup.
+        rolled = list(
+            ForYouDailyMetric.objects
+            .filter(date__gte=start, date__lt=end)
+            .values('date', 'kind', 'source', 'count', 'unique_viewers')
+            .order_by('date')
+        )
+        today_live = list(
+            ForYouEvent.objects
+            .filter(occurred_at__date=end)
+            .values('kind', 'source')
+            .annotate(
+                count=Count('id'),
+                unique_viewers=Count('viewer_id', distinct=True),
+            )
+        )
+        for row in today_live:
+            rolled.append({
+                'date': end, 'kind': row['kind'],
+                'source': row['source'], 'count': row['count'],
+                'unique_viewers': row['unique_viewers'],
+            })
+
+        return Response({
+            'days': days,
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'note': (
+                'count is total card impressions/clicks/handshakes (one row '
+                'per card per viewer per page load). unique_viewers is the '
+                'number of distinct viewer ids contributing to that count.'
+            ),
+            'rows': [
+                {
+                    'date': row['date'].isoformat() if hasattr(row['date'], 'isoformat') else row['date'],
+                    'kind': row['kind'],
+                    'source': row['source'],
+                    'count': row['count'],
+                    'unique_viewers': row.get('unique_viewers', 0),
+                }
+                for row in rolled
+            ],
+        })
+
     @action(
         detail=False,
         methods=['get'],
         url_path='debug-ranking-availability',
-        permission_classes=[permissions.IsAuthenticated],
+        permission_classes=[permissions.IsAdminUser],
     )
     def debug_ranking_availability(self, request):
+        # Admin-only per #371. The PlatformSetting flag remains as a master
+        # on/off but is now redundant with the IsAdminUser gate; left for
+        # backwards compatibility with the existing admin UI toggle.
         platform_settings = PlatformSetting.get_solo()
         return Response({'enabled': platform_settings.ranking_debug_enabled})
 
@@ -2346,9 +3089,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['post'],
         url_path='debug-ranking',
-        permission_classes=[permissions.IsAuthenticated],
+        permission_classes=[permissions.IsAdminUser],
     )
     def debug_ranking(self, request):
+        # Admin-only per #371. Optional simulated_user_id lets an admin compute
+        # the payload from another user's perspective (read-only -- no access to
+        # the simulated user's messages, settings, or other private state).
         platform_settings = PlatformSetting.get_solo()
         if not platform_settings.ranking_debug_enabled:
             return create_error_response(
@@ -2375,10 +3121,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             except (TypeError, ValueError):
                 return None
 
+        simulated_user_id = request.data.get('simulated_user_id')
+
         payload = build_service_debug_payload(
             service_ids=service_ids,
             selected_service_id=request.data.get('selected_service_id'),
             request_user=request.user,
+            simulated_user_id=str(simulated_user_id) if simulated_user_id else None,
             search=(request.data.get('search') or '').strip(),
             tag_ids=[str(tag_id) for tag_id in (request.data.get('tags') or []) if tag_id],
             lat=_to_float(request.data.get('lat')),
@@ -2386,7 +3135,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
             distance=_to_float(request.data.get('distance')),
             active_filter=(request.data.get('active_filter') or 'all').strip() or 'all',
         )
-        return Response(payload)
+        response = Response(payload)
+        response['X-Ranking-Debug-Debounce'] = '300'
+        return response
 
     @action(
         detail=True,
@@ -2452,11 +3203,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Listing Report',
                 message=f"New {report.get_type_display()} report for service '{service.title}'",
                 service=service,
+                report=report,
             )
+        notify_reporter_of_receipt(report)
 
         return Response({'status': 'success', 'report_id': str(report.id)}, status=201)
 
@@ -2600,6 +3353,14 @@ class ExpressInterestView(APIView):
 
     @track_performance
     def post(self, request, service_id):
+        # Email verification gate: applicants must be verified to request /
+        # offer help on any service.
+        verification_error = _require_verified_email(
+            request, 'before requesting this service'
+        )
+        if verification_error:
+            return verification_error
+
         try:
             service = Service.objects.select_related('user').get(id=service_id, status='Active')
         except Service.DoesNotExist:
@@ -2776,6 +3537,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path=r'services/(?P<service_id>[^/.]+)/interest', permission_classes=[permissions.IsAuthenticated])
     @track_performance
     def express_interest(self, request, service_id=None):
+        verification_error = _require_verified_email(
+            request, 'before requesting this service'
+        )
+        if verification_error:
+            return verification_error
+
         try:
             service = Service.objects.select_related('user').get(id=service_id, status='Active')
         except Service.DoesNotExist:
@@ -3123,6 +3890,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
 
         POST /api/handshakes/services/{service_id}/join-event/
         """
+        verification_error = _require_verified_email(
+            request, 'before joining this event'
+        )
+        if verification_error:
+            return verification_error
+
         try:
             service = Service.objects.select_related('user').get(
                 id=service_id, type='Event', status='Active'
@@ -3190,10 +3963,19 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         """Participant checks in to an Event during the lockdown window.
 
         POST /api/handshakes/{id}/checkin/
+
+        If the event requires QR check-in, pass ``qr_token`` in the request
+        body (the full token from the QR code or the short attendance code).
         """
         handshake = self.get_object()
+        qr_token = request.data.get('qr_token')
         try:
-            EventHandshakeService.checkin(handshake, request.user)
+            if qr_token:
+                EventHandshakeService.checkin_with_qr(
+                    handshake, request.user, qr_token=qr_token,
+                )
+            else:
+                EventHandshakeService.checkin(handshake, request.user)
         except PermissionError as e:
             return create_error_response(
                 str(e), code=ErrorCodes.PERMISSION_DENIED,
@@ -4040,9 +4822,11 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
 
         queryset = Report.objects.all()
 
-        # For retrieve (single object by PK), skip the status filter so resolved/dismissed
-        # reports can still be fetched for the detail panel.
-        if self.action == 'retrieve':
+        # For retrieve (single object by PK) and the resolve action, skip the status
+        # filter so resolved/dismissed reports can still be fetched for the detail
+        # panel and so re-resolving a closed report hits the idempotency guard
+        # (HTTP 400) rather than a 404 from get_object().
+        if self.action in ('retrieve', 'resolve_report'):
             return queryset.order_by('-created_at')
 
         # For list, filter by status (default: pending)
@@ -4169,6 +4953,7 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                 report.resolved_at = timezone.now()
                 report.admin_notes = admin_notes or 'Reported participant removed from event by admin moderation'
                 report.save()
+                notify_reporter_of_state_change(report)
 
                 create_notification(
                     user=target_handshake.requester,
@@ -4178,16 +4963,6 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                     handshake=target_handshake,
                     service=target_handshake.service,
                 )
-
-                if report.reporter_id and report.reporter_id != target_handshake.requester_id:
-                    create_notification(
-                        user=report.reporter,
-                        notification_type='dispute_resolved',
-                        title='Report Resolved',
-                        message=f'Your report was upheld and the participant was removed from "{target_handshake.service.title}".',
-                        handshake=target_handshake,
-                        service=target_handshake.service,
-                    )
 
                 if target_handshake.service.user_id not in [target_handshake.requester_id, report.reporter_id]:
                     create_notification(
@@ -4292,21 +5067,12 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                         handshake=handshake
                     )
                 
-                # If reporter is different from both parties, also notify them
-                if report.reporter.id not in [provider.id, receiver.id]:
-                    create_notification(
-                        user=report.reporter,
-                        notification_type='dispute_resolved',
-                        title='Your Report Has Been Resolved',
-                        message=f'Your no-show report has been confirmed and the dispute has been resolved.',
-                        handshake=handshake
-                    )
-
                 report.status = 'resolved'
                 report.resolved_by = request.user
                 report.resolved_at = timezone.now()
                 report.admin_notes = admin_notes or f'No-show confirmed - hours {financial_action} after investigation'
                 report.save()
+                notify_reporter_of_state_change(report)
 
             log_admin_action(
                 request.user,
@@ -4354,20 +5120,12 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                         handshake=handshake
                     )
                 
-                # Notify the reporter
-                create_notification(
-                    user=report.reporter,
-                    notification_type='dispute_resolved',
-                    title='Report Dismissed',
-                    message=f'Your report has been reviewed and dismissed. The service has been marked as completed.',
-                    handshake=handshake
-                )
-
                 report.status = 'dismissed'
                 report.resolved_by = request.user
                 report.resolved_at = timezone.now()
                 report.admin_notes = admin_notes or 'Report dismissed after investigation'
                 report.save()
+                notify_reporter_of_state_change(report)
 
             log_admin_action(
                 request.user,
@@ -4377,9 +5135,44 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
                 admin_notes or action_type,
             )
         
+        elif action_type in {'mark_resolved', 'mark_dismissed'}:
+            # Plain "Mark as Resolved" / "Mark as Dismissed" — no TimeBank or
+            # handshake side effects. Used when an admin has reviewed a report
+            # and wants to close the case without touching the related transfer.
+            # Safe even when the linked service has reached a terminal status
+            # (Completed / Cancelled), unlike confirm_no_show / dismiss which
+            # require an active handshake.
+            if report.status != 'pending':
+                return create_error_response(
+                    f'Report is already {report.status}; cannot change status.',
+                    code=ErrorCodes.INVALID_STATE,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            new_status = 'resolved' if action_type == 'mark_resolved' else 'dismissed'
+            default_note = (
+                'Report marked as resolved by admin without TimeBank action.'
+                if new_status == 'resolved'
+                else 'Report dismissed by admin without TimeBank action.'
+            )
+            with transaction.atomic():
+                report.status = new_status
+                report.resolved_by = request.user
+                report.resolved_at = timezone.now()
+                report.admin_notes = admin_notes or default_note
+                report.save(update_fields=['status', 'resolved_by', 'resolved_at', 'admin_notes'])
+                notify_reporter_of_state_change(report)
+
+            log_admin_action(
+                request.user,
+                'resolve_report',
+                'report',
+                report,
+                admin_notes or action_type,
+            )
+
         else:
             return create_error_response(
-                'Invalid action. Use "confirm_no_show", "dismiss", or "remove_from_event".',
+                'Invalid action. Use "confirm_no_show", "dismiss", "remove_from_event", "mark_resolved", or "mark_dismissed".',
                 code=ErrorCodes.VALIDATION_ERROR,
                 status_code=status.HTTP_400_BAD_REQUEST
             )
@@ -5114,7 +5907,8 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
 
         direction = self._get_direction_filter()
         page = request.query_params.get('page', '1')
-        cached_result = get_cached_transactions(str(user.id), page=page, direction=direction)
+        page_size = request.query_params.get('page_size', str(self.pagination_class.page_size))
+        cached_result = get_cached_transactions(str(user.id), page=page, direction=direction, page_size=page_size)
         if cached_result is not None:
             return Response(cached_result)
 
@@ -5125,7 +5919,14 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
             response.data['summary'] = summary
-            cache_transactions(str(user.id), response.data, page=request.query_params.get('page', '1'), direction=direction, ttl=CACHE_TTL_SHORT)
+            cache_transactions(
+                str(user.id),
+                response.data,
+                page=request.query_params.get('page', '1'),
+                direction=direction,
+                page_size=page_size,
+                ttl=CACHE_TTL_SHORT,
+            )
             return response
 
         serializer = self.get_serializer(queryset, many=True)
@@ -5136,11 +5937,19 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             'results': serializer.data,
             'summary': summary,
         }
-        cache_transactions(str(user.id), response_data, page=request.query_params.get('page', '1'), direction=direction, ttl=CACHE_TTL_SHORT)
+        cache_transactions(
+            str(user.id),
+            response_data,
+            page=request.query_params.get('page', '1'),
+            direction=direction,
+            page_size=page_size,
+            ttl=CACHE_TTL_SHORT,
+        )
         return Response(response_data)
 
     def get_queryset(self):
         queryset = TransactionHistory.objects.filter(user=self.request.user).select_related(
+            'service__user',
             'handshake__service__user',
             'handshake__requester',
         )
@@ -5150,12 +5959,14 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(amount__gt=0)
         elif direction == 'debit':
             queryset = queryset.filter(amount__lt=0)
+        elif direction == 'reservation':
+            queryset = queryset.filter(transaction_type__in=['provision', 'refund'])
 
         return queryset.order_by('-created_at')
 
     def _get_direction_filter(self):
         direction = self.request.query_params.get('direction', 'all').strip().lower()
-        if direction not in {'all', 'credit', 'debit'}:
+        if direction not in {'all', 'credit', 'debit', 'reservation'}:
             return 'all'
         return direction
 
@@ -6330,10 +7141,12 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Forum Topic Report',
                 message=f"{request.user.first_name or request.user.email} reported topic '{topic.title}'.",
+                report=report,
             )
+        notify_reporter_of_receipt(report)
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
 
@@ -6606,10 +7419,12 @@ class ForumPostViewSet(viewsets.ViewSet):
         for admin in admins:
             create_notification(
                 user=admin,
-                notification_type='admin_warning',
+                notification_type='new_report',
                 title='New Forum Post Report',
                 message=f"{request.user.first_name or request.user.email} reported content in '{post.topic.title}'.",
+                report=report,
             )
+        notify_reporter_of_receipt(report)
 
         return Response(ReportSerializer(report).data, status=status.HTTP_201_CREATED)
 

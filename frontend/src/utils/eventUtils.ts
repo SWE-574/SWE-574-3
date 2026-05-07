@@ -1,11 +1,11 @@
 // ─── Event Utilities ──────────────────────────────────────────────────────────
 
-/** Returns true if now is within 24 hours of the event start (lockdown window) */
+/** Returns true if now is within 24 hours of the event start, or the event has already started */
 export function isWithinLockdownWindow(scheduledTime: string | null | undefined): boolean {
   if (!scheduledTime) return false
   const eventMs = new Date(scheduledTime).getTime()
   const nowMs = Date.now()
-  return nowMs >= eventMs - 24 * 60 * 60 * 1000 && nowMs < eventMs
+  return nowMs >= eventMs - 24 * 60 * 60 * 1000
 }
 
 /** Returns true if the event is in the future (not yet started) */
