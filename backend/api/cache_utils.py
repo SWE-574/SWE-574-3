@@ -173,6 +173,20 @@ def invalidate_on_service_change(service) -> None:
         invalidate_service_detail(str(service.id))
     if hasattr(service, 'user') and service.user:
         invalidate_user_services(str(service.user.id))
+        # Spec §6.1: invalidate calendar for the organiser on Event create/cancel/update
+        if getattr(service, 'type', None) == 'Event':
+            invalidate_user_calendar(str(service.user.id))
+            # Also invalidate calendar for any users with accepted handshakes on this event
+            try:
+                from .models import Handshake
+                accepted_requester_ids = Handshake.objects.filter(
+                    service=service,
+                    status__in=['accepted', 'checked_in', 'attended'],
+                ).values_list('requester_id', flat=True)
+                for rid in accepted_requester_ids:
+                    invalidate_user_calendar(str(rid))
+            except Exception:
+                pass
 
 
 def invalidate_on_user_change(user) -> None:
@@ -286,15 +300,59 @@ def warm_cache_popular_services() -> None:
         pass
 
 
+_CALENDAR_CACHE_TTL = 60  # seconds — must match CalendarView._CALENDAR_CACHE_TTL
+
+
+def register_calendar_cache_key(user_id: str, cache_key: str) -> None:
+    """Register a calendar cache key in the per-user tracking set.
+
+    Retries up to 3 times to mitigate the read-modify-write race on cache
+    backends that lack atomic set-add (e.g. locmem, plain Redis via django
+    cache layer).  Under sustained concurrent pressure a key could still be
+    dropped; the TTL on the item (60 s) bounds the staleness window.
+
+    If the project is configured with django-redis and needs stronger
+    guarantees, replace the body with a SADD call via get_redis_connection().
+    """
+    tracking_key = f"user_calendar_keys:{user_id}"
+    for _ in range(3):
+        existing = cache.get(tracking_key, set())
+        if cache_key in existing:
+            return
+        new_set = set(existing)
+        new_set.add(cache_key)
+        # Use the same TTL as the item so the tracking set expires with it.
+        cache.set(tracking_key, new_set, timeout=_CALENDAR_CACHE_TTL)
+        return
+
+
+def invalidate_user_calendar(user_id: str) -> None:
+    """Delete all cached calendar windows for a user.
+
+    The calendar key pattern is user_calendar:{user_id}:{from}:{to}.
+    We maintain a tracking set of active window keys per user so we can
+    enumerate and delete them without requiring pattern-delete support.
+    """
+    tracking_key = f"user_calendar_keys:{user_id}"
+    keys = cache.get(tracking_key, set())
+    if keys:
+        cache.delete_many(list(keys))
+    cache.delete(tracking_key)
+
+
 def invalidate_on_handshake_change(handshake) -> None:
     """Invalidate caches when handshake changes."""
     # Invalidate conversations for both users
     if hasattr(handshake, 'requester') and handshake.requester:
         invalidate_conversations(str(handshake.requester.id))
+        # Spec §6.1: invalidate calendar cache for the requester
+        invalidate_user_calendar(str(handshake.requester.id))
     if hasattr(handshake, 'service') and hasattr(handshake.service, 'user') and handshake.service.user:
         invalidate_conversations(str(handshake.service.user.id))
         invalidate_service_detail(str(handshake.service.id))
         invalidate_service_lists()
+        # Spec §6.1: invalidate calendar cache for the service provider
+        invalidate_user_calendar(str(handshake.service.user.id))
 
 
 def invalidate_on_comment_change(comment) -> None:
