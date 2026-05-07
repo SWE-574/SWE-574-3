@@ -680,31 +680,32 @@ const DashboardPage = () => {
 
               {/* Filter pills — hidden on very small screens */}
               <Flex
-                data-tour="filters"
                 gap="3px" bg={GRAY100} p="3px" borderRadius="10px"
                 display={{ base: 'none', sm: 'flex' }}
                 flexShrink={0} align="center"
               >
-                {FILTERS.map((f) => (
-                  <Box
-                    key={f.id} as="button"
-                    onClick={() => setActiveFilter(f.id)}
-                    px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
-                    fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
-                    bg={activeFilter === f.id ? WHITE : 'transparent'}
-                    color={activeFilter === f.id ? GRAY800 : GRAY500}
-                    boxShadow={activeFilter === f.id ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
-                    cursor="pointer" transition="all 0.12s"
-                    display="flex" alignItems="center" gap="4px"
-                  >
-                    <Box color={activeFilter === f.id ? GREEN : GRAY400}>{f.icon}</Box>
-                    <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
-                  </Box>
-                ))}
+                <Flex data-tour="filters" gap="3px" align="center">
+                  {FILTERS.map((f) => (
+                    <Box
+                      key={f.id} as="button"
+                      onClick={() => setActiveFilter(f.id)}
+                      px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
+                      fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
+                      bg={activeFilter === f.id ? WHITE : 'transparent'}
+                      color={activeFilter === f.id ? GRAY800 : GRAY500}
+                      boxShadow={activeFilter === f.id ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                      cursor="pointer" transition="all 0.12s"
+                      display="flex" alignItems="center" gap="4px"
+                    >
+                      <Box color={activeFilter === f.id ? GREEN : GRAY400}>{f.icon}</Box>
+                      <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
+                    </Box>
+                  ))}
+                </Flex>
                 {/* Divider */}
                 <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
                 {/* Type filter icon button + dropdown */}
-                <Box position="relative" ref={typeDropdownRef as never}>
+                <Box data-tour="type-filter" position="relative" ref={typeDropdownRef as never}>
                   <Box
                     as="button"
                     onClick={() => setTypeDropdownOpen((v) => !v)}

@@ -169,6 +169,19 @@ const ALL_STEPS: TourStep[] = [
     ),
   },
   {
+    id: 'type-filter',
+    target: '[data-tour="type-filter"]',
+    placement: 'bottom',
+    title: 'Filter by type',
+    content: (
+      <p>
+        Narrow the feed to <strong>Offers</strong>, <strong>Needs</strong>, or{' '}
+        <strong>Events</strong>. Pick more than one to combine them, or leave it
+        empty to see everything.
+      </p>
+    ),
+  },
+  {
     id: 'map-toggle',
     target: '[data-tour="map-toggle"]',
     placement: 'bottom',
