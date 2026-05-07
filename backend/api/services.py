@@ -1988,6 +1988,8 @@ class EventNoShowAppealService:
                     report=report,
                 )
 
+            notify_reporter_of_receipt(report)
+
             return report
 
     @staticmethod
