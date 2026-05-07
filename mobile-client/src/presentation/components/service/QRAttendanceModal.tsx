@@ -22,7 +22,6 @@ import QRCode from "react-native-qrcode-svg";
 import { colors } from "../../../constants/colors";
 import { generateQRToken, type QRTokenResponse } from "../../../api/services";
 
-// ─── Participant: scan QR or enter code ───────────────────────────────────
 
 type ParticipantProps = {
   visible: boolean;
@@ -155,7 +154,6 @@ export function QRScannerModal({ visible, onClose, onSubmit, loading }: Particip
   );
 }
 
-// ─── Organizer: display QR + code ─────────────────────────────────────────
 
 type OrganizerProps = {
   visible: boolean;
@@ -232,7 +230,6 @@ export function QRDisplayModal({ visible, onClose, serviceId }: OrganizerProps) 
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
   container: {

@@ -40,11 +40,9 @@ import {
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import { useAuth } from "../../context/AuthContext";
 
-// ── Types ─────────────────────────────────────────────────────────────────
 
 type CalNavigation = NativeStackNavigationProp<ProfileStackParamList>;
 
-// ── Helpers ───────────────────────────────────────────────────────────────
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -61,7 +59,6 @@ function addMonths(date: Date, n: number): Date {
   return d;
 }
 
-// ── Month grid cell ───────────────────────────────────────────────────────
 
 function GridCell({
   cell,
@@ -120,7 +117,6 @@ function GridCell({
   );
 }
 
-// ── Agenda item row ───────────────────────────────────────────────────────
 
 function AgendaItemRow({
   item,
@@ -196,7 +192,6 @@ function AgendaItemRow({
   );
 }
 
-// ── Agenda section header ─────────────────────────────────────────────────
 
 function AgendaSectionHeader({ label }: { label: string }) {
   return (
@@ -206,7 +201,6 @@ function AgendaSectionHeader({ label }: { label: string }) {
   );
 }
 
-// ── Main screen ───────────────────────────────────────────────────────────
 
 export default function CalendarScreen() {
   const navigation = useNavigation<CalNavigation>();
@@ -314,7 +308,6 @@ export default function CalendarScreen() {
     }
   };
 
-  // ── Render agenda section ──
   const renderAgendaSection = (label: string, sectionItems: CalendarItem[]) => {
     if (sectionItems.length === 0) return null;
     return (
@@ -354,7 +347,6 @@ export default function CalendarScreen() {
           />
         }
       >
-        {/* ── Month grid section ── */}
         <View style={styles.monthSection}>
           {/* Month navigation header */}
           <View style={styles.monthHeader}>
@@ -437,7 +429,6 @@ export default function CalendarScreen() {
           ) : null}
         </View>
 
-        {/* ── Agenda section ── */}
         <View style={styles.agendaSection}>
           <View style={styles.agendaHeader}>
             <Text style={styles.agendaEyebrow}>
@@ -499,7 +490,6 @@ export default function CalendarScreen() {
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────
 
 const gridStyles = StyleSheet.create({
   cell: {

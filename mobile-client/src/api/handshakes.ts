@@ -138,7 +138,6 @@ export function handshakeServiceInterest(serviceId: string, body?: object): Prom
   return apiRequest(`/handshakes/services/${serviceId}/interest/`, { method: 'POST', body: body ?? {} });
 }
 
-// ─── Event actions ────────────────────────────────────────────────────────
 
 export function joinEvent(serviceId: string): Promise<Handshake> {
   return apiRequest<Handshake>(`/handshakes/services/${serviceId}/join-event/`, { method: 'POST', body: {} });

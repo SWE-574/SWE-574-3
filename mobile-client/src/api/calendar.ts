@@ -5,7 +5,6 @@
 
 import { apiRequest } from "./client";
 
-// ── Types ──────────────────────────────────────────────────────────────────
 
 export type CalendarItemKind =
   | "service_session"
@@ -81,14 +80,12 @@ export interface BadgeDetail {
   earned_at: string;
 }
 
-// ── Params ────────────────────────────────────────────────────────────────
 
 export interface FetchCalendarParams {
   from: string;
   to: string;
 }
 
-// ── API function ──────────────────────────────────────────────────────────
 
 /**
  * Fetch the authenticated user's calendar items in the given date window.

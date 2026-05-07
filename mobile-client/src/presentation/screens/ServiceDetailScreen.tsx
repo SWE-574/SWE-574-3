@@ -1553,7 +1553,6 @@ export default function ServiceDetailScreen() {
             </View>
           ) : null}
 
-          {/* ─── Event lifecycle CTA ─── */}
           {isEvent && !isOwner && (() => {
             const status = myEventHandshake?.status;
             const banned = isEventBanned(currentUser?.is_organizer_banned_until);
@@ -1644,7 +1643,6 @@ export default function ServiceDetailScreen() {
             return null;
           })()}
 
-          {/* ─── Non-event: Express Interest ─── */}
           {!isEvent && !isOwner && (
             <>
             {showOpenChat && myHandshake ? (
