@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 import { forumAPI, type ForumReportType, type TopicSortOption } from '@/services/forumAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { ForumCategory, ForumTopic, ForumPost, User } from '@/types'
+import ReportModal, { type ReportOption } from '@/components/ReportModal'
 import {
   GREEN, GREEN_LT,
   BLUE, BLUE_LT, AMBER, AMBER_LT,
@@ -606,6 +607,14 @@ function TopicListView({
 
 // ─── Topic Detail View ────────────────────────────────────────────────────────
 
+const FORUM_REPORT_OPTIONS: ReportOption[] = [
+  { value: 'inappropriate_content', label: 'Inappropriate content',  desc: 'This post contains offensive or harmful material.' },
+  { value: 'spam',                  label: 'Spam',                   desc: 'This post is unsolicited or repetitive advertising.' },
+  { value: 'scam',                  label: 'Scam',                   desc: 'This post is fraudulent or misleading.' },
+  { value: 'harassment',            label: 'Harassment',             desc: 'This post targets or intimidates another user.' },
+  { value: 'other',                 label: 'Other',                  desc: 'Something else not listed above.' },
+]
+
 const POSTS_PAGE_SIZE = 20
 
 function TopicDetailView({
@@ -628,6 +637,8 @@ function TopicDetailView({
   const [editingPost, setEditingPost] = useState<ForumPost | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [editingTopic, setEditingTopic] = useState(false)
+  const [reportTarget, setReportTarget] = useState<{ type: 'topic' } | { type: 'post'; post: ForumPost } | null>(null)
+  const [reportLoading, setReportLoading] = useState(false)
   const totalPages = Math.max(1, Math.ceil(total / POSTS_PAGE_SIZE))
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -694,50 +705,35 @@ function TopicDetailView({
     } catch { toast.error('Failed to delete') }
   }
 
-  const reportTopic = async () => {
+  const openReportTopic = () => {
     if (!topic) return
-    if (!isAuthenticated) {
-      toast.error('Please sign in to flag content')
-      navigate('/login')
-      return
-    }
-    if (user?.id && topic.author_id === user.id) {
-      toast.error('You cannot flag your own topic')
-      return
-    }
-
-    const reportType: ForumReportType = 'inappropriate_content'
-    const description = window.prompt('Why are you flagging this topic? (optional)')
-    if (description === null) return
-
-    try {
-      await forumAPI.reportTopic(topic.id, reportType, description.trim())
-      toast.success('Topic flagged for moderator review')
-    } catch {
-      toast.error('Could not submit topic flag')
-    }
+    if (!isAuthenticated) { toast.error('Please sign in to flag content'); navigate('/login'); return }
+    if (user?.id && topic.author_id === user.id) { toast.error('You cannot flag your own topic'); return }
+    setReportTarget({ type: 'topic' })
   }
 
-  const reportReply = async (post: ForumPost) => {
-    if (!isAuthenticated) {
-      toast.error('Please sign in to flag content')
-      navigate('/login')
-      return
-    }
-    if (user?.id && post.author_id === user.id) {
-      toast.error('You cannot flag your own reply')
-      return
-    }
+  const openReportReply = (post: ForumPost) => {
+    if (!isAuthenticated) { toast.error('Please sign in to flag content'); navigate('/login'); return }
+    if (user?.id && post.author_id === user.id) { toast.error('You cannot flag your own reply'); return }
+    setReportTarget({ type: 'post', post })
+  }
 
-    const reportType: ForumReportType = 'inappropriate_content'
-    const description = window.prompt('Why are you flagging this reply? (optional)')
-    if (description === null) return
-
+  const submitReport = async (reportType: string, statement: string) => {
+    if (!reportTarget) return
+    setReportLoading(true)
     try {
-      await forumAPI.reportPost(post.id, reportType, description.trim())
-      toast.success('Reply flagged for moderator review')
+      if (reportTarget.type === 'topic' && topic) {
+        await forumAPI.reportTopic(topic.id, reportType as ForumReportType, statement)
+        toast.success('Topic flagged for moderator review')
+      } else if (reportTarget.type === 'post') {
+        await forumAPI.reportPost(reportTarget.post.id, reportType as ForumReportType, statement)
+        toast.success('Reply flagged for moderator review')
+      }
+      setReportTarget(null)
     } catch {
-      toast.error('Could not submit reply flag')
+      toast.error('Could not submit flag')
+    } finally {
+      setReportLoading(false)
     }
   }
 
@@ -791,7 +787,7 @@ function TopicDetailView({
             </Flex>
             <Flex align="center" gap={2}>
               {isAuthenticated && (!user?.id || topic.author_id !== user.id) && (
-                <Button size="xs" variant="outline" borderRadius="8px" onClick={reportTopic}>
+                <Button size="xs" variant="ghost" borderRadius="8px" onClick={openReportTopic}>
                   <Flex align="center" gap={1}><FiFlag size={11} /></Flex>
                 </Button>
               )}
@@ -836,10 +832,19 @@ function TopicDetailView({
           {posts.map((post) => {
             const isOwn = user?.id && post.author_id === user.id
             const isAuthor = post.author_id === topic.author_id
+            const isMod = user?.role === 'moderator' || user?.role === 'admin' || user?.is_admin
             if (post.is_deleted) {
               return (
                 <Box key={post.id} px={4} py="12px" borderBottom={`1px solid ${GRAY100}`} _last={{ borderBottom: 'none' }}>
-                  <Text fontSize="13px" color={GRAY400} fontStyle="italic">[Deleted]</Text>
+                  <Flex align="center" justify="space-between">
+                    <Text fontSize="13px" color={GRAY400} fontStyle="italic">[Deleted]</Text>
+                    {isMod && (
+                      <Box px={2} py="2px" borderRadius="6px" bg={GRAY100} color={GRAY400}
+                        fontSize="11px" fontWeight={600} style={{ cursor: 'not-allowed' }}>
+                        Reply Deleted
+                      </Box>
+                    )}
+                  </Flex>
                 </Box>
               )
             }
@@ -907,9 +912,31 @@ function TopicDetailView({
                         )
                       )}
                       {!isOwn && isAuthenticated && (
-                        <Box as="button" p={1} borderRadius="6px" color={GRAY400} _hover={{ bg: RED_LT, color: RED }} onClick={() => void reportReply(post)}>
-                          <FiFlag size={12} />
-                        </Box>
+                        <Flex gap={1}>
+                          {isMod && (
+                            confirmDeleteId === post.id ? (
+                              <Flex align="center" gap={2}>
+                                <Text fontSize="11px" color={RED}>Delete?</Text>
+                                <Box as="button" p={1} borderRadius="6px" bg={RED_LT} color={RED} onClick={() => deletePost(post.id)}>
+                                  <FiCheck size={11} />
+                                </Box>
+                                <Box as="button" p={1} borderRadius="6px" bg={GRAY100} color={GRAY600} onClick={() => setConfirmDeleteId(null)}>
+                                  <FiX size={11} />
+                                </Box>
+                              </Flex>
+                            ) : (
+                              <Box as="button" p={1} borderRadius="6px" color={GRAY400} _hover={{ bg: RED_LT, color: RED }}
+                                onClick={() => setConfirmDeleteId(post.id)}>
+                                <FiTrash2 size={12} />
+                              </Box>
+                            )
+                          )}
+                          {!isMod && (
+                            <Box as="button" p={1} borderRadius="6px" color={GRAY400} _hover={{ bg: RED_LT, color: RED }} onClick={() => openReportReply(post)}>
+                              <FiFlag size={12} />
+                            </Box>
+                          )}
+                        </Flex>
                       )}
                     </Flex>
                     <Text fontSize="14px" color={GRAY700} lineHeight={1.7} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -975,6 +1002,21 @@ function TopicDetailView({
               onClick={() => navigate('/login')}>Sign in</Text>{' '}to reply.
           </Text>
         </Box>
+      )}
+
+      {reportTarget && (
+        <ReportModal
+          title={reportTarget.type === 'topic' ? 'Report Topic' : 'Report Reply'}
+          subtitle={
+            reportTarget.type === 'topic'
+              ? 'Why are you reporting this topic?'
+              : 'Why are you reporting this reply?'
+          }
+          options={FORUM_REPORT_OPTIONS}
+          loading={reportLoading}
+          onSubmit={submitReport}
+          onClose={() => setReportTarget(null)}
+        />
       )}
     </Box>
   )

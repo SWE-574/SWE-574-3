@@ -9,24 +9,21 @@ import { toast } from 'sonner'
 import { forumAPI, type ForumReportType } from '@/services/forumAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { ForumTopic, ForumPost } from '@/types'
+import ReportModal, { type ReportOption } from '@/components/ReportModal'
 import {
   GREEN, GREEN_LT,
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800, WHITE, RED, RED_LT,
 } from '@/theme/tokens'
 
 const PAGE_SIZE = 20
-const FORUM_REPORT_OPTIONS: ForumReportType[] = ['inappropriate_content', 'spam', 'scam', 'harassment', 'other']
 
-function askForumReportType(): ForumReportType | null {
-  const raw = window.prompt('Report reason: inappropriate_content | spam | scam | harassment | other', 'inappropriate_content')
-  if (!raw) return null
-  const normalized = raw.trim().toLowerCase() as ForumReportType
-  if (!FORUM_REPORT_OPTIONS.includes(normalized)) {
-    toast.error('Invalid report reason')
-    return null
-  }
-  return normalized
-}
+const FORUM_REPORT_OPTIONS: ReportOption[] = [
+  { value: 'inappropriate_content', label: 'Inappropriate content',  desc: 'This post contains offensive or harmful material.' },
+  { value: 'spam',                  label: 'Spam',                   desc: 'This post is unsolicited or repetitive advertising.' },
+  { value: 'scam',                  label: 'Scam',                   desc: 'This post is fraudulent or misleading.' },
+  { value: 'harassment',            label: 'Harassment',             desc: 'This post targets or intimidates another user.' },
+  { value: 'other',                 label: 'Other',                  desc: 'Something else not listed above.' },
+]
 
 function timeAgo(iso: string) {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000)
@@ -299,6 +296,10 @@ export default function ForumTopicDetail() {
   const [editingPost, setEditingPost]   = useState<ForumPost | null>(null)
   const [editingTopic, setEditingTopic] = useState(false)
 
+  // Report modal state
+  const [reportTarget, setReportTarget] = useState<{ type: 'topic' } | { type: 'post'; post: ForumPost } | null>(null)
+  const [reportLoading, setReportLoading] = useState(false)
+
   const replyRef = useRef<HTMLTextAreaElement | null>(null)
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -335,7 +336,6 @@ export default function ForumTopicDetail() {
     try {
       const newPost = await forumAPI.createPost(topicId, trimmed)
       setReplyBody('')
-      // If on last page with room, append; else go to last page
       if (page === totalPages && posts.length < PAGE_SIZE) {
         setPosts((prev) => [...prev, newPost])
         setTotal((t) => t + 1)
@@ -385,41 +385,34 @@ export default function ForumTopicDetail() {
     }
   }
 
-  const reportTopic = async () => {
+  const openReportTopic = () => {
     if (!topic || !user?.id) return
-    if (topic.author_id === user.id) {
-      toast.error('You cannot report your own topic')
-      return
-    }
-
-    const reportType = askForumReportType()
-    if (!reportType) return
-    const description = window.prompt('Optional explanation', '') ?? ''
-
-    try {
-      await forumAPI.reportTopic(topic.id, reportType, description)
-      toast.success('Topic report submitted for moderation')
-    } catch {
-      toast.error('Failed to submit topic report')
-    }
+    if (topic.author_id === user.id) { toast.error('You cannot report your own topic'); return }
+    setReportTarget({ type: 'topic' })
   }
 
-  const reportPost = async (post: ForumPost) => {
+  const openReportPost = (post: ForumPost) => {
     if (!user?.id) return
-    if (post.author_id === user.id) {
-      toast.error('You cannot report your own post')
-      return
-    }
+    if (post.author_id === user.id) { toast.error('You cannot report your own post'); return }
+    setReportTarget({ type: 'post', post })
+  }
 
-    const reportType = askForumReportType()
-    if (!reportType) return
-    const description = window.prompt('Optional explanation', '') ?? ''
-
+  const submitReport = async (reportType: string) => {
+    if (!reportTarget) return
+    setReportLoading(true)
     try {
-      await forumAPI.reportPost(post.id, reportType, description)
-      toast.success('Post report submitted for moderation')
+      if (reportTarget.type === 'topic' && topic) {
+        await forumAPI.reportTopic(topic.id, reportType as ForumReportType, '')
+        toast.success('Topic report submitted for moderation')
+      } else if (reportTarget.type === 'post') {
+        await forumAPI.reportPost(reportTarget.post.id, reportType as ForumReportType, '')
+        toast.success('Post report submitted for moderation')
+      }
+      setReportTarget(null)
     } catch {
-      toast.error('Failed to submit post report')
+      toast.error('Failed to submit report')
+    } finally {
+      setReportLoading(false)
     }
   }
 
@@ -488,7 +481,7 @@ export default function ForumTopicDetail() {
                       gap={1}
                       color={RED}
                       fontSize="12px"
-                      onClick={reportTopic}
+                      onClick={openReportTopic}
                     >
                       <FiFlag size={12} /> Report topic
                     </Box>
@@ -565,7 +558,7 @@ export default function ForumTopicDetail() {
                       currentUserId={user?.id}
                       onEdit={setEditingPost}
                       onDelete={deletePost}
-                      onReport={reportPost}
+                      onReport={openReportPost}
                     />
                   )
                 ))}
@@ -674,6 +667,22 @@ export default function ForumTopicDetail() {
           </>
         )}
       </Box>
+
+      {/* Report modal */}
+      {reportTarget && (
+        <ReportModal
+          title={reportTarget.type === 'topic' ? 'Report Topic' : 'Report Post'}
+          subtitle={
+            reportTarget.type === 'topic'
+              ? 'Why are you reporting this topic?'
+              : 'Why are you reporting this post?'
+          }
+          options={FORUM_REPORT_OPTIONS}
+          loading={reportLoading}
+          onSubmit={submitReport}
+          onClose={() => setReportTarget(null)}
+        />
+      )}
     </Box>
   )
 }

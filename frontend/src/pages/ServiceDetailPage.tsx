@@ -741,11 +741,11 @@ export default function ServiceDetailPage() {
     } finally { setInterestLoading(false) }
   }
 
-  const handleReport = async (type: ReportType) => {
+  const handleReport = async (type: ReportType, statement = '') => {
     if (!service) return
     setReportLoading(true)
     try {
-      await serviceAPI.report(service.id, type, '')
+      await serviceAPI.report(service.id, type, statement)
       toast.success('Report submitted. Thank you for keeping the community safe.')
       if (user?.id) localStorage.setItem(`reported:${user.id}:${service.id}`, '1')
       setAlreadyReported(true); setShowReport(false)
@@ -907,7 +907,7 @@ export default function ServiceDetailPage() {
     })
   }
 
-  const handleSubmitEventBehaviorReport = async (issueType: EventBehaviorIssueType) => {
+  const handleSubmitEventBehaviorReport = async (issueType: EventBehaviorIssueType, _statement = '') => {
     if (!eventReportTarget) return
     setReportingEventIssue(true)
     try {
@@ -2299,7 +2299,7 @@ export default function ServiceDetailPage() {
       {showReport && (
         <ReportModal
           onClose={() => setShowReport(false)}
-          onSubmit={(reason) => handleReport(reason as ReportType)}
+          onSubmit={(reason, statement) => handleReport(reason as ReportType, statement)}
           loading={reportLoading}
           options={REPORT_OPTIONS}
           title="Report this listing"
@@ -2310,7 +2310,7 @@ export default function ServiceDetailPage() {
       {showEventReport && eventReportTarget && (
         <ReportModal
           onClose={closeEventReportModal}
-          onSubmit={(reason) => handleSubmitEventBehaviorReport(reason as EventBehaviorIssueType)}
+          onSubmit={(reason, statement) => handleSubmitEventBehaviorReport(reason as EventBehaviorIssueType, statement)}
           loading={reportingEventIssue}
           options={EVENT_BEHAVIOR_REPORT_OPTIONS}
           title={`Report ${eventReportTarget.targetLabel}`}

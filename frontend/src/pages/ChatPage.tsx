@@ -2058,7 +2058,7 @@ export default function ChatPage() {
     }
   }, [isReportingNoShow, refreshConversations, selectedId])
 
-  const handleSubmitReportIssue = useCallback(async (issueType: string) => {
+  const handleSubmitReportIssue = useCallback(async (issueType: string, _statement = '') => {
     if (!selectedId || isReportingIssue) return
     setIsReportingIssue(true)
     try {
