@@ -542,6 +542,17 @@ class ServiceSerializer(serializers.ModelSerializer):
     event_evaluation_summary = serializers.SerializerMethodField()
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
+    # source / for_you_signals / explore_pool are transient: not stored on
+    # the Service model. They are attached to the instance by _list_for_you()
+    # and the explore-only list path in views.py before serialization.
+    # getattr(obj, ..., None) returns None for cards from non-personalized
+    # endpoints, which is the intended "absent" representation.
+    source = serializers.SerializerMethodField()
+    for_you_signals = serializers.SerializerMethodField()
+    explore_pool = serializers.SerializerMethodField()
+    is_newcomer_owner = serializers.SerializerMethodField()
+    edit_locked = serializers.BooleanField(read_only=True)
+    edit_lock_reason = serializers.CharField(read_only=True, allow_null=True)
 
     class Meta:
         model = Service
@@ -552,8 +563,41 @@ class ServiceSerializer(serializers.ModelSerializer):
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
+            'is_newcomer_owner', 'source', 'for_you_signals', 'explore_pool',
+            'edit_locked', 'edit_lock_reason',
         ]
-        read_only_fields = ['user', 'hot_score', 'is_visible', 'is_pinned']
+        read_only_fields = [
+            'user', 'hot_score', 'is_visible', 'is_pinned', 'is_newcomer_owner',
+            'source', 'for_you_signals', 'explore_pool',
+            'edit_locked', 'edit_lock_reason',
+        ]
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_is_newcomer_owner(self, obj):
+        """True when the service owner registered less than 30 days ago. Lets
+        the feed render a Newcomer badge that mirrors the Phase 2 newcomer
+        boost (#477)."""
+        from .achievement_utils import is_newcomer
+        owner = getattr(obj, 'user', None)
+        if owner is None:
+            return False
+        return bool(is_newcomer(owner))
+   
+    def get_source(self, obj):
+        """Set transiently by the For You list view (#481) and the onboarding
+        fallback (#478). None when the card came from the regular feed."""
+        return getattr(obj, 'source', None)
+
+    def get_for_you_signals(self, obj):
+        """Per-card breakdown of the four For You signals (#481). None for
+        cards not served by the For You feed."""
+        return getattr(obj, 'for_you_signals', None)
+
+    def get_explore_pool(self, obj):
+        """Which Phase 3 sub-bucket this service was drawn from when served by
+        the explore-only list path. One of cold_start, undershown_quality,
+        stale_recurring, or None for non-explore responses."""
+        return getattr(obj, 'explore_pool', None)
 
     @extend_schema_field(TagSerializer(many=True))
     def get_tags(self, obj):
@@ -804,6 +848,33 @@ class ServiceSerializer(serializers.ModelSerializer):
             status__in=['accepted', 'checked_in', 'attended'],
         ).exists()
 
+    def _has_accepted_handshake(self, instance, user):
+        """FR-17l (#319): exact location is unblocked once a handshake exists
+        between the requester and provider in an accepted-or-later state.
+        Covers both Event participants and 1:1 Offer/Need handshakes; this
+        is the canonical "we know each other now" signal.
+        """
+        if user is None:
+            return False
+        if instance.type == 'Event':
+            return self._is_event_participant(instance, user)
+        return Handshake.objects.filter(
+            service=instance,
+            requester=user,
+            status__in=['accepted', 'completed', 'reported', 'paused'],
+        ).exists()
+
+    def _blur_distance_to_500m(self, value):
+        """Round a meters distance to the nearest 500m so triangulation across
+        repeated feed queries cannot recover the precise location."""
+        if value is None:
+            return None
+        try:
+            meters = float(value)
+        except (TypeError, ValueError):
+            return None
+        return int(round(meters / 500.0)) * 500
+
     def to_representation(self, instance):
         """Replace exact coordinates with a ~1 km privacy-fuzzed version before sending."""
         data = super().to_representation(instance)
@@ -814,13 +885,13 @@ class ServiceSerializer(serializers.ModelSerializer):
             and getattr(request_user, 'is_authenticated', False)
             and str(getattr(request_user, 'id', '')) == str(instance.user_id)
         )
-        is_joined_event = (
+        is_handshake_partner = (
             not is_owner
             and request_user
             and getattr(request_user, 'is_authenticated', False)
-            and self._is_event_participant(instance, request_user)
+            and self._has_accepted_handshake(instance, request_user)
         )
-        show_exact = is_owner or is_joined_event
+        show_exact = is_owner or is_handshake_partner
         if not show_exact:
             data.pop('session_exact_location', None)
             data.pop('session_exact_location_lat', None)
@@ -832,6 +903,17 @@ class ServiceSerializer(serializers.ModelSerializer):
                 fuzzy_lat, fuzzy_lng = _fuzzy_coords(str(instance.id), lat, lng)
                 data['location_lat'] = round(fuzzy_lat, 6)
                 data['location_lng'] = round(fuzzy_lng, 6)
+
+        # Distance-to-viewer (annotated by LocationStrategy when lat/lng are
+        # supplied). Round to 500m for non-handshake-partners so repeated
+        # queries from different reference points cannot triangulate the
+        # provider's address.
+        annotated_distance = getattr(instance, 'distance', None)
+        if annotated_distance is not None:
+            distance_m = getattr(annotated_distance, 'm', annotated_distance)
+            data['distance'] = (
+                float(distance_m) if show_exact else self._blur_distance_to_500m(distance_m)
+            )
         return data
 
     def create(self, validated_data):
@@ -1411,7 +1493,41 @@ class ProfileFollowStatsMixin(serializers.Serializer):
         ).exists()
 
 
-class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
+class FeaturedBadgesDetailMixin:
+    """Shared serializer logic for featured_badges_detail.
+
+    Returns the resolved Badge objects in the order specified by
+    ``obj.featured_badges``. Skips IDs the user has not earned (defensive —
+    User.clean() should prevent this, but stale data could exist).
+    """
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_featured_badges_detail(self, obj):
+        ids = list(obj.featured_badges or [])
+        if not ids:
+            return []
+        earned = (
+            UserBadge.objects
+            .filter(user=obj, badge_id__in=ids)
+            .select_related('badge')
+        )
+        by_id = {ub.badge_id: ub for ub in earned}
+        result = []
+        for badge_id in ids:
+            ub = by_id.get(badge_id)
+            if ub is None:
+                continue
+            result.append({
+                'id': ub.badge.id,
+                'name': ub.badge.name,
+                'description': ub.badge.description,
+                'icon_url': ub.badge.icon_url,
+                'earned_at': ub.earned_at,
+            })
+        return result
+
+
+class UserProfileSerializer(FeaturedBadgesDetailMixin, ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     created_events = serializers.SerializerMethodField()
     joined_events = serializers.SerializerMethodField()
@@ -1431,6 +1547,7 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
     video_intro_url = serializers.CharField(allow_blank=True, required=False, allow_null=True)
     portfolio_images = serializers.JSONField(required=False, default=list)
     show_history = serializers.BooleanField(required=False, default=True)
+    notification_preferences = serializers.JSONField(required=False, default=dict)
     video_intro_file_url = serializers.SerializerMethodField()
 
     # Skills: read as tag objects, write as list of tag IDs or new tag names
@@ -1438,6 +1555,12 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
     skill_ids = serializers.ListField(
         child=serializers.CharField(allow_blank=True), write_only=True, required=False
     )
+
+    # Featured badges (writable list of badge IDs, max 2, must be earned)
+    featured_badges = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    featured_badges_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -1447,10 +1570,11 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
             'created_events', 'joined_events', 'invited_events',
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file', 'video_intro_file_url',
-            'portfolio_images', 'show_history', 'featured_achievement_id',
+            'portfolio_images', 'show_history', 'notification_preferences', 'featured_achievement_id',
             'is_onboarded', 'is_verified',
             'skills', 'skill_ids',
             'followers_count', 'following_count', 'is_following',
+            'featured_badges', 'featured_badges_detail',
         ]
         read_only_fields = [
             'id', 'email', 'timebank_balance', 'karma_score', 'role', 'services',
@@ -1459,6 +1583,7 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
             'video_intro_file_url', 'featured_achievement_id', 'is_verified',
             'skills',
             'followers_count', 'following_count', 'is_following',
+            'featured_badges_detail',
         ]
         extra_kwargs = {
             'video_intro_file': {'write_only': True, 'required': False}
@@ -1564,11 +1689,34 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
             return [ub.badge.id for ub in user_badges if getattr(ub, 'badge', None)]
         except (AttributeError, Exception):
             return []
-    
+
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_badges(self, obj):
         """Deprecated: use achievements instead. Return list of achievement IDs for backward compatibility."""
         return self.get_achievements(obj)
+
+    def validate_featured_badges(self, value):
+        """Validate that featured_badges is a list of ≤2 unique earned badge IDs."""
+        if value is None:
+            value = []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Must be a list.')
+        if len(value) > 2:
+            raise serializers.ValidationError('At most 2 featured badges are allowed.')
+        for entry in value:
+            if not isinstance(entry, str):
+                raise serializers.ValidationError('All entries must be strings.')
+        if len(value) != len(set(value)):
+            raise serializers.ValidationError('Duplicate badge IDs are not allowed.')
+        if value:
+            instance = getattr(self, 'instance', None)
+            if instance is not None:
+                earned_count = UserBadge.objects.filter(user=instance, badge_id__in=value).count()
+                if earned_count != len(value):
+                    raise serializers.ValidationError(
+                        'One or more badge IDs have not been earned by this user.'
+                    )
+        return value
 
     def update(self, instance, validated_data):
         import uuid as _uuid_mod
@@ -1618,7 +1766,7 @@ class UserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, se
             instance.skills.set(tags_to_set)
         return instance
 
-class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
+class PublicUserProfileSerializer(FeaturedBadgesDetailMixin, ProfileFollowStatsMixin, ProfileEventFieldsMixin, serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     created_events = serializers.SerializerMethodField()
     joined_events = serializers.SerializerMethodField()
@@ -1629,6 +1777,7 @@ class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMix
     badges = serializers.SerializerMethodField()  # Deprecated: use achievements instead
     video_intro_file_url = serializers.SerializerMethodField()
     skills = serializers.SerializerMethodField()
+    featured_badges_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -1639,6 +1788,7 @@ class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMix
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
             'followers_count', 'following_count', 'is_following',
+            'featured_badges', 'featured_badges_detail',
         ]
         read_only_fields = [
             'id', 'first_name', 'last_name', 'bio', 'location', 'avatar_url',
@@ -1647,6 +1797,7 @@ class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMix
             'punctual_count', 'helpful_count', 'kind_count', 'achievements', 'badges', 'date_joined',
             'video_intro_url', 'video_intro_file_url', 'portfolio_images', 'show_history', 'skills',
             'followers_count', 'following_count', 'is_following',
+            'featured_badges', 'featured_badges_detail',
         ]
 
     def get_skills(self, obj):
@@ -1682,6 +1833,7 @@ class PublicUserProfileSerializer(ProfileFollowStatsMixin, ProfileEventFieldsMix
     def get_badges(self, obj):
         """Deprecated: use achievements instead. Return list of achievement IDs for backward compatibility."""
         return self.get_achievements(obj)
+
 
 # Handshake Serializers
 @extend_schema_serializer(
@@ -1726,6 +1878,8 @@ class HandshakeSerializer(serializers.ModelSerializer):
     cancellation_requested_by_name = serializers.SerializerMethodField()
     can_request_cancellation = serializers.SerializerMethodField()
     can_respond_to_cancellation = serializers.SerializerMethodField()
+    # Interests panel: full requester profile — only exposed to the service owner
+    requester_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = Handshake
@@ -1742,18 +1896,45 @@ class HandshakeSerializer(serializers.ModelSerializer):
             'can_request_cancellation', 'can_respond_to_cancellation',
             'evaluation_window_starts_at', 'evaluation_window_ends_at', 'evaluation_window_closed_at',
             'user_has_reviewed',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
+            'requester_detail',
         ]
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_requester_name(self, obj):
         return f"{obj.requester.first_name} {obj.requester.last_name}".strip()
-    
+
     @extend_schema_field(OpenApiTypes.STR)
     def get_provider_name(self, obj):
         from .utils import get_provider_and_receiver
         provider, _ = get_provider_and_receiver(obj)
         return f"{provider.first_name} {provider.last_name}".strip()
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_requester_detail(self, obj):
+        """
+        Return requester profile detail for the Interests panel.
+        Only exposed to the service owner — non-owners receive null.
+        Includes: id, first_name, last_name, avatar_url, member_since (date_joined year).
+
+        Note: username is intentionally omitted — this project's custom User model
+        sets username = None (AbstractUser field removed) and the frontend no longer
+        uses it (direction from team: "don't use username at all").
+        """
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        # Owner-only rule: only the service owner sees this field
+        if str(obj.service.user_id) != str(request.user.id):
+            return None
+        r = obj.requester
+        return {
+            'id': str(r.id),
+            'first_name': r.first_name,
+            'last_name': r.last_name,
+            'avatar_url': r.avatar_url,
+            'member_since': r.date_joined.isoformat() if r.date_joined else None,
+        }
 
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_counterpart(self, obj):
@@ -1894,7 +2075,7 @@ class NotificationSerializer(serializers.ModelSerializer):
         model = Notification
         fields = [
             'id', 'type', 'title', 'message', 'is_read',
-            'related_handshake', 'related_service', 'created_at'
+            'related_handshake', 'related_service', 'related_report', 'created_at'
         ]
 
 class DevicePushTokenSerializer(serializers.Serializer):
@@ -2021,6 +2202,7 @@ class ReportSerializer(serializers.ModelSerializer):
     reported_service_owner_name = serializers.SerializerMethodField()
     reported_service_owner_email = serializers.SerializerMethodField()
     reported_service_owner_karma_score = serializers.SerializerMethodField()
+    reported_service_has_active_handshakes = serializers.SerializerMethodField()
     reported_forum_topic = serializers.PrimaryKeyRelatedField(read_only=True)
     reported_forum_post = serializers.PrimaryKeyRelatedField(read_only=True)
     reported_forum_topic_title = serializers.SerializerMethodField()
@@ -2038,7 +2220,8 @@ class ReportSerializer(serializers.ModelSerializer):
             'reported_service', 'reported_service_title', 'reported_service_status', 'reported_service_type',
             'reported_service_description', 'reported_service_location', 'reported_service_hours',
             'reported_service_owner', 'reported_service_owner_name', 'reported_service_owner_email',
-            'reported_service_owner_karma_score', 'related_handshake',
+            'reported_service_owner_karma_score', 'reported_service_has_active_handshakes',
+            'related_handshake',
             'reported_forum_topic', 'reported_forum_topic_title',
             'reported_forum_post', 'reported_forum_post_excerpt',
             'handshake_hours', 'handshake_scheduled_time', 'handshake_status',
@@ -2113,6 +2296,17 @@ class ReportSerializer(serializers.ModelSerializer):
         if service:
             return service.type
         return None
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_reported_service_has_active_handshakes(self, obj):
+        # Mirror ServiceViewSet.destroy() so the client can disable the
+        # Close-service button when the destroy endpoint would reject.
+        service = obj.reported_service
+        if not service:
+            return False
+        return service.handshakes.filter(
+            status__in=['pending', 'accepted', 'checked_in', 'attended']
+        ).exists()
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_reported_service_description(self, obj):
@@ -2235,10 +2429,81 @@ class ReportSerializer(serializers.ModelSerializer):
         """
         if not obj.related_handshake or not obj.reported_user:
             return None
-        
+
         from .utils import get_provider_and_receiver
         _, receiver = get_provider_and_receiver(obj.related_handshake)
         return obj.reported_user.id == receiver.id
+
+
+class MyReportSerializer(serializers.ModelSerializer):
+    """Reporter-facing serializer — no moderator PII or admin-only fields.
+
+    Used by GET /api/users/me/reports/ so a user can see what they've submitted
+    and the moderation outcome without learning the moderator's identity.
+    """
+    type_display = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+    target_summary = serializers.SerializerMethodField()
+    target_kind = serializers.SerializerMethodField()
+    target_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Report
+        fields = [
+            'id', 'type', 'type_display', 'status', 'status_display',
+            'description', 'target_kind', 'target_id', 'target_summary',
+            'created_at', 'resolved_at',
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_type_display(self, obj):
+        return obj.get_type_display()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_kind(self, obj):
+        if obj.reported_forum_post_id:
+            return 'forum_post'
+        if obj.reported_forum_topic_id:
+            return 'forum_topic'
+        if obj.reported_service_id:
+            return 'service'
+        if obj.reported_user_id:
+            return 'user'
+        return 'other'
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_id(self, obj):
+        # Forum URLs are topic-based (/forum/topic/{topic_id}); for a post
+        # report, return the parent topic id so the deep-link resolves.
+        if obj.reported_forum_post_id:
+            return str(obj.reported_forum_topic_id) if obj.reported_forum_topic_id else None
+        for fk in (
+            obj.reported_forum_topic_id,
+            obj.reported_service_id,
+            obj.reported_user_id,
+        ):
+            if fk:
+                return str(fk)
+        return None
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_summary(self, obj):
+        if obj.reported_forum_post_id and obj.reported_forum_topic:
+            return f"Reply in '{obj.reported_forum_topic.title}'"
+        if obj.reported_forum_topic:
+            return obj.reported_forum_topic.title
+        if obj.reported_service:
+            return obj.reported_service.title
+        if obj.reported_user:
+            full = f"{obj.reported_user.first_name} {obj.reported_user.last_name}".strip()
+            return full or obj.reported_user.email
+        return None
+
 
 # Transaction History Serializer
 @extend_schema_serializer(

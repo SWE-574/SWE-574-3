@@ -1,4 +1,5 @@
 import logging
+import threading
 
 from django.contrib.auth.signals import user_logged_in, user_login_failed
 from django.db.models.signals import post_save, post_delete, pre_delete
@@ -250,6 +251,25 @@ def invalidate_handshake_cache(sender, instance, **kwargs):
     invalidate_on_handshake_change(instance)
 
 
+_service_deletes_in_flight = threading.local()
+
+
+def _services_being_deleted():
+    if not hasattr(_service_deletes_in_flight, 'ids'):
+        _service_deletes_in_flight.ids = set()
+    return _service_deletes_in_flight.ids
+
+
+@receiver(pre_delete, sender=Service)
+def _track_service_delete_start(sender, instance, **kwargs):
+    _services_being_deleted().add(instance.pk)
+
+
+@receiver(post_delete, sender=Service)
+def _track_service_delete_end(sender, instance, **kwargs):
+    _services_being_deleted().discard(instance.pk)
+
+
 def _update_service_hot_score(service):
     """Update hot_score + score_updated_at for a service and append a
     ScoreAuditLog row (NFR-17c / #308). Uses the same factor helpers as the
@@ -257,6 +277,12 @@ def _update_service_hot_score(service):
     write identical audit data.
     """
     if service and service.status == 'Active':
+        # Skip when the parent Service is mid-deletion — cascaded child deletes
+        # (Comment, ReputationRep, NegativeRep) fire post_delete before the
+        # Service row is removed, and writing an audit row here would violate
+        # the FK at COMMIT time once the cascade finishes.
+        if service.pk in _services_being_deleted():
+            return
         try:
             if service.type == 'Event':
                 f = _compute_event_factors(service)
@@ -268,6 +294,9 @@ def _update_service_hot_score(service):
                     quality=f['organiser_quality'],
                     activity=f['velocity'],
                     capacity_multiplier=f['capacity_multiplier'],
+                    capacity_boost_applied=f['capacity_boost_applied'],
+                    newcomer_boost=f['newcomer_boost'],
+                    newcomer_boost_applied=f['newcomer_boost_applied'],
                     final_score=f['final_score'],
                     formula_version=FORMULA_VERSION,
                     formula_kind=ScoreAuditLog.EVENT,
@@ -283,6 +312,9 @@ def _update_service_hot_score(service):
                     quality=f['quality'],
                     activity=f['activity'],
                     capacity_multiplier=f['capacity_multiplier'],
+                    capacity_boost_applied=f['capacity_boost_applied'],
+                    newcomer_boost=f['newcomer_boost'],
+                    newcomer_boost_applied=f['newcomer_boost_applied'],
                     final_score=f['final_score'],
                     formula_version=FORMULA_VERSION,
                     formula_kind=ScoreAuditLog.SERVICE,
@@ -371,6 +403,55 @@ def notify_on_new_chat_message(sender, instance, created, **kwargs):
         ))
     except Exception:
         logger.exception('Failed to queue chat notification for message %s', instance.pk)
+
+
+@receiver(post_save, sender=Handshake)
+def attribute_handshake_to_for_you_click(sender, instance, created, **kwargs):
+    """For You CTR proxy (#481): when a handshake is created, look up the
+    most recent For You click on this (viewer, service) within the
+    attribution window and emit a kind=handshake row tagged with the same
+    source. Lets the metrics endpoint compute click-to-handshake rate.
+
+    Fires only on initial Handshake creation. Status transitions
+    (pending -> accepted -> completed) are intentionally not attributed:
+    CTR is defined here as click -> handshake-creation, not click ->
+    completion. Completion-rate is a separate metric and is not measured
+    by this signal. The early return on `created is False` enforces that.
+    """
+    if not created:
+        return
+    try:
+        from datetime import timedelta
+        from django.conf import settings as _settings
+        from django.utils import timezone as _tz
+        from .models import ForYouEvent
+
+        attribution_minutes = int(getattr(
+            _settings, 'RANKING_FOR_YOU_ATTRIBUTION_MINUTES', 60,
+        ))
+        cutoff = _tz.now() - timedelta(minutes=attribution_minutes)
+        last_click = (
+            ForYouEvent.objects
+            .filter(
+                viewer=instance.requester,
+                service=instance.service,
+                kind=ForYouEvent.CLICK,
+                occurred_at__gte=cutoff,
+            )
+            .order_by('-occurred_at')
+            .first()
+        )
+        if last_click is not None:
+            ForYouEvent.objects.create(
+                service=instance.service,
+                viewer=instance.requester,
+                kind=ForYouEvent.HANDSHAKE,
+                source=last_click.source,
+            )
+    except Exception:
+        logger.exception(
+            'For You handshake attribution failed for handshake %s', instance.pk,
+        )
 
 
 @receiver(post_save, sender=Handshake)

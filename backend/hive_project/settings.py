@@ -882,3 +882,49 @@ RANKING_FEED_E2E_SLA_SECONDS = float(os.environ.get('RANKING_FEED_E2E_SLA_SECOND
 # multiplicative bump in Phase 2 score so brand-new members surface before
 # their reputation accumulates. Customer request, May 2026.
 RANKING_NEWCOMER_BOOST = float(os.environ.get('RANKING_NEWCOMER_BOOST', '1.2'))
+
+# For You feed (#481). Additive blend on top of hot_score:
+#   for_you_score = hot_score
+#                 + TAG * tag_overlap (Jaccard with viewer.skills)
+#                 + FOLLOW * follow_affinity (1.0 1st-degree, 0.5 2nd-degree)
+#                 + COOCCUR * cooccurrence_signal (k-anon item-item)
+#                 - RECENCY * recency_penalty (decay over hours since last seen)
+# TAG outweighs FOLLOW: a freshly onboarded user has declared skills but
+# few follows, so tag relevance is the strongest available signal.
+RANKING_FOR_YOU_TAG_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_TAG_WEIGHT', '0.5'))
+RANKING_FOR_YOU_FOLLOW_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_FOLLOW_WEIGHT', '0.3'))
+RANKING_FOR_YOU_COOCCUR_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_COOCCUR_WEIGHT', '0.2'))
+RANKING_FOR_YOU_RECENCY_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_RECENCY_WEIGHT', '0.1'))
+RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS = float(os.environ.get('RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS', '24'))
+RANKING_COOCCUR_MIN_USERS = int(os.environ.get('RANKING_COOCCUR_MIN_USERS', '3'))
+RANKING_FOR_YOU_LIMIT = int(os.environ.get('RANKING_FOR_YOU_LIMIT', '10'))
+# Click-to-handshake attribution window for the For You CTR proxy. A handshake
+# created within this many minutes of a `?from=for_you` click is attributed to
+# the For You feed in ForYouEvent.
+RANKING_FOR_YOU_ATTRIBUTION_MINUTES = int(os.environ.get('RANKING_FOR_YOU_ATTRIBUTION_MINUTES', '60'))
+# Cap on how many recent impressions to remember per viewer for the recency
+# penalty. Older entries are dropped.
+RANKING_FOR_YOU_IMPRESSION_HISTORY = int(os.environ.get('RANKING_FOR_YOU_IMPRESSION_HISTORY', '100'))
+
+# Stochastic boost probabilities (#477). Each ranges 0..1. Default 1.0 means
+# the boost behaves exactly like the deterministic baseline. Lowering a
+# probability rotates which boosted items surface across impressions while
+# preserving the expected multiplier (sample_boost in api/ranking.py amplifies
+# the effective multiplier when applied so the average across calls equals
+# the configured target).
+RANKING_NEWCOMER_BOOST_PROBABILITY = float(os.environ.get('RANKING_NEWCOMER_BOOST_PROBABILITY', '1.0'))
+RANKING_CAPACITY_BOOST_PROBABILITY = float(os.environ.get('RANKING_CAPACITY_BOOST_PROBABILITY', '1.0'))
+RANKING_SOCIAL_PROXIMITY_PROBABILITY = float(os.environ.get('RANKING_SOCIAL_PROXIMITY_PROBABILITY', '1.0'))
+
+# Proximity ranking factor (#479). Distance decay applied to the hot score on
+# the recommendation feed when the viewer has a known location. The
+# multiplier is 1 / (1 + distance_km / half_life_km); a service at the half
+# life distance keeps half its score. Skipped when the viewer has no
+# location (multiplier = 1.0).
+RANKING_PROXIMITY_HALF_LIFE_KM = float(os.environ.get('RANKING_PROXIMITY_HALF_LIFE_KM', '10.0'))
+
+# Onboarding tag fallback (#478). When an onboarded viewer with declared
+# skills hits the hot feed and fewer than this many services match those
+# skills, the tail is filled from the Phase 3 explore pool (cold start,
+# undershown quality, stale recurring) so the feed never feels empty.
+RANKING_ONBOARDING_MIN_RESULTS = int(os.environ.get('RANKING_ONBOARDING_MIN_RESULTS', '10'))

@@ -2,7 +2,12 @@
  * Unit tests for Notifications API.
  */
 
-import { listNotifications, getNotification, markAllNotificationsRead } from "../notifications";
+import {
+  listNotifications,
+  getNotification,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from "../notifications";
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
 
 describe("notifications", () => {
@@ -29,5 +34,13 @@ describe("notifications", () => {
     mockFetchResolve({});
     await markAllNotificationsRead();
     expect(getLastFetchCall().url).toContain("/notifications/read/");
+  });
+
+  it("markNotificationRead PATCHes /notifications/:id/read/", async () => {
+    mockFetchResolve({});
+    await markNotificationRead("n1");
+    const { url, init } = getLastFetchCall();
+    expect(url).toContain("/notifications/n1/read/");
+    expect(init.method).toBe("PATCH");
   });
 });

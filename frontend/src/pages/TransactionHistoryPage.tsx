@@ -845,7 +845,7 @@ const TransactionHistoryPage = () => {
   }, [direction, user?.id])
 
   return (
-    <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto" py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
+    <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto" className="no-scrollbar" py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
       <Box
         maxW="1440px"
         mx="auto"

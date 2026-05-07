@@ -1,11 +1,121 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from math import asin, cos, pi, sin, sqrt
+
+from django.conf import settings
+from django.db.models import Count, Max
 from django.utils import timezone
 
+from .achievement_utils import is_newcomer
 from .models import Comment, Handshake, NegativeRep, ReputationRep, Service, User
-from .ranking import calculate_hot_score
+from .ranking import (
+    _compute_event_factors,
+    _compute_service_factors,
+    calculate_hot_score,
+)
 from .services import get_social_proximity_boosts
+
+
+def _phase3_trace(service: Service, factors: dict) -> dict:
+    """Compute Phase 3 eligibility for a single service so the admin debug
+    panel can explain whether a card came from the regular hot list or the
+    explore bucket and which sub pool it was eligible for.
+    """
+    cold_threshold = getattr(settings, 'RANKING_COLDSTART_THRESHOLD', 5)
+    quality_threshold = getattr(settings, 'RANKING_UNDERSHOWN_QUALITY_THRESHOLD', 0.4)
+    stale_days = getattr(settings, 'RANKING_UNDERSHOWN_STALE_DAYS', 14)
+    cutoff = timezone.now() - timedelta(days=stale_days)
+
+    lifetime = Handshake.objects.filter(
+        service__user_id=service.user_id, status='completed',
+    ).count()
+    last_completed = Handshake.objects.filter(
+        service=service, status='completed',
+    ).aggregate(latest=Max('updated_at'))['latest']
+    days_since_last = (
+        (timezone.now() - last_completed).days if last_completed else None
+    )
+
+    pool = None
+    if lifetime < cold_threshold:
+        pool = 'cold_start'
+    elif (
+        service.type != 'Event'
+        and factors.get('quality', 0.0) >= quality_threshold
+        and (last_completed is None or last_completed < cutoff)
+    ):
+        pool = 'undershown_quality'
+    elif getattr(service, 'is_stale_recurring', False):
+        pool = 'stale_recurring'
+
+    return {
+        'pool': pool,
+        'exploration_rate': float(getattr(settings, 'RANKING_EXPLORATION_RATE', 0.20)),
+        'lifetime_completed_handshakes': lifetime,
+        'days_since_last_completed_handshake': days_since_last,
+        'is_stale_recurring': bool(getattr(service, 'is_stale_recurring', False)),
+        'cold_start_threshold': cold_threshold,
+        'undershown_quality_threshold': quality_threshold,
+        'undershown_stale_days': stale_days,
+    }
+
+
+def _factor_breakdown(service: Service) -> dict:
+    """Run the live ranking formulas and return a flattened debug summary
+    that includes both the raw inputs (positive_count, negative_count,
+    comment_count, hours_exchanged or rsvps_last_7d) and the derived
+    factors (quality, activity / velocity, capacity_multiplier,
+    newcomer_boost, final_score) in one shape per service kind."""
+    if service.type == 'Event':
+        f = _compute_event_factors(service)
+        return {
+            'kind': 'event',
+            'positive_count': f['positive_rep_count'],
+            'negative_count': f['negative_rep_count'],
+            'rsvps_last_7d': f['rsvps_last_7d'],
+            'organiser_quality': f['organiser_quality'],
+            'velocity': f['velocity'],
+            'capacity_multiplier': f['capacity_multiplier'],
+            'newcomer_boost': f['newcomer_boost'],
+            'is_newcomer': is_newcomer(service.user),
+            'final_score': f['final_score'],
+        }
+    f = _compute_service_factors(service)
+    return {
+        'kind': 'service',
+        'positive_count': f['positive_rep_count'],
+        'negative_count': f['negative_rep_count'],
+        'comment_count': f['comment_count'],
+        'hours_exchanged': float(f['hours_exchanged']),
+        'quality': f['quality'],
+        'activity': f['activity'],
+        'capacity_multiplier': f['capacity_multiplier'],
+        'newcomer_boost': f['newcomer_boost'],
+        'is_newcomer': is_newcomer(service.user),
+        'final_score': f['final_score'],
+    }
+
+
+def _formula_lines_with_substitutions(factors: dict) -> list[str]:
+    """Render the ranking formulas with the actual numeric values so the
+    debug panel reads as 'Wilson(1, 1) = 0.21' rather than the algebraic
+    template only."""
+    if factors['kind'] == 'event':
+        return [
+            f"velocity = log2(2 + {factors['rsvps_last_7d']}) = {factors['velocity']:.4f}",
+            f"organiser_quality (Wilson) = Wilson({factors['positive_count']}, {factors['positive_count'] + factors['negative_count']}) = {factors['organiser_quality']:.4f}",
+            f"capacity_multiplier = {factors['capacity_multiplier']:.2f}",
+            f"newcomer_boost = {factors['newcomer_boost']:.2f}",
+            f"final = velocity * organiser_quality * capacity * newcomer = {factors['final_score']:.6f}",
+        ]
+    return [
+        f"quality (Wilson) = Wilson({factors['positive_count']}, {factors['positive_count'] + factors['negative_count']}) = {factors['quality']:.4f}",
+        f"activity = log2(2 + {factors['hours_exchanged']:.2f}) + 0.5 * log2(2 + {factors['comment_count']}) = {factors['activity']:.4f}",
+        f"capacity_multiplier = {factors['capacity_multiplier']:.2f}",
+        f"newcomer_boost = {factors['newcomer_boost']:.2f}",
+        f"final = quality * activity * capacity * newcomer = {factors['final_score']:.6f}",
+    ]
 
 
 def _normalize_text(value: str) -> str:
@@ -206,6 +316,10 @@ def build_service_debug_payload(
         {'source': 'pin', 'target': 'card', 'value': 1.0 if selected_service.is_pinned else 0.01, 'tone': 'positive' if selected_service.is_pinned else 'neutral'},
     ]
 
+    factors = _factor_breakdown(selected_service)
+    phase3 = _phase3_trace(selected_service, factors)
+    new_formula_lines = _formula_lines_with_substitutions(factors)
+
     return {
         'active_filter': active_filter,
         'total_services': len(service_ids),
@@ -226,6 +340,8 @@ def build_service_debug_payload(
             'distance_km': distance_km,
             'participant_count': accepted_count,
             'max_participants': selected_service.max_participants,
+            'factors': factors,
+            'phase3': phase3,
             'breakdown': {
                 'positive_count': positive_count,
                 'negative_count': negative_count,
@@ -238,16 +354,7 @@ def build_service_debug_payload(
                 'capacity_boost_applied': capacity_boost_applied,
                 'social_reason': social_reason_label,
             },
-            'formula_lines': [
-                f'P = {positive_count}',
-                f'N = {negative_count}',
-                f'C = {comment_count}',
-                f'T = {age_hours:.2f}h',
-                f'raw_hot = ({numerator}) / ({denominator:.4f})',
-                f'recomputed_hot = {float(recomputed_hot_score):.6f}',
-                f'search_score = {float(search_score):.6f}',
-                f'weighted_social = {weighted_social_boost:.6f}',
-            ],
+            'formula_lines': new_formula_lines,
             'notes': notes,
             'sankey': {
                 'nodes': sankey_nodes,

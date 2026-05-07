@@ -8,6 +8,7 @@ import { colors } from "../../constants/colors";
 import type { PostStackParamList } from "../../navigation/PostStack";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import CreateAccessGate from "../components/service/CreateAccessGate";
+import { useDisabledIfOffline } from "../../hooks/useDisabledIfOffline";
 
 function TopBar({ title }: { title: string }) {
   return (
@@ -64,6 +65,7 @@ export default function PostServiceScreen() {
   const { isAuthenticated } = useAuth();
   const navigation =
     useNavigation<NativeStackNavigationProp<PostStackParamList, "PostServiceHome">>();
+  const { disabled: offlineDisabled, reason: offlineReason } = useDisabledIfOffline();
 
   if (!isAuthenticated) {
     return (
@@ -81,16 +83,21 @@ export default function PostServiceScreen() {
       <TopBar title="New service" />
       <View style={styles.header}>
         <Text style={styles.subtitle}>What are you sharing today?</Text>
+        {offlineDisabled ? (
+          <Text style={styles.offlineNote}>{offlineReason}</Text>
+        ) : null}
       </View>
 
       <View style={styles.list}>
         {OPTIONS.map((opt) => (
           <Pressable
             key={opt.screen}
+            disabled={offlineDisabled}
             style={({ pressed }) => [
               styles.card,
               { backgroundColor: opt.gradient[0] },
               pressed && styles.cardPressed,
+              offlineDisabled && styles.cardDisabled,
             ]}
             onPress={() => navigation.navigate(opt.screen)}
           >
@@ -164,6 +171,14 @@ const styles = StyleSheet.create({
   cardPressed: {
     opacity: 0.85,
     transform: [{ scale: 0.985 }],
+  },
+  cardDisabled: {
+    opacity: 0.45,
+  },
+  offlineNote: {
+    marginTop: 8,
+    fontSize: 12,
+    color: colors.GRAY500,
   },
   deco: {
     position: "absolute",
