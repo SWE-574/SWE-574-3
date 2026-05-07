@@ -34,3 +34,17 @@ export function isEventBanned(bannedUntil: string | null | undefined): boolean {
   if (!bannedUntil) return false;
   return new Date(bannedUntil).getTime() > Date.now();
 }
+
+/** Format fixed group-offer dates compactly for service cards/details. */
+export function formatGroupOfferDateTime(scheduledTime: string | null | undefined): string {
+  if (!scheduledTime) return "Not scheduled";
+  const date = new Date(scheduledTime);
+  if (Number.isNaN(date.getTime())) return "Not scheduled";
+  return date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}

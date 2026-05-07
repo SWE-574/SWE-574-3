@@ -3,6 +3,7 @@ import {
   eventCountdownSummary,
   formatBanExpiry,
   formatEventDateTime,
+  formatGroupOfferDateTime,
   isEventBanned,
   isEventFull,
   isEventPast,
@@ -216,5 +217,14 @@ describe('eventUtils — time-dependent helpers', () => {
       const formatted = formatBanExpiry(inFuture(7 * 24 * 3600_000))
       expect(formatted.length).toBeGreaterThan(0)
     })
+  })
+})
+
+describe('formatGroupOfferDateTime', () => {
+  it('formats fixed group offer dates compactly with time', () => {
+    const formatted = formatGroupOfferDateTime('2026-05-14T00:36:00Z')
+
+    expect(formatted).toMatch(/14 May, \d{2}:\d{2}/)
+    expect(formatted).not.toMatch(/Thu|Fri|2026/)
   })
 })
