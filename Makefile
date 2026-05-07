@@ -6,7 +6,8 @@
         docker-up docker-down docker-logs docker-build docker-reset docker-demo \
         prod-up prod-down prod-logs prod-build prod-reset prod-demo \
         shell-backend shell-db shell-redis \
-        test test-unit test-integration test-docker coverage coverage-backend coverage-frontend coverage-report
+        test test-unit test-integration test-docker coverage coverage-backend coverage-frontend coverage-report \
+        test-mutation test-mutation-html test-perf test-mobile-unit
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -420,6 +421,26 @@ coverage-report: ## Open coverage reports in the default browser
 	   echo "  backend/tests/reports/coverage/html/index.html"; \
 	   echo "  frontend/tests/reports/coverage/index.html"; \
 	 fi
+
+test-mutation: ## Run mutmut against backend hot modules (ranking, scoring, services)
+	$(call _log,"Backend mutation tests (mutmut)...")
+	@cd backend && $(PYEXEC) -m mutmut run || true
+	@cd backend && $(PYEXEC) -m mutmut results
+
+test-mutation-html: ## Generate browsable mutmut HTML report
+	@cd backend && $(PYEXEC) -m mutmut html
+	$(call _ok,"Mutmut HTML report at backend/html/index.html")
+
+test-perf: ## Run k6 perf gates against the running stack
+	$(call _log,"Running k6 perf gates...")
+	@command -v k6 >/dev/null 2>&1 || { echo "k6 not installed: brew install k6"; exit 1; }
+	@for script in frontend/tests/perf/*.js; do \
+	   echo "→ $$script"; \
+	   k6 run "$$script" || exit 1; \
+	 done
+
+test-mobile-unit: ## Run mobile-client Jest test suite
+	@cd mobile-client && npm test -- --watchAll=false
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -96,9 +96,20 @@ export default defineConfig(({ mode }) => {
       exclude: ['tests/e2e/**', 'node_modules/**'],
       coverage: {
         provider: 'v8',
-        reporter: ['text', 'json', 'json-summary'],
+        reporter: ['text', 'json', 'json-summary', 'html', 'lcov'],
         include: ['src/**/*.{ts,tsx}'],
-        exclude: ['src/test/**', 'src/main.tsx'],
+        exclude: [
+          'src/test/**',
+          'src/main.tsx',
+          'src/**/*.d.ts',
+          'src/**/__mocks__/**',
+        ],
+        thresholds: {
+          lines: 60,
+          functions: 60,
+          statements: 60,
+          branches: 40,
+        },
       },
       server: {
         deps: {

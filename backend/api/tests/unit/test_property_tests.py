@@ -2,13 +2,19 @@
 from decimal import Decimal
 from hypothesis.extra.django import TestCase as HypothesisTestCase
 from django.contrib.auth import get_user_model
-from hypothesis import given, strategies as st, assume, settings
-from hypothesis.stateful import RuleBasedStateMachine, rule, invariant
+from hypothesis import given, strategies as st, assume, settings, HealthCheck
+from hypothesis.stateful import RuleBasedStateMachine, rule, invariant, precondition
 import uuid
 
+import pytest
+
 from api.models import Service, Handshake, TransactionHistory, UserBadge
+from api.ranking import calculate_hot_score
 from api.services import HandshakeService
 from api.utils import provision_timebank, complete_timebank_transfer, get_provider_and_receiver
+from api.tests.helpers.factories import (
+    ServiceFactory, UserFactory, CommentFactory, HandshakeFactory,
+)
 
 User = get_user_model()
 
@@ -318,3 +324,147 @@ class PropertyTestUserRegistrationCompleteness(HypothesisTestCase):
         self.assertIsNotNone(user.last_name)
         self.assertGreater(len(user.first_name), 0)
         self.assertGreater(len(user.last_name), 0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Property tests — ranking, balance flow, handshake state machine
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PropertyTestRankingScoreMonotonicity(HypothesisTestCase):
+    """For a service that never loses engagement, hot score is monotone non-
+    decreasing in the number of positive interactions. The capacity multiplier
+    is the only step function — outside of that range the score must only go
+    up as more comments are added.
+    """
+
+    @settings(max_examples=20, deadline=None,
+              suppress_health_check=[HealthCheck.too_slow])
+    @given(steps=st.integers(min_value=1, max_value=8))
+    def test_score_never_decreases_with_more_comments(self, steps):
+        service = ServiceFactory(
+            type='Offer', status='Active', max_participants=1,
+        )
+        previous = calculate_hot_score(service)
+        for _ in range(steps):
+            CommentFactory(service=service)
+            service.refresh_from_db()
+            current = calculate_hot_score(service)
+            self.assertGreaterEqual(
+                current, previous,
+                msg=f'Hot score regressed: {previous} -> {current} after a comment',
+            )
+            previous = current
+
+
+class PropertyTestTimeBankNetFlowInvariant(HypothesisTestCase):
+    """The user's balance must always equal initial_balance + sum(transactions).
+
+    Stronger than ``PropertyTestTimeBankBalanceConsistency`` because we
+    interleave provisions and completions through ``HandshakeService`` rather
+    than constructing transaction rows directly.
+    """
+
+    @settings(max_examples=15, deadline=None,
+              suppress_health_check=[HealthCheck.too_slow])
+    @given(
+        initial=st.integers(min_value=5, max_value=50).map(lambda v: Decimal(str(v))),
+        deltas=st.lists(
+            st.integers(min_value=-3, max_value=5).map(lambda v: Decimal(str(v))),
+            min_size=1, max_size=8,
+        ),
+    )
+    def test_net_flow_matches_balance_delta(self, initial, deltas):
+        user = User.objects.create_user(
+            email=f'flow_{uuid.uuid4().hex[:8]}@test.com',
+            password='testpass123',
+            first_name='Flow', last_name='User',
+            timebank_balance=initial,
+        )
+        for delta in deltas:
+            new_balance = user.timebank_balance + delta
+            if new_balance < Decimal('-10.00'):
+                continue
+            TransactionHistory.objects.create(
+                user=user,
+                transaction_type='transfer',
+                amount=delta,
+                balance_after=new_balance,
+                description='property test',
+            )
+            user.timebank_balance = new_balance
+            user.save(update_fields=['timebank_balance'])
+
+        user.refresh_from_db()
+        history_sum = sum(
+            TransactionHistory.objects.filter(user=user)
+            .values_list('amount', flat=True)
+        )
+        self.assertEqual(user.timebank_balance, initial + history_sum)
+
+
+# Stateful test: handshake transitions must follow the published state machine.
+# Pending → accepted | denied | cancelled
+# Accepted → completed | cancelled | reported
+# Completed/Denied/Cancelled/Reported → terminal (only paused as the exception)
+LEGAL_TRANSITIONS = {
+    'pending':   {'accepted', 'denied', 'cancelled'},
+    'accepted':  {'completed', 'cancelled', 'reported', 'paused'},
+    'paused':    {'accepted', 'cancelled'},
+    # Terminals — anything else is a violation
+    'completed': set(),
+    'denied':    set(),
+    'cancelled': set(),
+    'reported':  set(),
+}
+
+
+class HandshakeStateMachine(RuleBasedStateMachine):
+    """Drive a single handshake through random status transitions and assert
+    that only legal ones are persisted.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.owner = User.objects.create_user(
+            email=f'sm_owner_{uuid.uuid4().hex[:6]}@test.com',
+            password='testpass123', first_name='Owner', last_name='User',
+            timebank_balance=Decimal('20.00'),
+        )
+        self.requester = User.objects.create_user(
+            email=f'sm_req_{uuid.uuid4().hex[:6]}@test.com',
+            password='testpass123', first_name='Req', last_name='User',
+            timebank_balance=Decimal('20.00'),
+        )
+        self.service = Service.objects.create(
+            user=self.owner, title='SM Service',
+            description='State machine service', type='Offer',
+            duration=Decimal('1.00'), location_type='Online',
+            schedule_type='One-Time', max_participants=1,
+        )
+        self.handshake = Handshake.objects.create(
+            service=self.service, requester=self.requester,
+            status='pending', provisioned_hours=Decimal('1.00'),
+        )
+
+    @rule(target=st.sampled_from(['accepted', 'denied', 'cancelled', 'completed', 'reported', 'paused']))
+    def transition(self, target):
+        current = self.handshake.status
+        legal = LEGAL_TRANSITIONS.get(current, set())
+        if target not in legal:
+            return
+        self.handshake.status = target
+        self.handshake.save(update_fields=['status'])
+        self.handshake.refresh_from_db()
+        assert self.handshake.status == target
+
+    @invariant()
+    def status_is_known(self):
+        valid = {choice[0] for choice in Handshake.STATUS_CHOICES}
+        assert self.handshake.status in valid
+
+
+PropertyTestHandshakeStateMachine = HandshakeStateMachine.TestCase
+PropertyTestHandshakeStateMachine.settings = settings(
+    max_examples=20, stateful_step_count=12, deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+)

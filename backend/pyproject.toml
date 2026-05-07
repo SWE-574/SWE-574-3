@@ -1,0 +1,33 @@
+[tool.coverage.run]
+branch = true
+source = ["api"]
+omit = [
+    "api/migrations/*",
+    "api/tests/*",
+    "*/management/commands/*",
+    "manage.py",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.mutmut]
+paths_to_mutate = [
+    "api/ranking.py",
+    "api/achievement_utils.py",
+    "api/badge_utils.py",
+    "api/event_permissions.py",
+    "api/services.py",
+    "api/search_filters.py",
+]
+runner = "python -m pytest -x -q --no-cov api/tests/unit"
+tests_dir = "api/tests"
+backup = false

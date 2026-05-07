@@ -10,7 +10,11 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test tests/e2e/auth.spec.ts tests/e2e/dashboard.spec.ts",
+    "test:e2e:nightly": "playwright test --reporter=list,html,junit",
+    "test:e2e:a11y": "playwright test --grep=@a11y",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:report": "playwright show-report tests/reports/playwright"
@@ -38,8 +42,12 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
     "@eslint/js": "^9.39.1",
     "@playwright/test": "^1.49.1",
+    "@stryker-mutator/core": "^8.7.1",
+    "@stryker-mutator/typescript-checker": "^8.7.1",
+    "@stryker-mutator/vitest-runner": "^8.7.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

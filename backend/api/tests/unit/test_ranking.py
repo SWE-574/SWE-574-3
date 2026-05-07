@@ -35,6 +35,27 @@ except ImportError:
     _apply_recurring_decay = None
 
 
+def _seed_positive_signal(service):
+    """Give the service a non-zero ``quality`` factor so the capacity
+    multiplier is observable in score deltas. The hot score is
+    ``quality * activity * capacity_multiplier * newcomer_boost`` — without
+    a positive rep, quality is 0 and any multiplier vanishes.
+
+    Note: ``_compute_service_factors`` only counts positive reps from
+    handshakes on Offer/Need services. For Event tests, seed quality through
+    a sibling Offer owned by the same user.
+    """
+    owner = service.user
+    rep_target = service
+    if service.type == 'Event':
+        rep_target = ServiceFactory(user=owner, type='Offer', status='Active')
+    giver = UserFactory()
+    handshake = HandshakeFactory(service=rep_target, requester=giver, status='completed')
+    ReputationRepFactory(handshake=handshake, giver=giver, receiver=owner)
+    CommentFactory(service=service)
+    service.refresh_from_db()
+
+
 @pytest.mark.django_db
 @pytest.mark.unit
 class TestCalculateHotScore:
@@ -48,16 +69,30 @@ class TestCalculateHotScore:
         assert isinstance(score, (int, float))
     
     def test_hot_score_with_comments(self):
-        """Test hot score increases with comments"""
-        service = ServiceFactory(status='Active')
+        """Each new comment must strictly raise the hot score.
+
+        The score is ``quality * activity * ...`` so quality must be non-zero
+        for activity changes to be observable. Seed one positive rep first.
+        """
+        owner = UserFactory()
+        service = ServiceFactory(user=owner, status='Active')
+        giver = UserFactory()
+        handshake = HandshakeFactory(service=service, requester=giver, status='completed')
+        ReputationRepFactory(handshake=handshake, giver=giver, receiver=owner)
+        service.refresh_from_db()
         base_score = calculate_hot_score(service)
-        
-        CommentFactory(service=service)
+        assert base_score > 0
+
         CommentFactory(service=service)
         service.refresh_from_db()
-        
-        new_score = calculate_hot_score(service)
-        assert new_score >= base_score
+        score_after_one = calculate_hot_score(service)
+
+        CommentFactory(service=service)
+        service.refresh_from_db()
+        score_after_two = calculate_hot_score(service)
+
+        assert score_after_one > base_score
+        assert score_after_two > score_after_one
     
     def test_hot_score_with_reputation(self):
         """Test hot score increases with reputation"""
@@ -90,15 +125,15 @@ class TestCalculateHotScore:
             type='Event', status='Active', max_participants=4,
             scheduled_time=timezone.now() + timedelta(days=3),
         )
+        _seed_positive_signal(service)
         base_score = calculate_hot_score(service)
+        assert base_score > 0
 
-        # Fill to 75% (3 of 4)
         for _ in range(3):
             HandshakeFactory(service=service, status='accepted')
 
         boosted_score = calculate_hot_score(service)
-        if base_score != 0:
-            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+        assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
 
     def test_event_below_75_pct_no_boost(self):
         """Event below 75% capacity should NOT receive the multiplier."""
@@ -168,14 +203,15 @@ class TestCalculateHotScore:
             type='Event', status='Active', max_participants=100,
             scheduled_time=timezone.now() + timedelta(days=3),
         )
+        _seed_positive_signal(service)
         base_score = calculate_hot_score(service)
+        assert base_score > 0
 
         for _ in range(75):
             HandshakeFactory(service=service, status='accepted')
 
         boosted_score = calculate_hot_score(service)
-        if base_score != 0:
-            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+        assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
 
     def test_event_at_99pct_gets_boost(self):
         """99% capacity (last slot open) should still trigger the 1.5× boost."""
@@ -183,14 +219,15 @@ class TestCalculateHotScore:
             type='Event', status='Active', max_participants=100,
             scheduled_time=timezone.now() + timedelta(days=3),
         )
+        _seed_positive_signal(service)
         base_score = calculate_hot_score(service)
+        assert base_score > 0
 
         for _ in range(99):
             HandshakeFactory(service=service, status='accepted')
 
         boosted_score = calculate_hot_score(service)
-        if base_score != 0:
-            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+        assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
 
     def test_event_at_100pct_no_boost(self):
         """Exactly 100% capacity (full) should NOT trigger the boost."""
@@ -211,14 +248,15 @@ class TestCalculateHotScore:
         service = ServiceFactory(
             type='Offer', status='Active', max_participants=4,
         )
+        _seed_positive_signal(service)
         base_score = calculate_hot_score(service)
+        assert base_score > 0
 
         for _ in range(3):
             HandshakeFactory(service=service, status='accepted')
 
         boosted_score = calculate_hot_score(service)
-        if base_score != 0:
-            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+        assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
 
     def test_single_participant_offer_no_boost(self):
         """Offer with max_participants=1 should never receive the group multiplier."""

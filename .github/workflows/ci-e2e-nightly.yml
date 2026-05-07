@@ -1,0 +1,173 @@
+name: CI — E2E Nightly (full Playwright + a11y + perf)
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-e2e:
+    name: Full Playwright + a11y
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DOCKER_BUILDKIT: "1"
+      COMPOSE_DOCKER_CLI_BUILD: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Write .env
+        run: |
+          cp .env.example .env
+          sed -i 's|DB_HOST=.*|DB_HOST=db|'         .env || true
+          sed -i 's|REDIS_HOST=.*|REDIS_HOST=redis|' .env || true
+          sed -i 's|MINIO_ENDPOINT=.*|MINIO_ENDPOINT=minio:9000|' .env || true
+          cat >> .env <<'EOF'
+          SECRET_KEY=ci-e2e-secret-key-not-used-in-production
+          DEBUG=True
+          ALLOWED_HOSTS=localhost,127.0.0.1
+          DJANGO_E2E=1
+          DISABLE_THROTTLING=1
+          EOF
+
+      - name: Build images
+        run: DJANGO_E2E=1 VITE_E2E=1 docker compose build
+
+      - name: Start stack
+        run: DJANGO_E2E=1 VITE_E2E=1 docker compose up -d
+
+      - name: Wait for stack health
+        run: |
+          for i in $(seq 1 30); do
+            UNHEALTHY=$(docker compose ps --format json | python3 -c "
+          import sys, json
+          rows = [json.loads(l) for l in sys.stdin if l.strip()]
+          bad = [r['Name'] for r in rows if r.get('Health','') not in ('healthy','')]
+          print('\n'.join(bad))")
+            [ -z "$UNHEALTHY" ] && { echo "All healthy"; break; }
+            sleep 5
+          done
+
+      - name: Seed demo data
+        run: |
+          DJANGO_E2E=1 docker compose exec -T backend \
+            bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python setup_demo.py"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-e2e-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Remove Docker-owned node_modules
+        run: sudo rm -rf frontend/node_modules
+
+      - name: Install JS dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run full Playwright suite
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost
+          CI: "true"
+        run: npm run test:e2e:nightly
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-nightly-report
+          path: frontend/tests/reports/playwright/
+          retention-days: 30
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-nightly-junit
+          path: frontend/tests/reports/playwright-junit.xml
+          retention-days: 30
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  perf:
+    name: k6 perf gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: full-e2e
+    env:
+      DOCKER_BUILDKIT: "1"
+      COMPOSE_DOCKER_CLI_BUILD: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write .env
+        run: |
+          cp .env.example .env
+          sed -i 's|DB_HOST=.*|DB_HOST=db|' .env || true
+          sed -i 's|REDIS_HOST=.*|REDIS_HOST=redis|' .env || true
+          sed -i 's|MINIO_ENDPOINT=.*|MINIO_ENDPOINT=minio:9000|' .env || true
+          cat >> .env <<'EOF'
+          SECRET_KEY=ci-perf-secret-key
+          DEBUG=False
+          ALLOWED_HOSTS=localhost,127.0.0.1
+          DJANGO_E2E=1
+          DISABLE_THROTTLING=1
+          EOF
+
+      - name: Build & start stack
+        run: |
+          DJANGO_E2E=1 docker compose build
+          DJANGO_E2E=1 docker compose up -d
+          sleep 30
+
+      - name: Seed demo data
+        run: |
+          DJANGO_E2E=1 docker compose exec -T backend \
+            bash -lc "cd /code && DJANGO_SETTINGS_MODULE=hive_project.settings python setup_demo.py"
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Run k6 perf gates
+        env:
+          BASE_URL: http://localhost
+        run: |
+          for script in frontend/tests/perf/*.js; do
+            echo "==> $script"
+            k6 run "$script"
+          done
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
