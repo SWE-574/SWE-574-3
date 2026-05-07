@@ -49,7 +49,6 @@ import {
   WHITE,
 } from '@/theme/tokens'
 import { formatGroupOfferDateTime, isNearlyFull } from '@/utils/eventUtils'
-import { isNearlyFull } from '@/utils/eventUtils'
 import {
   MAP_SCROLL_DEBOUNCE_MS,
   nextMapCollapsedState,
