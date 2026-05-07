@@ -2,9 +2,12 @@ import React from 'react'
 import { render, fireEvent } from '@testing-library/react-native'
 import MapTabButton from '../MapTabButton'
 
+// React Navigation's BottomTabBarButtonProps requires `children` (the icon
+// slot), so satisfy the contract with an empty fragment for the test.
 const baseProps = {
   href: '/map',
   testID: 'map-tab-button',
+  children: null,
 } as const
 
 describe('MapTabButton', () => {
