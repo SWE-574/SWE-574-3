@@ -2783,22 +2783,64 @@ class ServiceViewSet(viewsets.ModelViewSet):
     )
     def saved(self, request):
         """List the viewer's saved services, newest first (#483)."""
-        from .models import SavedService
+        from .models import Endorsement, SavedService
+        from django.db.models import BooleanField, DateTimeField, IntegerField
 
-        saved_qs = (
-            SavedService.objects
-            .filter(user=request.user)
-            .select_related('service__user')
-            .order_by('-created_at')
+        user_badges_prefetch = Prefetch(
+            'user__badges',
+            queryset=UserBadge.objects.select_related('badge'),
         )
-        services = [row.service for row in saved_qs]
-        for svc in services:
-            svc.is_saved = True
-        page = self.paginate_queryset(services)
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused', 'checked_in', 'attended', 'no_show']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+        saved_at_sq = (
+            SavedService.objects
+            .filter(user=request.user, service=OuterRef('pk'))
+            .values('created_at')[:1]
+        )
+        endorsement_count_sq = (
+            Endorsement.objects
+            .filter(service=OuterRef('pk'))
+            .order_by()
+            .values('service')
+            .annotate(c=Count('id'))
+            .values('c')
+        )
+        queryset = (
+            Service.objects
+            .filter(savers__user=request.user)
+            .select_related('user', 'event_evaluation_summary')
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
+            .annotate(
+                comment_count=Count('comments', filter=Q(comments__is_deleted=False)),
+                is_saved_anno=Value(True, output_field=BooleanField()),
+                is_endorsed_anno=Exists(
+                    Endorsement.objects.filter(
+                        endorser=request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                endorsement_count_anno=Coalesce(
+                    Subquery(endorsement_count_sq, output_field=IntegerField()),
+                    Value(0, output_field=IntegerField()),
+                ),
+                saved_at=Subquery(saved_at_sq, output_field=DateTimeField()),
+            )
+            .order_by('-saved_at')
+        )
+        page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(services, many=True)
+        serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
     @action(
