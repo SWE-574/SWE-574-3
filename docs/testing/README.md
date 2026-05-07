@@ -140,9 +140,21 @@ Frontend (Vitest + v8):
 Backend uses mutmut against the listed hot modules. Frontend uses Stryker against the API client + utils. Both run advisory on PR (commenting the score) and gating on the nightly cron.
 
 ```bash
-make test-mutation          # backend
+make test-mutation          # backend (mutmut)
 cd frontend && npm run test:mutation
 ```
+
+### Current state
+
+- **Frontend (Stryker 9.6.x against Vitest 4)**: working end-to-end. Initial baseline scores from one local run:
+  - `utils/dateTime.ts` — **60.5%** (meets the `break: 60` gate)
+  - `utils/eventUtils.ts` — 14% (no targeted unit tests yet)
+  - `services/conversationAPI.ts` — 9% (no targeted unit tests yet)
+  - `services/api.ts` — 0% (no targeted unit tests yet)
+  - `utils/cookies.ts` — 0% (no targeted unit tests yet)
+  These scores are the gate doing its job — the four low-scoring files have helpers/clients but no unit specs that actually exercise them. Adding those is follow-up work; the CI workflow already accepts non-zero exit (`|| true`) so the score surfaces as a PR comment without blocking the pipeline.
+
+- **Backend (mutmut 3.x)**: config updated to the v3 layout (`paths_to_mutate`, `tests_dir` as a list, `pytest_add_cli_args`) and `also_copy = ["hive_project", "manage.py", "conftest.py", "logs"]` to ship the Django bootstrap into `mutants/`. End-to-end runs are still blocked on Django's app registry — when `api/` is mirrored into `mutants/api/`, `AUTH_USER_MODEL = 'api.User'` no longer resolves through the registry. Bridging that gap is tracked as follow-up work; until it lands, the nightly job records partial output rather than a final score.
 
 ## CI Workflows
 
