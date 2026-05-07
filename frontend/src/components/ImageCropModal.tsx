@@ -73,7 +73,7 @@ export default function ImageCropModal({
   return (
     /* Backdrop */
     <Box
-      position="fixed" inset={0} zIndex={1000}
+      position="fixed" inset={0} zIndex={4000}
       style={{ background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={e => { if (e.target === e.currentTarget) onCancel() }}
     >

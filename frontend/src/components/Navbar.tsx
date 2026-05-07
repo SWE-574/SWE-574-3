@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Box, Flex, Text } from '@chakra-ui/react'
 import {
   FiBookmark,
+  FiActivity,
   FiMessageSquare,
   FiUser,
   FiBell,
@@ -14,8 +15,10 @@ import {
   FiMenu,
   FiX,
   FiLayers,
+  FiHelpCircle,
 } from 'react-icons/fi'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useTourStore } from '@/store/useTourStore'
 
 import {
   YELLOW, GREEN, GREEN_LT, RED, RED_LT,
@@ -136,6 +139,7 @@ function MobileNavLink({ to, icon, children, active, onClick }: {
 
 const Navbar = () => {
   const { user, isAuthenticated, logout } = useAuthStore()
+  const startTour = useTourStore((s) => s.startTour)
   const navigate  = useNavigate()
   const location  = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -192,11 +196,13 @@ const Navbar = () => {
         {/* Desktop nav links — absolutely centered, always in middle of navbar */}
         {isAuthenticated && (
           <Flex
+            data-tour="top-nav"
             align="center" gap={1} display={{ base: 'none', md: 'flex' }}
             position="absolute" left="50%" style={{ transform: 'translateX(-50%)' }}
           >
             <NavLink to="/dashboard" icon={<FiGrid size={15} />} active={p === '/dashboard'}>Browse</NavLink>
             <NavLink to="/forum" icon={<FiMessageCircle size={15} />} active={p.startsWith('/forum')}>Forum</NavLink>
+            <NavLink to="/activity" icon={<FiActivity size={15} />} active={p === '/activity'}>Activity</NavLink>
             <NavLink to="/messages" icon={<FiMessageSquare size={15} />} active={p === '/messages' || p.startsWith('/messages/')}>Messages</NavLink>
           </Flex>
         )}
@@ -257,6 +263,32 @@ const Navbar = () => {
               <Box display={{ base: 'none', sm: 'flex' }} alignItems="center">
                 <NotificationDropdown />
               </Box>
+
+              {/* Help / guided tour — visible on dashboard only */}
+              {isDashboard && (
+                <Box
+                  as="button"
+                  onClick={() => startTour()}
+                  title="Take a tour"
+                  aria-label="Take a tour"
+                  data-tour-trigger="dashboard"
+                  display={{ base: 'none', sm: 'flex' }}
+                  alignItems="center" justifyContent="center"
+                  w="36px" h="36px" borderRadius="10px"
+                  bg="transparent" color={GRAY600}
+                  style={{ border: 'none', cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s, color 0.15s' }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.background = GREEN_LT
+                    ;(e.currentTarget as HTMLDivElement).style.color = GREEN
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.background = 'transparent'
+                    ;(e.currentTarget as HTMLDivElement).style.color = GRAY600
+                  }}
+                >
+                  <FiHelpCircle size={20} />
+                </Box>
+              )}
 
               {/* User dropdown — desktop */}
               <Box display={{ base: 'none', md: 'block' }}>

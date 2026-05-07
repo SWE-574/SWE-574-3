@@ -94,7 +94,7 @@ export function MainSidebar({
       <Box px={4} pt={5} pb={4} borderBottom={`1px solid ${GRAY100}`}>
         {isAuthenticated && user ? (
           <>
-            <Flex align="center" gap={3} mb={4}>
+            <Flex data-tour="profile-card" align="center" gap={3} mb={4}>
               <Avatar u={user} size={44} />
               <Box flex={1} minW={0}>
                 <Text fontSize="14px" fontWeight={700} color={GRAY800}
@@ -124,6 +124,7 @@ export function MainSidebar({
             {/* Time bank widget */}
             <Box
               as="button"
+              data-tour="time-balance"
               w="full"
               display="block"
               borderRadius="14px" p="14px" mb={3} position="relative" overflow="hidden"
@@ -168,7 +169,7 @@ export function MainSidebar({
             </Box>
 
             {/* Stats row */}
-            <Grid templateColumns="repeat(2, minmax(0, 1fr))" gap="5px">
+            <Grid data-tour="activity-stats" templateColumns="repeat(2, minmax(0, 1fr))" gap="5px">
               <StatPill label="Pending"  value={pendingHs}   bg={AMBER_LT} color={AMBER} />
               <StatPill label="Active"   value={acceptedHs}  bg={GREEN_LT} color={GREEN} />
               <StatPill label="Done"     value={completedHs} bg={BLUE_LT}  color={BLUE}  />
@@ -204,7 +205,7 @@ export function MainSidebar({
 
       {/* ── Post a Service ── */}
       {isAuthenticated && (
-        <Box px={4} py={3} borderBottom={`1px solid ${GRAY100}`}>
+        <Box data-tour="post-buttons" px={4} py={3} borderBottom={`1px solid ${GRAY100}`}>
           <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
             style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             Post a Service
@@ -239,7 +240,7 @@ export function MainSidebar({
       <Box flex={1} overflowY="auto" px={4} py={4}>
 
         {!hideLocationFilters && toggleLocation && (
-          <Box mb={4}>
+          <Box data-tour="location" mb={4}>
             <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
               style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}>
               Location
@@ -281,7 +282,7 @@ export function MainSidebar({
         )}
 
         {isAuthenticated && myServices.length > 0 && !hideLocationFilters && (
-          <>
+          <Box data-tour="my-listings">
             <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
               style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}>
               My Listings ({myServices.length})
@@ -318,7 +319,7 @@ export function MainSidebar({
                 </Text>
               )}
             </VStack>
-          </>
+          </Box>
         )}
       </Box>
     </Box>

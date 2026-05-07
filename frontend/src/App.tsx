@@ -31,6 +31,8 @@ const PublicProfile          = lazy(() => import('@/pages/PublicProfile'))
 const TransactionHistoryPage = lazy(() => import('@/pages/TransactionHistoryPage'))
 const NotificationsPage      = lazy(() => import('@/pages/NotificationsPage'))
 const SavedServicesPage      = lazy(() => import('@/pages/SavedServicesPage'))
+const ActivityPage           = lazy(() => import('@/pages/ActivityPage'))
+const SuggestedUsersPage     = lazy(() => import('@/pages/SuggestedUsersPage'))
 const AdminDashboard         = lazy(() => import('@/pages/AdminDashboard'))
 const AdminUserDetailPage    = lazy(() => import('@/pages/AdminUserDetailPage'))
 const ReportDetail           = lazy(() => import('@/pages/ReportDetail'))
@@ -261,6 +263,22 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/activity"
+            element={
+              <ProtectedRoute>
+                <ActivityPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users/suggested"
+            element={
+              <ProtectedRoute>
+                <SuggestedUsersPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/service-detail/:id" element={<ServiceDetailPage />} />
           <Route path="/public-profile/:userId" element={<PublicProfile />} />
 
@@ -329,6 +347,10 @@ function App() {
           <Route
             path="/transaction-history"
             element={<ProtectedRoute><TransactionHistoryPage /></ProtectedRoute>}
+          />
+          <Route
+            path="/profile/reports"
+            element={<ProtectedRoute><UserProfile /></ProtectedRoute>}
           />
           <Route
             path="/notifications"

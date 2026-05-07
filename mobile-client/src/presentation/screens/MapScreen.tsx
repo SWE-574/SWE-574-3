@@ -31,7 +31,6 @@ type FilterType = "all" | ServiceType;
 // Istanbul city center — used when location permission is denied
 const DEFAULT_LOCATION = { latitude: 41.0082, longitude: 28.9784 };
 
-// ─── Marker helpers ───────────────────────────────────────────────────────────
 
 const MARKER_COLOR: Record<ServiceType, string> = {
   Offer: colors.GREEN,
@@ -363,7 +362,6 @@ export default function MapScreen() {
   );
 }
 
-/* ─── Marker summary sheet content ─────────────────────────────────────── */
 
 const TYPE_COLOR: Record<string, string> = {
   Offer: colors.GREEN,

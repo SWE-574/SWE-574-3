@@ -3,6 +3,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import { buildNotificationWsUrl, withAuthToken } from '../api/websocketUrls';
 import { useAuth } from '../context/AuthContext';
 import { useNotificationStore } from '../store/useNotificationStore';
+import { useToastStore } from '../store/useToastStore';
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const MAX_RECONNECT_DELAY = 30_000;
@@ -31,7 +32,21 @@ export function useNotificationSocket() {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'notification' && data.notification) {
-          useNotificationStore.getState().addNotification(data.notification);
+          const n = data.notification;
+          useNotificationStore.getState().addNotification(n);
+          useToastStore.getState().push({
+            id: String(n.id),
+            title: n.title ?? 'New notification',
+            body: n.message,
+            payload: n.type
+              ? {
+                  type: n.type,
+                  notification_id: n.id,
+                  related_handshake: n.related_handshake ?? null,
+                  related_service: n.related_service ?? null,
+                }
+              : undefined,
+          });
         }
       } catch {
         // ignore malformed messages

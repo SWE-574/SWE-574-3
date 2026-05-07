@@ -41,10 +41,12 @@ export interface ServicesListParams {
   location_type?: string;
   /** Owner filter; matches web `serviceAPI.list` (`?user=`). */
   user?: string;
-  sort?: "latest" | "hot";
+  sort?: "latest" | "hot" | "for_you";
   lat?: number;
   lng?: number;
   distance?: number;
+  /** Restrict to Phase 3 explore-eligible services for the "Try something new" carousel. */
+  explore_only?: boolean;
 }
 
 function normalizeService(service: Service): Service {
@@ -163,7 +165,6 @@ export function cancelEvent(serviceId: string): Promise<void> {
   return apiRequest<void>(`/services/${serviceId}/cancel-event/`, { method: 'POST' });
 }
 
-// ─── QR attendance token ─────────────────────────────────────────────────
 
 export interface QRTokenResponse {
   id: string;

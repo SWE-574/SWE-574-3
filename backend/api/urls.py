@@ -14,9 +14,13 @@ from .authentication import CookieJWTAuthentication
 from .views import (
     UserRegistrationView,
     UserProfileView,
+    MeCalendarView,
     UserHistoryView,
+    MyReportsView,
     UserBadgeProgressView,
     UserVerifiedReviewsView,
+    SuggestedUsersView,
+    ActivityFeedView,
     UserFollowView,
     UserFollowersListView,
     UserFollowingListView,
@@ -56,7 +60,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .views import CustomTokenObtainPairView
 from .views import CustomTokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
-from .views_featured import FeaturedView
+from .views_featured import FeaturedView, PublicFeaturedView
 
 router = DefaultRouter()
 router.register(r'services', ServiceViewSet, basename='service')
@@ -295,6 +299,9 @@ urlpatterns = [
     path('auth/send-verification/', SendVerificationEmailView.as_view(), name='send-verification'),
     path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
+    path('users/suggested/', SuggestedUsersView.as_view(), name='users-suggested'),
+    path('users/me/reports/', MyReportsView.as_view(), name='my-reports'),
+    path('users/me/calendar/', MeCalendarView.as_view(), name='user-calendar'),
     # Nested /users/<id>/… routes must be registered before the generic user-detail path
     # so paths like …/follow/ are never mistaken for detail (defensive ordering).
     path('users/<uuid:id>/follow/', UserFollowView.as_view(), name='user-follow'),
@@ -339,9 +346,14 @@ urlpatterns = [
     # E2E test utilities (only active when DJANGO_E2E=1)
     path('e2e/set-balance/', E2ESetBalanceView.as_view(), name='e2e-set-balance'),
 
+    # Activity feed (#482) — chronological events from followed actors and
+    # actors within the configured proximity radius of the viewer.
+    path('activity/feed/', ActivityFeedView.as_view(), name='activity-feed'),
+
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
     path('featured/', FeaturedView.as_view(), name='featured'),
+    path('featured/public/', PublicFeaturedView.as_view(), name='featured-public'),
     path('', include(router.urls)),
 ]

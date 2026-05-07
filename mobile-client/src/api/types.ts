@@ -18,13 +18,19 @@ export interface UserSummary {
   bio?: string | null;
   avatar_url?: string | null;
   banner_url?: string | null;
+  location?: string | null;
   timebank_balance?: string;
   karma_score?: number;
   role?: string;
   date_joined?: string;
   badges?: string[];
+  /** @deprecated Use featured_badges[] instead */
   featured_badge?: string | null;
   featured_achievement_id?: string | null;
+  /** Up to 2 badge IDs the user has chosen to feature on their profile. */
+  featured_badges?: string[];
+  /** Resolved badge details for featured_badges (read-only, from API). */
+  featured_badges_detail?: import("./calendar").BadgeDetail[];
   /** When false, other users should not see exchange history (web parity). */
   show_history?: boolean;
   is_verified?: boolean;
@@ -53,6 +59,10 @@ export interface PublicUserProfile {
   punctual_count?: number;
   badges?: string[];
   achievements?: string[];
+  /** Up to 2 badge IDs the user has chosen to feature on their profile. */
+  featured_badges?: string[];
+  /** Resolved badge details for featured_badges (read-only, from API). */
+  featured_badges_detail?: import("./calendar").BadgeDetail[];
   skills?: Array<{ id: string; name: string }>;
   portfolio_images?: string[];
   /** Public exchange history visibility; when false, do not fetch history for viewers. */
@@ -113,6 +123,13 @@ export interface EventEvaluationSummary {
   updated_at: string;
 }
 
+export interface ForYouSignals {
+  tag: number;
+  follow: number;
+  cooccur: number;
+  recency_penalty: number;
+}
+
 export interface Service {
   id: string;
   user: UserSummary;
@@ -139,6 +156,9 @@ export interface Service {
   is_saved?: boolean;
   is_endorsed?: boolean;
   endorsement_count?: number;
+  is_newcomer_owner?: boolean;
+  source?: "tag_match" | "explore_topup" | "for_you" | null;
+  for_you_signals?: ForYouSignals | null;
   requires_qr_checkin?: boolean;
   session_exact_location?: string | null;
   session_exact_location_lat?: string | null;

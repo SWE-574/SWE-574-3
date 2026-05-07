@@ -4,12 +4,14 @@ import HomeScreen from "../presentation/screens/HomeScreen";
 import ServiceDetailScreen from "../presentation/screens/ServiceDetailScreen";
 import MapScreen from "../presentation/screens/MapScreen";
 import NotificationsScreen from "../presentation/screens/NotificationsScreen";
+import ActivityScreen from "../presentation/screens/ActivityScreen";
 
 export type HomeStackParamList = {
   HomeFeed: undefined;
   ServiceDetail: { id: string };
   Map: undefined;
   Notifications: undefined;
+  Activity: undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -25,6 +27,7 @@ export default function HomeStack() {
       <Stack.Screen name="ServiceDetail" component={ServiceDetailScreen} />
       <Stack.Screen name="Map" component={MapScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
+      <Stack.Screen name="Activity" component={ActivityScreen} />
     </Stack.Navigator>
   );
 }

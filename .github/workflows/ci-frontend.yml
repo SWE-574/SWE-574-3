@@ -31,9 +31,15 @@ jobs:
           key: node-${{ hashFiles('frontend/package-lock.json') }}
           restore-keys: node-
 
+      # Stale tarball-extraction tmp files in ~/.npm/_cacache/tmp can cause
+      # `npm ci` to crash with `EEXIST: file already exists`. Wiping the
+      # tmp dir is safe and only adds a few ms.
+      - name: Clear npm cache tmp
+        run: rm -rf ~/.npm/_cacache/tmp
+
       - name: Install dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit
 
       - name: Audit dependencies
         working-directory: frontend

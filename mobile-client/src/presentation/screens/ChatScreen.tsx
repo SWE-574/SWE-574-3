@@ -38,7 +38,17 @@ import { initiateHandshake, reportHandshake } from "../../api/handshakes";
 import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import { formatStatusLabel } from "../../utils/chatUtils";
+import {
+  getChatParticipantDisplay,
+  shouldShowChatParticipantLoading,
+} from "../../utils/chatParticipant";
+import { getChatNotificationReadIds } from "../../utils/chatNotificationRead";
 import type { Handshake } from "../../api/handshakes";
+import {
+  listNotifications,
+  markNotificationRead,
+} from "../../api/notifications";
+import { useNotificationStore } from "../../store/useNotificationStore";
 import type {
   ActionType,
   ChatMessageWithMeta,
@@ -69,6 +79,7 @@ export default function ChatScreen() {
 
   const {
     handshakeId,
+    notificationId,
     serviceId,
     otherUserName,
     serviceTitle,
@@ -86,6 +97,7 @@ export default function ChatScreen() {
     provisionedHours,
   } = params ?? {
     handshakeId: "",
+    notificationId: undefined,
     serviceId: undefined,
     otherUserName: "Chat",
     serviceTitle: undefined,
@@ -121,10 +133,25 @@ export default function ChatScreen() {
   const currentUserId = user?.id ? String(user.id) : undefined;
   const currentUserEmail = user?.email;
   const handshakeRecord = handshake as Record<string, unknown> | null;
+  const chatParticipant = useMemo(
+    () =>
+      getChatParticipantDisplay({
+        routeName: otherUserName,
+        routeUserId: otherUserId,
+        routeAvatarUrl: otherUserAvatarUrl,
+        handshake,
+      }),
+    [handshake, otherUserAvatarUrl, otherUserId, otherUserName],
+  );
+  const isParticipantLoading = shouldShowChatParticipantLoading({
+    handshakeId,
+    routeName: otherUserName,
+    handshake,
+  });
 
   const title = useMemo(
-    () => serviceTitle || otherUserName || "Messages",
-    [otherUserName, serviceTitle],
+    () => serviceTitle || chatParticipant.name || "Messages",
+    [chatParticipant.name, serviceTitle],
   );
   const isCurrentUserServiceOwner = useMemo(() => {
     const liveServiceType =
@@ -144,10 +171,10 @@ export default function ChatScreen() {
   }, [handshakeRecord, isProvider, serviceType]);
 
   const openOtherUserPublicProfile = useCallback(() => {
-    if (!otherUserId) return;
+    if (!chatParticipant.userId) return;
     // Navigate within the Messages stack so a proper back button is rendered
-    navigation.navigate("UserPublicProfile", { userId: otherUserId });
-  }, [navigation, otherUserId]);
+    navigation.navigate("UserPublicProfile", { userId: chatParticipant.userId });
+  }, [chatParticipant.userId, navigation]);
 
   const openServiceDetail = useCallback(() => {
     if (!serviceId) return;
@@ -286,6 +313,41 @@ export default function ChatScreen() {
   }, [loadHandshake]);
 
   useEffect(() => {
+    if (!handshakeId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const unread = await listNotifications({
+          unread_only: true,
+          page_size: 100,
+        });
+        if (cancelled) return;
+        const ids = getChatNotificationReadIds({
+          handshakeId,
+          explicitNotificationId: notificationId,
+          notifications: unread.results ?? [],
+        });
+        if (ids.length === 0) return;
+        await Promise.all(ids.map((id) => markNotificationRead(id)));
+        if (!cancelled) {
+          const notificationStore = useNotificationStore.getState();
+          await Promise.all([
+            notificationStore.fetchNotifications(1),
+            notificationStore.fetchUnreadCount(),
+          ]);
+        }
+      } catch {
+        // Read receipts are best-effort; chat must still open offline or on API failure.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [handshakeId, notificationId]);
+
+  useEffect(() => {
     navigation.setOptions({
       headerTitle: () => (
         <View style={styles.headerTitleWrap}>
@@ -326,7 +388,7 @@ export default function ChatScreen() {
       return {
         myConfirmed: false,
         otherConfirmed: false,
-        counterpartName: otherUserName,
+      counterpartName: chatParticipant.name,
       };
     }
 
@@ -348,14 +410,14 @@ export default function ChatScreen() {
         .join(" ")
         .trim() ||
       counterpart?.email ||
-      otherUserName;
+      chatParticipant.name;
 
     return {
       myConfirmed: isCurrentUserProvider ? providerConfirmed : receiverConfirmed,
       otherConfirmed: isCurrentUserProvider ? receiverConfirmed : providerConfirmed,
       counterpartName,
     };
-  }, [handshake, isProvider, otherUserName]);
+  }, [chatParticipant.name, handshake, isProvider]);
 
   const displayHandshakeBanner = useMemo(() => {
     if (hasCancellationRequest) {
@@ -604,7 +666,7 @@ export default function ChatScreen() {
       const currentSenderKey = String(item.sender_id ?? item.sender ?? "");
       const showAvatar =
         !own && (!previous || previousOwn || previousSenderKey !== currentSenderKey);
-      const senderName = item.sender_name ?? otherUserName;
+      const senderName = item.sender_name ?? chatParticipant.name;
       const avatarUrl = item.sender_avatar_url;
 
       return (
@@ -618,7 +680,7 @@ export default function ChatScreen() {
         />
       );
     },
-    [formatTime, isOwnMessage, messages, otherUserName],
+    [chatParticipant.name, formatTime, isOwnMessage, messages],
   );
 
   return (
@@ -629,15 +691,16 @@ export default function ChatScreen() {
         keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
       >
         <ChatTopMeta
-          otherUserName={otherUserName}
-          otherUserAvatarUrl={otherUserAvatarUrl}
+          otherUserName={chatParticipant.name}
+          otherUserAvatarUrl={chatParticipant.avatarUrl}
+          isParticipantLoading={isParticipantLoading}
           serviceTitle={serviceTitle}
           handshakeStatus={handshakeStatus}
           formatStatusLabel={formatStatusLabel}
           connected={connected}
           reconnectAttempts={reconnectAttempts}
           onViewProfile={
-            otherUserId ? openOtherUserPublicProfile : undefined
+            chatParticipant.userId ? openOtherUserPublicProfile : undefined
           }
           onOpenService={serviceId ? openServiceDetail : undefined}
         />

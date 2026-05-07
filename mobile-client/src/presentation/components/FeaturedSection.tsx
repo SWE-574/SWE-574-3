@@ -97,14 +97,23 @@ export default function FeaturedSection({
             .catch(() => {});
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        // Log so the underlying cause is visible in the dev console — the
+        // empty-state copy ("Friend activity is unavailable right now.")
+        // otherwise hides whether this is a 401, network drop, or parse error.
+        console.warn("[FeaturedSection] getFeatured failed:", err);
         if (!cancelled) {
           setApiFailed(true);
           listServices({ sort: "hot", page_size: 8 })
             .then(({ results }) => {
               if (!cancelled) setHotFallback(results ?? []);
             })
-            .catch(() => {});
+            .catch((fallbackErr) => {
+              console.warn(
+                "[FeaturedSection] hot fallback failed:",
+                fallbackErr,
+              );
+            });
         }
       })
       .finally(() => {
