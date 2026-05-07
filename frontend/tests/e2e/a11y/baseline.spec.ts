@@ -43,4 +43,33 @@ test.describe('@a11y baseline', () => {
     await page.getByRole('button', { name: /create.*offer/i }).first().click()
     await expectNoBlockingA11y(page, { selector: '[role="dialog"]' })
   })
+
+  test('@a11y registration page', async ({ page }) => {
+    await page.goto('/register')
+    await expectNoBlockingA11y(page)
+  })
+
+  test('@a11y forum topic list', async ({ page }) => {
+    await loginAs(page, USERS.regular)
+    await page.goto('/forum')
+    await expectNoBlockingA11y(page)
+  })
+
+  test('@a11y search / dashboard with active query', async ({ page }) => {
+    await loginAs(page, USERS.regular)
+    await page.goto('/dashboard?q=tutoring')
+    await expectNoBlockingA11y(page)
+  })
+
+  test('@a11y create event modal', async ({ page }) => {
+    await loginAs(page, USERS.regular)
+    await page.goto('/dashboard')
+    const createEvent = page.getByRole('button', { name: /create.*event/i }).first()
+    if (!(await createEvent.isVisible().catch(() => false))) {
+      test.skip(true, 'No create-event entry point on this dashboard variant')
+      return
+    }
+    await createEvent.click()
+    await expectNoBlockingA11y(page, { selector: '[role="dialog"]' })
+  })
 })

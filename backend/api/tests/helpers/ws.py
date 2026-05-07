@@ -22,6 +22,7 @@ The yielded object is a Channels ``WebsocketCommunicator``.
 """
 from contextlib import asynccontextmanager
 
+from channels.db import database_sync_to_async
 from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -33,7 +34,11 @@ def _build_app():
     return URLRouter(api.routing.websocket_urlpatterns)
 
 
+@database_sync_to_async
 def _token_for(user) -> str:
+    """Async-safe token mint. ``RefreshToken.for_user`` may touch the ORM
+    (custom claims), so it must run on a sync thread inside an async test.
+    """
     return str(RefreshToken.for_user(user).access_token)
 
 
@@ -60,7 +65,7 @@ async def consumer_for(path: str, *, user=None, auth: str = 'cookie'):
     headers: list[tuple[bytes, bytes]] = []
 
     if user is not None:
-        token = _token_for(user)
+        token = await _token_for(user)
         if auth == 'cookie':
             headers.append((b'cookie', f'access_token={token}'.encode()))
         else:
@@ -85,7 +90,7 @@ async def connect_consumer(path: str, *, user=None, auth: str = 'cookie'):
     headers: list[tuple[bytes, bytes]] = []
     final_path = path
     if user is not None:
-        token = _token_for(user)
+        token = await _token_for(user)
         if auth == 'cookie':
             headers.append((b'cookie', f'access_token={token}'.encode()))
         else:

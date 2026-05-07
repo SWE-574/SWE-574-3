@@ -446,16 +446,18 @@ class HandshakeStateMachine(RuleBasedStateMachine):
             status='pending', provisioned_hours=Decimal('1.00'),
         )
 
-    @rule(target=st.sampled_from(['accepted', 'denied', 'cancelled', 'completed', 'reported', 'paused']))
-    def transition(self, target):
+    @rule(target_status=st.sampled_from(
+        ['accepted', 'denied', 'cancelled', 'completed', 'reported', 'paused']
+    ))
+    def transition(self, target_status):
         current = self.handshake.status
         legal = LEGAL_TRANSITIONS.get(current, set())
-        if target not in legal:
+        if target_status not in legal:
             return
-        self.handshake.status = target
+        self.handshake.status = target_status
         self.handshake.save(update_fields=['status'])
         self.handshake.refresh_from_db()
-        assert self.handshake.status == target
+        assert self.handshake.status == target_status
 
     @invariant()
     def status_is_known(self):

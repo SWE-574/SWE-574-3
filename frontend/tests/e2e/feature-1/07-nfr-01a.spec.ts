@@ -71,10 +71,12 @@ test.describe('NFR-01a: Passwords not exposed in API responses', () => {
     // Chakra UI v3 (Ark UI): id prop goes to HiddenInput, not root. Click the visible Control.
     await page.locator('[data-scope="checkbox"][data-part="control"]').first().click()
 
+    const registerResponse = page.waitForResponse(
+      (r) => /\/api\/auth\/register\/?/.test(r.url()),
+      { timeout: 10_000 },
+    )
     await page.getByRole('button', { name: /sign up|register|create/i }).click()
-
-    // Wait for the register API response to be processed
-    await page.waitForTimeout(2_000)
+    await registerResponse.catch(() => undefined)
 
     expect(passwordLeak.found).toBe(false)
   })

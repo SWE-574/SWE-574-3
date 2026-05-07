@@ -102,11 +102,10 @@ test.describe('service detail join/request email verification gate', () => {
     // If we landed on our own service (no CTA), bail out — the test will be
     // exercised by other workers; this keeps the spec resilient to demo data.
     if (!(await requestBtn.isVisible().catch(() => false))) {
-      test.info().annotations.push({
-        type: 'skip-reason',
-        description: `Logged-in user (${ownerEmail}) appears to own the first dashboard service; no join CTA rendered.`,
-      })
-      test.skip()
+      test.skip(
+        true,
+        `Logged-in user (${ownerEmail}) owns the first dashboard service; no join CTA rendered to test the gate.`,
+      )
       return
     }
 

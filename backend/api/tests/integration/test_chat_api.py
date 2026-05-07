@@ -5,6 +5,7 @@ import pytest
 from rest_framework import status
 from unittest.mock import AsyncMock, patch
 
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory, ChatMessageFactory,
     ServiceGroupChatMessageFactory,
@@ -34,7 +35,7 @@ class TestChatViewSet:
         client.authenticate_user(user)
         
         response = client.get('/api/chats/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert 'results' in response.data
         conversation = next(item for item in response.data['results'] if item['handshake_id'] == str(handshake.id))
         assert conversation['service_member_count'] == 1
@@ -51,7 +52,7 @@ class TestChatViewSet:
         client.authenticate_user(requester)
 
         response = client.get('/api/chats/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         conversation = next(item for item in response.data['results'] if item['handshake_id'] == str(handshake.id))
         assert conversation['service_member_count'] == 3
     
@@ -67,7 +68,7 @@ class TestChatViewSet:
         client.authenticate_user(user)
         
         response = client.get(f'/api/chats/{handshake.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['count'] == 3
         assert len(response.data['results']) == 3
     
@@ -85,7 +86,7 @@ class TestChatViewSet:
             'handshake_id': str(handshake.id),
             'body': 'Hello, I am interested!'
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert ChatMessage.objects.filter(
             handshake=handshake,
             body='Hello, I am interested!'
@@ -110,7 +111,7 @@ class TestChatViewSet:
                 'body': 'WS broadcast check'
             })
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         fake_channel_layer.group_send.assert_awaited_once()
         called_group_name, called_payload = fake_channel_layer.group_send.await_args.args
         assert called_group_name == f'chat_{handshake.id}'
@@ -132,8 +133,7 @@ class TestChatViewSet:
             'handshake_id': str(handshake.id),
             'body': 'Unauthorized message'
         })
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
+        assert_problem_detail(response, 403)
     def test_completed_handshake_messages_accessible_to_both_parties(self):
         """FR-10c: private chat remains accessible after handshake is completed."""
         owner = UserFactory()
@@ -189,8 +189,7 @@ class TestChatViewSet:
         client.authenticate_user(participant_b)
 
         response = client.get(f'/api/chats/{handshake_a.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
+        assert_problem_detail(response, 403)
     def test_group_offer_participant_cannot_send_to_other_private_thread(self):
         """FR-10e: participant cannot send messages into another participant's private thread."""
         owner = UserFactory()
@@ -208,7 +207,7 @@ class TestChatViewSet:
             'handshake_id': str(handshake_a.id),
             'body': 'I should not be able to write here',
         })
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert not ChatMessage.objects.filter(
             handshake=handshake_a,
             sender=participant_b,
@@ -229,7 +228,7 @@ class TestPublicChatViewSet:
         client.authenticate_user(user)
         
         response = client.get(f'/api/public-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert 'room' in response.data
         assert 'messages' in response.data
         assert 'id' in response.data['room']
@@ -255,7 +254,7 @@ class TestPublicChatViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(UserFactory())
         response = client.get(f'/api/public-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['messages']['count'] == 1
         assert len(response.data['messages']['results']) == 1
     
@@ -270,7 +269,7 @@ class TestPublicChatViewSet:
         response = client.post(f'/api/public-chat/{service.id}/', {
             'body': 'Public question about this service'
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert PublicChatMessage.objects.filter(
             room=service.chat_room,
             body='Public question about this service'
@@ -325,7 +324,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(owner)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['service_id'] == str(service.id)
         assert response.data['service_title'] == service.title
         assert response.data['participants'] == [{
@@ -346,7 +345,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(participant)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data['messages']) == 1
         assert len(response.data['participants']) == 2
         assert response.data['participants'][0]['id'] == str(service.user_id)
@@ -362,7 +361,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(owner)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         created_at_values = [m['created_at'] for m in response.data['messages']]
         assert created_at_values == sorted(created_at_values)
 
@@ -375,8 +374,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(outsider)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
+        assert_problem_detail(response, 403)
     def test_pending_handshake_user_cannot_get_messages(self):
         """A pending requester must wait until the handshake is accepted."""
         service = _group_service()
@@ -387,16 +385,14 @@ class TestGroupChatViewSet:
         client.authenticate_user(requester)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
+        assert_problem_detail(response, 403)
     def test_unauthenticated_get_returns_401(self):
         """Unauthenticated requests are rejected."""
         from rest_framework.test import APIClient
         service = _group_service()
 
         response = APIClient().get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-
+        assert_problem_detail(response, 401)
     def test_get_nonexistent_service_returns_404(self):
         """Unknown service UUID returns 404."""
         import uuid
@@ -405,8 +401,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(owner)
 
         response = client.get(f'/api/group-chat/{uuid.uuid4()}/')
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
+        assert_problem_detail(response, 404)
     # ── GET: eligibility guards ───────────────────────────────────────────────
 
     def test_recurrent_service_requires_session_id(self):
@@ -418,7 +413,7 @@ class TestGroupChatViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(owner)
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert 'session_id' in (response.data.get('detail') or '')
 
     def test_recurrent_list_sessions_returns_sessions(self):
@@ -430,7 +425,7 @@ class TestGroupChatViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(owner)
         response = client.get(f'/api/group-chat/{service.id}/', {'list_sessions': 1})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert 'sessions' in response.data
         assert response.data['service_id'] == str(service.id)
 
@@ -450,7 +445,7 @@ class TestGroupChatViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(participant)
         response = client.get(f'/api/group-chat/{service.id}/', {'session_id': str(session.id)})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data['messages']) == 1
         assert response.data['messages'][0]['body'] == 'Hello session'
         assert response.data.get('session_id') == str(session.id)
@@ -464,7 +459,7 @@ class TestGroupChatViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(owner)
         response = client.get(f'/api/group-chat/{service.id}/', {'session_id': 'not-a-uuid'})
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
         assert response.data.get('detail') == 'Session not found'
 
     def test_recurrent_participant_cannot_access_other_session(self):
@@ -483,8 +478,7 @@ class TestGroupChatViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(participant_a)
         response = client.get(f'/api/group-chat/{service.id}/', {'session_id': str(session_b.id)})
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
+        assert_problem_detail(response, 403)
     def test_recurrent_participant_without_scheduled_time_cannot_access_session(self):
         """Accepted requester without matching scheduled_time cannot access recurrent session chat."""
         owner = UserFactory()
@@ -510,8 +504,7 @@ class TestGroupChatViewSet:
             f'/api/group-chat/{service.id}/',
             {'session_id': str(session.id)},
         )
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
+        assert_problem_detail(response, 403)
     def test_one_time_group_chat_unchanged_without_session_id(self):
         """One-Time group chat GET without session_id still returns 200 (backward compat)."""
         owner = UserFactory()
@@ -519,7 +512,7 @@ class TestGroupChatViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(owner)
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert 'messages' in response.data
         assert 'participants' in response.data
 
@@ -536,8 +529,7 @@ class TestGroupChatViewSet:
             {'body': 'Hello'},
             format='json',
         )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-
+        assert_problem_detail(response, 400)
     def test_recurrent_post_with_session_id_stores_in_session(self):
         """Recurrent send message with session_id creates message in that session."""
         owner = UserFactory()
@@ -555,7 +547,7 @@ class TestGroupChatViewSet:
             {'body': 'Session message', 'session_id': str(session.id)},
             format='json',
         )
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         msg = ServiceGroupChatMessage.objects.get(service=service, body='Session message')
         assert msg.group_chat_session_id == session.id
 
@@ -572,7 +564,7 @@ class TestGroupChatViewSet:
             {'body': 'Hello', 'session_id': 'not-a-uuid'},
             format='json',
         )
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
         assert response.data.get('detail') == 'Session not found'
 
     def test_single_participant_service_is_not_eligible(self):
@@ -586,8 +578,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(owner)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
+        assert_problem_detail(response, 403)
     # ── POST: sending messages ────────────────────────────────────────────────
 
     def test_owner_can_send_message(self):
@@ -603,7 +594,7 @@ class TestGroupChatViewSet:
             {'body': 'Welcome everyone!'},
             format='json',
         )
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert ServiceGroupChatMessage.objects.filter(
             service=service, body='Welcome everyone!'
         ).exists()
@@ -622,7 +613,7 @@ class TestGroupChatViewSet:
             {'body': 'Hello group!'},
             format='json',
         )
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert ServiceGroupChatMessage.objects.filter(
             service=service, sender=participant, body='Hello group!'
         ).exists()
@@ -640,7 +631,7 @@ class TestGroupChatViewSet:
             {'body': 'Test message'},
             format='json',
         )
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         for field in ('id', 'body', 'sender_id', 'sender_name', 'created_at'):
             assert field in response.data, f"Missing field: {field}"
 
@@ -657,8 +648,7 @@ class TestGroupChatViewSet:
             {'body': '   '},
             format='json',
         )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-
+        assert_problem_detail(response, 400)
     def test_missing_body_returns_400(self):
         """Request with no body field is rejected."""
         owner = UserFactory()
@@ -668,8 +658,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(owner)
 
         response = client.post(f'/api/group-chat/{service.id}/', {}, format='json')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-
+        assert_problem_detail(response, 400)
     def test_unrelated_user_cannot_send_message(self):
         """A user with no connection to the service cannot post."""
         service = _group_service()
@@ -683,7 +672,7 @@ class TestGroupChatViewSet:
             {'body': 'Sneaky message'},
             format='json',
         )
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert not ServiceGroupChatMessage.objects.filter(service=service).exists()
 
     def test_unauthenticated_post_returns_401(self):
@@ -696,8 +685,7 @@ class TestGroupChatViewSet:
             {'body': 'No auth'},
             format='json',
         )
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-
+        assert_problem_detail(response, 401)
     # ── Event group chat  ─────────────────────────────────────────────────────
 
     def test_event_organizer_can_access_group_chat(self):
@@ -712,8 +700,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(owner)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
-
+        assert_api_response(response, 200)
     def test_event_checked_in_participant_can_access_group_chat(self):
         """A checked-in event participant can access group chat."""
         owner = UserFactory()
@@ -728,8 +715,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(participant)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
-
+        assert_api_response(response, 200)
     def test_event_attended_participant_can_access_group_chat(self):
         """An attended event participant can access group chat."""
         owner = UserFactory()
@@ -744,8 +730,7 @@ class TestGroupChatViewSet:
         client.authenticate_user(participant)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
-
+        assert_api_response(response, 200)
     def test_event_cancelled_participant_cannot_access_group_chat(self):
         """A cancelled event participant cannot access group chat."""
         owner = UserFactory()
@@ -760,4 +745,4 @@ class TestGroupChatViewSet:
         client.authenticate_user(participant)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)

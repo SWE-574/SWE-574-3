@@ -12,11 +12,20 @@ exercised the connection handshake or authorization rejection at the wire.
 from decimal import Decimal
 
 import pytest
+from channels.db import database_sync_to_async
 
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory,
 )
 from api.tests.helpers.ws import consumer_for, connect_consumer
+
+
+# Channels' WebsocketCommunicator runs in an async context, so any ORM call
+# (and the django-storages MinIO setup that fires when a service is built)
+# must be wrapped in database_sync_to_async to avoid SynchronousOnlyOperation.
+async_user = database_sync_to_async(UserFactory)
+async_service = database_sync_to_async(ServiceFactory)
+async_handshake = database_sync_to_async(HandshakeFactory)
 
 
 @pytest.mark.asyncio
@@ -26,10 +35,10 @@ class TestPrivateChatConnect:
     """``ws/chat/<handshake>/`` is restricted to the two handshake parties."""
 
     async def test_owner_can_connect_via_cookie(self, db):
-        owner = UserFactory()
-        requester = UserFactory()
-        service = ServiceFactory(user=owner)
-        handshake = HandshakeFactory(service=service, requester=requester)
+        owner = await async_user()
+        requester = await async_user()
+        service = await async_service(user=owner)
+        handshake = await async_handshake(service=service, requester=requester)
 
         async with consumer_for(
             f'/ws/chat/{handshake.id}/', user=owner, auth='cookie',
@@ -38,10 +47,10 @@ class TestPrivateChatConnect:
             assert connected is True
 
     async def test_requester_can_connect_via_query_token(self, db):
-        owner = UserFactory()
-        requester = UserFactory()
-        service = ServiceFactory(user=owner)
-        handshake = HandshakeFactory(service=service, requester=requester)
+        owner = await async_user()
+        requester = await async_user()
+        service = await async_service(user=owner)
+        handshake = await async_handshake(service=service, requester=requester)
 
         async with consumer_for(
             f'/ws/chat/{handshake.id}/', user=requester, auth='query',
@@ -50,11 +59,11 @@ class TestPrivateChatConnect:
             assert connected is True
 
     async def test_outsider_is_rejected(self, db):
-        owner = UserFactory()
-        requester = UserFactory()
-        outsider = UserFactory()
-        service = ServiceFactory(user=owner)
-        handshake = HandshakeFactory(service=service, requester=requester)
+        owner = await async_user()
+        requester = await async_user()
+        outsider = await async_user()
+        service = await async_service(user=owner)
+        handshake = await async_handshake(service=service, requester=requester)
 
         comm, connected, _ = await connect_consumer(
             f'/ws/chat/{handshake.id}/', user=outsider, auth='cookie',
@@ -65,10 +74,10 @@ class TestPrivateChatConnect:
             await comm.disconnect()
 
     async def test_anonymous_is_rejected(self, db):
-        owner = UserFactory()
-        requester = UserFactory()
-        service = ServiceFactory(user=owner)
-        handshake = HandshakeFactory(service=service, requester=requester)
+        owner = await async_user()
+        requester = await async_user()
+        service = await async_service(user=owner)
+        handshake = await async_handshake(service=service, requester=requester)
 
         comm, connected, _ = await connect_consumer(
             f'/ws/chat/{handshake.id}/', user=None,
@@ -86,13 +95,13 @@ class TestNotificationConsumer:
     """``ws/notifications/`` accepts every authenticated user."""
 
     async def test_authenticated_user_connects(self, db):
-        user = UserFactory()
+        user = await async_user()
         async with consumer_for('/ws/notifications/', user=user, auth='cookie') as comm:
             connected, _ = await comm.connect()
             assert connected is True
 
     async def test_query_token_path_works_for_mobile(self, db):
-        user = UserFactory()
+        user = await async_user()
         async with consumer_for('/ws/notifications/', user=user, auth='query') as comm:
             connected, _ = await comm.connect()
             assert connected is True
@@ -112,8 +121,8 @@ class TestGroupChatConsumer:
     """``ws/group-chat/<service>/`` requires service ownership or accepted membership."""
 
     async def test_owner_can_connect(self, db):
-        owner = UserFactory()
-        service = ServiceFactory(user=owner, max_participants=4)
+        owner = await async_user()
+        service = await async_service(user=owner, max_participants=4)
         async with consumer_for(
             f'/ws/group-chat/{service.id}/', user=owner, auth='cookie',
         ) as comm:
@@ -121,9 +130,9 @@ class TestGroupChatConsumer:
             assert connected is True
 
     async def test_outsider_without_handshake_rejected(self, db):
-        owner = UserFactory()
-        outsider = UserFactory()
-        service = ServiceFactory(user=owner, max_participants=4)
+        owner = await async_user()
+        outsider = await async_user()
+        service = await async_service(user=owner, max_participants=4)
         comm, connected, _ = await connect_consumer(
             f'/ws/group-chat/{service.id}/', user=outsider, auth='cookie',
         )

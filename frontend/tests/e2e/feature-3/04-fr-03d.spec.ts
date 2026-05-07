@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { loginAsAdmin, goToAdminTab, ADMIN_USERS } from '../helpers'
+import { waitForApi } from '../helpers/wait'
 
 /**
  * FR-03d — Forum topic lock / pin moderation.
@@ -19,9 +20,9 @@ test('FR-03d: Forum Topics tab loads without an auth error', async ({ page }) =>
 
 test('FR-03d: Forum Topics tab shows lock and pin controls when topics exist', async ({ page }) => {
   await loginAsAdmin(page, ADMIN_USERS.admin)
+  const moderation = waitForApi(page, '/api/admin/forum')
   await goToAdminTab(page, 'moderation')
-
-  await page.waitForTimeout(2_000)
+  await moderation.catch(() => undefined)
 
   const lockBtn = page.getByRole('button', { name: /lock|unlock/i }).first()
   const pinBtn  = page.getByRole('button', { name: /pin|unpin/i }).first()
@@ -42,13 +43,13 @@ test('FR-03d: Forum Topics tab shows lock and pin controls when topics exist', a
 
 test('FR-03d: admin can toggle the lock state on a forum topic', async ({ page }) => {
   await loginAsAdmin(page, ADMIN_USERS.admin)
+  const moderation = waitForApi(page, '/api/admin/forum')
   await goToAdminTab(page, 'moderation')
-
-  await page.waitForTimeout(2_000)
+  await moderation.catch(() => undefined)
 
   const lockBtn = page.getByRole('button', { name: /^(un)?lock topic$/i }).first()
   if (!(await lockBtn.isVisible().catch(() => false))) {
-    test.skip()
+    test.skip(true, 'No seeded forum topics in this environment — moderation control absent')
     return
   }
 
@@ -61,13 +62,13 @@ test('FR-03d: admin can toggle the lock state on a forum topic', async ({ page }
 
 test('FR-03d: admin can toggle the pin state on a forum topic', async ({ page }) => {
   await loginAsAdmin(page, ADMIN_USERS.admin)
+  const moderation = waitForApi(page, '/api/admin/forum')
   await goToAdminTab(page, 'moderation')
-
-  await page.waitForTimeout(2_000)
+  await moderation.catch(() => undefined)
 
   const pinBtn = page.getByRole('button', { name: /^(un)?pin topic$/i }).first()
   if (!(await pinBtn.isVisible().catch(() => false))) {
-    test.skip()
+    test.skip(true, 'No seeded forum topics in this environment — moderation control absent')
     return
   }
 

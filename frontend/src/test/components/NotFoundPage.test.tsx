@@ -29,10 +29,9 @@ describe('NotFoundPage', () => {
     expect(document.title).toMatch(/Page Not Found/i)
   })
 
-  it('renders a link back to the home page', () => {
+  it('renders navigation back to the home and services pages', () => {
     renderPage()
-    const home = screen.getByRole('link', { name: /home|dashboard|back/i })
-    expect(home).toBeInTheDocument()
-    expect(home.getAttribute('href')).toBe('/')
+    expect(screen.getByRole('button', { name: /go to home/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /browse services/i })).toBeInTheDocument()
   })
 })

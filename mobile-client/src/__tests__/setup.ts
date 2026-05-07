@@ -1,4 +1,6 @@
-import '@testing-library/jest-native/extend-expect'
+// @testing-library/react-native v12.4+ ships built-in Jest matchers, so the
+// deprecated @testing-library/jest-native/extend-expect import is no longer
+// needed — matchers are registered automatically when react-native is loaded.
 
 // Expo modules that touch the native bridge — stub them so component tests
 // can render without an Expo runtime. Each test file can override individual
