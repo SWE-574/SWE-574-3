@@ -7,7 +7,6 @@
 
 import { getCompactBadgeTooltipText } from "../../../../utils/profileBadgeDisplay";
 
-// ── Compact variant logic ─────────────────────────────────────────────────
 
 describe("BadgeShowcase compact logic", () => {
   // Reproduces the slicing logic from CompactShowcase
@@ -63,7 +62,6 @@ describe("BadgeShowcase compact logic", () => {
   });
 });
 
-// ── Picker variant logic ──────────────────────────────────────────────────
 
 describe("BadgeShowcase picker logic", () => {
   interface BadgeProg {

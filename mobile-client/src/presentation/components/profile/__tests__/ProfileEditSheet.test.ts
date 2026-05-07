@@ -6,7 +6,6 @@
  * drive the save-button enabled/disabled state and PATCH diff computation.
  */
 
-// ── Section order expectations ────────────────────────────────────────────
 
 describe("ProfileEditSheet sections", () => {
   it("defines sections in the correct order", () => {
@@ -28,7 +27,6 @@ describe("ProfileEditSheet sections", () => {
   });
 });
 
-// ── diffFields / isDirty helpers ──────────────────────────────────────────
 // Inlined here to unit-test the save button logic.
 
 type EditableFields = {

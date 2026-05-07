@@ -49,7 +49,6 @@ describe("UpcomingScheduleCard month grid", () => {
   });
 });
 
-// ── Selected day filtering ────────────────────────────────────────────────
 // Verifies the component's day-selection logic: when a day is selected,
 // only items starting on that day should be visible.
 

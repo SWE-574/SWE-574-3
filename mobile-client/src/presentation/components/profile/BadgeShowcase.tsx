@@ -29,7 +29,6 @@ import {
   getCompactBadgeTooltipText,
 } from "../../../utils/profileBadgeDisplay";
 
-// ── Types ─────────────────────────────────────────────────────────────────
 
 /** Shape used in picker mode – represents every badge with progress info */
 export interface BadgeProgress {
@@ -64,9 +63,7 @@ export interface BadgeShowcaseProps {
   onSelectionChange?: (ids: string[]) => void;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────
 
-// ── Compact mode ──────────────────────────────────────────────────────────
 
 function CompactBadge({
   badge,
@@ -179,7 +176,6 @@ function CompactShowcase({
   );
 }
 
-// ── Picker mode ───────────────────────────────────────────────────────────
 
 function PickerBadgeItem({
   badge,
@@ -340,7 +336,6 @@ function PickerGrid({
   );
 }
 
-// ── Main export ───────────────────────────────────────────────────────────
 
 export default function BadgeShowcase({
   variant,
@@ -375,7 +370,6 @@ export default function BadgeShowcase({
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────
 
 const compactStyles = StyleSheet.create({
   wrapper: {

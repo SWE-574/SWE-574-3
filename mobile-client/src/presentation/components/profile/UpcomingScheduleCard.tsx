@@ -35,11 +35,9 @@ import {
 } from "../../../utils/calendarItems";
 import type { ProfileStackParamList } from "../../../navigation/ProfileStack";
 
-// ── Types ─────────────────────────────────────────────────────────────────
 
 type ScheduleNavigation = NativeStackNavigationProp<ProfileStackParamList>;
 
-// ── Helpers ───────────────────────────────────────────────────────────────
 
 const MONTH_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -63,7 +61,6 @@ function formatSelectedDay(dayKey: string | null): string {
   }).format(new Date(`${dayKey}T12:00:00`));
 }
 
-// ── Month day cell ────────────────────────────────────────────────────────
 
 function MonthDayCell({
   cell,
@@ -116,7 +113,6 @@ function MonthDayCell({
   );
 }
 
-// ── Agenda item card ──────────────────────────────────────────────────────
 
 function AgendaItemCard({
   item,
@@ -159,7 +155,6 @@ function AgendaItemCard({
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────
 
 export default function UpcomingScheduleCard() {
   const navigation = useNavigation<ScheduleNavigation>();
@@ -336,7 +331,6 @@ export default function UpcomingScheduleCard() {
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────
 
 const cellStyles = StyleSheet.create({
   cell: {

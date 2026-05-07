@@ -27,7 +27,6 @@ import { normalizeRuntimeUrl } from "../../../constants/env";
 import { getInitials } from "../../../utils/getInitials";
 import BadgeShowcase from "./BadgeShowcase";
 
-// ── Types ─────────────────────────────────────────────────────────────────
 
 export interface ProfileHeroProps {
   /** "own" = authenticated user's own profile; "public" = another user's profile */
@@ -86,7 +85,6 @@ export interface ProfileHeroProps {
   onBadgePickerOpenRequest?: () => void;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────
 
 // getInitials is imported from utils/getInitials (shared utility).
 
@@ -121,7 +119,6 @@ function formatHeroLocation(location?: string | null): string | null {
   return location.trim();
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────
 
 function StatItem({
   label,
@@ -155,7 +152,6 @@ function StatItem({
   return content;
 }
 
-// ── Main component ────────────────────────────────────────────────────────
 
 export default function ProfileHero({
   mode,
@@ -407,7 +403,6 @@ export default function ProfileHero({
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────
 
 // GREEN brand gradient palette (no expo-linear-gradient; emulated with overlays)
 const HERO_DARK = "#064E3B"; // dark emerald (top overlay)

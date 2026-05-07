@@ -10,7 +10,6 @@
 
 import type { CalendarItem } from "../../../api/calendar";
 
-// ── Month header label format ─────────────────────────────────────────────
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -35,7 +34,6 @@ describe("CalendarScreen month header", () => {
   });
 });
 
-// ── Month grid ────────────────────────────────────────────────────────────
 
 describe("CalendarScreen month grid", () => {
   const { buildMonthGrid, startOfDay } = require("../../../utils/calendarItems");
@@ -67,7 +65,6 @@ describe("CalendarScreen month grid", () => {
   });
 });
 
-// ── Prev/next month navigation logic ──────────────────────────────────────
 
 describe("CalendarScreen month navigation", () => {
   function addMonths(date: Date, n: number): Date {
@@ -97,7 +94,6 @@ describe("CalendarScreen month navigation", () => {
   });
 });
 
-// ── Agenda grouping ───────────────────────────────────────────────────────
 
 describe("CalendarScreen agenda grouping", () => {
   const { groupItemsByAgenda } = require("../../../utils/calendarItems");

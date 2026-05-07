@@ -7,7 +7,6 @@
  * If react-test-renderer is added in future, promote these to full render tests.
  */
 
-// ── Meta strip construction ───────────────────────────────────────────────
 // Per THEME.md: @handle is removed from the meta strip. It now shows
 // "Joined Mon YYYY · city" only.
 
@@ -45,7 +44,6 @@ describe("ProfileHero meta strip", () => {
   });
 });
 
-// ── formatJoinedDate helper (inline, same logic as component) ─────────────
 
 describe("ProfileHero formatJoinedDate", () => {
   function formatJoinedDate(dateStr?: string): string {

@@ -15,7 +15,6 @@ import {
 } from "../calendarItems";
 import type { CalendarItem } from "../../api/calendar";
 
-// ── Fixtures ──────────────────────────────────────────────────────────────
 
 function makeItem(
   id: string,
@@ -46,7 +45,6 @@ function makeItem(
   };
 }
 
-// ── groupItemsByAgenda ─────────────────────────────────────────────────────
 
 describe("groupItemsByAgenda", () => {
   it("puts a same-day item in today bucket", () => {
@@ -104,7 +102,6 @@ describe("groupItemsByAgenda", () => {
   });
 });
 
-// ── nextNItems ────────────────────────────────────────────────────────────
 
 describe("nextNItems", () => {
   it("returns up to N items in chronological order", () => {
@@ -141,7 +138,6 @@ describe("nextNItems", () => {
   });
 });
 
-// ── formatItemRange ───────────────────────────────────────────────────────
 
 describe("formatItemRange", () => {
   it("returns a non-empty string for a valid item", () => {
@@ -164,7 +160,6 @@ describe("formatItemRange", () => {
   });
 });
 
-// ── accentColorFor ────────────────────────────────────────────────────────
 
 describe("accentColorFor", () => {
   it("maps GREEN to a non-empty color string", () => {
@@ -189,7 +184,6 @@ describe("accentColorFor", () => {
   });
 });
 
-// ── buildMonthGrid ────────────────────────────────────────────────────────
 
 describe("buildMonthGrid", () => {
   it("always returns 6 rows of 7 cells", () => {
@@ -218,7 +212,6 @@ describe("buildMonthGrid", () => {
   });
 });
 
-// ── profileCalendarFetchRange ──────────────────────────────────────────────
 
 describe("profileCalendarFetchRange", () => {
   it("fetches history from the broader fallback date and one year forward", () => {
@@ -237,7 +230,6 @@ describe("profileCalendarFetchRange", () => {
   });
 });
 
-// ── Date helpers ──────────────────────────────────────────────────────────
 
 describe("addDays", () => {
   it("adds positive days correctly", () => {

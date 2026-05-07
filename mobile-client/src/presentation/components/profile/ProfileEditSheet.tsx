@@ -49,7 +49,6 @@ import {
   type LocationValue,
 } from "../../../utils/mapboxLocation";
 
-// ── Types ─────────────────────────────────────────────────────────────────
 
 export interface ProfileEditSheetProps {
   visible: boolean;
@@ -101,7 +100,6 @@ const EDIT_TABS: Array<{ key: EditTabKey; label: string; icon: keyof typeof Ioni
   { key: "privacy", label: "Privacy", icon: "shield-checkmark-outline" },
 ];
 
-// ── Diff helper ───────────────────────────────────────────────────────────
 
 function diffFields(
   original: EditableFields,
@@ -141,7 +139,6 @@ function isDirty(original: EditableFields, current: EditableFields): boolean {
   return Object.keys(diffFields(original, current)).length > 0;
 }
 
-// ── Section header ────────────────────────────────────────────────────────
 
 function SectionHeader({ title }: { title: string }) {
   return (
@@ -151,7 +148,6 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-// ── Form field ────────────────────────────────────────────────────────────
 
 function FormField({
   label,
@@ -218,7 +214,6 @@ function FormField({
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────
 
 export default function ProfileEditSheet({
   visible,
@@ -703,7 +698,6 @@ export default function ProfileEditSheet({
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────
 
 const sectionStyles = StyleSheet.create({
   header: {

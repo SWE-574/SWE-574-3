@@ -142,7 +142,6 @@ export function cancelEvent(serviceId: string): Promise<void> {
   return apiRequest<void>(`/services/${serviceId}/cancel-event/`, { method: 'POST' });
 }
 
-// ─── QR attendance token ─────────────────────────────────────────────────
 
 export interface QRTokenResponse {
   id: string;

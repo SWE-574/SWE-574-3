@@ -10,7 +10,6 @@ import type {
   CalendarAccentToken,
 } from "../api/calendar";
 
-// ── Date helpers ──────────────────────────────────────────────────────────
 
 function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -50,7 +49,6 @@ export function profileCalendarFetchRange(
   };
 }
 
-// ── Agenda grouping ───────────────────────────────────────────────────────
 
 export interface AgendaGroups {
   today: CalendarItem[];
@@ -98,7 +96,6 @@ export function groupItemsByAgenda(items: CalendarItem[]): AgendaGroups {
   return groups;
 }
 
-// ── Next N items ──────────────────────────────────────────────────────────
 
 /**
  * Returns the next `n` upcoming items from `fromDate` (defaults to now).
@@ -115,7 +112,6 @@ export function nextNItems(
   return upcoming.slice(0, n);
 }
 
-// ── Accent color ──────────────────────────────────────────────────────────
 
 /**
  * Maps an accent_token to the corresponding color from the design token set.
@@ -134,7 +130,6 @@ export function accentColorFor(token: CalendarAccentToken): string {
   }
 }
 
-// ── Format item time range ────────────────────────────────────────────────
 
 /**
  * Formats a calendar item's time range as e.g. "Tue 14:00 – 16:00 (2h)"
@@ -166,7 +161,6 @@ export function formatItemRange(item: CalendarItem): string {
   }
 }
 
-// ── Conflict map ──────────────────────────────────────────────────────────
 
 /**
  * Converts the conflicts array into a Map<item_id, overlaps_with[]> for O(1) lookup.
@@ -179,7 +173,6 @@ export function conflictMap(conflicts: CalendarConflict[]): Map<string, string[]
   return map;
 }
 
-// ── Month grid ────────────────────────────────────────────────────────────
 
 export interface MonthGridCell {
   date: Date;
@@ -252,7 +245,6 @@ export function buildMonthGrid(
   return weeks;
 }
 
-// ── Date string helpers ───────────────────────────────────────────────────
 
 /**
  * Formats a Date as a "YYYY-MM-DD" string (local time, not UTC).
@@ -265,6 +257,5 @@ export function toDateString(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-// ── Helpers re-exported for tests ─────────────────────────────────────────
 
 export { isSameDay, addDays, startOfDay };

@@ -43,36 +43,19 @@ const rootEnv = readRootEnv();
 const mobileConfig = baseConfig.expo;
 
 const apiUrl =
-  process.env.EXPO_PUBLIC_API_URL ||
-  rootEnv.EXPO_PUBLIC_API_URL ||
-  "https://apiary.selmangunes.com/api";
+  process.env.EXPO_PUBLIC_API_URL || rootEnv.EXPO_PUBLIC_API_URL;
 
-const mapboxToken =
-  rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || rootEnv.VITE_MAPBOX_TOKEN || "";
+if (!apiUrl) {
+  throw new Error(
+    "EXPO_PUBLIC_API_URL is not set. Run `make env` at the repo root, or " +
+      "use `npm run ios` / `npm run android` which set it inline."
+  );
+}
 
-// #370 — let CI/EAS point at the Firebase credential file outside the repo.
-// app.json's androidFile/iosFile defaults still apply when these env vars
-// are absent, which is the local-dev path documented in CLAUDE.md.
-const androidFirebaseFile =
-  process.env.EXPO_GOOGLE_SERVICES_JSON ||
-  rootEnv.EXPO_GOOGLE_SERVICES_JSON;
-const iosFirebaseFile =
-  process.env.EXPO_GOOGLE_SERVICES_PLIST ||
-  rootEnv.EXPO_GOOGLE_SERVICES_PLIST;
-
-const androidConfig = {
-  ...(mobileConfig.android ?? {}),
-  ...(androidFirebaseFile ? { googleServicesFile: androidFirebaseFile } : {}),
-};
-const iosConfig = {
-  ...(mobileConfig.ios ?? {}),
-  ...(iosFirebaseFile ? { googleServicesFile: iosFirebaseFile } : {}),
-};
+const mapboxToken = rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || "";
 
 module.exports = {
   ...mobileConfig,
-  ios: iosConfig,
-  android: androidConfig,
   plugins: [
     ...(mobileConfig.plugins ?? []),
     "@react-native-community/datetimepicker",
