@@ -43,16 +43,17 @@ const rootEnv = readRootEnv();
 const mobileConfig = baseConfig.expo;
 
 const apiUrl =
-  process.env.EXPO_PUBLIC_API_URL ||
-  rootEnv.EXPO_PUBLIC_API_URL ||
-  "https://apiary.selmangunes.com/api";
+  process.env.EXPO_PUBLIC_API_URL || rootEnv.EXPO_PUBLIC_API_URL;
 
-const mapboxToken =
-  rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || rootEnv.VITE_MAPBOX_TOKEN || "";
+if (!apiUrl) {
+  throw new Error(
+    "EXPO_PUBLIC_API_URL is not set. Run `make env` at the repo root, or " +
+      "use one of the start:local:* scripts which set it inline."
+  );
+}
 
-// #370 — let CI/EAS point at the Firebase credential file outside the repo.
-// app.json's androidFile/iosFile defaults still apply when these env vars
-// are absent, which is the local-dev path documented in CLAUDE.md.
+const mapboxToken = rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || "";
+
 const androidFirebaseFile =
   process.env.EXPO_GOOGLE_SERVICES_JSON ||
   rootEnv.EXPO_GOOGLE_SERVICES_JSON;
