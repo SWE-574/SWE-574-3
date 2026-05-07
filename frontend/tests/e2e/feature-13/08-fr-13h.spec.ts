@@ -54,8 +54,7 @@ test('FR-13h: owner sees Interests panel with requester profile links', async ({
   )
 
   if (!handshakeResult.ok) {
-    // If seeding handshake fails (e.g. balance issue), skip gracefully
-    test.skip()
+    test.skip(true, 'Could not seed handshake via API (likely balance/permission issue in this environment)')
     return
   }
 

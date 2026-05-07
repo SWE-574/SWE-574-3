@@ -44,9 +44,15 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@testing-library/jest-native": "^5.4.3",
+    "@testing-library/react-native": "^12.9.0",
     "@types/jest": "^29.5.14",
     "@types/react": "~19.1.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "babel-jest": "^29.7.0",
     "jest": "^29.7.0",
+    "jest-expo": "~54.0.0",
+    "react-test-renderer": "19.1.0",
     "ts-jest": "^29.2.5",
     "typescript": "~5.9.2"
   },
@@ -55,18 +61,40 @@
     "@xmldom/xmldom": "^0.9.10"
   },
   "jest": {
-    "preset": "ts-jest",
-    "testEnvironment": "node",
-    "roots": [
-      "<rootDir>/src"
-    ],
-    "testMatch": [
-      "**/__tests__/**/*.test.ts"
-    ],
-    "moduleNameMapper": {
-      "^expo-secure-store$": "<rootDir>/src/api/__tests__/__mocks__/expo-secure-store.ts",
-      "^expo-network$": "<rootDir>/src/api/__tests__/__mocks__/expo-network.ts"
-    }
+    "projects": [
+      {
+        "displayName": "api",
+        "preset": "ts-jest",
+        "testEnvironment": "node",
+        "roots": [
+          "<rootDir>/src/api"
+        ],
+        "testMatch": [
+          "**/__tests__/**/*.test.ts"
+        ],
+        "moduleNameMapper": {
+          "^expo-secure-store$": "<rootDir>/src/api/__tests__/__mocks__/expo-secure-store.ts",
+          "^expo-network$": "<rootDir>/src/api/__tests__/__mocks__/expo-network.ts"
+        }
+      },
+      {
+        "displayName": "components",
+        "preset": "jest-expo",
+        "setupFiles": [
+          "<rootDir>/src/__tests__/setup.ts"
+        ],
+        "roots": [
+          "<rootDir>/src"
+        ],
+        "testMatch": [
+          "**/components/__tests__/**/*.test.tsx",
+          "**/__tests__/components/**/*.test.tsx"
+        ],
+        "transformIgnorePatterns": [
+          "node_modules/(?!((jest-)?react-native|@react-native|@react-navigation|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-clone-referenced-element|@react-native-community|sentry-expo|native-base|react-native-svg))"
+        ]
+      }
+    ]
   },
   "private": true
 }

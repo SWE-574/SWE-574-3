@@ -1,0 +1,55 @@
+[tool.coverage.run]
+branch = true
+source = ["api"]
+omit = [
+    "api/migrations/*",
+    "api/tests/*",
+    "*/management/commands/*",
+    "manage.py",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.mutmut]
+# Hot-module mutation scope. Each module here is a leverage point — ranking
+# scoring, achievement / badge logic, event permissions, the central service
+# domain layer, and the search filter strategies. Anything else is out of
+# scope for the mutation gate.
+paths_to_mutate = [
+    "api/ranking.py",
+    "api/achievement_utils.py",
+    "api/badge_utils.py",
+    "api/event_permissions.py",
+    "api/services.py",
+    "api/search_filters.py",
+]
+# mutmut 3.x drives pytest internally — `runner` is no longer supported.
+# `tests_dir` is a list of paths fed as positional pytest args, and
+# `pytest_add_cli_args` carries the extras that used to live in the v2
+# `runner` string. We blank out the project's pytest addopts via
+# `-o addopts=` because the inherited --cov=api / --cov-fail-under=70 /
+# --html=... options break inside the mutants/ working tree.
+tests_dir = ["api/tests/unit"]
+pytest_add_cli_args = ["-o", "addopts=", "-x", "-q", "--no-header", "-p", "no:cacheprovider"]
+# pytest-django needs hive_project/ on the path to load DJANGO_SETTINGS_MODULE,
+# and `manage.py` is the conventional entry point pytest-django pokes at.
+# mutmut 3.x only ships tests/, setup.cfg, pyproject.toml, pytest.ini and
+# .gitignore by default — everything else has to be enumerated here.
+#
+# NOTE: end-to-end mutmut runs against this Django app are not yet stable.
+# `mutants/api/` confuses Django's app registry (`AUTH_USER_MODEL refers to
+# model 'api.User' that has not been installed`) because mutmut moves the
+# whole `api` package into the mutants tree and Django's app loading does
+# not see the original location. Bridging that gap is tracked as follow-up
+# work; the CI job (.github/workflows/ci-mutation.yml) already tolerates
+# the non-zero exit so PR comments still surface whatever score is produced.
+also_copy = ["hive_project", "manage.py", "conftest.py", "logs"]

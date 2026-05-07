@@ -6,6 +6,7 @@ from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
 
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
 )
@@ -47,7 +48,7 @@ class TestReputationViewSet:
             'helpful': True,
             'kindness': True
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert ReputationRep.objects.filter(
             handshake=handshake,
             giver=requester,
@@ -79,7 +80,7 @@ class TestReputationViewSet:
             'comment': 'Great communication and punctual.'
         })
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert ReputationRep.objects.filter(
             handshake=handshake,
             giver=provider,
@@ -110,7 +111,7 @@ class TestReputationViewSet:
             'kindness': False,
         })
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert Notification.objects.filter(
             user=provider,
             type='positive_rep',
@@ -185,8 +186,7 @@ class TestReputationViewSet:
             'handshake_id': str(handshake.id),
             'comment': 'Too late review',
         })
-        assert response.status_code == status.HTTP_410_GONE
-
+        assert_problem_detail(response, 410)
     def test_add_review_without_comment_is_allowed_noop(self):
         provider = UserFactory()
         requester = UserFactory()
@@ -213,7 +213,7 @@ class TestReputationViewSet:
             'handshake_id': str(handshake.id),
         })
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['status'] == 'success'
         assert Comment.objects.filter(
             related_handshake=handshake,
@@ -296,7 +296,7 @@ class TestReputationViewSet:
 
         provider_client = AuthenticatedAPIClient().authenticate_user(provider)
         response = provider_client.get(f'/api/services/{service.id}/comments/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['count'] == 1
     
     def test_create_reputation_duplicate(self):
@@ -328,8 +328,7 @@ class TestReputationViewSet:
             'helpful': True,
             'kindness': True
         })
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-    
+        assert_problem_detail(response, 400)
     def test_create_reputation_own_handshake(self):
         """Test can only create reputation for completed handshake"""
         provider = UserFactory()
@@ -350,8 +349,7 @@ class TestReputationViewSet:
             'helpful': True,
             'kindness': True
         })
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-    
+        assert_problem_detail(response, 404)
     def test_list_reputation(self):
         """Test listing reputation entries"""
         provider = UserFactory()
@@ -375,7 +373,7 @@ class TestReputationViewSet:
         client.authenticate_user(requester)
         
         response = client.get('/api/reputation/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data) > 0
 
     def test_create_reputation_event_requires_attended(self):
@@ -403,8 +401,7 @@ class TestReputationViewSet:
             'engaging': True,
             'welcoming': True,
         })
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
+        assert_problem_detail(response, 404)
     def test_create_reputation_event_attended_allowed(self):
         organizer = UserFactory()
         participant = UserFactory()
@@ -430,8 +427,7 @@ class TestReputationViewSet:
             'engaging': False,
             'welcoming': True,
         })
-        assert response.status_code == status.HTTP_201_CREATED
-
+        assert_api_response(response, 201)
     def test_organizer_cannot_submit_event_evaluation(self):
         organizer = UserFactory()
         attendee = UserFactory()
@@ -457,9 +453,7 @@ class TestReputationViewSet:
             'engaging': True,
             'welcoming': True,
         })
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
-
+        assert_problem_detail(response, 403)
 @pytest.mark.django_db
 @pytest.mark.integration
 class TestNegativeRepViewSet:
@@ -484,7 +478,7 @@ class TestNegativeRepViewSet:
             'is_late': True,
             'comment': 'Arrived 30 minutes late'
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert NegativeRep.objects.filter(
             handshake=handshake,
             giver=requester,
@@ -510,7 +504,7 @@ class TestNegativeRepViewSet:
             'is_late': True,
         })
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert not Notification.objects.filter(
             user=provider,
             related_handshake=handshake,
@@ -575,8 +569,7 @@ class TestNegativeRepViewSet:
             'handshake_id': str(handshake.id),
             'disorganized': True,
         })
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
+        assert_problem_detail(response, 404)
     def test_create_positive_event_reputation_requires_attended_not_accepted(self):
         organizer = UserFactory()
         participant = UserFactory()
@@ -602,8 +595,7 @@ class TestNegativeRepViewSet:
             'engaging': True,
             'welcoming': True,
         })
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
+        assert_problem_detail(response, 404)
     def test_create_negative_event_reputation_requires_attended_not_accepted(self):
         organizer = UserFactory()
         participant = UserFactory()
@@ -627,8 +619,7 @@ class TestNegativeRepViewSet:
             'handshake_id': str(handshake.id),
             'disorganized': True,
         })
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
+        assert_problem_detail(response, 404)
     def test_create_positive_event_reputation_requires_attended_not_no_show(self):
         organizer = UserFactory()
         participant = UserFactory()
@@ -654,8 +645,7 @@ class TestNegativeRepViewSet:
             'engaging': True,
             'welcoming': True,
         })
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
+        assert_problem_detail(response, 404)
     def test_create_negative_event_reputation_requires_attended_not_no_show(self):
         organizer = UserFactory()
         participant = UserFactory()
@@ -679,8 +669,7 @@ class TestNegativeRepViewSet:
             'handshake_id': str(handshake.id),
             'disorganized': True,
         })
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
+        assert_problem_detail(response, 404)
     def test_event_evaluation_summary_created_and_exposed_on_service(self):
         organizer = UserFactory()
         participant = UserFactory()
@@ -704,8 +693,7 @@ class TestNegativeRepViewSet:
             'engaging': True,
             'welcoming': False,
         })
-        assert response.status_code == status.HTTP_201_CREATED
-
+        assert_api_response(response, 201)
         summary = EventEvaluationSummary.objects.get(service=event)
         assert summary.total_attended == 1
         assert summary.positive_feedback_count == 1
@@ -796,8 +784,7 @@ class TestNegativeRepViewSet:
             'engaging': True,
             'welcoming': True,
         })
-        assert response.status_code == status.HTTP_410_GONE
-
+        assert_problem_detail(response, 410)
     def test_event_reputation_window_expired_for_negative(self):
         organizer = UserFactory()
         participant = UserFactory()
@@ -819,9 +806,7 @@ class TestNegativeRepViewSet:
             'handshake_id': str(handshake.id),
             'disorganized': True,
         })
-        assert response.status_code == status.HTTP_410_GONE
-
-
+        assert_problem_detail(response, 410)
 @pytest.mark.django_db
 @pytest.mark.integration
 class TestEventEvaluationHotScoreIsolation:
@@ -862,8 +847,7 @@ class TestEventEvaluationHotScoreIsolation:
             'engaging': True,
             'welcoming': True,
         })
-        assert response.status_code == status.HTTP_201_CREATED
-
+        assert_api_response(response, 201)
         organizer.refresh_from_db()
         event.refresh_from_db()
 
@@ -939,7 +923,7 @@ class TestEventNoShowAppeals:
             {'description': 'I attended and can provide proof.'},
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert 'report_id' in response.data
         report = Report.objects.get(id=response.data['report_id'])
         assert report.type == 'no_show'
@@ -1007,7 +991,7 @@ class TestEventNoShowAppeals:
             {'action': 'overturn_no_show', 'admin_notes': 'Evidence confirmed'},
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         handshake.refresh_from_db()
         participant.refresh_from_db()
         report.refresh_from_db()
@@ -1048,7 +1032,7 @@ class TestEventNoShowAppeals:
             {'action': 'uphold_no_show'},
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         handshake.refresh_from_db()
         participant.refresh_from_db()
         report.refresh_from_db()
@@ -1091,7 +1075,7 @@ class TestAdminReportResolutionStatusMapping:
             {'action': 'dismiss', 'admin_notes': 'No violation found.'},
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         report.refresh_from_db()
         assert report.status == 'dismissed'
 
@@ -1125,7 +1109,7 @@ class TestAdminReportResolutionStatusMapping:
             {'action': 'confirm_no_show', 'admin_notes': 'No-show confirmed.'},
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         report.refresh_from_db()
         assert report.status == 'resolved'
 
@@ -1165,7 +1149,7 @@ class TestAdminReportResolutionStatusMapping:
             {'action': 'remove_from_event', 'admin_notes': 'Removed after chat abuse report.'},
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         report.refresh_from_db()
         participant_handshake.refresh_from_db()
         assert report.status == 'resolved'
@@ -1200,7 +1184,7 @@ class TestAdminReportResolutionStatusMapping:
             {'action': 'remove_from_event'},
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert 'organizer cannot be removed' in (response.data.get('detail', '') or '').lower()
 
 
@@ -1270,7 +1254,7 @@ class TestEventEvaluationCommentHistory:
         client.authenticate_user(participant)
         response = client.get(f'/api/services/{event.id}/comments/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['count'] == 1, (
             "Event reviews must not be hidden during the evaluation window — "
             "blind-review filter must skip Event handshakes"
@@ -1476,7 +1460,7 @@ class TestFR16cEvaluationScoping:
             'helpful': False,
             'kindness': False,
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         rep = ReputationRep.objects.get(handshake=handshake, giver=requester)
         assert rep.receiver == provider
 
@@ -1492,7 +1476,7 @@ class TestFR16cEvaluationScoping:
             'helpful': False,
             'kindness': False,
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         rep = ReputationRep.objects.get(handshake=handshake, giver=provider)
         assert rep.receiver == requester
 
@@ -1509,8 +1493,7 @@ class TestFR16cEvaluationScoping:
             'helpful': False,
             'kindness': False,
         })
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
+        assert_problem_detail(response, 403)
     def test_offer_evaluation_window_uniform_with_event_window(self):
         """
         Both Offer and Event evaluation windows are gated by the same
@@ -1534,8 +1517,7 @@ class TestFR16cEvaluationScoping:
             'handshake_id': str(handshake.id),
             'punctual': True,
         })
-        assert response.status_code == status.HTTP_410_GONE
-
+        assert_problem_detail(response, 410)
     # ------------------------------------------------------------------ #
     # 2. Event attendee-only gating
     # ------------------------------------------------------------------ #
@@ -1553,8 +1535,7 @@ class TestFR16cEvaluationScoping:
             'engaging': False,
             'welcoming': False,
         })
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-
+        assert_problem_detail(response, 403)
     def test_event_non_participant_cannot_evaluate(self):
         """User with no relation to the event is rejected."""
         organizer = UserFactory()
@@ -1585,7 +1566,7 @@ class TestFR16cEvaluationScoping:
             'engaging': False,
             'welcoming': False,
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         rep = ReputationRep.objects.get(handshake=handshake, giver=participant)
         assert rep.receiver == organizer, (
             'Event evaluation must target the organizer, not the participant'
@@ -1618,8 +1599,7 @@ class TestFR16cEvaluationScoping:
                 'engaging': False,
                 'welcoming': True,
             })
-            assert response.status_code == status.HTTP_201_CREATED
-
+            assert_api_response(response, 201)
         summary = EventEvaluationSummary.objects.get(service=event)
         assert summary.unique_evaluator_count == 3
         assert summary.positive_feedback_count == 3
@@ -1704,7 +1684,7 @@ class TestFR16cEvaluationScoping:
             'welcoming': True,        # event field — ignored by offer logic
         })
         # Request succeeds (offer context, not an error) but offer traits are all False.
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         rep = ReputationRep.objects.get(handshake=handshake, giver=requester)
         assert rep.is_punctual is False
         assert rep.is_helpful is False
@@ -1727,7 +1707,7 @@ class TestFR16cEvaluationScoping:
             'helpful': True,    # aliased to engaging
             'kindness': True,   # aliased to welcoming
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         rep = ReputationRep.objects.get(handshake=handshake, giver=participant)
         assert rep.receiver == organizer
 
@@ -1982,8 +1962,7 @@ class TestFR16eWindowCloseHotScoreContract:
             'handshake_id': str(handshake.id),
             'punctual': True,
         })
-        assert response.status_code == status.HTTP_410_GONE
-
+        assert_problem_detail(response, 410)
     def test_event_evaluation_rejected_after_window_close(self):
         """
         Submitting an event evaluation for a handshake whose window has already
@@ -2000,8 +1979,7 @@ class TestFR16eWindowCloseHotScoreContract:
             'handshake_id': str(handshake.id),
             'well_organized': True,
         })
-        assert response.status_code == status.HTTP_410_GONE
-
+        assert_problem_detail(response, 410)
     def test_batch_close_is_idempotent_for_event_scores(self):
         """
         Running process_feedback_windows twice on the same event must produce

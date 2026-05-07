@@ -15,6 +15,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - { name: unit,        marker: unit,        workers: "-n auto" }
+          - { name: integration, marker: integration, workers: "-n 2"    }
+    name: test (${{ matrix.suite.name }})
 
     services:
       db:
@@ -184,25 +191,37 @@ jobs:
         working-directory: backend
         run: .venv/bin/python manage.py migrate --check
 
-      - name: Run tests
+      - name: Run tests (${{ matrix.suite.name }})
         working-directory: backend
+        env:
+          PYTEST_MARK: ${{ matrix.suite.marker }}
+          PYTEST_WORKERS: ${{ matrix.suite.workers }}
         run: |
           mkdir -p tests/reports/coverage
-          .venv/bin/pytest -c pytest-ci.ini
+          .venv/bin/pytest -c pytest-ci.ini -m "$PYTEST_MARK" $PYTEST_WORKERS
 
       - name: Upload JUnit report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-junit
+          name: backend-junit-${{ matrix.suite.name }}
           path: backend/tests/reports/junit.xml
 
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-coverage
+          name: backend-coverage-${{ matrix.suite.name }}
           path: backend/tests/reports/coverage/
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/tests/reports/coverage/coverage.xml
+          flags: backend-${{ matrix.suite.name }}
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Stop MinIO
         if: always()

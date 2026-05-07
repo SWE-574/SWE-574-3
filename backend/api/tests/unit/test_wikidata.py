@@ -20,8 +20,9 @@ class WikidataSearchViewTests(APITestCase):
         self.client = APIClient()
         self.url = reverse('wikidata-search')
 
+    @patch('api.wikidata.classify_and_filter_results', side_effect=lambda r: r)
     @patch('api.wikidata.search_wikidata_items')
-    def test_wikidata_search_success(self, mock_search):
+    def test_wikidata_search_success(self, mock_search, _mock_classify):
         """Test successful Wikidata search returns QID, label, and description"""
         mock_search.return_value = [
             {

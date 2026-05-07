@@ -6,26 +6,32 @@ import { MemoryRouter } from 'react-router-dom'
 import NotFoundPage from '../../pages/NotFoundPage'
 import system from '../../theme'
 
+function renderPage() {
+  return render(
+    <ChakraProvider value={system}>
+      <MemoryRouter>
+        <NotFoundPage />
+      </MemoryRouter>
+    </ChakraProvider>,
+  )
+}
+
 describe('NotFoundPage', () => {
-  it('renders without crashing', () => {
-    render(
-      <ChakraProvider value={system}>
-        <MemoryRouter>
-          <NotFoundPage />
-        </MemoryRouter>
-      </ChakraProvider>,
-    )
-    expect(screen.getByRole('heading')).toBeTruthy()
+  it('shows the 404 status and recognisable heading', () => {
+    renderPage()
+    expect(screen.getByText('404')).toBeInTheDocument()
+    expect(screen.getByText(/Page Not Found/i)).toBeInTheDocument()
   })
 
-  it('displays a recognisable not-found heading', () => {
-    render(
-      <ChakraProvider value={system}>
-        <MemoryRouter>
-          <NotFoundPage />
-        </MemoryRouter>
-      </ChakraProvider>,
-    )
-    expect(screen.getByRole('heading').textContent).toBeTruthy()
+  it('sets the document title so browser tabs are not blank', () => {
+    renderPage()
+    expect(document.title).toMatch(/404/)
+    expect(document.title).toMatch(/Page Not Found/i)
+  })
+
+  it('renders navigation back to the home and services pages', () => {
+    renderPage()
+    expect(screen.getByRole('button', { name: /go to home/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /browse services/i })).toBeInTheDocument()
   })
 })

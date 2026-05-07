@@ -87,11 +87,13 @@ test.describe('UpcomingSchedule — calendar view (#446)', () => {
       await route.fulfill({ response })
     })
 
+    const calendarLoaded = page.waitForResponse(
+      (r) => /\/api\/users\/me\/calendar\//.test(r.url()),
+      { timeout: 15_000 },
+    )
     await page.goto('/profile')
     await expect(page.getByText('UPCOMING')).toBeVisible({ timeout: 20_000 })
-
-    // Wait a moment for the API call to complete
-    await page.waitForTimeout(2000)
+    await calendarLoaded.catch(() => undefined)
 
     if (!calendarData || calendarData.items.length === 0) {
       test.skip(
