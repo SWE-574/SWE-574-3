@@ -1989,6 +1989,8 @@ class EventNoShowAppealService:
                 service=locked_handshake.service,
             )
 
+            notify_reporter_of_receipt(report)
+
             for admin in User.objects.filter(role__in=['admin', 'super_admin'], is_active=True).only('id'):
                 create_notification(
                     user=admin,
@@ -2002,8 +2004,6 @@ class EventNoShowAppealService:
                     service=locked_handshake.service,
                     report=report,
                 )
-
-            notify_reporter_of_receipt(report)
 
             return report
 

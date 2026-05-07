@@ -193,6 +193,9 @@ def notify_on_new_chat_message(sender, instance, created, **kwargs):
         return
     from .utils import create_notification
     try:
+        instance = ChatMessage.objects.select_related(
+            'handshake__service', 'handshake__requester', 'sender'
+        ).get(pk=instance.pk)
         handshake = instance.handshake
         msg_sender = instance.sender
         other_user = (

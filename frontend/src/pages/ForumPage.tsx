@@ -636,6 +636,7 @@ function TopicDetailView({
   const [replying, setReplying] = useState(false)
   const [editingPost, setEditingPost] = useState<ForumPost | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [confirmDeleteTopic, setConfirmDeleteTopic] = useState(false)
   const [editingTopic, setEditingTopic] = useState(false)
   const [reportTarget, setReportTarget] = useState<{ type: 'topic' } | { type: 'post'; post: ForumPost } | null>(null)
   const [reportLoading, setReportLoading] = useState(false)
@@ -718,6 +719,15 @@ function TopicDetailView({
     setReportTarget({ type: 'post', post })
   }
 
+  const modDeleteTopic = async () => {
+    if (!topic) return
+    try {
+      await forumAPI.deleteTopic(topic.id)
+      toast.success('Topic deleted')
+      navigate('/forum')
+    } catch { toast.error('Failed to delete topic') }
+  }
+
   const submitReport = async (reportType: string, statement: string) => {
     if (!reportTarget) return
     setReportLoading(true)
@@ -790,6 +800,24 @@ function TopicDetailView({
                 <Button size="xs" variant="ghost" borderRadius="8px" onClick={openReportTopic}>
                   <Flex align="center" gap={1}><FiFlag size={11} /></Flex>
                 </Button>
+              )}
+              {isAuthenticated && (user?.role === 'moderator' || user?.role === 'admin' || user?.is_admin) && topic.author_id !== user?.id && (
+                confirmDeleteTopic ? (
+                  <Flex align="center" gap={2}>
+                    <Text fontSize="11px" color={RED}>Delete topic?</Text>
+                    <Box as="button" p={1} borderRadius="6px" bg={RED_LT} color={RED} onClick={modDeleteTopic}>
+                      <FiCheck size={11} />
+                    </Box>
+                    <Box as="button" p={1} borderRadius="6px" bg={GRAY100} color={GRAY600} onClick={() => setConfirmDeleteTopic(false)}>
+                      <FiX size={11} />
+                    </Box>
+                  </Flex>
+                ) : (
+                  <Box as="button" p={1} borderRadius="6px" color={GRAY400} _hover={{ bg: RED_LT, color: RED }}
+                    onClick={() => setConfirmDeleteTopic(true)}>
+                    <FiTrash2 size={12} />
+                  </Box>
+                )
               )}
               {isAuthenticated && user?.id === topic.author_id && !topic.is_locked && !editingTopic && (
                 <Button size="xs" variant="outline" borderRadius="8px" onClick={() => setEditingTopic(true)}>

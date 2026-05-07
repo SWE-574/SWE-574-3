@@ -6,7 +6,7 @@ from rest_framework import status
 
 from api.tests.helpers.factories import (
     UserFactory, NotificationFactory, ServiceFactory,
-    HandshakeFactory, ServiceGroupChatMessageFactory,
+    HandshakeFactory, ChatMessageFactory, ServiceGroupChatMessageFactory,
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Notification
@@ -138,6 +138,46 @@ class TestNotificationViewSet:
         assert results_by_id[str(n_event.id)]['related_service_type'] == 'Event'
         assert results_by_id[str(n_offer.id)]['related_service_type'] == 'Offer'
         assert results_by_id[str(n_no_service.id)]['related_service_type'] is None
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.integration
+class TestPrivateChatNotificationSignal:
+    """Test notify_on_new_chat_message signal behaviour."""
+
+    def test_requester_message_notifies_service_owner(self):
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner)
+        handshake = HandshakeFactory(service=service, requester=requester, status='pending')
+
+        ChatMessageFactory(handshake=handshake, sender=requester)
+
+        assert Notification.objects.filter(user=owner).exists()
+        assert not Notification.objects.filter(user=requester).exists()
+
+    def test_owner_message_notifies_requester(self):
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner)
+        handshake = HandshakeFactory(service=service, requester=requester, status='accepted')
+
+        ChatMessageFactory(handshake=handshake, sender=owner)
+
+        assert Notification.objects.filter(user=requester).exists()
+        assert not Notification.objects.filter(user=owner).exists()
+
+    def test_self_notification_guard_no_notification_sent(self):
+        """Guard: if service.user == handshake.requester (data anomaly), no notification is sent."""
+        owner = UserFactory()
+        service = ServiceFactory(user=owner)
+        # Force requester == service owner to exercise the guard without going through
+        # business-logic validation (which normally prevents self-handshakes).
+        handshake = HandshakeFactory(service=service, requester=owner, status='pending')
+
+        ChatMessageFactory(handshake=handshake, sender=owner)
+
+        assert not Notification.objects.filter(user=owner).exists()
 
 
 @pytest.mark.django_db(transaction=True)
