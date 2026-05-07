@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Box, Flex, Text, Button, Input, Textarea, VStack, HStack, Avatar,
+  Box, Flex, Text, Button, Textarea, VStack, HStack, Avatar,
 } from '@chakra-ui/react'
 import { FiArrowLeft, FiArrowRight, FiCheck, FiCamera, FiX } from 'react-icons/fi'
 import { toast } from 'sonner'
@@ -18,6 +18,7 @@ import {
 import { Logo } from '@/components/Logo'
 import ImageCropModal from '@/components/ImageCropModal'
 import WikidataTagAutocomplete from '@/components/WikidataTagAutocomplete'
+import ProfileLocationSearch from '@/components/profile/ProfileLocationSearch'
 
 const STEPS = [
   { id: 1, title: 'Welcome' },
@@ -193,10 +194,14 @@ const OnboardingPage = () => {
                 style={{ fontSize: '13px', fontWeight: 500, color: GRAY700, display: 'block', marginBottom: '6px' }}>
                 Location <span style={{ color: GRAY400, fontWeight: 400 }}>(optional)</span>
               </label>
-              <Input id="onb-location" value={location} onChange={e => setLocation(e.target.value)}
-                placeholder="e.g. Beşiktaş, Istanbul"
-                borderColor={GRAY300} borderRadius="8px" fontSize="sm"
-                _focus={{ borderColor: GREEN, boxShadow: `0 0 0 3px ${GREEN}22` }} />
+              <ProfileLocationSearch
+                id="onb-location"
+                value={location}
+                onChange={setLocation}
+                label="Location"
+                placeholder="Search city, district, or address"
+                helperText="Pick a suggestion to show your neighbourhood consistently."
+              />
             </Box>
           </VStack>
         )

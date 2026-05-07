@@ -11,6 +11,8 @@ import NotificationPreferencesScreen from "../presentation/screens/NotificationP
 import MyCommitmentsScreen from "../presentation/screens/MyCommitmentsScreen";
 import TimeActivityScreen from "../presentation/screens/TimeActivityScreen";
 import ServiceDetailScreen from "../presentation/screens/ServiceDetailScreen";
+import CalendarScreen from "../presentation/screens/CalendarScreen";
+import ProfileEditScreen from "../presentation/screens/ProfileEditScreen";
 import { colors } from "../constants/colors";
 
 export type ProfileStackParamList = {
@@ -24,7 +26,13 @@ export type ProfileStackParamList = {
   NotificationPreferences: undefined;
   MyCommitments: undefined;
   TimeActivity: undefined;
+  ProfileEdit:
+    | {
+        initialTab?: "identity" | "photos" | "skills" | "showcase" | "privacy";
+      }
+    | undefined;
   ServiceDetail: { id: string };
+  Calendar: undefined;
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -87,7 +95,6 @@ export default function ProfileStack() {
           animation: "slide_from_right",
         }}
       />
-
       <Stack.Screen
         name="MyCommitments"
         component={MyCommitmentsScreen}
@@ -101,6 +108,19 @@ export default function ProfileStack() {
           animation: "slide_from_right",
         }}
       />
+      <Stack.Screen
+        name="ProfileEdit"
+        component={ProfileEditScreen}
+        options={{
+          headerShown: true,
+          title: "Edit profile",
+          headerStyle: { backgroundColor: colors.WHITE },
+          headerTitleStyle: { fontSize: 17, fontWeight: "600" },
+          headerShadowVisible: false,
+          gestureEnabled: true,
+          animation: "slide_from_right",
+        }}
+      />
       <Stack.Screen name="ServiceDetail" component={ServiceDetailScreen} />
       <Stack.Screen
         name="TimeActivity"
@@ -108,6 +128,19 @@ export default function ProfileStack() {
         options={{
           headerShown: true,
           title: "Time Activity",
+          headerStyle: { backgroundColor: colors.WHITE },
+          headerTitleStyle: { fontSize: 17, fontWeight: "600" },
+          headerShadowVisible: true,
+          gestureEnabled: true,
+          animation: "slide_from_right",
+        }}
+      />
+      <Stack.Screen
+        name="Calendar"
+        component={CalendarScreen}
+        options={{
+          headerShown: true,
+          title: "Calendar",
           headerStyle: { backgroundColor: colors.WHITE },
           headerTitleStyle: { fontSize: 17, fontWeight: "600" },
           headerShadowVisible: true,

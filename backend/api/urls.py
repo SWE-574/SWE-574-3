@@ -14,6 +14,7 @@ from .authentication import CookieJWTAuthentication
 from .views import (
     UserRegistrationView,
     UserProfileView,
+    MeCalendarView,
     UserHistoryView,
     MyReportsView,
     UserBadgeProgressView,
@@ -297,6 +298,7 @@ urlpatterns = [
     path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
     path('users/me/reports/', MyReportsView.as_view(), name='my-reports'),
+    path('users/me/calendar/', MeCalendarView.as_view(), name='user-calendar'),
     # Nested /users/<id>/… routes must be registered before the generic user-detail path
     # so paths like …/follow/ are never mistaken for detail (defensive ordering).
     path('users/<uuid:id>/follow/', UserFollowView.as_view(), name='user-follow'),

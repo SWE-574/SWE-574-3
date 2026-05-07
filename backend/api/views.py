@@ -103,7 +103,8 @@ from .cache_utils import (
     get_cached_service_list, cache_service_list, invalidate_service_lists,
     get_cached_conversations, cache_conversations, invalidate_conversations,
     get_cached_transactions, cache_transactions, invalidate_transactions,
-    invalidate_user_services, CACHE_TTL_SHORT
+    invalidate_user_services, invalidate_user_calendar, CACHE_TTL_SHORT,
+    register_calendar_cache_key,
 )
 
 from django.contrib.auth import authenticate
@@ -1257,6 +1258,233 @@ class MyReportsView(generics.ListAPIView):
         )
 
 
+class MeCalendarView(APIView):
+    """
+    GET /api/users/me/calendar/?from=YYYY-MM-DD&to=YYYY-MM-DD
+
+    Returns the authenticated user's scheduled items within the given date window.
+    Defaults to today → today+365d. Window is capped at 3650 days.
+
+    Response shape (contract for Teams B, C, D):
+    {
+        "items": [
+            {
+                "id": "uuid",
+                "kind": "service_session" | "event_organized" | "event_joined" | "scheduled_commitment",
+                "title": "...",
+                "start": "ISO8601",
+                "end": "ISO8601",
+                "duration_hours": 2.0,
+                "location_type": "In-Person" | "Online" | null,
+                "location_label": "..." | null,
+                "service_type": "Offer" | "Need" | "Event" | null,
+                "service_id": "uuid" | null,
+                "handshake_id": "uuid" | null,
+                "chat_id": "uuid" | null,
+                "counterpart": {"id": "uuid", "name": "...", "avatar_url": "..."} | null,
+                "is_owner": true,
+                "status": "...",
+                "accent_token": "GREEN" | "BLUE" | "TEAL",
+                "link": {"type": "service" | "event" | "chat", "id": "uuid"}
+            }
+        ],
+        "conflicts": [{"item_id": "uuid", "overlaps_with": ["uuid", ...]}],
+        "range": {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}
+    }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    _CALENDAR_CACHE_TTL = 60  # 60 seconds — short TTL, supplemented by explicit invalidation
+
+    def get(self, request, *args, **kwargs):
+        from datetime import date
+        from django.core.cache import cache
+        from .schedule_utils import _user_scheduled_intervals, find_overlapping_pairs
+
+        today = timezone.now().date()
+
+        from_str = request.query_params.get('from')
+        to_str = request.query_params.get('to')
+
+        try:
+            from_date = date.fromisoformat(from_str) if from_str else today
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid "from" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            to_date = date.fromisoformat(to_str) if to_str else today + timedelta(days=365)
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid "to" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if to_date < from_date:
+            return Response({'detail': '"to" must not be before "from".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        max_days = 3650
+        if (to_date - from_date).days > max_days:
+            return Response(
+                {'detail': f'Date window exceeds maximum of {max_days} days.', 'max_days': max_days},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cache_key = f"user_calendar:{request.user.id}:{from_date.isoformat()}:{to_date.isoformat()}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        window_start = timezone.make_aware(
+            timezone.datetime.combine(from_date, timezone.datetime.min.time())
+        )
+        window_end = timezone.make_aware(
+            timezone.datetime.combine(to_date, timezone.datetime.max.time())
+        )
+
+        user = request.user
+        intervals = self._dedupe_calendar_intervals(
+            list(_user_scheduled_intervals(user, window_start, window_end))
+        )
+        items = [self._serialize_interval(iv, user) for iv in intervals]
+        conflicts = find_overlapping_pairs(intervals)
+
+        response_data = {
+            'items': items,
+            'conflicts': conflicts,
+            'range': {
+                'from': from_date.isoformat(),
+                'to': to_date.isoformat(),
+            },
+        }
+        cache.set(cache_key, response_data, self._CALENDAR_CACHE_TTL)
+        # Register this key in the per-user tracking set so invalidate_user_calendar
+        # can find and delete it without pattern-delete support (spec §6.1).
+        # register_calendar_cache_key uses a bounded retry loop to reduce the
+        # read-modify-write race on concurrent requests (H2 fix).
+        register_calendar_cache_key(str(user.id), cache_key)
+        return Response(response_data)
+
+    def _dedupe_calendar_intervals(self, intervals):
+        """
+        Collapse group/event participant rows into one visible calendar item.
+
+        Service owners can have one Service interval plus one accepted Handshake
+        interval per participant for the same fixed group offer or event. The
+        calendar should show the session once, not once per participant.
+        """
+        deduped = {}
+        passthrough = []
+
+        def service_for(iv):
+            source = iv.source_obj
+            return source.service if iv.source_kind == 'handshake' else source
+
+        def dedupe_key(iv):
+            svc = service_for(iv)
+            if svc.type != 'Event' and int(getattr(svc, 'max_participants', 1) or 1) <= 1:
+                return None
+            source_status = getattr(iv.source_obj, 'status', None)
+            if source_status in ('Completed', 'completed'):
+                return (str(svc.id), 'completed', iv.end.date())
+            return (str(svc.id), iv.start, iv.end)
+
+        def priority(iv):
+            return 0 if iv.source_kind == 'service' else 1
+
+        for iv in intervals:
+            key = dedupe_key(iv)
+            if key is None:
+                passthrough.append(iv)
+                continue
+            current = deduped.get(key)
+            if current is None or priority(iv) < priority(current):
+                deduped[key] = iv
+
+        return sorted(
+            [*passthrough, *deduped.values()],
+            key=lambda iv: (iv.start, iv.end, str(iv.source_obj.id)),
+        )
+
+    def _serialize_interval(self, iv, user) -> dict:
+        from .schedule_utils import ScheduledInterval
+
+        source = iv.source_obj
+        is_handshake = iv.source_kind == 'handshake'
+
+        if is_handshake:
+            h = source
+            svc = h.service
+            service_id = str(svc.id)
+            handshake_id = str(h.id)
+            title = svc.title
+            location_type = svc.location_type
+            location_label = svc.location_area or None
+            service_type = svc.type
+            item_status = h.status
+
+            is_owner = (svc.user_id == user.id)
+            # counterpart is the other party
+            if is_owner:
+                cp = h.requester
+            else:
+                cp = svc.user
+            counterpart = {
+                'id': str(cp.id),
+                'name': f"{cp.first_name} {cp.last_name}".strip(),
+                'avatar_url': cp.avatar_url,
+            }
+
+            # Accent token
+            if svc.type == 'Event':
+                accent_token = 'BLUE'
+            else:
+                accent_token = 'GREEN'
+
+            # Calendar cards should open the service/event detail page; chat stays
+            # available from detail/messages surfaces, not from the calendar.
+            chat_id = handshake_id  # The chat channel is keyed by handshake id
+            link = {'type': 'service', 'id': service_id}
+
+        else:
+            svc = source
+            service_id = str(svc.id)
+            handshake_id = None
+            chat_id = None
+            title = svc.title
+            location_type = svc.location_type
+            location_label = svc.location_area or None
+            service_type = svc.type
+            item_status = svc.status
+            is_owner = True
+            counterpart = None
+
+            if svc.type == 'Event':
+                accent_token = 'BLUE'
+                link = {'type': 'service', 'id': service_id}
+            else:
+                accent_token = 'TEAL'
+                link = {'type': 'service', 'id': service_id}
+
+        duration_hours = (iv.end - iv.start).total_seconds() / 3600.0
+
+        return {
+            'id': str(source.id),
+            'kind': iv.kind,
+            'title': title,
+            'start': iv.start.isoformat(),
+            'end': iv.end.isoformat(),
+            'duration_hours': round(duration_hours, 2),
+            'location_type': location_type,
+            'location_label': location_label,
+            'service_type': service_type,
+            'service_id': service_id,
+            'handshake_id': handshake_id,
+            'chat_id': chat_id,
+            'counterpart': counterpart,
+            'is_owner': is_owner,
+            'status': item_status,
+            'accent_token': accent_token,
+            'link': link,
+        }
+
+
 class UserHistoryView(APIView):
     """
     User Transaction History
@@ -1852,16 +2080,33 @@ class ServiceViewSet(viewsets.ModelViewSet):
             sort_param == 'hot'
             and getattr(_ranking_settings, 'RANKING_EXPLORATION_RATE', 0.0) > 0
         )
+        explore_only_param = request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes')
         use_cache = not (
             (request.query_params.get('lat') and request.query_params.get('lng'))
             or (sort_param == 'hot' and request.user.is_authenticated)
+            or sort_param == 'for_you'
             or explore_enabled
+            or explore_only_param
         )
 
         if use_cache:
             cached_result = get_cached_service_list(cache_key_params)
             if cached_result is not None:
                 return Response(cached_result)
+
+        # For You feed (#481): viewer-specific re-ranking of the top hot
+        # candidates by tag overlap, follow affinity, handshake cooccurrence,
+        # and recency-of-viewing. Only authenticated, onboarded users with
+        # declared skills get a populated response; everyone else gets [].
+        if sort_param == 'for_you':
+            return self._list_for_you(request)
+
+        # Explore-only feed: surfaces Phase 3 candidates (cold-start,
+        # under-shown quality, stale recurring) as a standalone list rather
+        # than mixed into hot at slot 5. Powers the web "Try something new"
+        # carousel and any client that wants the rotation pool directly.
+        if request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes'):
+            return self._list_explore_only(request)
 
         queryset = self.filter_queryset(self.get_queryset())
         paginator = self.pagination_class()
@@ -1890,6 +2135,121 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if use_cache:
             cache_service_list(cache_key_params, response_data, ttl=CACHE_TTL_SHORT)
         return Response(response_data)
+
+    def _list_explore_only(self, request):
+        """Return Phase 3 explore candidates flat, tagged with their pool.
+
+        Mixes the three sub-buckets (cold-start, under-shown quality, stale
+        recurring) round-robin so the carousel surfaces all three pools when
+        each is non-empty. Caps at RANKING_EXPLORE_LIMIT (default 10).
+        """
+        from .ranking import _eligible_exploration
+
+        # Build the candidate pool from the same hot-sorted queryset the
+        # explore slot picks from at request time, capped to keep the
+        # eligibility scan bounded.
+        request.query_params._mutable = True if hasattr(request.query_params, '_mutable') else None
+        try:
+            request.query_params['sort'] = 'hot'
+        except Exception:
+            pass
+
+        queryset = self.filter_queryset(self.get_queryset())
+        candidates = list(queryset[:200])
+        cold, undershown, stale = _eligible_exploration(candidates)
+
+        for s in cold:
+            s.explore_pool = 'cold_start'
+            s.source = 'explore'
+        for s in undershown:
+            s.explore_pool = 'undershown_quality'
+            s.source = 'explore'
+        for s in stale:
+            s.explore_pool = 'stale_recurring'
+            s.source = 'explore'
+
+        # Round-robin across the three pools so the response surfaces each
+        # vocabulary when available, rather than draining cold first.
+        limit = int(getattr(settings, 'RANKING_EXPLORE_LIMIT', 10))
+        pools = [list(cold), list(undershown), list(stale)]
+        mixed = []
+        seen = set()
+        while len(mixed) < limit and any(pools):
+            for pool in pools:
+                if not pool:
+                    continue
+                item = pool.pop(0)
+                if item.id in seen:
+                    continue
+                mixed.append(item)
+                seen.add(item.id)
+                if len(mixed) >= limit:
+                    break
+
+        serializer = self.get_serializer(mixed, many=True)
+        return Response({
+            'count': len(mixed),
+            'next': None,
+            'previous': None,
+            'results': serializer.data,
+        })
+
+    def _list_for_you(self, request):
+        """For You feed (#481). Re-rank top hot candidates with viewer-specific
+        signals; cap at RANKING_FOR_YOU_LIMIT; record impressions for the
+        recency penalty and CTR proxy.
+        """
+        from .models import ForYouEvent
+        from .ranking_personalized import record_impressions, score_for_you
+
+        viewer = request.user
+        is_eligible = (
+            viewer.is_authenticated
+            and getattr(viewer, 'is_onboarded', False)
+            and viewer.skills.exists()
+        )
+        if not is_eligible:
+            return Response({'count': 0, 'next': None, 'previous': None, 'results': []})
+
+        # Force sort to hot when building the candidate pool so we re-rank a
+        # principled top slice rather than the chronological list.
+        request.query_params._mutable = True if hasattr(request.query_params, '_mutable') else None
+        try:
+            request.query_params['sort'] = 'hot'
+        except Exception:
+            pass
+
+        queryset = self.filter_queryset(self.get_queryset())
+        candidates = list(queryset[:200])
+        scored = score_for_you(candidates, viewer)
+        limit = int(getattr(settings, 'RANKING_FOR_YOU_LIMIT', 10))
+        top = scored[:limit]
+
+        # Stash signals on the model instance for the serializer to pick up.
+        services = []
+        for svc, score, signals in top:
+            svc.for_you_signals = signals
+            svc.source = 'for_you'
+            services.append(svc)
+
+        # Record impressions for recency-of-viewing decay AND for the
+        # CTR proxy (one ForYouEvent per impression, source=for_you).
+        record_impressions(viewer.id, [s.id for s in services])
+        ForYouEvent.objects.bulk_create([
+            ForYouEvent(
+                service=s, viewer=viewer,
+                kind=ForYouEvent.IMPRESSION, source=ForYouEvent.SOURCE_FOR_YOU,
+            )
+            for s in services
+        ])
+
+        serializer = self.get_serializer(services, many=True)
+        return Response({
+            'count': len(services),
+            'next': None,
+            'previous': None,
+            'results': serializer.data,
+        })
 
     @track_performance
     def get_queryset(self):
@@ -2189,6 +2549,25 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
         )
         instance = get_object_or_404(queryset, pk=kwargs['pk'])
+
+        # For You click attribution (#481): when the detail page is reached
+        # via ?from=for_you (or ?from=hot for CTR comparison), log a
+        # ForYouEvent click row. Used by the daily metrics rollup.
+        from_param = (request.query_params.get('from') or '').lower()
+        if (
+            request.user.is_authenticated
+            and from_param in ('for_you', 'hot')
+        ):
+            from .models import ForYouEvent
+            ForYouEvent.objects.create(
+                service=instance, viewer=request.user,
+                kind=ForYouEvent.CLICK,
+                source=(
+                    ForYouEvent.SOURCE_FOR_YOU if from_param == 'for_you'
+                    else ForYouEvent.SOURCE_HOT
+                ),
+            )
+
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
@@ -2605,6 +2984,92 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'created_at': token_obj.created_at.isoformat(),
             'expires_at': token_obj.expires_at.isoformat(),
             'qr_payload': qr_payload,
+        })
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='for-you-metrics',
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def for_you_metrics(self, request):
+        """Admin-only CTR proxy for the For You feed (#481).
+
+        Returns the last N days of impressions, clicks, and handshakes
+        bucketed by source ('for_you' vs 'hot'). Aggregated nightly by
+        roll_up_for_you_metrics; today's row is computed live so the
+        admin sees fresh numbers without waiting for the cron.
+
+        Each row exposes both `count` (raw event count - one row per
+        card per viewer per page load) and `unique_viewers` (distinct
+        viewer ids). count >> unique_viewers when one viewer reloads
+        the feed; the two fields are not interchangeable.
+
+        Re-running roll_up_for_you_metrics within the same day is
+        normally safe: the (date, kind, source) UniqueConstraint plus
+        the delete-then-insert pattern in the command keeps history
+        clean. The one edge case is calling the rollup mid-day when
+        today's row is also being computed live here - the response
+        will then include both today's rolled row and the live row,
+        double-counting today. The nightly cron runs after midnight
+        so this only matters if rollup is invoked manually.
+        """
+        from datetime import timedelta
+        from django.db.models import Count
+        from .models import ForYouDailyMetric, ForYouEvent
+
+        try:
+            days = int(request.query_params.get('days', '7'))
+        except ValueError:
+            days = 7
+        days = max(1, min(days, 90))
+
+        end = timezone.now().date()
+        start = end - timedelta(days=days - 1)
+
+        # Yesterday and earlier from the rolled-up table; today computed live
+        # to avoid the visible lag between events and the nightly rollup.
+        rolled = list(
+            ForYouDailyMetric.objects
+            .filter(date__gte=start, date__lt=end)
+            .values('date', 'kind', 'source', 'count', 'unique_viewers')
+            .order_by('date')
+        )
+        today_live = list(
+            ForYouEvent.objects
+            .filter(occurred_at__date=end)
+            .values('kind', 'source')
+            .annotate(
+                count=Count('id'),
+                unique_viewers=Count('viewer_id', distinct=True),
+            )
+        )
+        for row in today_live:
+            rolled.append({
+                'date': end, 'kind': row['kind'],
+                'source': row['source'], 'count': row['count'],
+                'unique_viewers': row['unique_viewers'],
+            })
+
+        return Response({
+            'days': days,
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'note': (
+                'count is total card impressions/clicks/handshakes (one row '
+                'per card per viewer per page load). unique_viewers is the '
+                'number of distinct viewer ids contributing to that count.'
+            ),
+            'rows': [
+                {
+                    'date': row['date'].isoformat() if hasattr(row['date'], 'isoformat') else row['date'],
+                    'kind': row['kind'],
+                    'source': row['source'],
+                    'count': row['count'],
+                    'unique_viewers': row.get('unique_viewers', 0),
+                }
+                for row in rolled
+            ],
         })
 
     @action(

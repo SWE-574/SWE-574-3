@@ -6,7 +6,7 @@ import type {
 } from '@/types'
 
 export interface ServiceListParams {
-  sort?: 'latest' | 'hot'
+  sort?: 'latest' | 'hot' | 'for_you'
   lat?: number
   lng?: number
   distance?: number
@@ -17,6 +17,7 @@ export interface ServiceListParams {
   page?: number
   page_size?: number
   user_id?: string
+  explore_only?: boolean
   // FR-12c — only honored when type='Event'. ISO-8601 dates.
   date_from?: string
   date_to?: string
@@ -82,6 +83,7 @@ export const serviceAPI = {
     if (params?.page) queryParams.set('page', String(params.page))
     if (params?.page_size) queryParams.set('page_size', String(params.page_size))
     if (params?.user_id) queryParams.set('user', params.user_id)
+    if (params?.explore_only) queryParams.set('explore_only', 'true')
     if (params?.date_from) queryParams.set('date_from', params.date_from)
     if (params?.date_to) queryParams.set('date_to', params.date_to)
 

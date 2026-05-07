@@ -40,3 +40,6 @@ export const GRAY700  = '#374151'
 export const GRAY800  = '#1F2937'
 export const GRAY900  = '#111827'
 export const WHITE    = '#FFFFFF'
+
+// ─── Gradients ────────────────────────────────────────────────────────────────
+export const HERO_GRADIENT = 'linear-gradient(135deg, #064E3B 0%, #2D5C4E 55%, #34D399 100%)'

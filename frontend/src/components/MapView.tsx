@@ -17,6 +17,7 @@ import mapboxgl from 'mapbox-gl'
 import type { MapMouseEvent } from 'mapbox-gl'
 import type { Feature, FeatureCollection, Point } from 'geojson'
 import 'mapbox-gl/dist/mapbox-gl.css'
+import { MapLegendOverlay, MapRefreshBadge } from '@/components/MapLegendOverlay'
 
 // Disable Mapbox telemetry to avoid CORS errors to events.mapbox.com
 const mapboxWithTelemetry = mapboxgl as typeof mapboxgl & {
@@ -52,6 +53,7 @@ export interface MapViewProps {
   height?: string
   onServiceClick?: (id: string) => void
   userLocation?: { lat: number; lng: number } | null
+  isRefreshing?: boolean
 }
 
 const ISTANBUL_CENTER = { longitude: 28.9784, latitude: 41.0082, zoom: 11 }
@@ -418,7 +420,7 @@ function MyLocationButton({ onClick }: { onClick: () => void }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function MapView({ services, height = '400px', onServiceClick, userLocation }: MapViewProps) {
+export function MapView({ services, height = '400px', onServiceClick, userLocation, isRefreshing }: MapViewProps) {
   const mapRef = useRef<MapRef>(null)
   const [popupInfo, setPopupInfo] = useState<PopupInfo | null>(null)
 
@@ -645,6 +647,9 @@ export function MapView({ services, height = '400px', onServiceClick, userLocati
       {userLocation && (
         <MyLocationButton onClick={flyToUser} />
       )}
+
+      <MapLegendOverlay />
+      {isRefreshing && <MapRefreshBadge />}
     </div>
   )
 }
