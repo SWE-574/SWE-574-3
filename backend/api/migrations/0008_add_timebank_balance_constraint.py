@@ -13,7 +13,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name='user',
             constraint=models.CheckConstraint(
-                check=models.Q(timebank_balance__gte=-10.00),
+                condition=models.Q(timebank_balance__gte=-10.00),
                 name='timebank_balance_minimum',
             ),
         ),
