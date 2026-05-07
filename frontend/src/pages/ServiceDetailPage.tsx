@@ -21,7 +21,7 @@ import { AdminConfirmModal, ModalBackdrop, ModalCard, ModalHeader, ModalFooter, 
 import VerificationRequiredModal from '@/components/VerificationRequiredModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
-  spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
+  spotsLeft, formatEventDateTime, formatGroupOfferDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
 } from '@/utils/eventUtils'
 import type { Service, EventEvaluationSummary } from '@/types'
 import type { Comment } from '@/services/commentAPI'
@@ -205,6 +205,9 @@ function InfoTile({ icon, label, value, accentBg, accentColor }: {
     </Flex>
   )
 }
+
+const NEUTRAL_TILE_BG = GRAY100
+const NEUTRAL_TILE_COLOR = GRAY500
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
@@ -575,6 +578,7 @@ export default function ServiceDetailPage() {
     && (service.participant_count ?? 0) >= service.max_participants
   const isOffer    = service?.type === 'Offer'
   const isEvent    = service?.type === 'Event'
+  const isFixedGroupOffer = !!service && isOffer && service.schedule_type === 'One-Time' && service.max_participants > 1
 
   const openEventDetailModal = (tab: EventDetailModalTab = 'details') => {
     setEventDetailModalTab(tab)
@@ -1194,11 +1198,20 @@ export default function ServiceDetailPage() {
                     </>
                   ) : (
                     <>
-                      <InfoTile icon={<FiClock size={15} />} label="Duration" value={fmtDuration(service.duration)} />
+                      <InfoTile
+                        icon={<FiClock size={15} />} label="Duration"
+                        value={fmtDuration(service.duration)}
+                        accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : undefined}
+                        accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : undefined}
+                      />
                       <InfoTile
                         icon={<FiCalendar size={15} />} label="Schedule"
-                        value={`${service.schedule_type}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`}
-                        accentBg={AMBER_LT} accentColor={AMBER}
+                        value={isFixedGroupOffer && service.scheduled_time
+                          ? `${formatGroupOfferDateTime(service.scheduled_time)}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`
+                          : `${service.schedule_type}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`
+                        }
+                        accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : AMBER_LT}
+                        accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : AMBER}
                       />
                     </>
                   )}
@@ -1206,7 +1219,8 @@ export default function ServiceDetailPage() {
                     icon={service.location_type === 'Online' ? <FiMonitor size={15} /> : <FiMapPin size={15} />}
                     label="Location"
                     value={service.location_type === 'Online' ? 'Online' : service.location_area ?? 'In-Person'}
-                    accentBg={BLUE_LT} accentColor={BLUE}
+                    accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : BLUE_LT}
+                    accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : BLUE}
                   />
                   <InfoTile
                     icon={<FiUsers size={15} />}
@@ -1217,7 +1231,8 @@ export default function ServiceDetailPage() {
                         : `${service.participant_count ?? 0}/${service.max_participants} filled`
                       : String(service.max_participants)
                     }
-                    accentBg="#F3E8FF" accentColor="#7C3AED"
+                    accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : '#F3E8FF'}
+                    accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : '#7C3AED'}
                   />
                 </Grid>
 

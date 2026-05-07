@@ -52,6 +52,18 @@ export function formatEventDateTime(scheduledTime: string | null | undefined): s
   })
 }
 
+/** Format fixed group-offer dates compactly for service cards/details. */
+export function formatGroupOfferDateTime(scheduledTime: string | null | undefined): string {
+  if (!scheduledTime) return 'TBD'
+  return new Date(scheduledTime).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
 /** Returns a human-readable countdown (e.g. "2 days away", "3 hours away") */
 export function timeUntilEvent(scheduledTime: string | null | undefined): string {
   if (!scheduledTime) return ''

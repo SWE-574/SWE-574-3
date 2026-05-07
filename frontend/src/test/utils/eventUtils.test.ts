@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isNearlyFull } from '@/utils/eventUtils'
+import { formatGroupOfferDateTime, isNearlyFull } from '@/utils/eventUtils'
 
 describe('isNearlyFull', () => {
   // ── Boundary cases required by FR-RANK-03 acceptance criteria ─────────────
@@ -50,5 +50,14 @@ describe('isNearlyFull', () => {
 
   it('returns false for single-participant at 100% (max=1, count=1)', () => {
     expect(isNearlyFull(1, 1)).toBe(false)
+  })
+})
+
+describe('formatGroupOfferDateTime', () => {
+  it('formats fixed group offer dates compactly with time', () => {
+    const formatted = formatGroupOfferDateTime('2026-05-14T00:36:00Z')
+
+    expect(formatted).toMatch(/14 May, \d{2}:\d{2}/)
+    expect(formatted).not.toMatch(/Thu|Fri|2026/)
   })
 })
