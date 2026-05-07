@@ -19,6 +19,8 @@ from .views import (
     MyReportsView,
     UserBadgeProgressView,
     UserVerifiedReviewsView,
+    SuggestedUsersView,
+    ActivityFeedView,
     UserFollowView,
     UserFollowersListView,
     UserFollowingListView,
@@ -297,6 +299,7 @@ urlpatterns = [
     path('auth/send-verification/', SendVerificationEmailView.as_view(), name='send-verification'),
     path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
+    path('users/suggested/', SuggestedUsersView.as_view(), name='users-suggested'),
     path('users/me/reports/', MyReportsView.as_view(), name='my-reports'),
     path('users/me/calendar/', MeCalendarView.as_view(), name='user-calendar'),
     # Nested /users/<id>/… routes must be registered before the generic user-detail path
@@ -342,6 +345,10 @@ urlpatterns = [
     path('forum/posts/recent/', forum_post_recent, name='forum-post-recent'),
     # E2E test utilities (only active when DJANGO_E2E=1)
     path('e2e/set-balance/', E2ESetBalanceView.as_view(), name='e2e-set-balance'),
+
+    # Activity feed (#482) — chronological events from followed actors and
+    # actors within the configured proximity radius of the viewer.
+    path('activity/feed/', ActivityFeedView.as_view(), name='activity-feed'),
 
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

@@ -443,6 +443,7 @@ export type NotificationType =
   | 'positive_rep'
   | 'admin_warning'
   | 'dispute_resolved'
+  | 'user_followed'
   | 'new_report'
   | 'report_received'
   | 'report_resolved'
