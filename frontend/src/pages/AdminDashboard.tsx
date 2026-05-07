@@ -515,6 +515,7 @@ const AdminDashboard = () => {
     setOpenReport(null)
     setOpenReportService(null)
     setOpenReportLoading(false)
+    setForumContentDeleted(false)
   }, [])
 
   const closeOpenReportPanel = useCallback(() => {

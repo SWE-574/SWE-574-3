@@ -931,11 +931,9 @@ function TopicDetailView({
                               </Box>
                             )
                           )}
-                          {!isMod && (
-                            <Box as="button" p={1} borderRadius="6px" color={GRAY400} _hover={{ bg: RED_LT, color: RED }} onClick={() => openReportReply(post)}>
-                              <FiFlag size={12} />
-                            </Box>
-                          )}
+                          <Box as="button" p={1} borderRadius="6px" color={GRAY400} _hover={{ bg: RED_LT, color: RED }} onClick={() => openReportReply(post)}>
+                            <FiFlag size={12} />
+                          </Box>
                         </Flex>
                       )}
                     </Flex>

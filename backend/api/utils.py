@@ -536,6 +536,8 @@ def _notification_payload_for_channels(notification: Notification) -> dict:
 
 def _broadcast_notification(notification: Notification) -> None:
     """Push a notification to the user's WebSocket group and send push notifications."""
+    # Refetch with select_related so related_service.type is always available without an extra query.
+    notification = Notification.objects.select_related('related_service').get(pk=notification.pk)
     # WebSocket broadcast
     try:
         from channels.layers import get_channel_layer
