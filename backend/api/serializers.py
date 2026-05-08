@@ -803,6 +803,29 @@ class ServiceSerializer(serializers.ModelSerializer):
             data['max_participants'] = 1
             max_participants = 1
 
+        # In-person posts must carry approximate coordinates so they're
+        # discoverable on the location-aware dashboard. The PostGIS
+        # `location` Point field is computed from these on save (see
+        # Service.save), and LocationStrategy filters out rows with
+        # location IS NULL, which silently hides the post from every
+        # nearby query. The form's picker writes both fields, so saving
+        # without re-touching the picker on edit could leave them null.
+        if location_type == 'In-Person':
+            location_lat = data.get(
+                'location_lat', getattr(instance, 'location_lat', None),
+            )
+            location_lng = data.get(
+                'location_lng', getattr(instance, 'location_lng', None),
+            )
+            if location_lat is None or location_lng is None:
+                raise serializers.ValidationError({
+                    'location_lat': (
+                        'In-person posts need a saved location — pick the '
+                        'address from the search results or drop a pin so '
+                        'coordinates are stored.'
+                    ),
+                })
+
         is_fixed_group_offer = (
             service_type == 'Offer'
             and schedule_type == 'One-Time'

@@ -124,6 +124,25 @@ class TestServiceSerializer:
         assert service.title == 'New Service'
         assert service.user == user
 
+    def test_in_person_service_requires_coordinates(self):
+        """In-person posts without lat/lng would disappear from the
+        location-aware dashboard (LocationStrategy filters location IS NULL)
+        — the serializer must reject them up front."""
+        serializer = ServiceSerializer(data={
+            'title': 'Coffee chat',
+            'description': 'Want to chat over coffee',
+            'type': 'Offer',
+            'duration': 1,
+            'location_type': 'In-Person',
+            'location_area': 'Kadıköy',
+            'max_participants': 1,
+            'schedule_type': 'One-Time',
+            'status': 'Active',
+            # location_lat / location_lng deliberately omitted
+        })
+        assert serializer.is_valid() is False
+        assert 'location_lat' in serializer.errors
+
     def test_fixed_group_offer_requires_exact_coords(self):
         """Fixed in-person group offers must include exact-address coordinates."""
         serializer = ServiceSerializer(data={
