@@ -748,13 +748,20 @@ class ServiceSerializer(serializers.ModelSerializer):
         schedule_type = data.get('schedule_type', getattr(instance, 'schedule_type', None))
         max_participants = data.get('max_participants', getattr(instance, 'max_participants', 1))
 
-        # Recurrence is Event-only. Force Offer/Need rows to One-Time and
-        # strip any recurrence cadence the client may have sent.
+        # Recurrence is Event-only. If the incoming patch tries to set
+        # schedule_type=Recurrent on an Offer/Need, force it to One-Time and
+        # strip any recurrence cadence. We deliberately only flip when the
+        # field is *in the incoming data* — partial updates that don't touch
+        # schedule_type should not silently mutate an existing instance's
+        # value, since the data migration in 0079 already coerced any legacy
+        # rows and that path would otherwise re-trigger fixed-group-offer
+        # validation on unrelated edits like lowering max_participants.
         if service_type in ('Offer', 'Need'):
-            if schedule_type == 'Recurrent':
+            if data.get('schedule_type') == 'Recurrent':
                 data['schedule_type'] = 'One-Time'
                 schedule_type = 'One-Time'
-            data['recurrence_interval_days'] = None
+            if 'recurrence_interval_days' in data:
+                data['recurrence_interval_days'] = None
         elif service_type == 'Event' and schedule_type != 'Recurrent':
             # One-time Events never have a recurrence cadence.
             data['recurrence_interval_days'] = None
