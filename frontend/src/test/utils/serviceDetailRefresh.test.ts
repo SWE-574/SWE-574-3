@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isServiceDetailRefreshType } from '@/pages/ServiceDetailPage'
+import { isServiceDetailRefreshType } from '@/utils/serviceDetailRefreshTypes'
 import type { NotificationType } from '@/types'
 
 describe('isServiceDetailRefreshType', () => {

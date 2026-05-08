@@ -26,7 +26,8 @@ import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
   spotsLeft, formatEventDateTime, formatGroupOfferDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
 } from '@/utils/eventUtils'
-import type { Service, EventEvaluationSummary, NotificationType } from '@/types'
+import type { Service, EventEvaluationSummary } from '@/types'
+import { isServiceDetailRefreshType } from '@/utils/serviceDetailRefreshTypes'
 import type { Comment } from '@/services/commentAPI'
 import type { Handshake } from '@/services/handshakeAPI'
 
@@ -477,21 +478,6 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
   )
 }
 
-// ─── Notification refresh filter ─────────────────────────────────────────────
-
-const SERVICE_DETAIL_REFRESH_TYPES: NotificationType[] = [
-  'handshake_accepted',
-  'handshake_cancelled',
-  'handshake_cancellation_requested',
-  'positive_rep',
-  'service_updated',
-  'service_confirmation',
-]
-
-/** Returns true when a notification type should trigger a ServiceDetailPage data refresh. */
-export function isServiceDetailRefreshType(type: NotificationType): boolean {
-  return SERVICE_DETAIL_REFRESH_TYPES.includes(type)
-}
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
