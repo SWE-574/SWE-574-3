@@ -799,6 +799,22 @@ class ServiceSerializer(serializers.ModelSerializer):
             data['session_exact_location_lat'] = None
             data['session_exact_location_lng'] = None
             data['session_location_guide'] = ''
+
+        if instance is not None and 'max_participants' in data:
+            from .services import HandshakeService
+            from .models import Handshake
+            current_count = Handshake.objects.filter(
+                service=instance,
+                status__in=HandshakeService._capacity_statuses(instance),
+            ).count()
+            if data['max_participants'] < current_count:
+                raise serializers.ValidationError({
+                    'max_participants': (
+                        f'Cannot lower below the current accepted count '
+                        f'({current_count}). Cancel a participant first or '
+                        f'pick a value of {current_count} or higher.'
+                    ),
+                })
         return data
 
     @extend_schema_field(UserSummarySerializer)

@@ -16,6 +16,22 @@ from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Handshake, ChatMessage, TransactionHistory
 
 
+def _accept_offer_via_approve_flow(handshake):
+    """Drive an Offer/Need handshake to 'accepted' via the canonical
+    propose→approve flow. Direct accept on Offer/Need is rejected (#521)."""
+    from api.services import HandshakeService
+    handshake.refresh_from_db()
+    handshake.exact_duration = handshake.service.duration
+    handshake.scheduled_time = timezone.now() + timedelta(days=1)
+    if handshake.service.location_type == 'In-Person':
+        handshake.exact_location = '123 Test Address'
+    handshake.provider_initiated = True
+    handshake.save()
+    HandshakeService.approve(handshake, handshake.requester)
+    handshake.refresh_from_db()
+    return handshake
+
+
 @pytest.mark.django_db
 @pytest.mark.integration
 class TestExpressInterestView:
@@ -919,8 +935,6 @@ class TestPendingCapacityIntegration:
     def test_multiple_users_can_express_interest_simultaneously(self):
         """Three users can all express interest in a max_participants=1 One-Time service
         because pending doesn't consume a slot."""
-        from api.utils import provision_timebank
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u1 = UserFactory(timebank_balance=Decimal('5'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
@@ -943,8 +957,6 @@ class TestPendingCapacityIntegration:
     def test_accepted_slot_blocks_new_interest(self):
         """After one handshake is accepted, the slot is consumed and no further
         interest can be expressed on a max_participants=1 One-Time service."""
-        from api.utils import provision_timebank
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u1 = UserFactory(timebank_balance=Decimal('5'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
@@ -954,12 +966,9 @@ class TestPendingCapacityIntegration:
         )
         h1 = HandshakeFactory(service=svc, requester=u1,
                                status='pending', provisioned_hours=Decimal('1'))
-        provision_timebank(h1)
 
-        # accept h1
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        client.post(f'/api/handshakes/{h1.id}/accept/')
+        # accept h1 via canonical propose→approve flow
+        _accept_offer_via_approve_flow(h1)
 
         # u2 tries to express interest — service is now Agreed (hidden) or full
         # Backend returns 404 (service not in Active queryset) or 400 (capacity)
@@ -977,8 +986,6 @@ class TestAcceptAutoDenyIntegration:
     """Accepting a One-Time handshake auto-denies all other pending ones."""
 
     def _setup_one_time(self, max_p=1):
-        from api.utils import provision_timebank
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         svc = ServiceFactory(
             user=provider, type='Offer', schedule_type='One-Time',
@@ -989,19 +996,13 @@ class TestAcceptAutoDenyIntegration:
         for r in requesters:
             h = HandshakeFactory(service=svc, requester=r,
                                  status='pending', provisioned_hours=Decimal('1'))
-            provision_timebank(h)
             handshakes.append(h)
         return provider, svc, requesters, handshakes
 
     def test_accept_last_slot_denies_remaining_pending(self):
         """For max_p=1: accepting fills the only slot → other pending get denied."""
         provider, svc, _, handshakes = self._setup_one_time(max_p=1)
-        h_accept = handshakes[0]
-
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        resp = client.post(f'/api/handshakes/{h_accept.id}/accept/')
-        assert resp.status_code == status.HTTP_200_OK
+        _accept_offer_via_approve_flow(handshakes[0])
 
         for h in handshakes[1:]:
             h.refresh_from_db()
@@ -1010,9 +1011,7 @@ class TestAcceptAutoDenyIntegration:
     def test_denied_count_correct_when_capacity_full(self):
         """max_p=1: accept 1 → remaining 2 denied."""
         provider, svc, _, handshakes = self._setup_one_time(max_p=1)
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        client.post(f'/api/handshakes/{handshakes[0].id}/accept/')
+        _accept_offer_via_approve_flow(handshakes[0])
 
         denied = Handshake.objects.filter(service=svc, status='denied').count()
         assert denied == 2
@@ -1021,9 +1020,7 @@ class TestAcceptAutoDenyIntegration:
         """Group offer with max_p=2: accepting the first should NOT deny the
         second pending — one slot remains open for it."""
         provider, svc, _, handshakes = self._setup_one_time(max_p=2)
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        client.post(f'/api/handshakes/{handshakes[0].id}/accept/')
+        _accept_offer_via_approve_flow(handshakes[0])
 
         # handshakes[1] must remain pending (1 slot still open)
         handshakes[1].refresh_from_db()
@@ -1043,12 +1040,7 @@ class TestAgreedStatusIntegration:
     """Service status lifecycle: Active → Agreed → Active."""
 
     def _accept(self, provider, handshake):
-        from api.utils import provision_timebank
-        provision_timebank(handshake)
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        resp = client.post(f'/api/handshakes/{handshake.id}/accept/')
-        assert resp.status_code == status.HTTP_200_OK, resp.data
+        _accept_offer_via_approve_flow(handshake)
 
     def test_one_time_service_becomes_agreed_on_full_accept(self):
         provider = UserFactory(timebank_balance=Decimal('20'))

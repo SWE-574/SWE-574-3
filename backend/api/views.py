@@ -2745,6 +2745,28 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 release_timebank_for_need_service(instance)
             instance.status = 'Cancelled'
             instance.save(update_fields=['status', 'updated_at'])
+
+            denied_user_ids = list(
+                instance.handshakes
+                .filter(status='denied')
+                .values_list('requester_id', flat=True)
+                .distinct()
+            )
+
+        if denied_user_ids:
+            denied_users = User.objects.in_bulk(denied_user_ids)
+            for requester_id in denied_user_ids:
+                u = denied_users.get(requester_id)
+                if u is None:
+                    continue
+                create_notification(
+                    user=u,
+                    notification_type='handshake_cancelled',
+                    title='Group offer cancelled',
+                    message=f"The offer '{instance.title}' was cancelled by the organiser.",
+                    service=instance,
+                )
+
         invalidate_service_lists()
         invalidate_user_services(str(instance.user.id))
         return Response(status=status.HTTP_204_NO_CONTENT)

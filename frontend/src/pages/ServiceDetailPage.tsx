@@ -1974,7 +1974,7 @@ export default function ServiceDetailPage() {
                               key={h.id}
                               handshake={h}
                               isOwner={isOwn}
-                              onAccept={h.status === 'pending'
+                              onAccept={h.status === 'pending' && service.type === 'Event'
                                 ? async () => {
                                     try {
                                       await handshakeAPI.accept(h.id)
