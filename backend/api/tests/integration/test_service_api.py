@@ -12,6 +12,7 @@ from api.tests.helpers.factories import UserFactory, ServiceFactory, TagFactory,
 from api.tests.helpers.factories import AdminUserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Service, Notification, TransactionHistory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -26,8 +27,7 @@ class TestServiceViewSet:
         
         client = APIClient()
         response = client.get('/api/services/')
-        assert response.status_code == status.HTTP_200_OK
-        assert 'results' in response.data
+        assert_api_response(response, 200, contains={'results'})
         assert len(response.data['results']) > 0
     
     def test_list_services_filtering(self):
@@ -37,7 +37,7 @@ class TestServiceViewSet:
         
         client = APIClient()
         response = client.get('/api/services/?type=Offer')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert all(s['type'] == 'Offer' for s in response.data['results'])
     
     def test_list_services_pagination(self):
@@ -46,7 +46,7 @@ class TestServiceViewSet:
         
         client = APIClient()
         response = client.get('/api/services/?page_size=10')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data['results']) == 10
         assert 'next' in response.data or response.data['count'] <= 10
     
@@ -72,8 +72,7 @@ class TestServiceViewSet:
             'status': 'Active',
             'tag_ids': [tag.id]
         })
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data['title'] == 'New Service'
+        assert_api_response(response, 201, schema={'title': 'New Service'})
         assert Service.objects.filter(id=response.data['id']).exists()
 
     def test_create_need_reserves_timebank_and_updates_profile_payload(self):
@@ -83,7 +82,7 @@ class TestServiceViewSet:
         client.authenticate_user(owner)
 
         me_before = client.get('/api/users/me/')
-        assert me_before.status_code == status.HTTP_200_OK
+        assert_api_response(me_before, 200)
         assert Decimal(str(me_before.data['timebank_balance'])) == Decimal('3.00')
 
         response = client.post('/api/services/', {
@@ -96,7 +95,7 @@ class TestServiceViewSet:
             'schedule_type': 'One-Time',
         })
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
         service = Service.objects.get(id=response.data['id'])
         owner.refresh_from_db()
@@ -112,7 +111,7 @@ class TestServiceViewSet:
         ).exists()
 
         me_after = client.get('/api/users/me/')
-        assert me_after.status_code == status.HTTP_200_OK
+        assert_api_response(me_after, 200)
         assert Decimal(str(me_after.data['timebank_balance'])) == Decimal('1.00')
 
     def test_create_service_with_video_media(self):
@@ -138,9 +137,7 @@ class TestServiceViewSet:
             ]
         }, format='json')
 
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data['title'] == 'Service With Video'
-        assert 'media' in response.data
+        assert_api_response(response, 201, contains={'media'}, schema={'title': 'Service With Video'})
         assert any(m.get('media_type') == 'video' for m in response.data.get('media', []))
     
     def test_create_service_validation(self):
@@ -153,7 +150,7 @@ class TestServiceViewSet:
             'title': 'ab',  # Too short
             'description': 'Test'
         })
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     # ── Email verification gate for service creation ────────────────────
     # Offers, Needs and Events all require a verified email address.
@@ -209,7 +206,7 @@ class TestServiceViewSet:
 
         response = client.post('/api/services/', self._offer_payload())
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
         assert not Service.objects.filter(title='Verified Only Offer').exists()
 
@@ -219,7 +216,7 @@ class TestServiceViewSet:
 
         response = client.post('/api/services/', self._need_payload())
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
         assert not Service.objects.filter(title='Help moving a sofa').exists()
 
@@ -229,7 +226,7 @@ class TestServiceViewSet:
 
         response = client.post('/api/services/', self._event_payload())
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
         assert not Service.objects.filter(title='Community picnic').exists()
 
@@ -239,7 +236,7 @@ class TestServiceViewSet:
 
         response = client.post('/api/services/', self._offer_payload())
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert Service.objects.filter(id=response.data['id'], type='Offer').exists()
 
     def test_verified_user_can_create_need(self):
@@ -248,7 +245,7 @@ class TestServiceViewSet:
 
         response = client.post('/api/services/', self._need_payload())
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert Service.objects.filter(id=response.data['id'], type='Need').exists()
 
     def test_verified_user_can_create_event(self):
@@ -257,7 +254,7 @@ class TestServiceViewSet:
 
         response = client.post('/api/services/', self._event_payload())
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert Service.objects.filter(id=response.data['id'], type='Event').exists()
     
     def test_retrieve_service(self):
@@ -266,9 +263,7 @@ class TestServiceViewSet:
         client = APIClient()
         
         response = client.get(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['id'] == str(service.id)
-        assert response.data['title'] == service.title
+        assert_api_response(response, 200, schema={'id': str(service.id), 'title': service.title})
     
     def test_update_service(self):
         """Test updating a service"""
@@ -280,8 +275,7 @@ class TestServiceViewSet:
         response = client.patch(f'/api/services/{service.id}/', {
             'title': 'Updated Title'
         })
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['title'] == 'Updated Title'
+        assert_api_response(response, 200, schema={'title': 'Updated Title'})
         
         service.refresh_from_db()
         assert service.title == 'Updated Title'
@@ -297,7 +291,7 @@ class TestServiceViewSet:
         client.authenticate_user(owner)
 
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Updated title'})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         service.refresh_from_db()
         assert service.title == 'Updated title'
@@ -318,7 +312,7 @@ class TestServiceViewSet:
         client.authenticate_user(owner)
 
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Updated title'})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         service.refresh_from_db()
         assert service.title == 'Updated title'
@@ -345,7 +339,7 @@ class TestServiceViewSet:
         client.authenticate_user(owner)
 
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Completed Updated'})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         service.refresh_from_db()
         assert service.title == 'Completed Updated'
@@ -365,7 +359,7 @@ class TestServiceViewSet:
         client.authenticate_user(owner)
 
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Should Fail'})
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
         service.refresh_from_db()
         assert service.title != 'Should Fail'
@@ -387,7 +381,7 @@ class TestServiceViewSet:
         client.authenticate_user(owner)
 
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Recurring Updated'})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         service.refresh_from_db()
         assert service.title == 'Recurring Updated'
@@ -413,7 +407,7 @@ class TestServiceViewSet:
         client.authenticate_user(owner)
 
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Updated Event Title'})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         joined_notification = Notification.objects.filter(
             user=joined_user,
@@ -459,7 +453,7 @@ class TestServiceViewSet:
                 'description': 'Updated event description',
             },
         )
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         notification = Notification.objects.filter(
             user=participant,
@@ -485,7 +479,7 @@ class TestServiceViewSet:
         client.authenticate_user(owner)
 
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Should Be Blocked'})
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         service.refresh_from_db()
         assert service.title == 'Event In Lockdown'
 
@@ -504,7 +498,7 @@ class TestServiceViewSet:
         client.authenticate_user(owner)
 
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Should Also Be Blocked'})
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         service.refresh_from_db()
         assert service.title == 'Past Event'
     
@@ -520,7 +514,7 @@ class TestServiceViewSet:
         response = client.patch(f'/api/services/{service.id}/', {
             'title': 'Hacked Title'
         })
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
     
     def test_delete_service(self):
         """Test soft-deleting a service (sets status to Cancelled)"""
@@ -530,7 +524,7 @@ class TestServiceViewSet:
         client.authenticate_user(user)
         
         response = client.delete(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert_api_response(response, 204)
         service.refresh_from_db()
         assert service.status == 'Cancelled'
 
@@ -547,7 +541,7 @@ class TestServiceViewSet:
         client.authenticate_user(user)
 
         response = client.delete(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert_api_response(response, 204)
 
         service.refresh_from_db()
         user.refresh_from_db()
@@ -574,7 +568,7 @@ class TestServiceViewSet:
 
         # Soft-delete the service
         resp = owner_client.delete(f'/api/services/{service.id}/')
-        assert resp.status_code == status.HTTP_204_NO_CONTENT
+        assert_api_response(resp, 204)
 
         # Public service list should not include cancelled service
         response = APIClient().get('/api/services/')
@@ -605,7 +599,7 @@ class TestServiceViewSet:
         client.authenticate_user(user)
 
         response = client.delete(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert response.data.get('code') == 'INVALID_STATE'
         assert 'active handshakes' in response.data.get('detail', '').lower()
         assert Service.objects.filter(id=service.id).exists()
@@ -622,7 +616,7 @@ class TestServiceViewSet:
         client.authenticate_user(user)
 
         response = client.delete(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert_api_response(response, 204)
         service.refresh_from_db()
         assert service.status == 'Cancelled'
 
@@ -637,7 +631,7 @@ class TestServiceViewSet:
         client.authenticate_user(other_user)
 
         response = client.delete(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert Service.objects.filter(id=service.id).exists()
     
     def test_search_services(self):
@@ -647,7 +641,7 @@ class TestServiceViewSet:
         
         client = APIClient()
         response = client.get('/api/services/?search=cooking')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert any('cooking' in s['title'].lower() for s in response.data['results'])
 
     def test_report_service_visible_in_admin_reports_queue(self):
@@ -666,15 +660,14 @@ class TestServiceViewSet:
             },
             format='json'
         )
-        assert report_resp.status_code == status.HTTP_201_CREATED
-        assert 'report_id' in report_resp.data
+        assert_api_response(report_resp, 201, contains={'report_id'})
 
         admin_user = AdminUserFactory()
         admin_client = AuthenticatedAPIClient()
         admin_client.authenticate_admin(admin_user)
 
         queue_resp = admin_client.get('/api/admin/reports/?status=pending')
-        assert queue_resp.status_code == status.HTTP_200_OK
+        assert_api_response(queue_resp, 200)
         # Not paginated: should be a list of reports.
         report_ids = {r['id'] for r in queue_resp.data}
         assert report_resp.data['report_id'] in report_ids
@@ -702,28 +695,25 @@ class TestServiceRetrieveStatusVisibility:
         """Agreed One-Time service is visible on the detail endpoint."""
         service = ServiceFactory(schedule_type='One-Time', status='Agreed')
         response = APIClient().get(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['status'] == 'Agreed'
+        assert_api_response(response, 200, schema={'status': 'Agreed'})
 
     def test_retrieve_one_time_completed_returns_200(self):
         """Completed One-Time service is visible on the detail endpoint."""
         service = ServiceFactory(schedule_type='One-Time', status='Completed')
         response = APIClient().get(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['status'] == 'Completed'
+        assert_api_response(response, 200, schema={'status': 'Completed'})
 
     def test_retrieve_one_time_cancelled_returns_200(self):
         """Cancelled One-Time service is visible on the detail endpoint."""
         service = ServiceFactory(schedule_type='One-Time', status='Cancelled')
         response = APIClient().get(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['status'] == 'Cancelled'
+        assert_api_response(response, 200, schema={'status': 'Cancelled'})
 
     def test_retrieve_one_time_active_returns_200(self):
         """Active One-Time service is still reachable (regression guard)."""
         service = ServiceFactory(schedule_type='One-Time', status='Active')
         response = APIClient().get(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     # ── retrieve: Recurrent services are always Active ───────────────────────
 
@@ -731,13 +721,13 @@ class TestServiceRetrieveStatusVisibility:
         """Active Recurrent service is visible on the detail endpoint."""
         service = ServiceFactory(schedule_type='Recurrent', status='Active')
         response = APIClient().get(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_retrieve_nonexistent_service_returns_404(self):
         """Unknown UUID must still return 404."""
         import uuid
         response = APIClient().get(f'/api/services/{uuid.uuid4()}/')
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
     # ── list: only Active services are exposed ────────────────────────────────
 
@@ -746,7 +736,7 @@ class TestServiceRetrieveStatusVisibility:
         ServiceFactory(schedule_type='One-Time', status='Agreed')
         ServiceFactory(schedule_type='One-Time', status='Active')
         response = APIClient().get('/api/services/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         statuses = [s['status'] for s in response.data['results']]
         assert 'Agreed' not in statuses
 
@@ -755,7 +745,7 @@ class TestServiceRetrieveStatusVisibility:
         ServiceFactory(schedule_type='One-Time', status='Completed')
         ServiceFactory(schedule_type='One-Time', status='Active')
         response = APIClient().get('/api/services/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         statuses = [s['status'] for s in response.data['results']]
         assert 'Completed' not in statuses
 
@@ -764,7 +754,7 @@ class TestServiceRetrieveStatusVisibility:
         ServiceFactory(schedule_type='One-Time', status='Cancelled')
         ServiceFactory(schedule_type='One-Time', status='Active')
         response = APIClient().get('/api/services/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         statuses = [s['status'] for s in response.data['results']]
         assert 'Cancelled' not in statuses
 
@@ -775,7 +765,7 @@ class TestServiceRetrieveStatusVisibility:
         ServiceFactory(status='Completed')
         ServiceFactory(status='Cancelled')
         response = APIClient().get('/api/services/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert all(s['status'] == 'Active' for s in response.data['results'])
 
     def test_list_excludes_expired_group_offers_from_feed(self):
@@ -796,7 +786,7 @@ class TestServiceRetrieveStatusVisibility:
         )
 
         response = APIClient().get('/api/services/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = {item['id'] for item in response.data['results']}
         assert str(expired.id) not in ids
         assert str(future.id) in ids
@@ -816,8 +806,7 @@ class TestServiceRetrieveStatusVisibility:
             'max_participants': 5,
             'schedule_type': 'One-Time',
         })
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data['max_participants'] == 1
+        assert_api_response(response, 201, schema={'max_participants': 1})
         service = Service.objects.get(id=response.data['id'])
         assert service.max_participants == 1
 
@@ -837,8 +826,7 @@ class TestServiceRetrieveStatusVisibility:
             'max_participants': 5,
             'schedule_type': 'Recurrent',
         })
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data['max_participants'] == 5
+        assert_api_response(response, 201, schema={'max_participants': 5})
         service = Service.objects.get(id=response.data['id'])
         assert service.max_participants == 5
 
@@ -857,7 +845,7 @@ class TestServiceRetrieveStatusVisibility:
             'max_participants': 3,
             'schedule_type': 'One-Time',
         })
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         field_errors = response.data.get('field_errors', {})
         assert 'location_area' in field_errors or 'scheduled_time' in field_errors
 
@@ -885,7 +873,7 @@ class TestServiceRetrieveStatusVisibility:
             'session_location_guide': 'Veterinerin olduğu bina',
         })
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         service = Service.objects.get(id=response.data['id'])
         assert service.session_exact_location == 'Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye'
         assert service.session_exact_location_lat == Decimal('40.987654')

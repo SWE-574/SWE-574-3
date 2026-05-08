@@ -11,6 +11,7 @@ from django.test import override_settings
 
 from api.tests.helpers.factories import UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -28,10 +29,7 @@ class TestE2ESetBalance:
 
         response = client.post(self.URL, {'balance': 10.5}, format='json')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['balance'] == 10.5
-        assert response.data['email'] == user.email
-        assert response.data['id'] == str(user.id)
+        assert_api_response(response, 200, schema={'balance': 10.5, 'email': user.email, 'id': str(user.id)})
 
         user.refresh_from_db()
         assert user.timebank_balance == Decimal('10.50')
@@ -44,8 +42,7 @@ class TestE2ESetBalance:
 
         response = client.post(self.URL, {'balance': 0}, format='json')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['balance'] == 0.0
+        assert_api_response(response, 200, schema={'balance': 0.0})
 
         user.refresh_from_db()
         assert user.timebank_balance == Decimal('0.00')
@@ -58,7 +55,7 @@ class TestE2ESetBalance:
 
         response = client.post(self.URL, {'balance': -5.0}, format='json')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         user.refresh_from_db()
         assert user.timebank_balance == Decimal('-5.00')
 
@@ -70,7 +67,7 @@ class TestE2ESetBalance:
 
         response = client.post(self.URL, {'balance': 100}, format='json')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert 'E2E mode' in response.data['detail']
 
     @override_settings(DJANGO_E2E=True)
@@ -78,7 +75,7 @@ class TestE2ESetBalance:
         client = APIClient()
         response = client.post(self.URL, {'balance': 10}, format='json')
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     @override_settings(DJANGO_E2E=True)
     def test_missing_balance_field(self):
@@ -88,7 +85,7 @@ class TestE2ESetBalance:
 
         response = client.post(self.URL, {}, format='json')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert 'balance' in response.data['detail'].lower()
 
     @override_settings(DJANGO_E2E=True)
@@ -99,7 +96,7 @@ class TestE2ESetBalance:
 
         response = client.post(self.URL, {'balance': 'not-a-number'}, format='json')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     @override_settings(DJANGO_E2E=True)
     def test_balance_below_minimum_rejected(self):
@@ -109,5 +106,5 @@ class TestE2ESetBalance:
 
         response = client.post(self.URL, {'balance': -11.0}, format='json')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert 'range' in response.data['detail'].lower()

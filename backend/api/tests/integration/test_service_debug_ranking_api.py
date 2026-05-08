@@ -3,6 +3,7 @@ from rest_framework.test import APIClient
 
 from api.models import PlatformSetting
 from api.tests.helpers.factories import AdminUserFactory, ServiceFactory, UserFactory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -20,12 +21,12 @@ class TestServiceDebugRankingApi:
             'ranking_debug_enabled': True,
         }, format='json')
 
-        assert response.status_code == 200
+        assert_api_response(response, 200)
         assert response.json()['ranking_debug_enabled'] is True
 
         availability = client.get('/api/services/debug-ranking-availability/')
 
-        assert availability.status_code == 200
+        assert_api_response(availability, 200)
         assert availability.json() == {'enabled': True}
 
     def test_debug_ranking_returns_backend_breakdown_for_selected_service(self):
@@ -50,7 +51,7 @@ class TestServiceDebugRankingApi:
             'active_filter': 'all',
         }, format='json')
 
-        assert response.status_code == 200
+        assert_api_response(response, 200)
         payload = response.json()
         assert payload['total_services'] == 1
         assert payload['selected_service']['id'] == str(service.id)
@@ -76,7 +77,7 @@ class TestServiceDebugRankingApi:
             'selected_service_id': str(service.id),
         }, format='json')
 
-        assert response.status_code == 403
+        assert_problem_detail(response, 403)
 
 
 @pytest.mark.django_db
@@ -89,14 +90,14 @@ class TestDebugPanelAdminOnly:
         client = APIClient()
         client.force_authenticate(user=member)
         resp = client.get('/api/services/debug-ranking-availability/')
-        assert resp.status_code == 403
+        assert_problem_detail(resp, 403)
 
     def test_non_admin_post_debug_ranking_is_forbidden(self):
         member = UserFactory()
         client = APIClient()
         client.force_authenticate(user=member)
         resp = client.post('/api/services/debug-ranking/', {'service_ids': []}, format='json')
-        assert resp.status_code == 403
+        assert_problem_detail(resp, 403)
 
     def test_admin_can_simulate_as_other_user(self):
         admin = AdminUserFactory()
@@ -114,7 +115,7 @@ class TestDebugPanelAdminOnly:
             'simulated_user_id': str(target.id),
         }, format='json')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         # Payload should still describe the same service, just from `target`'s
         # perspective (different social_boost / proximity numbers).
         assert resp.json()['selected_service']['id'] == str(service.id)

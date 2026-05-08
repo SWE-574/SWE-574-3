@@ -10,6 +10,7 @@ from api.tests.helpers.factories import (
     ServiceFactory,
     UserFactory,
 )
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 def _make_tag(qid):
@@ -38,7 +39,7 @@ class TestForYouFeedEndpoint:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/?sort=for_you')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         data = resp.json()
         results = data['results']
         assert len(results) >= 1
@@ -53,8 +54,7 @@ class TestForYouFeedEndpoint:
         ServiceFactory(type='Offer', status='Active')
         client = APIClient()
         resp = client.get('/api/services/?sort=for_you')
-        assert resp.status_code == 200
-        assert resp.json()['results'] == []
+        assert_api_response(resp, 200, schema={'results': []})
 
     def test_not_onboarded_viewer_gets_empty_for_you(self):
         viewer = UserFactory(is_onboarded=False)
@@ -62,8 +62,7 @@ class TestForYouFeedEndpoint:
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/?sort=for_you')
-        assert resp.status_code == 200
-        assert resp.json()['results'] == []
+        assert_api_response(resp, 200, schema={'results': []})
 
     def test_onboarded_without_skills_gets_empty_for_you(self):
         viewer = UserFactory(is_onboarded=True)
@@ -71,8 +70,7 @@ class TestForYouFeedEndpoint:
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/?sort=for_you')
-        assert resp.status_code == 200
-        assert resp.json()['results'] == []
+        assert_api_response(resp, 200, schema={'results': []})
 
     def test_impressions_logged_on_for_you_response(self):
         from api.models import ForYouEvent
@@ -103,7 +101,7 @@ class TestForYouClickAttribution:
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.get(f'/api/services/{svc.id}/?from=for_you')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert ForYouEvent.objects.filter(
             viewer=viewer, service=svc,
             kind=ForYouEvent.CLICK, source=ForYouEvent.SOURCE_FOR_YOU,
@@ -192,7 +190,7 @@ class TestForYouMetricsEndpoint:
         client = APIClient()
         client.force_authenticate(user=admin)
         resp = client.get('/api/services/for-you-metrics/?days=7')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         body = resp.json()
         assert body['days'] == 7
         # Top-level note documents what `count` actually represents so admins
@@ -215,4 +213,4 @@ class TestForYouMetricsEndpoint:
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/for-you-metrics/?days=7')
-        assert resp.status_code == 403
+        assert_problem_detail(resp, 403)

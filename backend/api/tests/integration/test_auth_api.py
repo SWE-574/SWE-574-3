@@ -142,8 +142,7 @@ class TestTokenRefresh:
         response = client.post('/api/auth/refresh/', {
             'refresh': str(refresh)
         })
-        assert response.status_code == status.HTTP_200_OK
-        assert 'access' in response.data
+        assert_api_response(response, 200, contains={'access'})
     
     def test_token_refresh_invalid_token(self):
         """Test token refresh with invalid token"""
@@ -151,7 +150,7 @@ class TestTokenRefresh:
         response = client.post('/api/auth/refresh/', {
             'refresh': 'invalid-token'
         })
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 @pytest.mark.django_db
@@ -166,14 +165,13 @@ class TestAuthenticatedEndpoints:
         client.authenticate_user(user)
         
         response = client.get('/api/users/me/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['email'] == user.email
+        assert_api_response(response, 200, schema={'email': user.email})
     
     def test_unauthenticated_access(self):
         """Test accessing protected endpoint without token"""
         client = APIClient()
         response = client.get('/api/users/me/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 @pytest.mark.django_db
@@ -187,7 +185,7 @@ class TestLogout:
         user.set_password(password)
         user.save()
         resp = client.post('/api/auth/login/', {'email': email, 'password': password})
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         return user, resp.data['refresh']
 
     def test_logout_returns_200(self):
@@ -195,8 +193,7 @@ class TestLogout:
         client = APIClient()
         self._login(client)
         response = client.post('/api/auth/logout/')
-        assert response.status_code == status.HTTP_200_OK
-        assert 'detail' in response.data
+        assert_api_response(response, 200, contains={'detail'})
 
     def test_logout_clears_auth_cookies(self):
         """Logout response includes cookie-deletion directives for both tokens."""
@@ -207,7 +204,7 @@ class TestLogout:
         client.cookies['refresh_token'] = refresh_token
 
         response = client.post('/api/auth/logout/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         # Django sets max-age=0 when deleting a cookie
         assert 'access_token' in response.cookies
@@ -223,16 +220,15 @@ class TestLogout:
         # Attach refresh cookie so logout can blacklist it
         client.cookies['refresh_token'] = refresh_token
         logout_resp = client.post('/api/auth/logout/')
-        assert logout_resp.status_code == status.HTTP_200_OK
+        assert_api_response(logout_resp, 200)
 
         # Attempt to use the blacklisted token on a fresh client (sent in body)
         fresh_client = APIClient()
         refresh_resp = fresh_client.post('/api/auth/refresh/', {'refresh': refresh_token})
-        assert refresh_resp.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(refresh_resp, 401)
 
     def test_logout_without_cookies_is_safe(self):
         """Logout is idempotent / safe when no refresh cookie is present."""
         client = APIClient()
         response = client.post('/api/auth/logout/')
-        assert response.status_code == status.HTTP_200_OK
-        assert 'detail' in response.data
+        assert_api_response(response, 200, contains={'detail'})

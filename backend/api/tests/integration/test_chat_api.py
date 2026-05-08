@@ -146,13 +146,11 @@ class TestChatViewSet:
 
         client.authenticate_user(owner)
         owner_response = client.get(f'/api/chats/{handshake.id}/')
-        assert owner_response.status_code == status.HTTP_200_OK
-        assert owner_response.data['count'] == 1
+        assert_api_response(owner_response, 200, schema={'count': 1})
 
         client.authenticate_user(requester)
         requester_response = client.get(f'/api/chats/{handshake.id}/')
-        assert requester_response.status_code == status.HTTP_200_OK
-        assert requester_response.data['count'] == 1
+        assert_api_response(requester_response, 200, schema={'count': 1})
 
     def test_cancelled_handshake_messages_accessible_to_both_parties(self):
         """FR-10c: private chat remains accessible after handshake is cancelled."""
@@ -166,13 +164,11 @@ class TestChatViewSet:
 
         client.authenticate_user(owner)
         owner_response = client.get(f'/api/chats/{handshake.id}/')
-        assert owner_response.status_code == status.HTTP_200_OK
-        assert owner_response.data['count'] == 1
+        assert_api_response(owner_response, 200, schema={'count': 1})
 
         client.authenticate_user(requester)
         requester_response = client.get(f'/api/chats/{handshake.id}/')
-        assert requester_response.status_code == status.HTTP_200_OK
-        assert requester_response.data['count'] == 1
+        assert_api_response(requester_response, 200, schema={'count': 1})
 
     def test_group_offer_participant_cannot_read_other_private_thread(self):
         """FR-10e: participant cannot access another participant's private thread."""

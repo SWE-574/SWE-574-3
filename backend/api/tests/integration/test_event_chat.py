@@ -18,6 +18,7 @@ from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory, ChatMessageFactory,
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ class TestChatViewSetExcludesEvents:
         client.authenticate_user(user)
 
         response = client.get('/api/chats/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         results = response.data['results']
         handshake_ids = {item['handshake_id'] for item in results}
@@ -99,7 +100,7 @@ class TestChatViewSetExcludesEvents:
         client.authenticate_user(user)
 
         response = client.get('/api/chats/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data['results']) == 0
 
     def test_requester_side_event_excluded(self):
@@ -115,7 +116,7 @@ class TestChatViewSetExcludesEvents:
         client.authenticate_user(requester)
 
         response = client.get('/api/chats/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data['results']) == 0
 
 
@@ -143,9 +144,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(organizer)
 
         response = client.get(f'/api/public-chat/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert 'room' in response.data
-        assert 'messages' in response.data
+        assert_api_response(response, 200, contains={'room', 'messages'})
 
     def test_accepted_participant_can_access_event_chat(self):
         """A participant with 'accepted' status can access the event chat."""
@@ -158,7 +157,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(participant)
 
         response = client.get(f'/api/public-chat/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_checked_in_participant_can_access_event_chat(self):
         """A participant with 'checked_in' status can access the event chat."""
@@ -171,7 +170,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(participant)
 
         response = client.get(f'/api/public-chat/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_attended_participant_can_access_event_chat(self):
         """A participant with 'attended' status can access the event chat."""
@@ -184,7 +183,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(participant)
 
         response = client.get(f'/api/public-chat/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_non_participant_denied_event_chat(self):
         """A user with no handshake cannot access the event chat."""
@@ -195,7 +194,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(outsider)
 
         response = client.get(f'/api/public-chat/{event.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     def test_pending_participant_denied_event_chat(self):
         """A user with only a pending handshake cannot access the event chat."""
@@ -208,7 +207,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(user)
 
         response = client.get(f'/api/public-chat/{event.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     def test_cancelled_participant_denied_event_chat(self):
         """A user with a cancelled handshake cannot access the event chat."""
@@ -221,7 +220,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(user)
 
         response = client.get(f'/api/public-chat/{event.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     # ── POST (create message) ─────────────────────────────────────────────────
 
@@ -234,7 +233,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(organizer)
 
         response = client.post(f'/api/public-chat/{event.id}/', {'body': 'Hello from organizer!'})
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert PublicChatMessage.objects.filter(
             room=event.chat_room,
             body='Hello from organizer!'
@@ -251,7 +250,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(participant)
 
         response = client.post(f'/api/public-chat/{event.id}/', {'body': 'Participant message'})
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
     def test_non_participant_cannot_send_event_chat_message(self):
         """A non-participant cannot send a message to event chat."""
@@ -262,7 +261,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(outsider)
 
         response = client.post(f'/api/public-chat/{event.id}/', {'body': 'Sneaky msg'})
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert not PublicChatMessage.objects.filter(
             room=event.chat_room,
             body='Sneaky msg'
@@ -279,7 +278,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(random_user)
 
         response = client.get(f'/api/public-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_non_event_public_chat_send_open_to_all(self):
         """For non-event services, any authenticated user can send messages."""
@@ -290,7 +289,7 @@ class TestPublicChatEventAccess:
         client.authenticate_user(random_user)
 
         response = client.post(f'/api/public-chat/{service.id}/', {'body': 'Public question'})
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
 
 # ─── GroupChatViewSet: events rejected ────────────────────────────────────────
@@ -309,7 +308,7 @@ class TestGroupChatEventAccess:
         client.authenticate_user(organizer)
 
         response = client.get(f'/api/group-chat/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_event_organizer_can_post_group_chat(self):
         """POST /api/group-chat/{event_id}/ returns 201 for organizer."""
@@ -324,7 +323,7 @@ class TestGroupChatEventAccess:
             {'body': 'Hello from organizer'},
             format='json',
         )
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
     def test_event_checked_in_participant_can_access(self):
         """A checked-in event participant can access group chat."""
@@ -336,7 +335,7 @@ class TestGroupChatEventAccess:
         client.authenticate_user(participant)
 
         response = client.get(f'/api/group-chat/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_event_participant_list_includes_checked_in_and_attended(self):
         """Event group chat participants include all active event statuses."""
@@ -353,7 +352,7 @@ class TestGroupChatEventAccess:
         client.authenticate_user(organizer)
 
         response = client.get(f'/api/group-chat/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         participant_ids = {participant['id'] for participant in response.data['participants']}
         assert participant_ids == {
             str(organizer.id),
@@ -372,7 +371,7 @@ class TestGroupChatEventAccess:
         client.authenticate_user(participant)
 
         response = client.get(f'/api/group-chat/{event.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     def test_non_event_group_chat_still_works(self):
         """Regular group services still work with group chat."""
@@ -383,4 +382,4 @@ class TestGroupChatEventAccess:
         client.authenticate_user(owner)
 
         response = client.get(f'/api/group-chat/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)

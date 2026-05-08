@@ -140,7 +140,7 @@ class TestReputationViewSet:
             'helpful': False,
             'kindness': False,
         })
-        assert eval_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(eval_response, 201)
         assert not Comment.objects.filter(
             related_handshake=handshake,
             user=requester,
@@ -152,7 +152,7 @@ class TestReputationViewSet:
             'handshake_id': str(handshake.id),
             'comment': 'Adding my review later inside the evaluation window.',
         })
-        assert review_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(review_response, 201)
         assert Comment.objects.filter(
             related_handshake=handshake,
             user=requester,
@@ -243,12 +243,11 @@ class TestReputationViewSet:
             'kindness': False,
             'comment': 'Private until both sides evaluate.',
         })
-        assert create_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(create_response, 201)
 
         provider_client = AuthenticatedAPIClient().authenticate_user(provider)
         hidden_response = provider_client.get(f'/api/services/{service.id}/comments/')
-        assert hidden_response.status_code == status.HTTP_200_OK
-        assert hidden_response.data['count'] == 0
+        assert_api_response(hidden_response, 200, schema={'count': 0})
 
         reciprocal_response = provider_client.post('/api/reputation/', {
             'handshake_id': str(handshake.id),
@@ -256,11 +255,10 @@ class TestReputationViewSet:
             'helpful': True,
             'kindness': True,
         })
-        assert reciprocal_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(reciprocal_response, 201)
 
         revealed_response = provider_client.get(f'/api/services/{service.id}/comments/')
-        assert revealed_response.status_code == status.HTTP_200_OK
-        assert revealed_response.data['count'] == 1
+        assert_api_response(revealed_response, 200, schema={'count': 1})
 
     def test_blind_review_revealed_after_window_expires_without_reciprocal(self):
         provider = UserFactory()
@@ -283,7 +281,7 @@ class TestReputationViewSet:
             'kindness': False,
             'comment': 'Visible after feedback window expiry.',
         })
-        assert create_response.status_code == status.HTTP_410_GONE
+        assert_problem_detail(create_response, 410)
 
         # Create legacy-style verified review directly to validate display gating on read path.
         Comment.objects.create(
@@ -707,7 +705,7 @@ class TestNegativeRepViewSet:
 
         organizer_client = AuthenticatedAPIClient().authenticate_user(organizer)
         service_response = organizer_client.get(f'/api/services/{event.id}/')
-        assert service_response.status_code == status.HTTP_200_OK
+        assert_api_response(service_response, 200)
         payload = service_response.data.get('event_evaluation_summary')
         assert payload is not None
         assert payload['positive_feedback_count'] == 1
@@ -740,7 +738,7 @@ class TestNegativeRepViewSet:
             'engaging': False,
             'welcoming': True,
         })
-        assert positive.status_code == status.HTTP_201_CREATED
+        assert_api_response(positive, 201)
 
         negative = participant_client.post('/api/reputation/negative/', {
             'handshake_id': str(handshake.id),
@@ -748,7 +746,7 @@ class TestNegativeRepViewSet:
             'boring': False,
             'unwelcoming': True,
         })
-        assert negative.status_code == status.HTTP_201_CREATED
+        assert_api_response(negative, 201)
 
         summary = EventEvaluationSummary.objects.get(service=event)
         assert summary.positive_feedback_count == 1
@@ -883,7 +881,7 @@ class TestEventEvaluationHotScoreIsolation:
             'boring': True,
             'unwelcoming': False,
         })
-        assert negative_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(negative_response, 201)
 
         organizer.refresh_from_db()
         event.refresh_from_db()
@@ -952,8 +950,8 @@ class TestEventNoShowAppeals:
         first = client.post(f'/api/handshakes/{handshake.id}/appeal-no-show/', {'description': 'first'})
         second = client.post(f'/api/handshakes/{handshake.id}/appeal-no-show/', {'description': 'second'})
 
-        assert first.status_code == status.HTTP_201_CREATED
-        assert second.status_code == status.HTTP_400_BAD_REQUEST
+        assert_api_response(first, 201)
+        assert_problem_detail(second, 400)
         assert second.data['code'] == 'ALREADY_EXISTS'
 
     def test_admin_can_overturn_no_show_appeal(self):
@@ -1278,7 +1276,7 @@ class TestEventEvaluationCommentHistory:
             'welcoming': False,
             'comment': review_text,
         })
-        assert rep_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(rep_response, 201)
 
         # Comment created in the DB.
         assert Comment.objects.filter(
@@ -1295,7 +1293,7 @@ class TestEventEvaluationCommentHistory:
         organizer_client = AuthenticatedAPIClient()
         organizer_client.authenticate_user(organizer)
         profile_response = organizer_client.get('/api/users/me/')
-        assert profile_response.status_code == status.HTTP_200_OK
+        assert_api_response(profile_response, 200)
 
         history = profile_response.data.get('event_comments_history', [])
         assert isinstance(history, list), 'event_comments_history must be a list'
@@ -1335,7 +1333,7 @@ class TestEventEvaluationCommentHistory:
             'welcoming': False,
             # No 'comment' key supplied.
         })
-        assert rep_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(rep_response, 201)
 
         # No verified review comment should exist for this handshake.
         assert not Comment.objects.filter(
@@ -1350,7 +1348,7 @@ class TestEventEvaluationCommentHistory:
         organizer_client = AuthenticatedAPIClient()
         organizer_client.authenticate_user(organizer)
         profile_response = organizer_client.get('/api/users/me/')
-        assert profile_response.status_code == status.HTTP_200_OK
+        assert_api_response(profile_response, 200)
 
         history = profile_response.data.get('event_comments_history', [])
         event_entry = next(
@@ -1379,7 +1377,7 @@ class TestEventEvaluationCommentHistory:
             'welcoming': True,
             'comment': review_text,
         })
-        assert rep_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(rep_response, 201)
 
         # Expire the window before fetching profile.
         self._expire_window(handshake)
@@ -1387,7 +1385,7 @@ class TestEventEvaluationCommentHistory:
         organizer_client = AuthenticatedAPIClient()
         organizer_client.authenticate_user(organizer)
         profile_response = organizer_client.get('/api/users/me/')
-        assert profile_response.status_code == status.HTTP_200_OK
+        assert_api_response(profile_response, 200)
 
         history = profile_response.data.get('event_comments_history', [])
         event_entry = next(
@@ -1648,13 +1646,13 @@ class TestFR16cEvaluationScoping:
             'handshake_id': str(handshake.id),
             'well_organized': True,
         })
-        assert first.status_code == status.HTTP_201_CREATED
+        assert_api_response(first, 201)
 
         second = client.post('/api/reputation/', {
             'handshake_id': str(handshake.id),
             'well_organized': True,
         })
-        assert second.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(second, 400)
 
         # Summary must not double-count.
         summary = EventEvaluationSummary.objects.get(service=handshake.service)

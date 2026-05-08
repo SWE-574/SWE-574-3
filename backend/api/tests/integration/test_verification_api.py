@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 from api.models import EmailVerificationToken, PasswordResetToken
 from api.tests.helpers.factories import UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 User = get_user_model()
 
@@ -26,8 +27,7 @@ class TestVerificationAPI:
         )
         client = APIClient()
         response = client.post('/api/auth/verify-email/', {'token': 'valid_token_123'})
-        assert response.status_code == status.HTTP_200_OK
-        assert 'access' in response.data
+        assert_api_response(response, 200, contains={'access'})
         user.refresh_from_db()
         assert user.is_verified is True
         token.refresh_from_db()
@@ -36,7 +36,7 @@ class TestVerificationAPI:
     def test_verify_email_invalid_token(self):
         client = APIClient()
         response = client.post('/api/auth/verify-email/', {'token': 'invalid_string'})
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_verify_email_expired_token(self):
         user = UserFactory(is_verified=False)
@@ -47,7 +47,7 @@ class TestVerificationAPI:
         )
         client = APIClient()
         response = client.post('/api/auth/verify-email/', {'token': 'expired_token_123'})
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     @patch('api.views._send_email_async')
     def test_send_verification_authenticated(self, mock_send):
@@ -56,7 +56,7 @@ class TestVerificationAPI:
         client.authenticate_user(user)
 
         response = client.post('/api/auth/send-verification/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert EmailVerificationToken.objects.filter(user=user, is_used=False).exists()
         mock_send.assert_called_once()
 
@@ -66,21 +66,21 @@ class TestVerificationAPI:
         client.authenticate_user(user)
 
         response = client.post('/api/auth/send-verification/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     @patch('api.views._send_email_async')
     def test_resend_verification_public(self, mock_send):
         user = UserFactory(is_verified=False, email='testunverified@test.com')
         client = APIClient()
         response = client.post('/api/auth/resend-verification/', {'email': 'testunverified@test.com'})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         mock_send.assert_called_once()
 
     @patch('api.views._send_email_async')
     def test_resend_verification_public_does_not_exist(self, mock_send):
         client = APIClient()
         response = client.post('/api/auth/resend-verification/', {'email': 'doesnotexist@test.com'})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         mock_send.assert_not_called()
 
 
@@ -93,7 +93,7 @@ class TestPasswordResetAPI:
         UserFactory(email='forgotpass@test.com')
         client = APIClient()
         response = client.post('/api/auth/forgot-password/', {'email': 'forgotpass@test.com'})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         mock_send.assert_called_once()
 
     def test_reset_password_success(self):
@@ -113,7 +113,7 @@ class TestPasswordResetAPI:
             'password': 'newsecurepass123'
         })
         
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         user.refresh_from_db()
         assert user.check_password('newsecurepass123') is True
         token.refresh_from_db()
@@ -125,4 +125,4 @@ class TestPasswordResetAPI:
             'token': 'bad_token',
             'password': 'newsecurepass123'
         })
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
