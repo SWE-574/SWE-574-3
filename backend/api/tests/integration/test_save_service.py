@@ -1,4 +1,4 @@
-"""Integration tests for Save and Endorse (#483)."""
+"""Integration tests for the Save action on services (#483)."""
 import pytest
 from rest_framework.test import APIClient
 
@@ -94,10 +94,10 @@ class TestSaveService:
 
 @pytest.mark.django_db
 @pytest.mark.integration
-class TestSaveEndorseListPerformance:
-    """Regression guard for the per-card N+1 that the first version of the
-    save/endorse serializer fields introduced. The list response should
-    issue O(1) queries for the save/endorse fields, not O(N).
+class TestSaveListPerformance:
+    """Regression guard for the per-card N+1 that the save serializer field
+    could regress into. The list response should issue O(1) queries for
+    is_saved, not O(N).
     """
 
     def test_list_query_count_does_not_scale_with_service_count(self):
@@ -124,85 +124,8 @@ class TestSaveEndorseListPerformance:
         large = len(ctx_20)
 
         # Allow some growth from prefetch sub-queries that scale with row
-        # count, but per-card save/endorse queries would balloon by 3 per
-        # extra service (15 * 3 = +45). Cap the diff comfortably under that.
+        # count, but per-card N+1 would balloon by ~3 per extra service.
         assert large - small < 30, (
             f'list query count grew from {small} to {large} for 5 -> 20 '
             f'services; per-card N+1 likely back'
         )
-
-
-@pytest.mark.django_db
-@pytest.mark.integration
-class TestEndorseService:
-    def test_endorse_creates_row_and_returns_count(self):
-        from api.models import Endorsement
-
-        viewer = UserFactory()
-        owner = UserFactory()
-        svc = ServiceFactory(user=owner, type='Offer', status='Active')
-
-        client = APIClient()
-        client.force_authenticate(user=viewer)
-        resp = client.post(f'/api/services/{svc.id}/endorse/')
-        assert_api_response(resp, 200)
-        assert resp.json()['is_endorsed'] is True
-        assert resp.json()['endorsement_count'] == 1
-        assert Endorsement.objects.filter(endorser=viewer, service=svc).exists()
-
-    def test_self_endorse_is_blocked(self):
-        owner = UserFactory()
-        svc = ServiceFactory(user=owner, type='Offer', status='Active')
-        client = APIClient()
-        client.force_authenticate(user=owner)
-        resp = client.post(f'/api/services/{svc.id}/endorse/')
-        assert_problem_detail(resp, 400)
-
-    def test_endorse_is_idempotent(self):
-        from api.models import Endorsement
-
-        viewer = UserFactory()
-        owner = UserFactory()
-        svc = ServiceFactory(user=owner, type='Offer', status='Active')
-        client = APIClient()
-        client.force_authenticate(user=viewer)
-        client.post(f'/api/services/{svc.id}/endorse/')
-        client.post(f'/api/services/{svc.id}/endorse/')
-        assert Endorsement.objects.filter(endorser=viewer, service=svc).count() == 1
-
-    def test_unendorse_removes_row(self):
-        from api.models import Endorsement
-
-        viewer = UserFactory()
-        owner = UserFactory()
-        svc = ServiceFactory(user=owner, type='Offer', status='Active')
-        client = APIClient()
-        client.force_authenticate(user=viewer)
-        client.post(f'/api/services/{svc.id}/endorse/')
-        resp = client.delete(f'/api/services/{svc.id}/endorse/')
-        assert_api_response(resp, 200)
-        assert resp.json()['is_endorsed'] is False
-        assert resp.json()['endorsement_count'] == 0
-        assert not Endorsement.objects.filter(endorser=viewer, service=svc).exists()
-
-    def test_anonymous_blocked(self):
-        svc = ServiceFactory(type='Offer', status='Active')
-        client = APIClient()
-        resp = client.post(f'/api/services/{svc.id}/endorse/')
-        assert_problem_detail(resp, 401)
-
-    def test_endorsement_count_visible_to_anyone(self):
-        endorser_a = UserFactory()
-        endorser_b = UserFactory()
-        owner = UserFactory()
-        svc = ServiceFactory(user=owner, type='Offer', status='Active')
-
-        for endorser in (endorser_a, endorser_b):
-            client = APIClient()
-            client.force_authenticate(user=endorser)
-            client.post(f'/api/services/{svc.id}/endorse/')
-
-        # Anonymous request reads the count
-        anon = APIClient()
-        resp = anon.get(f'/api/services/{svc.id}/')
-        assert resp.json()['endorsement_count'] == 2

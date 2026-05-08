@@ -1371,38 +1371,6 @@ class SavedService(models.Model):
         return f'SavedService({self.user_id}, {self.service_id})'
 
 
-class Endorsement(models.Model):
-    """Public endorsement of a service's provider (#483 Endorse).
-
-    A viewer can endorse a service to publicly say 'I vouch for this provider'.
-    Counts are visible on the service card; integration into ranking
-    (Wilson quality / Phase 2 factor) is a planned follow-up so this PR keeps
-    the ranking math untouched.
-    """
-    endorser = models.ForeignKey(
-        'User', on_delete=models.CASCADE, related_name='endorsements_given',
-    )
-    service = models.ForeignKey(
-        Service, on_delete=models.CASCADE, related_name='endorsements',
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=['endorser', 'service'], name='endorsement_unique',
-            ),
-        ]
-        indexes = [
-            models.Index(fields=['service', '-created_at']),
-            models.Index(fields=['endorser', '-created_at']),
-        ]
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f'Endorsement({self.endorser_id}, {self.service_id})'
-
-
 class ActivityEvent(models.Model):
     """Append-only timeline of platform activity that powers the activity feed.
 
@@ -1416,7 +1384,6 @@ class ActivityEvent(models.Model):
     HANDSHAKE_ACCEPTED = 'handshake_accepted'
     HANDSHAKE_COMPLETED = 'handshake_completed'
     USER_FOLLOWED = 'user_followed'
-    SERVICE_ENDORSED = 'service_endorsed'
     EVENT_FILLING_UP = 'event_filling_up'
     NEW_NEIGHBOR = 'new_neighbor'
     VERB_CHOICES = [
@@ -1424,7 +1391,6 @@ class ActivityEvent(models.Model):
         (HANDSHAKE_ACCEPTED, 'handshake_accepted'),
         (HANDSHAKE_COMPLETED, 'handshake_completed'),
         (USER_FOLLOWED, 'user_followed'),
-        (SERVICE_ENDORSED, 'service_endorsed'),
         (EVENT_FILLING_UP, 'event_filling_up'),
         (NEW_NEIGHBOR, 'new_neighbor'),
     ]

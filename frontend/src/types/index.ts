@@ -165,6 +165,7 @@ export interface ServiceFormData {
   max_participants: number
   schedule_type: 'One-Time' | 'Recurrent'
   schedule_details?: string
+  recurrence_interval_days?: number | null
   tags?: string[]
   tag_names?: string[]
   scheduled_time?: string | null
@@ -195,6 +196,7 @@ export interface Service {
   participant_count: number
   schedule_type: 'One-Time' | 'Recurrent'
   schedule_details?: string
+  recurrence_interval_days?: number | null
   tags: Tag[]
   media?: ServiceMedia[]
   // Backend returns `user`; `provider` kept for compatibility
@@ -210,8 +212,6 @@ export interface Service {
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
   is_saved?: boolean
-  is_endorsed?: boolean
-  endorsement_count?: number
   source?: 'tag_match' | 'explore_topup' | 'for_you' | 'explore' | null
   for_you_signals?: ForYouSignals | null
   explore_pool?: 'cold_start' | 'undershown_quality' | 'stale_recurring' | null

@@ -205,14 +205,6 @@ def emit_activity_for_new_neighbor(sender, instance, created, **kwargs):
         )
 
 
-# NOTE: producer for ActivityEvent.SERVICE_ENDORSED is intentionally not
-# wired here. The Endorsement model lives on the #494 social-mechanics
-# branch; once it merges into dev, the producer should be added here as a
-# post_save receiver that creates an event with verb=SERVICE_ENDORSED,
-# actor=endorsement.endorser, service=endorsement.service. The verb is
-# already declared on ActivityEvent so the migration sets up the enum.
-
-
 @receiver(post_save, sender=UserFollow)
 def emit_activity_for_user_follow(sender, instance, created, **kwargs):
     """Emit an ActivityEvent when a follow edge is created so a viewer can

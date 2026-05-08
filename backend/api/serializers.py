@@ -543,8 +543,6 @@ class ServiceSerializer(serializers.ModelSerializer):
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
-    is_endorsed = serializers.SerializerMethodField()
-    endorsement_count = serializers.SerializerMethodField()
     # source / for_you_signals / explore_pool are transient: not stored on
     # the Service model. They are attached to the instance by _list_for_you()
     # and the explore-only list path in views.py before serialization.
@@ -566,13 +564,13 @@ class ServiceSerializer(serializers.ModelSerializer):
             'status', 'max_participants', 'schedule_type',
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
-            'is_saved', 'is_endorsed', 'endorsement_count',
+            'is_saved',
             'is_newcomer_owner', 'source', 'for_you_signals', 'explore_pool',
             'edit_locked', 'edit_lock_reason',
         ]
         read_only_fields = [
             'user', 'hot_score', 'is_visible', 'is_pinned',
-            'is_saved', 'is_endorsed', 'endorsement_count',
+            'is_saved',
             'is_newcomer_owner',
             'source', 'for_you_signals', 'explore_pool',
             'edit_locked', 'edit_lock_reason',
@@ -593,30 +591,6 @@ class ServiceSerializer(serializers.ModelSerializer):
             return False
         from .models import SavedService
         return SavedService.objects.filter(user=viewer, service=obj).exists()
-
-    def get_is_endorsed(self, obj):
-        """True when the current viewer has endorsed this service (#483).
-        Annotation-aware; same fallback pattern as get_is_saved.
-        """
-        annotated = getattr(obj, 'is_endorsed_anno', None)
-        if annotated is not None:
-            return bool(annotated)
-        request = self.context.get('request') if hasattr(self, 'context') else None
-        viewer = getattr(request, 'user', None) if request else None
-        if viewer is None or not viewer.is_authenticated:
-            return False
-        from .models import Endorsement
-        return Endorsement.objects.filter(endorser=viewer, service=obj).exists()
-
-    def get_endorsement_count(self, obj):
-        """Public endorsement count for the service (#483).
-        Annotation-aware; falls back to a per-row count for detail views.
-        """
-        annotated = getattr(obj, 'endorsement_count_anno', None)
-        if annotated is not None:
-            return int(annotated)
-        from .models import Endorsement
-        return Endorsement.objects.filter(service=obj).count()
 
     @extend_schema_field(serializers.BooleanField())
     def get_is_newcomer_owner(self, obj):
