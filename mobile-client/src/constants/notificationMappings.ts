@@ -15,6 +15,7 @@ export const NOTIFICATION_ICONS: Record<NotificationType, string> = {
   positive_rep: 'star-outline',
   admin_warning: 'warning-outline',
   dispute_resolved: 'shield-checkmark-outline',
+  user_followed: 'person-add-outline',
 };
 
 /**
@@ -25,11 +26,32 @@ export function navigateToNotificationTarget(
   notification: Notification,
   navigation: { navigate: (screen: string, params?: object) => void },
 ): void {
-  const { type, related_handshake, related_service } = notification;
+  const { type, related_handshake, related_service, related_service_type, related_user } = notification;
 
-  // Handshake-related and chat notifications → Chat screen
+  // New follower → follower's public profile
+  if (type === 'user_followed' && related_user) {
+    navigation.navigate('Home', {
+      screen: 'PublicProfile',
+      params: { userId: related_user },
+    });
+    return;
+  }
+
+  // Event notifications → ServiceDetail (even if related_handshake is present)
+  if (related_service_type === 'Event' && related_service) {
+    navigation.navigate('Home', {
+      screen: 'ServiceDetail',
+      params: { id: related_service },
+    });
+    return;
+  }
+
+  // Handshake-related and chat notifications → Chat screen.
+  // service_confirmation also lands here when related_service is absent
+  // (i.e. only a handshake link is available) so the user can confirm
+  // completion directly from the conversation.
   if (
-    (type.startsWith('handshake_') || type === 'chat_message') &&
+    (type.startsWith('handshake_') || type === 'chat_message' || type === 'service_confirmation') &&
     related_handshake
   ) {
     navigation.navigate('Messages', {

@@ -1005,6 +1005,7 @@ class HandshakeService:
                         f"for {handshake.requester.first_name}?"
                     ),
                     handshake=handshake,
+                    service=handshake.service,
                 )
                 create_notification(
                     user=handshake.requester,
@@ -1015,7 +1016,23 @@ class HandshakeService:
                         f"for {handshake.service.user.first_name}?"
                     ),
                     handshake=handshake,
+                    service=handshake.service,
                 )
+        elif handshake.status != 'Completed':
+            # One side confirmed — nudge the other party to confirm their side
+            other = handshake.requester if is_provider else handshake.service.user
+            confirmer_name = user.first_name
+            create_notification(
+                user=other,
+                notification_type='service_confirmation',
+                title='Completion Confirmed',
+                message=(
+                    f"{confirmer_name} confirmed completion of "
+                    f"'{handshake.service.title}'. Please confirm your side to finish the exchange."
+                ),
+                handshake=handshake,
+                service=handshake.service,
+            )
 
         return handshake
 
@@ -1427,7 +1444,7 @@ class HandshakeService:
             handshake.save(update_fields=['status', 'updated_at'])
 
         # Notify admins
-        admins = User.objects.filter(role='admin')
+        admins = User.objects.filter(role__in=['admin', 'super_admin'], is_active=True)
         for admin in admins:
             create_notification(
                 user=admin,
@@ -2055,7 +2072,7 @@ class EventNoShowAppealService:
 
             notify_reporter_of_receipt(report)
 
-            for admin in User.objects.filter(role='admin').only('id'):
+            for admin in User.objects.filter(role__in=['admin', 'super_admin'], is_active=True).only('id'):
                 create_notification(
                     user=admin,
                     notification_type='new_report',
@@ -2446,6 +2463,14 @@ class ReputationService:
                 notification_type='positive_rep',
                 title='Feedback Received',
                 message=f"{giver.first_name} left feedback for '{handshake.service.title}'.",
+                handshake=handshake,
+                service=handshake.service,
+            )
+            create_notification(
+                user=giver,
+                notification_type='positive_rep',
+                title='Feedback Submitted',
+                message=f"You left feedback for '{handshake.service.title}'.",
                 handshake=handshake,
                 service=handshake.service,
             )

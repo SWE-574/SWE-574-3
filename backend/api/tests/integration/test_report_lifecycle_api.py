@@ -14,6 +14,7 @@ from rest_framework.test import APIClient
 from api.models import Notification, Report
 from api.tests.helpers.factories import AdminUserFactory, ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -33,7 +34,7 @@ class TestReportReceivedNotification:
             format='json',
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         received = Notification.objects.filter(
             user=reporter, type='report_received',
         )
@@ -69,7 +70,7 @@ class TestReportResolveLifecycleNotifications:
             format='json',
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         report.refresh_from_db()
         assert report.status == 'resolved'
         assert report.resolved_by_id == admin.id
@@ -87,7 +88,7 @@ class TestReportResolveLifecycleNotifications:
             format='json',
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         report.refresh_from_db()
         assert report.status == 'dismissed'
         assert Notification.objects.filter(
@@ -106,7 +107,7 @@ class TestReportResolveLifecycleNotifications:
             format='json',
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
 
 @pytest.mark.django_db
@@ -116,7 +117,7 @@ class TestMyReportsEndpoint:
 
     def test_unauthenticated_request_is_rejected(self):
         response = APIClient().get('/api/users/me/reports/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_returns_only_current_users_reports(self):
         alice = UserFactory()
@@ -136,7 +137,7 @@ class TestMyReportsEndpoint:
         client = AuthenticatedAPIClient().authenticate_user(alice)
         response = client.get('/api/users/me/reports/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data['results'] if isinstance(response.data, dict) else response.data
         assert len(results) == 1
         assert results[0]['description'] == 'alice report'
@@ -161,7 +162,7 @@ class TestMyReportsEndpoint:
         client = AuthenticatedAPIClient().authenticate_user(reporter)
         response = client.get('/api/users/me/reports/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data['results'] if isinstance(response.data, dict) else response.data
         assert len(results) == 1
         payload = results[0]

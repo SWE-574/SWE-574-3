@@ -25,13 +25,33 @@ export default function WikidataTagAutocomplete({
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
 
   const abortRef = useRef<AbortController | null>(null)
+  // In-memory result cache keyed by lowercased query. Survives the lifetime
+  // of the component instance so closing/reopening the autocomplete reuses
+  // results, and re-typing the same prefix is instant.
+  const cacheRef = useRef<Map<string, Tag[]>>(new Map())
+
+  const MIN_QUERY_LENGTH = 2
+  const DEBOUNCE_MS = 400
 
   const searchTags = useCallback(async (searchQuery: string) => {
     abortRef.current?.abort()
 
-    if (!searchQuery.trim()) {
+    const trimmed = searchQuery.trim()
+    if (trimmed.length < MIN_QUERY_LENGTH) {
       setSuggestions([])
       setHighlightedIndex(-1)
+      setLoading(false)
+      return
+    }
+
+    const cacheKey = trimmed.toLowerCase()
+    const cached = cacheRef.current.get(cacheKey)
+    const existingIds = new Set(selectedTags.map((tag) => tag.id))
+    if (cached) {
+      const filtered = cached.filter((tag) => !existingIds.has(tag.id))
+      setSuggestions(filtered)
+      setHighlightedIndex(filtered.length > 0 ? 0 : -1)
+      setLoading(false)
       return
     }
 
@@ -39,8 +59,8 @@ export default function WikidataTagAutocomplete({
     setLoading(true)
 
     try {
-      const results = await tagAPI.search(searchQuery, abortRef.current.signal)
-      const existingIds = new Set(selectedTags.map((tag) => tag.id))
+      const results = await tagAPI.search(trimmed, abortRef.current.signal)
+      cacheRef.current.set(cacheKey, results)
       const filtered = results.filter((tag) => !existingIds.has(tag.id))
       setSuggestions(filtered)
       setHighlightedIndex(filtered.length > 0 ? 0 : -1)
@@ -53,7 +73,7 @@ export default function WikidataTagAutocomplete({
   }, [selectedTags])
 
   useEffect(() => {
-    const timer = setTimeout(() => searchTags(query), 300)
+    const timer = setTimeout(() => searchTags(query), DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [query, searchTags])
 
@@ -174,15 +194,15 @@ export default function WikidataTagAutocomplete({
             </Box>
           ))}
 
-          {!loading && query.trim() && suggestions.length === 0 && (
+          {!loading && query.trim().length >= MIN_QUERY_LENGTH && suggestions.length === 0 && (
             <Box px={4} py="10px">
               <Text color={GRAY400} fontSize="13px">No matching Wikidata tags found</Text>
             </Box>
           )}
 
-          {!loading && !query.trim() && suggestions.length === 0 && (
+          {!loading && query.trim().length < MIN_QUERY_LENGTH && (
             <Box px={4} py="10px">
-              <Text color={GRAY400} fontSize="13px">Type to search Wikidata tags</Text>
+              <Text color={GRAY400} fontSize="13px">Type at least 2 characters to search</Text>
             </Box>
           )}
         </Box>

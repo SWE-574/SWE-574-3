@@ -21,6 +21,7 @@ from api.tests.helpers.factories import (
     ServiceFactory,
     UserFactory,
 )
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -35,7 +36,7 @@ class TestNewcomerOwnerSerializerField:
         client.force_authenticate(user=viewer)
         resp = client.get(f'/api/services/{svc.id}/')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert resp.json()['is_newcomer_owner'] is True
 
     def test_newcomer_owner_field_false_for_veteran(self):
@@ -47,7 +48,7 @@ class TestNewcomerOwnerSerializerField:
         client.force_authenticate(user=viewer)
         resp = client.get(f'/api/services/{svc.id}/')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert resp.json()['is_newcomer_owner'] is False
 
 
@@ -64,7 +65,7 @@ class TestExploreOnlyEndpoint:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/?explore_only=true')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         data = resp.json()
         assert data['count'] >= 1
         first = data['results'][0]
@@ -80,8 +81,7 @@ class TestExploreOnlyEndpoint:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/?explore_only=true')
 
-        assert resp.status_code == 200
-        assert resp.json()['count'] == 0
+        assert_api_response(resp, 200, schema={'count': 0})
 
     def test_explore_pool_field_is_none_on_regular_list(self):
         # Without ?explore_only the field exists but is None for every card.
@@ -93,7 +93,7 @@ class TestExploreOnlyEndpoint:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         results = resp.json().get('results', resp.json())
         assert len(results) >= 1
         assert results[0]['explore_pool'] is None
@@ -123,7 +123,7 @@ class TestExploreOnlyQueryParam:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/?explore_only=true')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         ids = {item['id'] for item in resp.json()['results']}
         assert str(cold_svc.id) in ids
         assert str(established_svc.id) not in ids
@@ -137,7 +137,7 @@ class TestExploreOnlyQueryParam:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         ids = {item['id'] for item in resp.json()['results']}
         assert str(a.id) in ids
         assert str(b.id) in ids

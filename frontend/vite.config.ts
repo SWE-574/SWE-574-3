@@ -108,13 +108,13 @@ export default defineConfig(({ mode }) => {
         // catches regressions today; the targets in the testing roadmap
         // (60/60/60/40) need a lot more component / hook / store specs.
         // Ratchet these up as new test specs land — never down.
-        // Latest baseline (after the B2/B3 batch) was lines 11.5,
-        // functions 8.9, statements 11.0, branches 9.2.
+        // Latest baseline (after the #461 service + store spec batch):
+        //   lines 16.79, functions 15.07, statements 15.91, branches 12.23.
         thresholds: {
-          lines: 11,
-          functions: 8,
-          statements: 10,
-          branches: 9,
+          lines: 15,
+          functions: 14,
+          statements: 14,
+          branches: 11,
         },
       },
       server: {

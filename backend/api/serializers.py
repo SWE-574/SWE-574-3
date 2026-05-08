@@ -545,6 +545,8 @@ class ServiceSerializer(serializers.ModelSerializer):
     is_saved = serializers.SerializerMethodField()
     is_endorsed = serializers.SerializerMethodField()
     endorsement_count = serializers.SerializerMethodField()
+    is_dismissed = serializers.SerializerMethodField()
+    is_endorsable = serializers.SerializerMethodField()
     # source / for_you_signals / explore_pool are transient: not stored on
     # the Service model. They are attached to the instance by _list_for_you()
     # and the explore-only list path in views.py before serialization.
@@ -567,12 +569,14 @@ class ServiceSerializer(serializers.ModelSerializer):
             'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
             'is_saved', 'is_endorsed', 'endorsement_count',
+            'is_dismissed', 'is_endorsable',
             'is_newcomer_owner', 'source', 'for_you_signals', 'explore_pool',
             'edit_locked', 'edit_lock_reason',
         ]
         read_only_fields = [
             'user', 'hot_score', 'is_visible', 'is_pinned',
             'is_saved', 'is_endorsed', 'endorsement_count',
+            'is_dismissed', 'is_endorsable',
             'is_newcomer_owner',
             'source', 'for_you_signals', 'explore_pool',
             'edit_locked', 'edit_lock_reason',
@@ -617,6 +621,37 @@ class ServiceSerializer(serializers.ModelSerializer):
             return int(annotated)
         from .models import Endorsement
         return Endorsement.objects.filter(service=obj).count()
+
+    def get_is_dismissed(self, obj):
+        """True when the current viewer has dismissed this service via Pulse's
+        Not-interested action. Annotation-aware; per-row fallback for detail.
+        """
+        annotated = getattr(obj, 'is_dismissed_anno', None)
+        if annotated is not None:
+            return bool(annotated)
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        viewer = getattr(request, 'user', None) if request else None
+        if viewer is None or not viewer.is_authenticated:
+            return False
+        from .models import ServiceDismissal
+        return ServiceDismissal.objects.filter(viewer=viewer, service=obj).exists()
+
+    def get_is_endorsable(self, obj):
+        """True when the current viewer has at least one completed handshake on
+        this service — the eligibility gate for showing the Endorse button on
+        Pulse cards. Annotation-aware; per-row fallback for detail.
+        """
+        annotated = getattr(obj, 'is_endorsable_anno', None)
+        if annotated is not None:
+            return bool(annotated)
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        viewer = getattr(request, 'user', None) if request else None
+        if viewer is None or not viewer.is_authenticated:
+            return False
+        from .models import Handshake
+        return Handshake.objects.filter(
+            requester=viewer, service=obj, status='completed',
+        ).exists()
 
     @extend_schema_field(serializers.BooleanField())
     def get_is_newcomer_owner(self, obj):
@@ -2133,11 +2168,17 @@ class ChatMessageSerializer(serializers.ModelSerializer):
     ]
 )
 class NotificationSerializer(serializers.ModelSerializer):
+    related_service_type = serializers.SerializerMethodField()
+
+    def get_related_service_type(self, obj):
+        return obj.related_service.type if obj.related_service else None
+
     class Meta:
         model = Notification
         fields = [
             'id', 'type', 'title', 'message', 'is_read',
-            'related_handshake', 'related_service', 'related_report', 'created_at'
+            'related_handshake', 'related_service', 'related_service_type',
+            'related_report', 'related_user', 'created_at'
         ]
 
 class DevicePushTokenSerializer(serializers.Serializer):

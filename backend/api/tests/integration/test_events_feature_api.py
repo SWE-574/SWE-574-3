@@ -14,6 +14,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from api.tests.helpers.factories import ServiceFactory, UserFactory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 def _event(scheduled_time, **overrides):
@@ -48,7 +49,7 @@ class TestDateRangeStrategyAPI:
                 'date_to': (now + timedelta(days=5)).date().isoformat(),
             },
         )
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data['results'] if isinstance(response.data, dict) else response.data
         ids = {r['id'] for r in results}
         assert str(in_range.id) in ids
@@ -71,7 +72,7 @@ class TestDateRangeStrategyAPI:
                 'date_from': (now + timedelta(days=1)).date().isoformat(),
             },
         )
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data['results'] if isinstance(response.data, dict) else response.data
         ids = {r['id'] for r in results}
         assert str(with_time.id) in ids
@@ -83,7 +84,7 @@ class TestDateRangeStrategyAPI:
             '/api/services/',
             {'type': 'Event', 'date_from': 'not-a-real-date'},
         )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         # Field-level error so the frontend can attach it to the right input.
         assert 'date_from' in response.data.get('field_errors', {})
 
@@ -96,7 +97,7 @@ class TestDateRangeStrategyAPI:
             '/api/services/',
             {'type': 'Offer', 'date_from': '2026-01-01', 'date_to': '2026-12-31'},
         )
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
 
 @pytest.mark.django_db
@@ -108,7 +109,7 @@ class TestEditLockSerializer:
         event = _event(timezone.now() + timedelta(days=10))
         client = APIClient()
         response = client.get(f'/api/services/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['edit_locked'] is False
         assert response.data['edit_lock_reason'] is None
 
@@ -116,7 +117,7 @@ class TestEditLockSerializer:
         event = _event(timezone.now() + timedelta(hours=12))
         client = APIClient()
         response = client.get(f'/api/services/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['edit_locked'] is True
         assert 'lockdown' in (response.data['edit_lock_reason'] or '').lower()
 
@@ -124,7 +125,7 @@ class TestEditLockSerializer:
         event = _event(timezone.now() - timedelta(hours=1))
         client = APIClient()
         response = client.get(f'/api/services/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['edit_locked'] is True
 
     def test_terminal_status_service_is_locked(self):
@@ -135,7 +136,7 @@ class TestEditLockSerializer:
         )
         client = APIClient()
         response = client.get(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['edit_locked'] is True
 
 
@@ -152,5 +153,4 @@ class TestCancelledEventDetail:
         )
         client = APIClient()
         response = client.get(f'/api/services/{event.id}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['status'] == 'Cancelled'
+        assert_api_response(response, 200, schema={'status': 'Cancelled'})

@@ -5,131 +5,132 @@ Phase 4 tests — verify backfill populates parent_qid and entity_type
 for existing tags from WikiData.
 """
 from io import StringIO
-from django.test import TestCase
-from django.core.management import call_command
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
+from django.core.management import call_command
 
 from api.models import Tag
 
 
-class BackfillTagHierarchyTestCase(TestCase):
-    """Tests for the backfill_tag_hierarchy management command."""
+@pytest.fixture
+def env(db):
+    return SimpleNamespace(
+        tag_python=Tag.objects.create(id='Q28865', name='Python'),
+        tag_cooking=Tag.objects.create(id='Q25403900', name='Cooking'),
+        tag_custom=Tag.objects.create(id='my_custom_tag', name='Custom Tag'),
+    )
 
-    def setUp(self):
-        self.tag_python = Tag.objects.create(id='Q28865', name='Python')
-        self.tag_cooking = Tag.objects.create(id='Q25403900', name='Cooking')
-        self.tag_custom = Tag.objects.create(id='my_custom_tag', name='Custom Tag')
 
-    @patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
-    @patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
-    def test_populates_parent_qid(self, mock_resolve, mock_claims):
-        mock_claims.return_value = {
-            'instance_of': ['Q9143'],
-            'subclass_of': [],
-        }
-        mock_resolve.return_value = 'technology'
+@pytest.mark.django_db
+@patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
+@patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
+def test_populates_parent_qid(mock_resolve, mock_claims, env):
+    mock_claims.return_value = {'instance_of': ['Q9143'], 'subclass_of': []}
+    mock_resolve.return_value = 'technology'
 
-        call_command('backfill_tag_hierarchy', stdout=StringIO())
+    call_command('backfill_tag_hierarchy', stdout=StringIO())
 
-        self.tag_python.refresh_from_db()
-        self.assertEqual(self.tag_python.parent_qid, 'Q9143')
+    env.tag_python.refresh_from_db()
+    assert env.tag_python.parent_qid == 'Q9143'
 
-    @patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
-    @patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
-    def test_populates_entity_type(self, mock_resolve, mock_claims):
-        mock_claims.return_value = {
-            'instance_of': ['Q9143'],
-            'subclass_of': [],
-        }
-        mock_resolve.return_value = 'technology'
 
-        call_command('backfill_tag_hierarchy', stdout=StringIO())
+@pytest.mark.django_db
+@patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
+@patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
+def test_populates_entity_type(mock_resolve, mock_claims, env):
+    mock_claims.return_value = {'instance_of': ['Q9143'], 'subclass_of': []}
+    mock_resolve.return_value = 'technology'
 
-        self.tag_python.refresh_from_db()
-        self.assertEqual(self.tag_python.entity_type, 'technology')
+    call_command('backfill_tag_hierarchy', stdout=StringIO())
 
-    @patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
-    @patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
-    def test_is_idempotent(self, mock_resolve, mock_claims):
-        """Second run skips tags already populated."""
-        self.tag_python.parent_qid = 'Q9143'
-        self.tag_python.entity_type = 'technology'
-        self.tag_python.save()
+    env.tag_python.refresh_from_db()
+    assert env.tag_python.entity_type == 'technology'
 
-        mock_claims.return_value = {'instance_of': ['Q2095'], 'subclass_of': []}
-        mock_resolve.return_value = 'food'
 
-        call_command('backfill_tag_hierarchy', stdout=StringIO())
+@pytest.mark.django_db
+@patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
+@patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
+def test_is_idempotent(mock_resolve, mock_claims, env):
+    """Second run skips tags already populated."""
+    env.tag_python.parent_qid = 'Q9143'
+    env.tag_python.entity_type = 'technology'
+    env.tag_python.save()
 
-        # Should not have been called for tag_python (already has parent_qid)
-        called_qids = [c[0][0] for c in mock_claims.call_args_list]
-        self.assertNotIn('Q28865', called_qids)
+    mock_claims.return_value = {'instance_of': ['Q2095'], 'subclass_of': []}
+    mock_resolve.return_value = 'food'
 
-    @patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
-    @patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
-    def test_skips_non_qid_tags(self, mock_resolve, mock_claims):
-        """Tags with non-QID ids are skipped."""
-        mock_claims.return_value = {'instance_of': ['Q9143'], 'subclass_of': []}
-        mock_resolve.return_value = 'technology'
+    call_command('backfill_tag_hierarchy', stdout=StringIO())
 
-        call_command('backfill_tag_hierarchy', stdout=StringIO())
+    called_qids = [c[0][0] for c in mock_claims.call_args_list]
+    assert 'Q28865' not in called_qids
 
-        called_qids = [c[0][0] for c in mock_claims.call_args_list]
-        self.assertNotIn('my_custom_tag', called_qids)
 
-    @patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
-    @patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
-    def test_handles_api_failure(self, mock_resolve, mock_claims):
-        """API failure for one tag doesn't block others."""
-        def claims_side_effect(qid):
-            if qid == 'Q28865':
-                return None  # API failure
-            return {'instance_of': ['Q2095'], 'subclass_of': []}
+@pytest.mark.django_db
+@patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
+@patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
+def test_skips_non_qid_tags(mock_resolve, mock_claims, env):
+    """Tags with non-QID ids are skipped."""
+    mock_claims.return_value = {'instance_of': ['Q9143'], 'subclass_of': []}
+    mock_resolve.return_value = 'technology'
 
-        mock_claims.side_effect = claims_side_effect
-        mock_resolve.return_value = 'food'
+    call_command('backfill_tag_hierarchy', stdout=StringIO())
 
-        call_command('backfill_tag_hierarchy', stdout=StringIO())
+    called_qids = [c[0][0] for c in mock_claims.call_args_list]
+    assert 'my_custom_tag' not in called_qids
 
-        # Python tag should be unchanged (API failed)
-        self.tag_python.refresh_from_db()
-        self.assertIsNone(self.tag_python.parent_qid)
 
-        # Cooking tag should be populated
-        self.tag_cooking.refresh_from_db()
-        self.assertEqual(self.tag_cooking.parent_qid, 'Q2095')
+@pytest.mark.django_db
+@patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
+@patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
+def test_handles_api_failure(mock_resolve, mock_claims, env):
+    """API failure for one tag doesn't block others."""
+    def claims_side_effect(qid):
+        if qid == 'Q28865':
+            return None
+        return {'instance_of': ['Q2095'], 'subclass_of': []}
 
-    @patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
-    @patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
-    def test_force_flag(self, mock_resolve, mock_claims):
-        """--force re-fetches already-populated tags."""
-        self.tag_python.parent_qid = 'Q9143'
-        self.tag_python.entity_type = 'technology'
-        self.tag_python.save()
+    mock_claims.side_effect = claims_side_effect
+    mock_resolve.return_value = 'food'
 
-        mock_claims.return_value = {
-            'instance_of': ['Q9143'],
-            'subclass_of': [],
-        }
-        mock_resolve.return_value = 'technology'
+    call_command('backfill_tag_hierarchy', stdout=StringIO())
 
-        call_command('backfill_tag_hierarchy', '--force', stdout=StringIO())
+    env.tag_python.refresh_from_db()
+    assert env.tag_python.parent_qid is None
 
-        called_qids = [c[0][0] for c in mock_claims.call_args_list]
-        self.assertIn('Q28865', called_qids)
+    env.tag_cooking.refresh_from_db()
+    assert env.tag_cooking.parent_qid == 'Q2095'
 
-    @patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
-    @patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
-    def test_dry_run(self, mock_resolve, mock_claims):
-        """--dry-run does not save changes."""
-        mock_claims.return_value = {
-            'instance_of': ['Q9143'],
-            'subclass_of': [],
-        }
-        mock_resolve.return_value = 'technology'
 
-        call_command('backfill_tag_hierarchy', '--dry-run', stdout=StringIO())
+@pytest.mark.django_db
+@patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
+@patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
+def test_force_flag(mock_resolve, mock_claims, env):
+    """--force re-fetches already-populated tags."""
+    env.tag_python.parent_qid = 'Q9143'
+    env.tag_python.entity_type = 'technology'
+    env.tag_python.save()
 
-        self.tag_python.refresh_from_db()
-        self.assertIsNone(self.tag_python.parent_qid)
-        self.assertIsNone(self.tag_python.entity_type)
+    mock_claims.return_value = {'instance_of': ['Q9143'], 'subclass_of': []}
+    mock_resolve.return_value = 'technology'
+
+    call_command('backfill_tag_hierarchy', '--force', stdout=StringIO())
+
+    called_qids = [c[0][0] for c in mock_claims.call_args_list]
+    assert 'Q28865' in called_qids
+
+
+@pytest.mark.django_db
+@patch('api.management.commands.backfill_tag_hierarchy.fetch_wikidata_claims')
+@patch('api.management.commands.backfill_tag_hierarchy.resolve_entity_type')
+def test_dry_run(mock_resolve, mock_claims, env):
+    """--dry-run does not save changes."""
+    mock_claims.return_value = {'instance_of': ['Q9143'], 'subclass_of': []}
+    mock_resolve.return_value = 'technology'
+
+    call_command('backfill_tag_hierarchy', '--dry-run', stdout=StringIO())
+
+    env.tag_python.refresh_from_db()
+    assert env.tag_python.parent_qid is None
+    assert env.tag_python.entity_type is None

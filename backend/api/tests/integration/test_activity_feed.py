@@ -16,6 +16,7 @@ from api.tests.helpers.factories import (
     ServiceFactory,
     UserFactory,
 )
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -138,7 +139,7 @@ class TestActivityFeedEndpoint:
     def test_anonymous_returns_401(self):
         client = APIClient()
         resp = client.get('/api/activity/feed/')
-        assert resp.status_code == 401
+        assert_problem_detail(resp, 401)
 
     def test_returns_events_from_followed_users(self):
         from api.models import UserFollow
@@ -157,7 +158,7 @@ class TestActivityFeedEndpoint:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/activity/feed/')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         data = resp.json()
         actors = {row['actor']['id'] for row in data['results']}
         assert str(followed.id) in actors
@@ -184,7 +185,7 @@ class TestActivityFeedEndpoint:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/activity/feed/?lat=0.0&lng=0.0')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         actors = {row['actor']['id'] for row in resp.json()['results']}
         assert str(nearby_owner.id) in actors
         assert str(far_owner.id) not in actors
@@ -220,7 +221,7 @@ class TestActivityFeedEndpoint:
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.get('/api/activity/feed/?lat=0.0&lng=0.0&sort=nearby')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         results = resp.json()['results']
         assert len(results) <= 12
         # Distances should be monotonically increasing.
@@ -246,7 +247,7 @@ class TestActivityFeedEndpoint:
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.get('/api/activity/feed/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         rows = [
             r for r in resp.json()['results']
             if r['verb'] == ActivityEvent.EVENT_FILLING_UP
@@ -293,7 +294,7 @@ class TestActivityFeedEndpoint:
         client = APIClient()
         client.force_authenticate(user=b)
         resp = client.get('/api/activity/feed/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         follow_rows = [
             r for r in resp.json()['results']
             if r['verb'] == ActivityEvent.USER_FOLLOWED

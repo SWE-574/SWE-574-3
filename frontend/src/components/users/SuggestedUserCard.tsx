@@ -37,7 +37,7 @@ export function SuggestedUserCard({ user }: SuggestedUserCardProps) {
       bg="white"
       p="16px"
       transition="all 0.18s ease"
-      _hover={{ borderColor: 'teal.300', boxShadow: '0 6px 16px rgba(20, 184, 166, 0.10)' }}
+      _hover={{ borderColor: 'green.300', boxShadow: '0 6px 16px rgba(45, 92, 78, 0.12)' }}
     >
       <RouterLink to={`/public-profile/${user.id}`} style={{ textDecoration: 'none' }}>
         <Flex align="center" gap={3} mb="12px">
@@ -59,14 +59,14 @@ export function SuggestedUserCard({ user }: SuggestedUserCardProps) {
         w="100%"
         py="8px"
         borderRadius="9px"
-        bg={following ? 'teal.50' : 'teal.500'}
-        color={following ? 'teal.700' : 'white'}
+        bg={following ? 'green.50' : 'green.700'}
+        color={following ? 'green.700' : 'white'}
         borderWidth={following ? '1px' : '0'}
-        borderColor="teal.300"
+        borderColor="green.300"
         fontSize="13px"
         fontWeight={700}
         cursor={following ? 'default' : 'pointer'}
-        _hover={following ? undefined : { bg: 'teal.600' }}
+        _hover={following ? undefined : { bg: 'green.800' }}
       >
         <Flex align="center" justify="center" gap="6px">
           <Box as={following ? FiCheck : FiUserPlus} />

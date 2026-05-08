@@ -14,6 +14,7 @@ from api.tests.helpers.factories import (
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Handshake, ChatMessage, TransactionHistory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 def _accept_offer_via_approve_flow(handshake):
@@ -47,7 +48,7 @@ class TestExpressInterestView:
         client.authenticate_user(requester)
         
         response = client.post(f'/api/services/{service.id}/interest/')
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert Handshake.objects.filter(
             service=service,
             requester=requester,
@@ -71,7 +72,7 @@ class TestExpressInterestView:
 
         response = client.post(f'/api/services/{service.id}/interest/')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
         assert not Handshake.objects.filter(
             service=service, requester=requester
@@ -90,7 +91,7 @@ class TestExpressInterestView:
 
         response = client.post(f'/api/services/{need.id}/interest/')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
         assert not Handshake.objects.filter(
             service=need, requester=requester
@@ -110,7 +111,7 @@ class TestExpressInterestView:
 
         response = client.post(f'/api/handshakes/services/{service.id}/interest/')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
     
     def test_express_interest_insufficient_balance(self):
@@ -123,7 +124,7 @@ class TestExpressInterestView:
         client.authenticate_user(requester)
         
         response = client.post(f'/api/services/{service.id}/interest/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
     
     def test_express_interest_own_service(self):
         """Test cannot express interest in own service"""
@@ -134,7 +135,7 @@ class TestExpressInterestView:
         client.authenticate_user(user)
         
         response = client.post(f'/api/services/{service.id}/interest/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
     
     def test_express_interest_max_participants(self):
         """Test cannot express interest when max participants reached"""
@@ -149,7 +150,7 @@ class TestExpressInterestView:
         client.authenticate_user(requester2)
         
         response = client.post(f'/api/services/{service.id}/interest/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_express_interest_creates_chat_thread_with_opening_message(self):
         """FR-10a/10b: expressing interest creates private thread and opening message."""
@@ -161,20 +162,20 @@ class TestExpressInterestView:
         client.authenticate_user(requester)
 
         interest_response = client.post(f'/api/services/{service.id}/interest/')
-        assert interest_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(interest_response, 201)
 
         handshake_id = interest_response.data['id']
         assert str(interest_response.data['status']).lower() == 'pending'
 
         # Requester can see the conversation in chat list.
         requester_list = client.get('/api/chats/')
-        assert requester_list.status_code == status.HTTP_200_OK
+        assert_api_response(requester_list, 200)
         requester_rows = requester_list.data.get('results', requester_list.data)
         assert any(row['handshake_id'] == str(handshake_id) for row in requester_rows)
 
         # Requester can fetch messages and sees the auto opening text.
         requester_thread = client.get(f'/api/chats/{handshake_id}/')
-        assert requester_thread.status_code == status.HTTP_200_OK
+        assert_api_response(requester_thread, 200)
         requester_messages = requester_thread.data.get('results', [])
         assert len(requester_messages) >= 1
         assert any(
@@ -185,7 +186,7 @@ class TestExpressInterestView:
         # Provider can also fetch the same thread.
         client.authenticate_user(provider)
         provider_thread = client.get(f'/api/chats/{handshake_id}/')
-        assert provider_thread.status_code == status.HTTP_200_OK
+        assert_api_response(provider_thread, 200)
         provider_messages = provider_thread.data.get('results', [])
         assert any(
             'interested in your service' in message['body']
@@ -210,7 +211,7 @@ class TestExpressInterestView:
         ):
             response = client.post(f'/api/services/{service.id}/interest/')
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert fake_channel_layer.group_send.await_count >= 1
         chat_group_name = f"chat_{response.data['id']}"
         chat_events = [
@@ -239,7 +240,7 @@ class TestHandshakeViewSet:
         client.authenticate_user(user)
         
         response = client.get('/api/handshakes/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert isinstance(response.data, list)
         assert len(response.data) == 3
 
@@ -261,7 +262,7 @@ class TestHandshakeViewSet:
         client.authenticate_user(requester)
 
         response = client.get('/api/handshakes/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data) >= 1
         h = next((x for x in response.data if str(x['id']) == str(handshake.id)), None)
         assert h is not None
@@ -275,7 +276,7 @@ class TestHandshakeViewSet:
             'kindness': True,
         })
         response2 = client.get('/api/handshakes/')
-        assert response2.status_code == status.HTTP_200_OK
+        assert_api_response(response2, 200)
         h2 = next((x for x in response2.data if str(x['id']) == str(handshake.id)), None)
         assert h2 is not None
         assert h2['user_has_reviewed'] is True
@@ -295,7 +296,7 @@ class TestHandshakeViewSet:
             'exact_duration': 2.0,
             'scheduled_time': '2027-12-20T10:00:00Z'
         })
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
@@ -340,7 +341,7 @@ class TestHandshakeViewSet:
             'exact_duration': 9,
             'scheduled_time': '2099-01-01T10:00:00Z',
         })
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
@@ -375,7 +376,7 @@ class TestHandshakeViewSet:
             'exact_duration': 2,
             'scheduled_time': '2027-12-20T10:00:00Z',
         })
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
@@ -408,7 +409,7 @@ class TestHandshakeViewSet:
         client.authenticate_user(requester)
         
         response = client.post(f'/api/handshakes/{handshake.id}/approve/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
@@ -440,14 +441,14 @@ class TestHandshakeViewSet:
         client.authenticate_user(provider)
         
         response = client.post(f'/api/handshakes/{handshake.id}/confirm/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         
         handshake.refresh_from_db()
         assert handshake.provider_confirmed_complete is True
         
         client.authenticate_user(requester)
         response = client.post(f'/api/handshakes/{handshake.id}/confirm/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         
         handshake.refresh_from_db()
         assert handshake.status == 'completed'
@@ -474,7 +475,7 @@ class TestHandshakeViewSet:
         request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
             'reason': 'Unexpected conflict',
         })
-        assert request_response.status_code == status.HTTP_200_OK
+        assert_api_response(request_response, 200)
 
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
@@ -483,7 +484,7 @@ class TestHandshakeViewSet:
 
         client.authenticate_user(requester)
         response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         
         handshake.refresh_from_db()
         assert handshake.status == 'cancelled'
@@ -514,11 +515,11 @@ class TestHandshakeViewSet:
         request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
             'reason': 'Cannot help anymore',
         })
-        assert request_response.status_code == status.HTTP_200_OK
+        assert_api_response(request_response, 200)
 
         client.authenticate_user(owner)
         response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         owner.refresh_from_db()
         service.refresh_from_db()
@@ -550,11 +551,11 @@ class TestHandshakeViewSet:
         request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
             'reason': 'Need to reschedule instead',
         })
-        assert request_response.status_code == status.HTTP_200_OK
+        assert_api_response(request_response, 200)
 
         client.authenticate_user(requester)
         reject_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/reject/')
-        assert reject_response.status_code == status.HTTP_200_OK
+        assert_api_response(reject_response, 200)
 
         handshake.refresh_from_db()
         requester.refresh_from_db()
@@ -578,10 +579,10 @@ class TestHandshakeViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/')
-        assert request_response.status_code == status.HTTP_200_OK
+        assert_api_response(request_response, 200)
 
         approve_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
-        assert approve_response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(approve_response, 403)
 
     def test_event_handshake_cannot_use_cancellation_request(self):
         organizer = UserFactory()
@@ -597,7 +598,7 @@ class TestHandshakeViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(organizer)
         response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
 
 # ── Tests: initiate/approve permission changes (service-owner-first model) ────
@@ -631,7 +632,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(service_owner)
         resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
 
@@ -650,7 +651,7 @@ class TestInitiateApproveServiceOwnerModel:
             'scheduled_time': (timezone.now() + timedelta(days=5)).isoformat(),
         })
 
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(resp, 400)
         assert resp.data['detail'] == 'Duration must be a whole number of hours'
 
     def test_offer_requester_cannot_initiate(self):
@@ -663,7 +664,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
-        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(resp, 403)
 
     def test_offer_requester_can_approve(self):
         """Requester (interest expresser) can approve an Offer handshake."""
@@ -681,7 +682,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
 
@@ -713,7 +714,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
 
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
@@ -744,7 +745,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(resp, 400)
         assert resp.data['detail'] == 'Provider must provide exact location, duration, and scheduled time before approval'
         assert resp.data['requires_details'] is True
 
@@ -764,7 +765,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(service_owner)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(resp, 403)
 
     # ── Need/Want service ─────────────────────────────────────────────────────
 
@@ -781,7 +782,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(service_owner)
         resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
         assert handshake.exact_location == 'Test Cafe, Beşiktaş'
@@ -799,7 +800,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(helper)
         resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
-        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(resp, 403)
 
     def test_need_helper_can_approve(self):
         """
@@ -820,7 +821,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(helper)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
 
@@ -848,7 +849,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(helper)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
 
         service_owner.refresh_from_db()
         service.refresh_from_db()
@@ -875,7 +876,7 @@ class TestInitiateApproveServiceOwnerModel:
         client.authenticate_user(provider)
         resp = client.post(f'/api/handshakes/{handshake.id}/confirm/', {'hours': 1.5})
 
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(resp, 400)
         assert resp.data['detail'] == 'Hours must be a whole number'
 
     def test_need_service_owner_cannot_approve_own_handshake(self):
@@ -894,7 +895,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(service_owner)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(resp, 403)
 
     def test_third_party_cannot_initiate_or_approve(self):
         """
@@ -948,9 +949,7 @@ class TestPendingCapacityIntegration:
         for user in (u1, u2, u3):
             client.authenticate_user(user)
             resp = client.post(f'/api/services/{svc.id}/interest/')
-            assert resp.status_code == status.HTTP_201_CREATED, (
-                f"User {user.email} should be able to express interest: {resp.data}"
-            )
+            assert_api_response(resp, 201)
 
         assert Handshake.objects.filter(service=svc, status='pending').count() == 3
 
@@ -1072,7 +1071,7 @@ class TestAgreedStatusIntegration:
         client = AuthenticatedAPIClient()
         client.authenticate_user(viewer)
         resp = client.get('/api/services/')
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         data = resp.data
         results = data['results'] if isinstance(data, dict) and 'results' in data else data
         ids = [str(s['id']) for s in results]
@@ -1094,10 +1093,10 @@ class TestAgreedStatusIntegration:
         client = AuthenticatedAPIClient()
         client.authenticate_user(provider)
         request_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/')
-        assert request_resp.status_code == status.HTTP_200_OK
+        assert_api_response(request_resp, 200)
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{h.id}/cancel-request/approve/')
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
 
         svc.refresh_from_db()
         assert svc.status == 'Active'
@@ -1116,10 +1115,10 @@ class TestAgreedStatusIntegration:
         client = AuthenticatedAPIClient()
         client.authenticate_user(provider)
         request_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/')
-        assert request_resp.status_code == status.HTTP_200_OK
+        assert_api_response(request_resp, 200)
         client.authenticate_user(requester)
         approve_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/approve/')
-        assert approve_resp.status_code == status.HTTP_200_OK
+        assert_api_response(approve_resp, 200)
 
         viewer = UserFactory()
         client.authenticate_user(viewer)
@@ -1183,7 +1182,7 @@ class TestEventHandshakeEndpoints:
         client = AuthenticatedAPIClient()
         client.authenticate_user(participant)
         response = client.post(f'/api/handshakes/services/{service.id}/join-event/')
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
         handshake = Handshake.objects.get(id=response.data['id'])
         assert handshake.status == 'accepted'
@@ -1205,7 +1204,7 @@ class TestEventHandshakeEndpoints:
         client = AuthenticatedAPIClient().authenticate_user(participant)
         response = client.post(f'/api/handshakes/services/{service.id}/join-event/')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
         assert not Handshake.objects.filter(
             service=service, requester=participant
@@ -1231,7 +1230,7 @@ class TestEventHandshakeEndpoints:
         client = AuthenticatedAPIClient()
         client.authenticate_user(participant)
         response = client.post(f'/api/handshakes/{handshake.id}/checkin/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert 'no longer available' in str(response.data).lower()
 
     def test_mark_attended_requires_authentication(self):
@@ -1296,7 +1295,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         handshake.refresh_from_db()
         assert handshake.status == 'attended'
 
@@ -1380,7 +1379,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
 
@@ -1406,7 +1405,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         handshake.refresh_from_db()
         assert handshake.status == 'attended'
 
@@ -1449,7 +1448,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/services/{event.id}/complete-event/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         h_accepted.refresh_from_db()
         h_checked_in.refresh_from_db()
@@ -1481,7 +1480,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/services/{event.id}/complete-event/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         handshake.refresh_from_db()
         assert handshake.status == 'attended'
 
@@ -1528,7 +1527,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
 
         first = client.post(f'/api/services/{event.id}/complete-event/')
-        assert first.status_code == status.HTTP_200_OK
+        assert_api_response(first, 200)
 
         second = client.post(f'/api/services/{event.id}/complete-event/')
         assert second.status_code in (
@@ -1555,7 +1554,7 @@ class TestHandshakeInterestsPanelRequesterDetail:
 
         client = AuthenticatedAPIClient().authenticate_user(owner)
         resp = client.get('/api/handshakes/')
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         results = resp.json()
         # Find our handshake in the list
         hs_data = next(
@@ -1588,7 +1587,7 @@ class TestHandshakeInterestsPanelRequesterDetail:
 
         client = AuthenticatedAPIClient().authenticate_user(requester)
         resp = client.get('/api/handshakes/')
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         results = resp.json()
         hs_data = next(
             (h for h in results if str(h.get('service_id')) == str(service.id)),
@@ -1613,7 +1612,7 @@ class TestHandshakeInterestsPanelRequesterDetail:
 
         client = AuthenticatedAPIClient().authenticate_user(owner)
         resp = client.get('/api/handshakes/')
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         results = resp.json()
         hs_data = next(
             (h for h in results if str(h.get('service_id')) == str(service.id)),

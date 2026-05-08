@@ -3,6 +3,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from api.tests.helpers.factories import ServiceFactory, UserFactory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -16,7 +17,7 @@ class TestSaveService:
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.post(f'/api/services/{svc.id}/save/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert resp.json()['is_saved'] is True
         assert SavedService.objects.filter(user=viewer, service=svc).exists()
 
@@ -40,7 +41,7 @@ class TestSaveService:
         client.force_authenticate(user=viewer)
         client.post(f'/api/services/{svc.id}/save/')
         resp = client.delete(f'/api/services/{svc.id}/save/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert resp.json()['is_saved'] is False
         assert not SavedService.objects.filter(user=viewer, service=svc).exists()
 
@@ -48,7 +49,7 @@ class TestSaveService:
         svc = ServiceFactory(type='Offer', status='Active')
         client = APIClient()
         resp = client.post(f'/api/services/{svc.id}/save/')
-        assert resp.status_code == 401
+        assert_problem_detail(resp, 401)
 
     def test_saved_list_returns_only_my_saves(self):
         viewer = UserFactory()
@@ -65,7 +66,7 @@ class TestSaveService:
         other_client.post(f'/api/services/{not_mine.id}/save/')
 
         resp = client.get('/api/services/saved/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         body = resp.json()
         results = body.get('results', body) if isinstance(body, dict) else body
         ids = {row['id'] for row in results}
@@ -111,7 +112,7 @@ class TestSaveEndorseListPerformance:
         client.force_authenticate(user=viewer)
         with CaptureQueriesContext(connection) as ctx_5:
             resp = client.get('/api/services/')
-            assert resp.status_code == 200
+            assert_api_response(resp, 200)
         small = len(ctx_5)
 
         for _ in range(15):
@@ -119,7 +120,7 @@ class TestSaveEndorseListPerformance:
 
         with CaptureQueriesContext(connection) as ctx_20:
             resp = client.get('/api/services/')
-            assert resp.status_code == 200
+            assert_api_response(resp, 200)
         large = len(ctx_20)
 
         # Allow some growth from prefetch sub-queries that scale with row
@@ -144,7 +145,7 @@ class TestEndorseService:
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.post(f'/api/services/{svc.id}/endorse/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert resp.json()['is_endorsed'] is True
         assert resp.json()['endorsement_count'] == 1
         assert Endorsement.objects.filter(endorser=viewer, service=svc).exists()
@@ -155,7 +156,7 @@ class TestEndorseService:
         client = APIClient()
         client.force_authenticate(user=owner)
         resp = client.post(f'/api/services/{svc.id}/endorse/')
-        assert resp.status_code == 400
+        assert_problem_detail(resp, 400)
 
     def test_endorse_is_idempotent(self):
         from api.models import Endorsement
@@ -179,7 +180,7 @@ class TestEndorseService:
         client.force_authenticate(user=viewer)
         client.post(f'/api/services/{svc.id}/endorse/')
         resp = client.delete(f'/api/services/{svc.id}/endorse/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert resp.json()['is_endorsed'] is False
         assert resp.json()['endorsement_count'] == 0
         assert not Endorsement.objects.filter(endorser=viewer, service=svc).exists()
@@ -188,7 +189,7 @@ class TestEndorseService:
         svc = ServiceFactory(type='Offer', status='Active')
         client = APIClient()
         resp = client.post(f'/api/services/{svc.id}/endorse/')
-        assert resp.status_code == 401
+        assert_problem_detail(resp, 401)
 
     def test_endorsement_count_visible_to_anyone(self):
         endorser_a = UserFactory()

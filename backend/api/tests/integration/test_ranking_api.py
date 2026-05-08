@@ -26,6 +26,7 @@ from api.tests.helpers.factories import (
 # ---------------------------------------------------------------------------
 
 from django.conf import settings as django_settings
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -45,7 +46,7 @@ class TestRankingQueryPerformance:
         response = client.get('/api/services/?ordering=-hot_score')
         elapsed = time.monotonic() - start
 
-        assert response.status_code == 200
+        assert_api_response(response, 200)
         assert elapsed < django_settings.RANKING_FEED_SLA_SECONDS, (
             f"Hot-sort query took {elapsed:.3f}s -- exceeds the "
             f"{django_settings.RANKING_FEED_SLA_SECONDS}s NFR-17a SLA. "
@@ -64,7 +65,7 @@ class TestRankingQueryPerformance:
         response = client.get('/api/services/?ordering=-hot_score')
         elapsed = time.monotonic() - start
 
-        assert response.status_code == 200
+        assert_api_response(response, 200)
         assert elapsed < django_settings.RANKING_FEED_SLA_SECONDS, (
             f"Mixed-type hot-sort took {elapsed:.3f}s -- exceeds NFR-17a SLA."
         )
@@ -87,7 +88,7 @@ class TestFeedEndToEndPerformance:
         response = client.get('/api/services/?ordering=-hot_score&page=1')
         elapsed = time.monotonic() - start
 
-        assert response.status_code == 200
+        assert_api_response(response, 200)
         assert elapsed < django_settings.RANKING_FEED_E2E_SLA_SECONDS, (
             f"Anonymous feed took {elapsed:.3f}s -- exceeds the "
             f"{django_settings.RANKING_FEED_E2E_SLA_SECONDS}s NFR-19a SLA."

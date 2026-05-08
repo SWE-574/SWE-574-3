@@ -19,6 +19,7 @@ from api.tests.helpers.factories import (
     UserFactory,
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -93,7 +94,7 @@ class TestLocationBlur:
             '/api/services/',
             {'lat': '41.0500', 'lng': '28.9700', 'distance': '50'},
         )
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data['results'] if isinstance(response.data, dict) else response.data
         rows = [r for r in results if r['id'] == str(service.id)]
         assert rows, 'service should be in the location-filtered feed'
@@ -113,7 +114,7 @@ class TestLocationBlur:
 
         client = AuthenticatedAPIClient().authenticate_user(partner)
         response = client.get(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         # Real coordinates should round-trip exactly because the partner has an
         # accepted handshake — no fuzzing is applied.
         assert float(response.data['location_lat']) == pytest.approx(41.0250, abs=1e-4)
@@ -126,7 +127,7 @@ class TestLocationBlur:
 
         client = AuthenticatedAPIClient().authenticate_user(viewer)
         response = client.get(f'/api/services/{service.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         # Fuzz applies a deterministic ~1km offset; absolute equality is fine
         # because the offset is non-zero and bounded.
         lat = float(response.data['location_lat'])
@@ -157,7 +158,7 @@ class TestAchievementProgressEndpoint:
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get(f'/api/users/{user.id}/badge-progress/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         # Response should be a dict-by-id with both earned and unearned entries.
         body = response.data
         assert isinstance(body, dict)

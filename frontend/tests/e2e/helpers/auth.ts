@@ -124,9 +124,16 @@ export async function openUserMenu(page: Page): Promise<void> {
  */
 export async function logout(page: Page): Promise<void> {
   await openUserMenu(page)
-  // Remove the /users/me/ interception so the app detects the session is
-  // gone after the backend clears the cookie.
+  // Replace the loginAs() always-200 interception with an explicit 401
+  // stub. Just calling page.unroute() opens a race in CI: dashboard hooks
+  // re-fetch /users/me/ between POST /auth/logout and the React state
+  // flip, the slow real backend returns 200 with the user, and
+  // useAuthStore re-hydrates — defeating the route-guard redirect that
+  // this test waits on. A 401 stub closes the race deterministically.
   await page.unroute('**/api/users/me/')
+  await page.route('**/api/users/me/', (route) =>
+    route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
+  )
   await page.getByText('Log Out').click()
   await expect(page).not.toHaveURL(/\/dashboard/, { timeout: 10_000 })
 }

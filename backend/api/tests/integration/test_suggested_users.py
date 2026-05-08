@@ -5,6 +5,7 @@ import pytest
 from api.models import UserFollow
 from api.tests.helpers.factories import TagFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -13,14 +14,14 @@ class TestSuggestedUsersView:
     def test_unauthenticated_returns_401(self):
         client = AuthenticatedAPIClient()
         resp = client.get('/api/users/suggested/')
-        assert resp.status_code == 401
+        assert_problem_detail(resp, 401)
 
     def test_excludes_self(self):
         viewer = UserFactory()
         UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(viewer)
         resp = client.get('/api/users/suggested/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         ids = {row['id'] for row in resp.data['results']}
         assert str(viewer.id) not in ids
 
@@ -71,3 +72,17 @@ class TestSuggestedUsersView:
         resp = client.get('/api/users/suggested/')
         order = [row['id'] for row in resp.data['results']]
         assert order.index(str(high.id)) < order.index(str(low.id))
+
+    def test_excludes_staff_roles(self):
+        viewer = UserFactory()
+        admin = UserFactory(role='admin')
+        moderator = UserFactory(role='moderator')
+        super_admin = UserFactory(role='super_admin')
+        member = UserFactory(role='member')
+        client = AuthenticatedAPIClient().authenticate_user(viewer)
+        resp = client.get('/api/users/suggested/')
+        ids = {row['id'] for row in resp.data['results']}
+        assert str(admin.id) not in ids
+        assert str(moderator.id) not in ids
+        assert str(super_admin.id) not in ids
+        assert str(member.id) in ids

@@ -8,6 +8,7 @@ from rest_framework import status
 from api.models import Report
 from api.tests.helpers.factories import HandshakeFactory, ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -24,8 +25,7 @@ class TestReportingAPI:
             {"issue_type": "spam", "description": "Report after status change."},
             format="json",
         )
-        assert response.status_code == status.HTTP_201_CREATED
-        assert "report_id" in response.data
+        assert_api_response(response, 201, contains={'report_id'})
 
     def test_user_can_only_report_a_listing_once(self):
         reporter = UserFactory()
@@ -38,15 +38,14 @@ class TestReportingAPI:
             {"issue_type": "spam", "description": "This listing looks like spam."},
             format="json",
         )
-        assert first.status_code == status.HTTP_201_CREATED
-        assert "report_id" in first.data
+        assert_api_response(first, 201, contains={'report_id'})
 
         second = client.post(
             f"/api/services/{service.id}/report/",
             {"issue_type": "spam", "description": "Duplicate report attempt."},
             format="json",
         )
-        assert second.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(second, 400)
         assert "already reported" in (second.data.get("detail", "") or "").lower()
 
     @pytest.mark.parametrize("final_status", ["resolved", "dismissed"])
@@ -61,7 +60,7 @@ class TestReportingAPI:
             {"issue_type": "spam", "description": "Initial report."},
             format="json",
         )
-        assert first.status_code == status.HTTP_201_CREATED
+        assert_api_response(first, 201)
 
         report = Report.objects.get(id=first.data["report_id"])
         report.status = final_status
@@ -72,7 +71,7 @@ class TestReportingAPI:
             {"issue_type": "spam", "description": "Attempt after moderation action."},
             format="json",
         )
-        assert second.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(second, 400)
         assert "already reported" in (second.data.get("detail", "") or "").lower()
 
     def test_handshake_report_is_not_blocked_by_existing_listing_report(self):
@@ -87,7 +86,7 @@ class TestReportingAPI:
             {"issue_type": "spam", "description": "Spam listing."},
             format="json",
         )
-        assert listing_report.status_code == status.HTTP_201_CREATED
+        assert_api_response(listing_report, 201)
 
         handshake = HandshakeFactory(service=service, requester=reporter, status="accepted")
 
@@ -96,8 +95,7 @@ class TestReportingAPI:
             {"issue_type": "no_show", "description": "No-show dispute for this handshake."},
             format="json",
         )
-        assert handshake_report.status_code == status.HTTP_201_CREATED
-        assert "report_id" in handshake_report.data
+        assert_api_response(handshake_report, 201, contains={'report_id'})
 
     def test_non_event_handshake_report_keeps_active_status(self):
         provider = UserFactory()
@@ -112,7 +110,7 @@ class TestReportingAPI:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         handshake.refresh_from_db()
         assert handshake.status == "accepted"
 
@@ -133,7 +131,7 @@ class TestReportingAPI:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         report = Report.objects.get(id=response.data["report_id"])
         assert report.type == "harassment"
         assert report.description == payload["description"]
@@ -156,7 +154,7 @@ class TestReportingAPI:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         report = Report.objects.get(id=response.data["report_id"])
         assert report.type == "harassment"
         assert report.reported_user_id == organizer.id
@@ -179,7 +177,7 @@ class TestReportingAPI:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
     def test_event_handshake_rejects_no_show_reports_before_event_start(self):
         organizer = UserFactory()
@@ -199,7 +197,7 @@ class TestReportingAPI:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert "no-show reports are allowed" in (response.data.get("detail", "") or "").lower()
 
     def test_event_handshake_rejects_no_show_reports_after_24h_window(self):
@@ -220,7 +218,7 @@ class TestReportingAPI:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert "no-show reports are allowed" in (response.data.get("detail", "") or "").lower()
 
     def test_event_handshake_allows_behavior_reports_after_24h_window(self):
@@ -241,7 +239,7 @@ class TestReportingAPI:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
     def test_event_participant_can_report_another_participant_with_reported_user_id(self):
         organizer = UserFactory()
@@ -267,7 +265,7 @@ class TestReportingAPI:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         report = Report.objects.get(id=response.data["report_id"])
         assert report.reported_user_id == target_participant.id
         assert report.type == "spam"
@@ -293,14 +291,14 @@ class TestReportingAPI:
             {"issue_type": "harassment", "description": "First harassment report."},
             format="json",
         )
-        assert first.status_code == status.HTTP_201_CREATED
+        assert_api_response(first, 201)
 
         second = participant_client.post(
             f"/api/handshakes/{handshake.id}/report/",
             {"issue_type": "harassment", "description": "Duplicate open report."},
             format="json",
         )
-        assert second.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(second, 400)
         assert "open report" in (second.data.get("detail", "") or "").lower()
 
         open_report = Report.objects.get(id=first.data["report_id"])
@@ -312,4 +310,4 @@ class TestReportingAPI:
             {"issue_type": "harassment", "description": "Re-report after moderation."},
             format="json",
         )
-        assert third.status_code == status.HTTP_201_CREATED
+        assert_api_response(third, 201)

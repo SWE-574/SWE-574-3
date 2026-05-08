@@ -122,7 +122,11 @@ class TestGroupChatConsumer:
 
     async def test_owner_can_connect(self, db):
         owner = await async_user()
-        service = await async_service(user=owner, max_participants=4)
+        # Pin schedule_type to 'One-Time' because ServiceFactory's iterator
+        # otherwise alternates between 'One-Time' and 'Recurrent' between
+        # consecutive test runs, and Recurrent group chat requires a
+        # session_id query parameter that this test does not provide.
+        service = await async_service(user=owner, max_participants=4, schedule_type='One-Time')
         async with consumer_for(
             f'/ws/group-chat/{service.id}/', user=owner, auth='cookie',
         ) as comm:
@@ -132,7 +136,7 @@ class TestGroupChatConsumer:
     async def test_outsider_without_handshake_rejected(self, db):
         owner = await async_user()
         outsider = await async_user()
-        service = await async_service(user=owner, max_participants=4)
+        service = await async_service(user=owner, max_participants=4, schedule_type='One-Time')
         comm, connected, _ = await connect_consumer(
             f'/ws/group-chat/{service.id}/', user=outsider, auth='cookie',
         )

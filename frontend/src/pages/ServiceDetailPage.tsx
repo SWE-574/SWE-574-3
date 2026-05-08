@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import InterestRequesterRow from '@/components/service-detail/InterestRequesterRow'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, Flex, Grid, Stack, Text } from '@chakra-ui/react'
 import {
   FiArrowLeft, FiClock, FiCalendar, FiMapPin, FiMonitor,
@@ -481,6 +481,7 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
 export default function ServiceDetailPage() {
   const { id }     = useParams<{ id: string }>()
   const navigate   = useNavigate()
+  const [searchParams] = useSearchParams()
   const { isAuthenticated, user, refreshUser, updateUserOptimistically } = useAuthStore()
 
   const [service, setService]           = useState<Service | null>(null)
@@ -586,6 +587,12 @@ export default function ServiceDetailPage() {
     setEventDetailModalTab(tab)
     setIsEventDetailModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'chat') {
+      openEventDetailModal('chat')
+    }
+  }, [searchParams])
 
   const closeEventDetailModal = () => {
     setIsEventDetailModalOpen(false)
@@ -739,11 +746,11 @@ export default function ServiceDetailPage() {
     } finally { setInterestLoading(false) }
   }
 
-  const handleReport = async (type: ReportType) => {
+  const handleReport = async (type: ReportType, statement = '') => {
     if (!service) return
     setReportLoading(true)
     try {
-      await serviceAPI.report(service.id, type, '')
+      await serviceAPI.report(service.id, type, statement)
       toast.success('Report submitted. Thank you for keeping the community safe.')
       if (user?.id) localStorage.setItem(`reported:${user.id}:${service.id}`, '1')
       setAlreadyReported(true); setShowReport(false)
@@ -905,14 +912,16 @@ export default function ServiceDetailPage() {
     })
   }
 
-  const handleSubmitEventBehaviorReport = async (issueType: EventBehaviorIssueType) => {
+  const handleSubmitEventBehaviorReport = async (issueType: EventBehaviorIssueType, statement = '') => {
     if (!eventReportTarget) return
     setReportingEventIssue(true)
     try {
       const selectedIssue = EVENT_BEHAVIOR_REPORT_OPTIONS.find((option) => option.value === issueType)
-      const autoDescription = selectedIssue
-        ? `${selectedIssue.label}. ${selectedIssue.desc}`
-        : `${issueType}`
+      const autoDescription = statement.trim()
+        ? statement.trim()
+        : selectedIssue
+          ? `${selectedIssue.label}. ${selectedIssue.desc}`
+          : `${issueType}`
 
       await handshakeAPI.report(
         eventReportTarget.handshakeId,
@@ -2341,7 +2350,7 @@ export default function ServiceDetailPage() {
       {showReport && (
         <ReportModal
           onClose={() => setShowReport(false)}
-          onSubmit={(reason) => handleReport(reason as ReportType)}
+          onSubmit={(reason, statement) => handleReport(reason as ReportType, statement)}
           loading={reportLoading}
           options={REPORT_OPTIONS}
           title="Report this listing"
@@ -2352,7 +2361,7 @@ export default function ServiceDetailPage() {
       {showEventReport && eventReportTarget && (
         <ReportModal
           onClose={closeEventReportModal}
-          onSubmit={(reason) => handleSubmitEventBehaviorReport(reason as EventBehaviorIssueType)}
+          onSubmit={(reason, statement) => handleSubmitEventBehaviorReport(reason as EventBehaviorIssueType, statement)}
           loading={reportingEventIssue}
           options={EVENT_BEHAVIOR_REPORT_OPTIONS}
           title={`Report ${eventReportTarget.targetLabel}`}
