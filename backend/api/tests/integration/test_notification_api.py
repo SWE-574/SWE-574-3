@@ -7,6 +7,7 @@ from rest_framework import status
 from api.tests.helpers.factories import (
     UserFactory, NotificationFactory, ServiceFactory,
     HandshakeFactory, ChatMessageFactory, ServiceGroupChatMessageFactory,
+    PublicChatMessageFactory,
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Notification
@@ -232,4 +233,73 @@ class TestGroupChatNotificationSignal:
 
         notified_users = set(Notification.objects.values_list('user_id', flat=True))
         assert active.pk in notified_users
+        assert pending.pk not in notified_users
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.integration
+class TestEventPublicChatNotificationSignal:
+    """Test that PublicChatMessage creates notifications for event participants."""
+
+    def _make_event_with_participants(self):
+        organizer = UserFactory()
+        service = ServiceFactory(user=organizer, type='Event')
+        # ServiceFactory triggers create_service_chat_room signal — reuse that room.
+        room = service.chat_room
+        participant1 = UserFactory()
+        participant2 = UserFactory()
+        HandshakeFactory(service=service, requester=participant1, status='accepted')
+        HandshakeFactory(service=service, requester=participant2, status='accepted')
+        return organizer, service, room, participant1, participant2
+
+    def test_participants_notified_on_event_chat_message(self):
+        organizer, service, room, participant1, participant2 = self._make_event_with_participants()
+
+        PublicChatMessageFactory(room=room, sender=organizer)
+
+        notified_users = set(Notification.objects.values_list('user_id', flat=True))
+        assert participant1.pk in notified_users
+        assert participant2.pk in notified_users
+
+    def test_sender_not_notified(self):
+        organizer, service, room, participant1, participant2 = self._make_event_with_participants()
+
+        PublicChatMessageFactory(room=room, sender=organizer)
+
+        assert not Notification.objects.filter(user=organizer).exists()
+
+    def test_organizer_notified_when_participant_sends(self):
+        organizer, service, room, participant1, participant2 = self._make_event_with_participants()
+
+        PublicChatMessageFactory(room=room, sender=participant1)
+
+        notified_users = set(Notification.objects.values_list('user_id', flat=True))
+        assert organizer.pk in notified_users
+        assert participant2.pk in notified_users
+        assert participant1.pk not in notified_users
+
+    def test_room_without_service_produces_no_notification(self):
+        sender = UserFactory()
+        # Manually create a room with no related_service to test the guard branch.
+        from api.models import ChatRoom
+        room = ChatRoom.objects.create(name='orphan-room', type='public', related_service=None)
+
+        PublicChatMessageFactory(room=room, sender=sender)
+
+        assert not Notification.objects.exists()
+
+    def test_pending_participant_not_notified(self):
+        organizer = UserFactory()
+        service = ServiceFactory(user=organizer, type='Event')
+        room = service.chat_room
+        active = UserFactory()
+        pending = UserFactory()
+        HandshakeFactory(service=service, requester=active, status='accepted')
+        HandshakeFactory(service=service, requester=pending, status='pending')
+
+        PublicChatMessageFactory(room=room, sender=organizer)
+
+        notified_users = set(Notification.objects.values_list('user_id', flat=True))
+        assert active.pk in notified_users
+        assert pending.pk not in notified_users
         assert pending.pk not in notified_users

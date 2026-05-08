@@ -16,6 +16,7 @@ function makeNotification(overrides: Partial<Notification>): Notification {
     related_service: null,
     related_service_type: null,
     related_report: null,
+    related_user: null,
     created_at: "",
     ...overrides,
   };

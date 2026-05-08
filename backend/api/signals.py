@@ -30,6 +30,8 @@ from .ranking import (
 
 security_logger = logging.getLogger('api.security')
 
+_HANDSHAKE_ACTIVE_STATUSES = ('accepted', 'checked_in', 'attended')
+
 
 def _client_ip(request) -> str:
     if request is None:
@@ -499,15 +501,15 @@ def notify_on_group_chat_message(sender, instance, created, **kwargs):
         return
     from .utils import create_notification
     try:
+        instance = ServiceGroupChatMessage.objects.select_related(
+            'service__user', 'sender'
+        ).get(pk=instance.pk)
         service = instance.service
         msg_sender = instance.sender
 
-        # Statuses that mean the user is an active participant
-        ACTIVE_STATUSES = ('accepted', 'checked_in', 'attended')
-
         participant_ids = set(
             Handshake.objects
-            .filter(service=service, status__in=ACTIVE_STATUSES)
+            .filter(service=service, status__in=_HANDSHAKE_ACTIVE_STATUSES)
             .exclude(requester_id=msg_sender.pk)
             .values_list('requester_id', flat=True)
         )
@@ -557,7 +559,7 @@ def notify_on_event_chat_message(sender, instance, created, **kwargs):
 
         participant_ids = set(
             Handshake.objects
-            .filter(service=service, status__in=['accepted', 'checked_in', 'attended'])
+            .filter(service=service, status__in=_HANDSHAKE_ACTIVE_STATUSES)
             .exclude(requester_id=msg_sender.pk)
             .values_list('requester_id', flat=True)
         )
@@ -590,10 +592,10 @@ def notify_on_user_follow(sender, instance, created, **kwargs):
     if not created:
         return
     from .utils import create_notification
-    follower = instance.follower
-    followed = instance.following
-    follower_name = (follower.first_name or follower.email or 'Someone').strip()
     try:
+        follower = instance.follower
+        followed = instance.following
+        follower_name = (follower.first_name or follower.email or 'Someone').strip()
         transaction.on_commit(lambda: create_notification(
             user=followed,
             notification_type='user_followed',
