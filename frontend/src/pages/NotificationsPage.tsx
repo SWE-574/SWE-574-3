@@ -48,6 +48,8 @@ const NotificationsPage = () => {
         navigate(`/service-detail/${notification.related_service}`)
       } else if (notification.related_service && notification.type === 'positive_rep') {
         navigate(`/service-detail/${notification.related_service}`)
+      } else if (notification.type === 'chat_message' && !notification.related_handshake && notification.related_service) {
+        navigate(`/messages?group=${notification.related_service}`)
       } else if (notification.related_handshake) {
         navigate(`/messages/${notification.related_handshake}`)
       } else if (notification.related_service) {

@@ -522,12 +522,18 @@ def notify_on_group_chat_message(sender, instance, created, **kwargs):
         recipients = list(User.objects.filter(pk__in=participant_ids))
 
         def _notify(recipients=recipients, msg_sender=msg_sender, service=service):
+            if service.type == 'Event':
+                title = 'New Event Chat Message'
+                msg_text = f"{msg_sender.first_name} sent a message in the event '{service.title}'"
+            else:
+                title = 'New Message'
+                msg_text = f"{msg_sender.first_name} sent a message in '{service.title}'"
             for user in recipients:
                 create_notification(
                     user=user,
                     notification_type='chat_message',
-                    title='New Message',
-                    message=f"{msg_sender.first_name} sent a message in '{service.title}'",
+                    title=title,
+                    message=msg_text,
                     service=service,
                 )
 
