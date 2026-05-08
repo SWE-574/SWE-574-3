@@ -6319,7 +6319,7 @@ class PublicChatViewSet(viewsets.ViewSet):
         has_active_hs = Handshake.objects.filter(
             service=service,
             requester=user,
-            status__in=['accepted', 'checked_in', 'attended'],
+            status__in=['accepted', 'checked_in', 'attended', 'completed', 'no_show'],
         ).exists()
         if has_active_hs:
             return None

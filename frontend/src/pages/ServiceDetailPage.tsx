@@ -1706,13 +1706,24 @@ export default function ServiceDetailPage() {
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'cancelled' ? (
-                    /* Participant was removed from event */
+                    /* Participant left voluntarily or was removed by moderation */
                     <Stack gap={2}>
                       <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}>
-                        <Text fontSize="13px" fontWeight={700} color={RED}>Removed From Event</Text>
-                        <Text fontSize="12px" color="#991B1B" mt="3px">
-                          You have been removed from this event after a moderation review.
-                        </Text>
+                        {myEventHandshake.cancellation_reason === 'user_left' ? (
+                          <>
+                            <Text fontSize="13px" fontWeight={700} color={RED}>You Left This Event</Text>
+                            <Text fontSize="12px" color="#991B1B" mt="3px">
+                              You cancelled your registration for this event.
+                            </Text>
+                          </>
+                        ) : (
+                          <>
+                            <Text fontSize="13px" fontWeight={700} color={RED}>Removed From Event</Text>
+                            <Text fontSize="12px" color="#991B1B" mt="3px">
+                              You have been removed from this event after a moderation review.
+                            </Text>
+                          </>
+                        )}
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'checked_in' ? (
@@ -1824,6 +1835,21 @@ export default function ServiceDetailPage() {
                         style={{ border: 'none', cursor: 'pointer' }}
                       >
                         <FiMessageSquare size={14} /> Event Chat
+                      </Box>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'accepted' && service.status === 'Completed' ? (
+                    /* Joined but event completed without check-in */
+                    <Stack gap={2}>
+                      <Box bg={GRAY100} borderRadius="12px" p={4} border={`1px solid ${GRAY200}`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiCheckCircle size={20} color={GRAY400} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={GRAY700}>Event Completed</Text>
+                          <Text fontSize="12px" color={GRAY500} mt="2px">
+                            This event has been marked as completed.
+                          </Text>
+                        </Box>
                       </Box>
                     </Stack>
                   ) : !isFutureEvent(service.scheduled_time) ? (
