@@ -15,6 +15,7 @@ export const NOTIFICATION_ICONS: Record<NotificationType, string> = {
   positive_rep: 'star-outline',
   admin_warning: 'warning-outline',
   dispute_resolved: 'shield-checkmark-outline',
+  user_followed: 'person-add-outline',
 };
 
 /**
@@ -25,7 +26,16 @@ export function navigateToNotificationTarget(
   notification: Notification,
   navigation: { navigate: (screen: string, params?: object) => void },
 ): void {
-  const { type, related_handshake, related_service, related_service_type } = notification;
+  const { type, related_handshake, related_service, related_service_type, related_user } = notification;
+
+  // New follower → follower's public profile
+  if (type === 'user_followed' && related_user) {
+    navigation.navigate('Home', {
+      screen: 'PublicProfile',
+      params: { userId: related_user },
+    });
+    return;
+  }
 
   // Event notifications → ServiceDetail (even if related_handshake is present)
   if (related_service_type === 'Event' && related_service) {

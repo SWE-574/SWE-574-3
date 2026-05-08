@@ -36,7 +36,9 @@ const NotificationsPage = () => {
   const handleClick = useCallback(
     (notification: Notification) => {
       if (!notification.is_read) markAsRead(notification.id)
-      if (notification.related_report && notification.type === 'new_report') {
+      if (notification.type === 'user_followed' && notification.related_user) {
+        navigate(`/public-profile/${notification.related_user}`)
+      } else if (notification.related_report && notification.type === 'new_report') {
         navigate(`/admin?tab=reports&reportId=${notification.related_report}`)
       } else if (
         notification.type === 'report_received'

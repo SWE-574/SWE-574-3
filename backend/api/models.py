@@ -620,6 +620,7 @@ class Notification(models.Model):
     related_handshake = models.ForeignKey(Handshake, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     related_service = models.ForeignKey(Service, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     related_report = models.ForeignKey('Report', on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    related_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='triggered_notifications')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -628,6 +629,7 @@ class Notification(models.Model):
             models.Index(fields=['related_handshake']),
             models.Index(fields=['related_service']),
             models.Index(fields=['related_report']),
+            models.Index(fields=['related_user']),
         ]
         ordering = ['-created_at']
 

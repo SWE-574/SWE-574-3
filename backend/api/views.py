@@ -4637,7 +4637,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         return (
             Notification.objects
             .filter(user=self.request.user)
-            .select_related('related_service', 'related_report', 'related_handshake')
+            .select_related('related_service', 'related_report', 'related_handshake', 'related_user')
             .order_by('-created_at')
         )
 

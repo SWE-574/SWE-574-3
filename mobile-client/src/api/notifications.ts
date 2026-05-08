@@ -22,7 +22,8 @@ export type NotificationType =
   | 'service_confirmation'
   | 'positive_rep'
   | 'admin_warning'
-  | 'dispute_resolved';
+  | 'dispute_resolved'
+  | 'user_followed';
 
 export interface Notification {
   id: string;
@@ -34,6 +35,7 @@ export interface Notification {
   related_service: string | null;
   related_service_type?: 'Offer' | 'Need' | 'Event' | null;
   related_report?: string | null;
+  related_user?: string | null;
   created_at: string;
 }
 

@@ -597,8 +597,9 @@ def notify_on_user_follow(sender, instance, created, **kwargs):
         transaction.on_commit(lambda: create_notification(
             user=followed,
             notification_type='user_followed',
-            title='New follower',
+            title='New Follower',
             message=f"{follower_name} started following you.",
+            related_user=follower,
         ))
     except Exception:
         logger.exception('Failed to queue follow notification for %s', instance.pk)

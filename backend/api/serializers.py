@@ -2127,7 +2127,7 @@ class NotificationSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'type', 'title', 'message', 'is_read',
             'related_handshake', 'related_service', 'related_service_type',
-            'related_report', 'created_at'
+            'related_report', 'related_user', 'created_at'
         ]
 
 class DevicePushTokenSerializer(serializers.Serializer):
