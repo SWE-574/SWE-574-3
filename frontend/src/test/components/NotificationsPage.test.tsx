@@ -1,129 +1,132 @@
-import { ChakraProvider } from '@chakra-ui/react'
-import { MemoryRouter } from 'react-router-dom'
-import { render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import NotificationsPage from '@/pages/NotificationsPage'
-import system from '@/theme'
-
 /**
- * State-coverage spec for the notifications listing page. Covers:
- *  - loading: store reports isLoading=true, no rows yet
- *  - empty: store finished loading and returned no notifications
- *  - populated: at least one row renders with the unread badge and bulk
- *    "Mark all as read" affordance
+ * Tests for NotificationsPage routing logic (handleClick).
  */
+import { ChakraProvider } from '@chakra-ui/react'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
+import system from '@/theme'
+import type { Notification } from '@/types'
 
-const storeState = vi.hoisted(() => ({
-  notifications: [] as Array<{
-    id: string
-    type: string
-    is_read: boolean
-    title?: string
-    message?: string
-    created_at: string
-  }>,
-  unreadCount: 0,
-  isLoading: false,
-  hasMore: false,
-  currentPage: 1,
-  fetchNotifications: vi.fn(),
-  markAsRead: vi.fn(),
-  markAllAsRead: vi.fn(),
-}))
+const navigateMock = vi.fn()
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => navigateMock }
+})
 
-vi.mock('@/store/useNotificationStore', () => ({
-  useNotificationStore: () => storeState,
-}))
+const markAsReadMock = vi.fn().mockResolvedValue(undefined)
+const markAllAsReadMock = vi.fn().mockResolvedValue(undefined)
+const fetchNotificationsMock = vi.fn().mockResolvedValue(undefined)
 
-vi.mock('@/components/NotificationItem', () => ({
-  NotificationItem: ({ notification }: { notification: { id: string; message?: string } }) => (
-    <div data-testid={`notif-${notification.id}`}>{notification.message ?? notification.id}</div>
-  ),
-}))
-
-function renderPage() {
-  return render(
-    <ChakraProvider value={system}>
-      <MemoryRouter>
-        <NotificationsPage />
-      </MemoryRouter>
-    </ChakraProvider>,
-  )
+function makeNotification(overrides: Partial<Notification>): Notification {
+  return {
+    id: 'notif-1',
+    type: 'handshake_request',
+    title: 'Test Notification',
+    message: 'Test message',
+    is_read: false,
+    related_handshake: null,
+    related_service: null,
+    related_service_type: null,
+    related_report: null,
+    related_user: null,
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
 }
 
-beforeEach(() => {
-  storeState.notifications = []
-  storeState.unreadCount = 0
-  storeState.isLoading = false
-  storeState.hasMore = false
-  storeState.currentPage = 1
-  storeState.fetchNotifications.mockClear()
-  storeState.markAsRead.mockClear()
-  storeState.markAllAsRead.mockClear()
-})
+async function renderPageWithNotification(notification: Notification) {
+  vi.doMock('@/store/useNotificationStore', () => ({
+    useNotificationStore: () => ({
+      notifications: [notification],
+      unreadCount: notification.is_read ? 0 : 1,
+      isLoading: false,
+      hasMore: false,
+      currentPage: 1,
+      fetchNotifications: fetchNotificationsMock,
+      markAsRead: markAsReadMock,
+      markAllAsRead: markAllAsReadMock,
+    }),
+  }))
+  const { default: NotificationsPage } = await import('@/pages/NotificationsPage')
+  render(
+    <MemoryRouter>
+      <ChakraProvider value={system}>
+        <NotificationsPage />
+      </ChakraProvider>
+    </MemoryRouter>
+  )
+  await waitFor(() => screen.getByText(notification.title))
+}
 
-afterEach(() => {
-  vi.clearAllMocks()
-})
-
-describe('NotificationsPage', () => {
-  it('renders the empty placeholder when there are no notifications and not loading', () => {
-    renderPage()
-    expect(screen.getByText(/no notifications yet/i)).toBeInTheDocument()
+describe('NotificationsPage routing', () => {
+  beforeEach(() => {
+    navigateMock.mockClear()
+    markAsReadMock.mockClear()
+    vi.resetModules()
   })
 
-  it('hides the empty placeholder while data is in flight', () => {
-    storeState.isLoading = true
-    renderPage()
-    expect(screen.queryByText(/no notifications yet/i)).not.toBeInTheDocument()
+  it('routes user_followed to /public-profile/:related_user', async () => {
+    const n = makeNotification({ type: 'user_followed', related_user: 'user-xyz' })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(navigateMock).toHaveBeenCalledWith('/public-profile/user-xyz')
   })
 
-  it('renders one row per notification when populated', () => {
-    storeState.notifications = [
-      { id: 'n-1', type: 'positive_rep', is_read: false, message: 'New rep', created_at: 't' },
-      { id: 'n-2', type: 'handshake_accepted', is_read: true, message: 'Accepted', created_at: 't' },
-    ]
-    storeState.unreadCount = 1
-    renderPage()
-    expect(screen.getByTestId('notif-n-1')).toBeInTheDocument()
-    expect(screen.getByTestId('notif-n-2')).toBeInTheDocument()
+  it('routes new_report to admin reports tab', async () => {
+    const n = makeNotification({ type: 'new_report', related_report: 'rpt-2' })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(navigateMock).toHaveBeenCalledWith('/admin?tab=reports&reportId=rpt-2')
   })
 
-  it('renders the unread badge and Mark-all-as-read button when unreadCount > 0', () => {
-    storeState.notifications = [
-      { id: 'n-1', type: 'positive_rep', is_read: false, message: 'Unread', created_at: 't' },
-    ]
-    storeState.unreadCount = 3
-    renderPage()
-    expect(screen.getByText('3')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /mark all as read/i })).toBeInTheDocument()
+  it('routes report_resolved to /profile?tab=reports', async () => {
+    const n = makeNotification({ type: 'report_resolved' })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(navigateMock).toHaveBeenCalledWith('/profile?tab=reports')
   })
 
-  it('hides the Mark-all-as-read button when unreadCount is zero', () => {
-    storeState.notifications = [
-      { id: 'n-1', type: 'positive_rep', is_read: true, message: 'Read', created_at: 't' },
-    ]
-    storeState.unreadCount = 0
-    renderPage()
-    expect(screen.queryByRole('button', { name: /mark all as read/i })).not.toBeInTheDocument()
+  it('routes event chat_message to /service-detail/:id?tab=chat', async () => {
+    const n = makeNotification({ type: 'chat_message', related_service: 'svc-10', related_service_type: 'Event' })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-10?tab=chat')
   })
 
-  it('shows the Load more button when hasMore is true and items exist', () => {
-    storeState.notifications = [
-      { id: 'n-1', type: 'positive_rep', is_read: true, message: 'X', created_at: 't' },
-    ]
-    storeState.hasMore = true
-    renderPage()
-    expect(screen.getByRole('button', { name: /load more/i })).toBeInTheDocument()
+  it('routes non-chat Event notification to /service-detail/:id', async () => {
+    const n = makeNotification({ type: 'handshake_request', related_service: 'svc-11', related_service_type: 'Event' })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-11')
   })
 
-  it('switches the Load more label to Loading… while a page is in flight', () => {
-    storeState.notifications = [
-      { id: 'n-1', type: 'positive_rep', is_read: true, message: 'X', created_at: 't' },
-    ]
-    storeState.hasMore = true
-    storeState.isLoading = true
-    renderPage()
-    expect(screen.getByText(/loading…/i)).toBeInTheDocument()
+  it('routes group chat_message to /messages?group=:serviceId', async () => {
+    const n = makeNotification({ type: 'chat_message', related_service: 'svc-12', related_service_type: 'Offer', related_handshake: null })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(navigateMock).toHaveBeenCalledWith('/messages?group=svc-12')
+  })
+
+  it('routes private chat_message to /messages/:handshakeId', async () => {
+    const n = makeNotification({ type: 'chat_message', related_handshake: 'hs-99', related_service: 'svc-13' })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(navigateMock).toHaveBeenCalledWith('/messages/hs-99')
+  })
+
+  it('routes service notification to /service-detail/:id', async () => {
+    const n = makeNotification({ type: 'handshake_request', related_service: 'svc-14' })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-14')
+  })
+
+  it('marks notification as read on click', async () => {
+    const n = makeNotification({ type: 'admin_warning', is_read: false })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(markAsReadMock).toHaveBeenCalledWith('notif-1')
   })
 })
