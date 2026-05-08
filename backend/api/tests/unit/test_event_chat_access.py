@@ -137,16 +137,15 @@ class TestPublicChatEventAccessHelper:
         assert result is not None
         assert result.status_code == 403
 
-    def test_no_show_participant_denied(self):
-        """User with no_show handshake gets a 403 response."""
+    def test_no_show_participant_allowed(self):
+        """User with no_show handshake can still read event chat (they were physically present)."""
         event = _event_service()
         user = UserFactory()
         HandshakeFactory(service=event, requester=user, status='no_show',
                          provisioned_hours=Decimal('0'))
         vs, request = self._viewset_with_user(user)
         result = vs._check_event_access(request, event)
-        assert result is not None
-        assert result.status_code == 403
+        assert result is None
 
 
 # ─── GroupChatViewSet._get_service_or_403 blocks events ──────────────────────

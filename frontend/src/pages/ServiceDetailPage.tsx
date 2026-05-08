@@ -477,6 +477,22 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
   )
 }
 
+// ─── Notification refresh filter ─────────────────────────────────────────────
+
+const SERVICE_DETAIL_REFRESH_TYPES: NotificationType[] = [
+  'handshake_accepted',
+  'handshake_cancelled',
+  'handshake_cancellation_requested',
+  'positive_rep',
+  'service_updated',
+  'service_confirmation',
+]
+
+/** Returns true when a notification type should trigger a ServiceDetailPage data refresh. */
+export function isServiceDetailRefreshType(type: NotificationType): boolean {
+  return SERVICE_DETAIL_REFRESH_TYPES.includes(type)
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ServiceDetailPage() {
@@ -538,20 +554,11 @@ export default function ServiceDetailPage() {
     handshakeAPI.list().then(setHandshakes).catch(() => {})
   }, [isAuthenticated])
 
-  const REFRESH_TYPES: NotificationType[] = [
-    'handshake_accepted',
-    'handshake_cancelled',
-    'handshake_cancellation_requested',
-    'positive_rep',
-    'service_updated',
-    'service_confirmation',
-  ]
-
   // Re-fetch when a relevant notification arrives (e.g. check-in, handshake status change).
   useEffect(() => {
     if (!lastNotification || !service?.id) return
     if (String(lastNotification.related_service) !== String(service.id)) return
-    if (!REFRESH_TYPES.includes(lastNotification.type)) return
+    if (!isServiceDetailRefreshType(lastNotification.type)) return
     // Refresh both the service (participant_count etc.) and the handshake list.
     serviceAPI.get(service.id).then(setService).catch(() => {})
     if (isAuthenticated) handshakeAPI.list().then(setHandshakes).catch(() => {})
