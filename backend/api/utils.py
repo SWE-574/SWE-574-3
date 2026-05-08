@@ -507,6 +507,7 @@ def create_notification(
     handshake: Handshake | None = None,
     service: Service | None = None,
     report: Report | None = None,
+    related_user: User | None = None,
 ) -> Notification:
     """Persist a notification and broadcast it via WebSocket."""
     notification = Notification.objects.create(
@@ -517,6 +518,7 @@ def create_notification(
         related_handshake=handshake,
         related_service=service,
         related_report=report,
+        related_user=related_user,
     )
     transaction.on_commit(lambda: _broadcast_notification(notification))
     return notification
@@ -536,6 +538,8 @@ def _notification_payload_for_channels(notification: Notification) -> dict:
 
 def _broadcast_notification(notification: Notification) -> None:
     """Push a notification to the user's WebSocket group and send push notifications."""
+    # Refetch with select_related so related_service.type is always available without an extra query.
+    notification = Notification.objects.select_related('related_service').get(pk=notification.pk)
     # WebSocket broadcast
     try:
         from channels.layers import get_channel_layer
@@ -629,6 +633,9 @@ def _send_push_notification(notification: Notification) -> None:
         'notification_id': str(notification.id),
         'related_handshake': str(notification.related_handshake_id) if notification.related_handshake_id else None,
         'related_service': str(notification.related_service_id) if notification.related_service_id else None,
+        'related_service_type': notification.related_service.type if notification.related_service else None,
+        'related_report': str(notification.related_report_id) if notification.related_report_id else None,
+        'related_user': str(notification.related_user_id) if notification.related_user_id else None,
     }
 
     messages = [

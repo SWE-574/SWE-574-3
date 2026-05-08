@@ -8,6 +8,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from api.tests.helpers.factories import UserFactory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 REGISTER_URL = '/api/auth/register/'
@@ -50,7 +51,7 @@ class TestDisposableEmailBlacklist:
     def test_disposable_domain_rejected(self, domain):
         client = APIClient()
         response = client.post(REGISTER_URL, _payload(f'spammer@{domain}'))
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         # Error must come back attached to the email field, not as a server error.
         # The custom exception handler nests DRF field errors under field_errors.
         assert 'email' in response.data.get('field_errors', response.data)
@@ -58,7 +59,7 @@ class TestDisposableEmailBlacklist:
     def test_real_provider_accepted(self):
         client = APIClient()
         response = client.post(REGISTER_URL, _payload('real.user@gmail.com'))
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
 
 @pytest.mark.django_db
@@ -90,5 +91,5 @@ class TestAuthSecurityLogging:
                 'email': 'success@example.com',
                 'password': 'GoodPass123!',
             })
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert any('auth.login.success' in rec.message for rec in caplog.records)

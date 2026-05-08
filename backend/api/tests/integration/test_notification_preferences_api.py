@@ -15,6 +15,7 @@ from api.models import DevicePushToken, Notification
 from api.tests.helpers.factories import UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.utils import _send_push_notification, user_wants_push
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -26,7 +27,7 @@ class TestNotificationPreferencesPersistence:
             {'notification_preferences': {'push': False}},
             format='json',
         )
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_patch_round_trips(self):
         user = UserFactory()
@@ -37,10 +38,10 @@ class TestNotificationPreferencesPersistence:
             {'notification_preferences': {'push': True, 'chat': False, 'system': True}},
             format='json',
         )
-        assert patch_response.status_code == status.HTTP_200_OK
+        assert_api_response(patch_response, 200)
 
         get_response = client.get('/api/users/me/')
-        assert get_response.status_code == status.HTTP_200_OK
+        assert_api_response(get_response, 200)
         prefs = get_response.data.get('notification_preferences') or {}
         assert prefs.get('push') is True
         assert prefs.get('chat') is False

@@ -86,5 +86,26 @@ describe('utils/cookies', () => {
       // delete cookie string" — assert via document.cookie shape.
       expect(document.cookie).toMatch(/scoped=/)
     })
+
+    it('defaults the path to "/" when not supplied', () => {
+      // Spy on the document.cookie setter so we can assert what was written
+      // (jsdom collapses the cookie back into a name=value pair on read).
+      const writes: string[] = []
+      const originalDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie')!
+      Object.defineProperty(document, 'cookie', {
+        configurable: true,
+        get: originalDesc.get,
+        set(value: string) {
+          writes.push(value)
+          originalDesc.set!.call(this, value)
+        },
+      })
+      try {
+        deleteCookie('default_path')
+      } finally {
+        Object.defineProperty(document, 'cookie', originalDesc)
+      }
+      expect(writes.some((w) => w.includes('path=/'))).toBe(true)
+    })
   })
 })

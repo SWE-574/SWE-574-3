@@ -8,6 +8,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from api.tests.helpers.factories import ServiceFactory, UserFactory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 def _make_tag(qid):
@@ -39,7 +40,7 @@ class TestForYouDismissals:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/?sort=for_you')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         ids = {row['id'] for row in resp.json()['results']}
         assert str(svc.id) not in ids
 

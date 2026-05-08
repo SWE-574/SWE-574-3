@@ -15,6 +15,7 @@ from api.exceptions import AuditLogImmutabilityError
 from api.models import AdminAuditLog, Report
 from api.tests.helpers.factories import AdminUserFactory, ForumTopicFactory, HandshakeFactory, ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 def _payload_items(data):
@@ -30,14 +31,14 @@ def _payload_items(data):
 class TestAdminManagementApi:
     def test_metrics_requires_authentication(self):
         response = APIClient().get('/api/metrics/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_non_admin_cannot_access_metrics(self):
         member = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(member)
 
         response = client.get('/api/metrics/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     def test_admin_can_access_metrics(self):
         admin = AdminUserFactory()
@@ -45,7 +46,7 @@ class TestAdminManagementApi:
 
         response = client.get('/api/metrics/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         payload = response.json()
         assert 'users' in payload
         assert 'services' in payload
@@ -54,14 +55,14 @@ class TestAdminManagementApi:
 
     def test_admin_users_list_requires_authentication(self):
         response = APIClient().get('/api/admin/users/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_non_admin_cannot_list_admin_users(self):
         member = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(member)
 
         response = client.get('/api/admin/users/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     def test_admin_can_list_users(self):
         admin = AdminUserFactory()
@@ -70,7 +71,7 @@ class TestAdminManagementApi:
         client = AuthenticatedAPIClient().authenticate_admin(admin)
         response = client.get('/api/admin/users/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         items = _payload_items(response.data)
         ids = {item['id'] for item in items}
         assert str(listed_user.id) in ids
@@ -86,15 +87,15 @@ class TestAdminManagementApi:
             {'message': 'Please follow guidelines.'},
             format='json',
         )
-        assert warn_response.status_code == status.HTTP_200_OK
+        assert_api_response(warn_response, 200)
 
         ban_response = client.post(f'/api/admin/users/{target_user.id}/ban/', {}, format='json')
-        assert ban_response.status_code == status.HTTP_200_OK
+        assert_api_response(ban_response, 200)
         target_user.refresh_from_db()
         assert target_user.is_active is False
 
         unban_response = client.post(f'/api/admin/users/{target_user.id}/unban/', {}, format='json')
-        assert unban_response.status_code == status.HTTP_200_OK
+        assert_api_response(unban_response, 200)
         target_user.refresh_from_db()
         assert target_user.is_active is True
 
@@ -103,13 +104,13 @@ class TestAdminManagementApi:
             {'adjustment': -3},
             format='json',
         )
-        assert karma_response.status_code == status.HTTP_200_OK
+        assert_api_response(karma_response, 200)
         target_user.refresh_from_db()
         assert target_user.karma_score == 7
 
     def test_admin_audit_logs_requires_authentication(self):
         response = APIClient().get('/api/admin/audit-logs/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_non_admin_gets_empty_admin_audit_logs(self):
         member = UserFactory()
@@ -126,7 +127,7 @@ class TestAdminManagementApi:
         client = AuthenticatedAPIClient().authenticate_user(member)
         response = client.get('/api/admin/audit-logs/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         items = _payload_items(response.data)
         assert len(items) == 0
 
@@ -161,12 +162,12 @@ class TestAdminManagementApi:
         client = AuthenticatedAPIClient().authenticate_admin(admin)
 
         all_response = client.get('/api/admin/audit-logs/')
-        assert all_response.status_code == status.HTTP_200_OK
+        assert_api_response(all_response, 200)
         all_items = _payload_items(all_response.data)
         assert len(all_items) >= 2
 
         filtered_response = client.get('/api/admin/audit-logs/?action_type=resolve_report&target_entity=report')
-        assert filtered_response.status_code == status.HTTP_200_OK
+        assert_api_response(filtered_response, 200)
         filtered_items = _payload_items(filtered_response.data)
         assert len(filtered_items) >= 1
         assert all(item['action_type'] == 'resolve_report' for item in filtered_items)
@@ -179,7 +180,7 @@ class TestAdminManagementApi:
 
         response = client.post(f'/api/admin/users/{admin.id}/ban/', {}, format='json')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         admin.refresh_from_db()
         assert admin.is_active is True  # account must remain active
 
@@ -194,7 +195,7 @@ class TestAdminManagementApi:
             format='json',
         )
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     def test_admin_can_still_suspend_other_users(self):
         """Regression: the self-suspend guard must not break normal ban flow."""
@@ -204,7 +205,7 @@ class TestAdminManagementApi:
 
         response = client.post(f'/api/admin/users/{target.id}/ban/', {}, format='json')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         target.refresh_from_db()
         assert target.is_active is False
 
@@ -218,7 +219,7 @@ class TestAdminManagementApi:
 
         response = client.post(f'/api/admin/users/{admin.id}/ban/', {}, format='json')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         admin.refresh_from_db()
         assert admin.is_active is True
 
@@ -234,7 +235,7 @@ class TestAdminManagementApi:
             format='json',
         )
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     def test_moderator_can_warn_another_moderator(self):
         """Moderators may warn peers at the same tier."""
@@ -248,7 +249,7 @@ class TestAdminManagementApi:
             format='json',
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_moderator_cannot_ban_another_moderator(self):
         """Moderators must not be able to ban peers at the same tier."""
@@ -258,7 +259,7 @@ class TestAdminManagementApi:
 
         response = client.post(f'/api/admin/users/{peer.id}/ban/', {}, format='json')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         peer.refresh_from_db()
         assert peer.is_active is True
 
@@ -275,7 +276,7 @@ class TestAdminManagementApi:
             format='json',
         )
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         admin.refresh_from_db()
         assert admin.karma_score == original_karma
 
@@ -289,7 +290,7 @@ class TestAdminManagementApi:
 
         response = client.get('/api/admin/users/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = {item['id'] for item in _payload_items(response.data)}
         assert str(super_admin.id) not in ids
 
@@ -301,7 +302,7 @@ class TestAdminManagementApi:
 
         response = client.get(f'/api/admin/users/{super_admin.id}/')
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
     def test_super_admin_can_see_other_super_admins(self):
         """A super_admin should be able to view another super_admin's detail."""
@@ -311,8 +312,7 @@ class TestAdminManagementApi:
 
         response = client.get(f'/api/admin/users/{peer.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['id'] == str(peer.id)
+        assert_api_response(response, 200, schema={'id': str(peer.id)})
 
     def test_resolved_report_is_retrievable_via_detail_endpoint(self):
         """Resolved reports must return 200 on the detail endpoint (not 404)."""
@@ -330,9 +330,7 @@ class TestAdminManagementApi:
         client = AuthenticatedAPIClient().authenticate_admin(admin)
         response = client.get(f'/api/admin/reports/{report.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['id'] == str(report.id)
-        assert response.data['status'] == 'resolved'
+        assert_api_response(response, 200, schema={'id': str(report.id), 'status': 'resolved'})
 
     def test_dismissed_report_is_retrievable_via_detail_endpoint(self):
         """Dismissed reports must also return 200 on the detail endpoint."""
@@ -350,8 +348,7 @@ class TestAdminManagementApi:
         client = AuthenticatedAPIClient().authenticate_admin(admin)
         response = client.get(f'/api/admin/reports/{report.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['status'] == 'dismissed'
+        assert_api_response(response, 200, schema={'status': 'dismissed'})
 
     def test_admin_can_list_retrieve_and_pause_reports(self):
         admin = AdminUserFactory()
@@ -372,17 +369,16 @@ class TestAdminManagementApi:
         client = AuthenticatedAPIClient().authenticate_admin(admin)
 
         list_response = client.get('/api/admin/reports/?status=pending')
-        assert list_response.status_code == status.HTTP_200_OK
+        assert_api_response(list_response, 200)
         list_items = _payload_items(list_response.data)
         report_ids = {item['id'] for item in list_items}
         assert str(report.id) in report_ids
 
         retrieve_response = client.get(f'/api/admin/reports/{report.id}/')
-        assert retrieve_response.status_code == status.HTTP_200_OK
-        assert retrieve_response.data['id'] == str(report.id)
+        assert_api_response(retrieve_response, 200, schema={'id': str(report.id)})
 
         pause_response = client.post(f'/api/admin/reports/{report.id}/pause/', {}, format='json')
-        assert pause_response.status_code == status.HTTP_200_OK
+        assert_api_response(pause_response, 200)
         handshake.refresh_from_db()
         assert handshake.status == 'paused'
 
@@ -391,14 +387,14 @@ class TestAdminManagementApi:
     def test_admin_user_detail_requires_authentication(self):
         target = UserFactory()
         response = APIClient().get(f'/api/admin/users/{target.id}/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_non_admin_cannot_retrieve_user_detail(self):
         member = UserFactory()
         target = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(member)
         response = client.get(f'/api/admin/users/{target.id}/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     def test_admin_can_retrieve_user_detail(self):
         admin = AdminUserFactory()
@@ -410,7 +406,7 @@ class TestAdminManagementApi:
 
         response = client.get(f'/api/admin/users/{target.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         data = response.data
         assert data['id'] == str(target.id)
         assert data['email'] == target.email
@@ -450,7 +446,7 @@ class TestAdminManagementApi:
         client = AuthenticatedAPIClient().authenticate_admin(admin)
         response = client.get(f'/api/admin/users/{target.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         data = response.data
         assert data['offers_count'] == 2
         assert data['requests_count'] == 1
@@ -472,7 +468,7 @@ class TestAdminManagementApi:
         client = AuthenticatedAPIClient().authenticate_admin(admin)
         response = client.get(f'/api/admin/users/{target.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         actions = response.data['recent_admin_actions']
         assert len(actions) == 1
         assert actions[0]['action_type'] == 'warn_user'
@@ -484,7 +480,7 @@ class TestAdminManagementApi:
         client = AuthenticatedAPIClient().authenticate_admin(admin)
 
         response = client.get(f'/api/admin/users/{uuid.uuid4()}/')
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
     # ── Role-aware handshake counts ───────────────────────────────────────────
 
@@ -658,7 +654,7 @@ class TestAdminRoleAssignment:
         """Endpoint requires a valid session."""
         target = UserFactory()
         response = APIClient().post(self._url(target.id), {'role': 'moderator'}, format='json')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_member_cannot_assign_roles(self):
         """A standard member must not access admin endpoints."""
@@ -668,7 +664,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, target.id, 'moderator')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         target.refresh_from_db()
         assert target.role == 'member'
 
@@ -681,7 +677,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, admin.id, 'member')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         admin.refresh_from_db()
         assert admin.role == 'admin'  # unchanged
 
@@ -695,7 +691,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, peer_admin.id, 'member')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         peer_admin.refresh_from_db()
         assert peer_admin.role == 'admin'  # unchanged
 
@@ -707,7 +703,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, target.id, 'admin')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         target.refresh_from_db()
         assert target.role == 'member'  # unchanged
 
@@ -721,7 +717,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, target.id, 'moderator')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         payload = response.json()
         assert payload['status'] == 'success'
         assert payload['previous_role'] == 'member'
@@ -737,7 +733,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, target.id, 'member')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         target.refresh_from_db()
         assert target.role == 'member'
 
@@ -749,7 +745,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, target.id, 'moderator')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         target.refresh_from_db()
         assert target.role == 'member'
 
@@ -763,7 +759,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, target.id, 'admin')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         target.refresh_from_db()
         assert target.role == 'admin'
 
@@ -775,7 +771,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, peer.id, 'admin')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         peer.refresh_from_db()
         assert peer.role == 'super_admin'
 
@@ -789,7 +785,7 @@ class TestAdminRoleAssignment:
 
         initial_log_count = AdminAuditLog.objects.filter(action_type='assign_role').count()
         response = self._post(client, target.id, 'moderator')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         logs = AdminAuditLog.objects.filter(action_type='assign_role')
         assert logs.count() == initial_log_count + 1
@@ -822,7 +818,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, target.id, 'superuser')  # not a valid role
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         target.refresh_from_db()
         assert target.role == 'member'
 
@@ -834,7 +830,7 @@ class TestAdminRoleAssignment:
 
         response = client.post(self._url(target.id), {}, format='json')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_unknown_user_id_returns_404(self):
         """A non-existent target user must return 404."""
@@ -844,7 +840,7 @@ class TestAdminRoleAssignment:
 
         response = self._post(client, uuid.uuid4(), 'member')
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
 
 @pytest.mark.django_db
@@ -869,7 +865,7 @@ class TestAdminForumTopicLockPin:
         initial_count = AdminAuditLog.objects.filter(action_type='lock_topic').count()
         response = client.post(self._lock_url(topic.id), format='json')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         topic.refresh_from_db()
         assert topic.is_locked is True
 
@@ -890,7 +886,7 @@ class TestAdminForumTopicLockPin:
         initial_count = AdminAuditLog.objects.filter(action_type='lock_topic').count()
         response = client.post(self._lock_url(topic.id), format='json')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         topic.refresh_from_db()
         assert topic.is_locked is False
 
@@ -907,7 +903,7 @@ class TestAdminForumTopicLockPin:
 
         response = client.post(self._lock_url(topic.id), format='json')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         topic.refresh_from_db()
         assert topic.is_locked is False
 
@@ -917,7 +913,7 @@ class TestAdminForumTopicLockPin:
 
         response = APIClient().post(self._lock_url(topic.id), format='json')
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     # ── pin ───────────────────────────────────────────────────────────────────
 
@@ -930,7 +926,7 @@ class TestAdminForumTopicLockPin:
         initial_count = AdminAuditLog.objects.filter(action_type='pin_topic').count()
         response = client.post(self._pin_url(topic.id), format='json')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         topic.refresh_from_db()
         assert topic.is_pinned is True
 
@@ -951,7 +947,7 @@ class TestAdminForumTopicLockPin:
         initial_count = AdminAuditLog.objects.filter(action_type='pin_topic').count()
         response = client.post(self._pin_url(topic.id), format='json')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         topic.refresh_from_db()
         assert topic.is_pinned is False
 
@@ -968,7 +964,7 @@ class TestAdminForumTopicLockPin:
 
         response = client.post(self._pin_url(topic.id), format='json')
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         topic.refresh_from_db()
         assert topic.is_pinned is False
 
@@ -978,7 +974,7 @@ class TestAdminForumTopicLockPin:
 
         response = APIClient().post(self._pin_url(topic.id), format='json')
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     # ── idempotency / multiple toggles ────────────────────────────────────────
 
@@ -991,14 +987,14 @@ class TestAdminForumTopicLockPin:
         # Lock → unlocked → locked: three round-trips
         for expected in [True, False, True]:
             response = client.post(self._lock_url(topic.id), format='json')
-            assert response.status_code == status.HTTP_200_OK
+            assert_api_response(response, 200)
             topic.refresh_from_db()
             assert topic.is_locked is expected
 
         # Pin → unpinned → pinned: three round-trips
         for expected in [True, False, True]:
             response = client.post(self._pin_url(topic.id), format='json')
-            assert response.status_code == status.HTTP_200_OK
+            assert_api_response(response, 200)
             topic.refresh_from_db()
             assert topic.is_pinned is expected
 

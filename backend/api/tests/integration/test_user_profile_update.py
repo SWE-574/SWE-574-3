@@ -7,6 +7,7 @@ from rest_framework import status
 from api.tests.helpers.factories import UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Badge, UserBadge
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 ME_URL = '/api/users/me/'
@@ -31,7 +32,7 @@ class TestFeaturedBadgesPatch:
         _earn_badge(user, b1)
         client = AuthenticatedAPIClient().authenticate_user(user)
         resp = client.patch(ME_URL, {'featured_badges': ['b1']}, format='json')
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         data = resp.json()
         assert 'b1' in data['featured_badges']
 
@@ -43,7 +44,7 @@ class TestFeaturedBadgesPatch:
         _earn_badge(user, b2)
         client = AuthenticatedAPIClient().authenticate_user(user)
         resp = client.patch(ME_URL, {'featured_badges': ['b1', 'b2']}, format='json')
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         data = resp.json()
         assert set(data['featured_badges']) == {'b1', 'b2'}
 
@@ -63,7 +64,7 @@ class TestFeaturedBadgesPatch:
         _create_badge('unearned', 'Unearned Badge')
         client = AuthenticatedAPIClient().authenticate_user(user)
         resp = client.patch(ME_URL, {'featured_badges': ['unearned']}, format='json')
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(resp, 400)
         assert self._has_featured_badges_error(resp)
 
     def test_patch_more_than_two_returns_400(self):
@@ -76,7 +77,7 @@ class TestFeaturedBadgesPatch:
         _earn_badge(user, b3)
         client = AuthenticatedAPIClient().authenticate_user(user)
         resp = client.patch(ME_URL, {'featured_badges': ['b1', 'b2', 'b3']}, format='json')
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(resp, 400)
         assert self._has_featured_badges_error(resp)
 
     def test_patch_duplicates_returns_400(self):
@@ -85,15 +86,14 @@ class TestFeaturedBadgesPatch:
         _earn_badge(user, b1)
         client = AuthenticatedAPIClient().authenticate_user(user)
         resp = client.patch(ME_URL, {'featured_badges': ['b1', 'b1']}, format='json')
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(resp, 400)
         assert self._has_featured_badges_error(resp)
 
     def test_patch_empty_list_succeeds(self):
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
         resp = client.patch(ME_URL, {'featured_badges': []}, format='json')
-        assert resp.status_code == status.HTTP_200_OK
-        assert resp.json()['featured_badges'] == []
+        assert_api_response(resp, 200, schema={'featured_badges': []})
 
 
 @pytest.mark.django_db
@@ -107,7 +107,7 @@ class TestFeaturedBadgesGet:
         user.save()
         client = AuthenticatedAPIClient().authenticate_user(user)
         resp = client.get(ME_URL)
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         data = resp.json()
         assert 'featured_badges' in data
         assert 'featured_badges_detail' in data

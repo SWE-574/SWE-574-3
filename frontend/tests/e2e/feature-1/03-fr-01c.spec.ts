@@ -19,8 +19,15 @@ test.describe('FR-01c: Logout invalidates session and redirects', () => {
 
     await openUserMenu(page)
 
-    // Remove the /users/me/ interception so the app detects the session is gone.
+    // Replace loginAs()'s always-200 /users/me/ stub with an explicit 401.
+    // A bare unroute() leaks a CI-only race: dashboard hooks can re-fetch
+    // /users/me/ between POST /auth/logout and React's auth-state flip,
+    // and the slow CI backend's 200 response then re-hydrates useAuthStore
+    // and pins the route guard to /dashboard.
     await page.unroute('**/api/users/me/')
+    await page.route('**/api/users/me/', (route) =>
+      route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
+    )
 
     // Capture the logout response to assert the backend sends a cookie-deletion header
     const [logoutResponse] = await Promise.all([

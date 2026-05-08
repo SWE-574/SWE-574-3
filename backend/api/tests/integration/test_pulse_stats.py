@@ -10,6 +10,7 @@ from api.tests.helpers.factories import (
     ServiceFactory,
     UserFactory,
 )
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 def _make_tag(qid):
@@ -29,7 +30,7 @@ class TestPulseVisit:
 
         before = timezone.now()
         resp = client.post('/api/pulse/visit/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
 
         viewer.refresh_from_db(fields=['last_pulse_visit_at'])
         assert viewer.last_pulse_visit_at is not None
@@ -37,7 +38,7 @@ class TestPulseVisit:
 
     def test_anonymous_blocked(self):
         resp = APIClient().post('/api/pulse/visit/')
-        assert resp.status_code == 401
+        assert_problem_detail(resp, 401)
 
 
 @pytest.mark.django_db
@@ -45,14 +46,14 @@ class TestPulseVisit:
 class TestPulseStats:
     def test_anonymous_blocked(self):
         resp = APIClient().get('/api/pulse/stats/')
-        assert resp.status_code == 401
+        assert_problem_detail(resp, 401)
 
     def test_returns_expected_shape(self):
         viewer = UserFactory()
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.get('/api/pulse/stats/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         body = resp.json()
         assert set(body.keys()) == {
             'new_since_last_visit', 'saved_count', 'follow_handshakes_week',

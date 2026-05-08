@@ -24,6 +24,7 @@ from rest_framework import status
 from api.models import Handshake, EventEvaluationSummary, Service
 from api.tests.helpers.factories import HandshakeFactory, ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +153,7 @@ class TestServiceHotScoreAtWindowClose:
             'helpful': False,
             'kindness': False,
         })
-        assert response.status_code == status.HTTP_410_GONE, (
-            "Reputation submission after window close must return 410 Gone."
-        )
+        assert_problem_detail(response, 410)
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +202,7 @@ class TestEventHotScoreAtWindowClose:
             'engaging': True,
             'welcoming': False,
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
         # Expire the window so process_feedback_windows picks it up.
         now = timezone.now()
@@ -306,7 +305,7 @@ class TestEventHotScoreAtWindowClose:
             'engaging': True,
             'welcoming': True,
         })
-        assert r1.status_code == status.HTTP_201_CREATED
+        assert_api_response(r1, 201)
 
         # participant_b submits purely negative evaluation.
         client_b = AuthenticatedAPIClient().authenticate_user(participant_b)
@@ -316,7 +315,7 @@ class TestEventHotScoreAtWindowClose:
             'boring': True,
             'unwelcoming': True,
         })
-        assert r2.status_code == status.HTTP_201_CREATED
+        assert_api_response(r2, 201)
 
         # Expire both windows so process_feedback_windows picks them up.
         now = timezone.now()
@@ -374,6 +373,4 @@ class TestEventHotScoreAtWindowClose:
             'engaging': False,
             'welcoming': True,
         })
-        assert response.status_code == status.HTTP_410_GONE, (
-            "Event evaluation after window close must return 410 Gone."
-        )
+        assert_problem_detail(response, 410)

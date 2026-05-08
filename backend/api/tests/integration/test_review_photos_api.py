@@ -20,6 +20,7 @@ from api.tests.helpers.factories import (
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Comment, CommentMedia
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +118,7 @@ class TestReviewPhotoAttachment:
             format='multipart',
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert CommentMedia.objects.filter(
             comment__related_handshake=handshake,
             comment__user=requester,
@@ -141,7 +142,7 @@ class TestReviewPhotoAttachment:
             format='multipart',
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert CommentMedia.objects.filter(
             comment__related_handshake=handshake,
         ).count() == 3
@@ -161,7 +162,7 @@ class TestReviewPhotoAttachment:
             format='multipart',
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert 'Maximum 3 images' in (response.data.get('detail') or '')
 
     def test_unsupported_image_format_rejected(self):
@@ -179,7 +180,7 @@ class TestReviewPhotoAttachment:
             format='multipart',
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert 'Unsupported image format' in (response.data.get('detail') or '')
 
     def test_image_url_returned_in_comment_serializer(self):
@@ -216,7 +217,7 @@ class TestReviewPhotoAttachment:
         client.authenticate_user(requester)
         response = client.get(f'/api/services/{service.id}/comments/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data.get('results', response.data)
         comment_data = next((c for c in results if str(c['id']) == str(comment.id)), None)
         assert comment_data is not None, 'Comment not found in response'
@@ -249,7 +250,7 @@ class TestReviewPhotoAttachment:
             format='multipart',
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         # Image must be attached to the existing comment, not a new one
         assert Comment.objects.filter(
             related_handshake=handshake, user=requester, is_verified_review=True,
@@ -297,7 +298,7 @@ class TestEventReviewPhotoAttachment:
             format='multipart',
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert CommentMedia.objects.filter(
             comment__related_handshake=handshake,
             comment__user=participant,
@@ -325,7 +326,7 @@ class TestEventReviewPhotoAttachment:
         client.authenticate_user(participant)
         response = client.get(f'/api/services/{event.id}/comments/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data.get('results', response.data)
         comment_data = next((c for c in results if str(c['id']) == str(comment.id)), None)
         assert comment_data is not None
@@ -346,7 +347,7 @@ class TestEventReviewPhotoAttachment:
             format='multipart',
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +395,7 @@ class TestEventReviewImmediateVisibility:
         client.authenticate_user(participant)
         response = client.get(f'/api/services/{event.id}/comments/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data.get('results', response.data)
         assert len(results) == 1, (
             'Event review must be visible immediately — '
@@ -420,8 +421,7 @@ class TestEventReviewImmediateVisibility:
             {'role': 'organizer'},
         )
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['count'] == 1
+        assert_api_response(response, 200, schema={'count': 1})
 
     def test_offer_review_still_suppressed_during_window(self):
         """
@@ -452,7 +452,7 @@ class TestEventReviewImmediateVisibility:
         client.authenticate_user(requester)
         response = client.get(f'/api/services/{service.id}/comments/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data.get('results', response.data)
         # Must be hidden — both flags False and window still open
         assert len(results) == 0, (
@@ -497,6 +497,5 @@ class TestEventReviewImmediateVisibility:
             {'role': 'organizer'},
         )
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['count'] == 1
+        assert_api_response(response, 200, schema={'count': 1})
         assert response.data['results'][0]['body'] == 'Great event!'

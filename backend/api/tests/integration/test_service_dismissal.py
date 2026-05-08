@@ -3,6 +3,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from api.tests.helpers.factories import ServiceFactory, UserFactory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -16,7 +17,7 @@ class TestServiceDismissal:
         client = APIClient()
         client.force_authenticate(user=viewer)
         resp = client.post(f'/api/services/{svc.id}/dismiss/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert resp.json()['is_dismissed'] is True
         assert ServiceDismissal.objects.filter(viewer=viewer, service=svc).exists()
 
@@ -40,7 +41,7 @@ class TestServiceDismissal:
         client.force_authenticate(user=viewer)
         client.post(f'/api/services/{svc.id}/dismiss/')
         resp = client.delete(f'/api/services/{svc.id}/dismiss/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert resp.json()['is_dismissed'] is False
         assert not ServiceDismissal.objects.filter(viewer=viewer, service=svc).exists()
 
@@ -48,7 +49,7 @@ class TestServiceDismissal:
         svc = ServiceFactory(type='Offer', status='Active')
         client = APIClient()
         resp = client.post(f'/api/services/{svc.id}/dismiss/')
-        assert resp.status_code == 401
+        assert_problem_detail(resp, 401)
 
     def test_dismissal_is_per_viewer(self):
         from api.models import ServiceDismissal

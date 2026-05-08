@@ -151,10 +151,15 @@ describe('eventUtils — time-dependent helpers', () => {
       expect(formatEventDateTime(null)).toBe('TBD')
       expect(formatEventDateTime(undefined)).toBe('TBD')
     })
-    it('returns a non-empty string for a real timestamp', () => {
-      const formatted = formatEventDateTime(inFuture(2 * 24 * 3600_000))
-      expect(formatted.length).toBeGreaterThan(0)
-      expect(formatted).not.toBe('TBD')
+    it('formats a real timestamp with weekday, month, day, year and 12-hour time', () => {
+      // Tue 2026-05-12 03:00 UTC → en-US localised. The exact wall-time depends
+      // on the test machine's TZ, so assert structural pieces, not literal text.
+      const formatted = formatEventDateTime('2026-05-12T03:00:00Z')
+      expect(formatted).toMatch(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/)
+      expect(formatted).toMatch(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/)
+      expect(formatted).toMatch(/2026/)
+      // hour12: true → must show AM or PM
+      expect(formatted).toMatch(/AM|PM/)
     })
   })
 
@@ -170,6 +175,15 @@ describe('eventUtils — time-dependent helpers', () => {
     })
     it('reports "Event started" once the event has begun', () => {
       expect(timeUntilEvent(inPast(60_000))).toBe('Event started')
+    })
+    it('reports "Event started" at the exact start moment (diff == 0)', () => {
+      expect(timeUntilEvent(new Date(FIXED_NOW).toISOString())).toBe('Event started')
+    })
+    it('switches to hours at exactly 60 minutes', () => {
+      expect(timeUntilEvent(inFuture(60 * 60_000))).toBe('1h away')
+    })
+    it('switches to days at exactly 24 hours', () => {
+      expect(timeUntilEvent(inFuture(24 * 3600_000))).toBe('1d away')
     })
     it('returns an empty string when the input is missing', () => {
       expect(timeUntilEvent(null)).toBe('')
@@ -203,6 +217,10 @@ describe('eventUtils — time-dependent helpers', () => {
       expect(isEventBanned(inPast(3600_000))).toBe(false)
       expect(isOrganizerBanned(inPast(3600_000))).toBe(false)
     })
+    it('is false at the exact expiry moment (strict greater-than, not >=)', () => {
+      expect(isEventBanned(new Date(FIXED_NOW).toISOString())).toBe(false)
+      expect(isOrganizerBanned(new Date(FIXED_NOW).toISOString())).toBe(false)
+    })
     it('is false for missing input', () => {
       expect(isEventBanned(null)).toBe(false)
       expect(isOrganizerBanned(undefined)).toBe(false)
@@ -213,9 +231,12 @@ describe('eventUtils — time-dependent helpers', () => {
     it('returns an empty string for missing input', () => {
       expect(formatBanExpiry(null)).toBe('')
     })
-    it('returns a non-empty formatted string for a real timestamp', () => {
-      const formatted = formatBanExpiry(inFuture(7 * 24 * 3600_000))
-      expect(formatted.length).toBeGreaterThan(0)
+    it('formats a real timestamp with the long month name, day and year', () => {
+      // 2026-05-17 → "May 17, 2026" in en-US (timezone shifts the wall date by ±1).
+      const formatted = formatBanExpiry('2026-05-17T12:00:00Z')
+      expect(formatted).toMatch(/May/)
+      expect(formatted).toMatch(/2026/)
+      expect(formatted).toMatch(/\b(16|17|18)\b/)
     })
   })
 })
@@ -226,5 +247,17 @@ describe('formatGroupOfferDateTime', () => {
 
     expect(formatted).toMatch(/14 May, \d{2}:\d{2}/)
     expect(formatted).not.toMatch(/Thu|Fri|2026/)
+  })
+
+  it('uses 24-hour time (no AM/PM marker)', () => {
+    const formatted = formatGroupOfferDateTime('2026-05-14T13:36:00Z')
+    // en-GB localised AM/PM appears lowercase ("am" / "pm"); match either case
+    // and also catch the unicode small-cap forms some node ICU builds emit.
+    expect(formatted).not.toMatch(/[ap]\.?m\.?/i)
+  })
+
+  it('returns TBD when the input is missing', () => {
+    expect(formatGroupOfferDateTime(null)).toBe('TBD')
+    expect(formatGroupOfferDateTime(undefined)).toBe('TBD')
   })
 })

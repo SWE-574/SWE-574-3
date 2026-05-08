@@ -11,7 +11,8 @@ from api.models import (
     Service, Tag, Handshake, ChatMessage, ReputationRep,
     Comment, NegativeRep, TransactionHistory, Badge, UserBadge,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia, ServiceGroupChatMessage,
-    Notification, SavedService, ServiceDismissal, Endorsement,
+    ChatRoom, PublicChatMessage, Notification,
+    SavedService, ServiceDismissal, Endorsement,
 )
 
 User = get_user_model()
@@ -129,6 +130,24 @@ class ServiceGroupChatMessageFactory(factory.django.DjangoModelFactory):
         schedule_type='One-Time',
         max_participants=3,
     )
+    sender = factory.SubFactory(UserFactory)
+    body = factory.Faker('sentence')
+
+
+class ChatRoomFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = ChatRoom
+
+    name = factory.Faker('sentence', nb_words=3)
+    type = 'public'
+    related_service = factory.SubFactory(ServiceFactory)
+
+
+class PublicChatMessageFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = PublicChatMessage
+
+    room = factory.SubFactory(ChatRoomFactory)
     sender = factory.SubFactory(UserFactory)
     body = factory.Faker('sentence')
 

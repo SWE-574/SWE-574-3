@@ -57,10 +57,11 @@ describe("forum", () => {
 
   it("listTopics GETs /forum/topics/ with params", async () => {
     mockFetchResolve({ count: 0, results: [], next: null, previous: null });
-    await listTopics({ page: 1, page_size: 10, category: "general" });
+    await listTopics({ page: 1, page_size: 10, category: "general", sort: "most_active" });
     const { url } = getLastFetchCall();
     expect(url).toContain("/forum/topics/");
     expect(url).toContain("category=general");
+    expect(url).toContain("sort=most_active");
   });
 
   it("createTopic POSTs, getTopic GETs, patchTopic PATCHes, deleteTopic DELETEs", async () => {
