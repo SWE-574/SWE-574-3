@@ -10,7 +10,8 @@ from api.cache_utils import (
     cache_service_list, get_cached_service_list, invalidate_service_lists,
     cache_service_detail, get_cached_service_detail, invalidate_service_detail,
     cache_hot_services, get_cached_hot_services, invalidate_hot_services,
-    invalidate_on_service_change, invalidate_on_user_change
+    invalidate_on_service_change, invalidate_on_user_change,
+    register_calendar_cache_key,
 )
 from api.tests.helpers.factories import UserFactory, ServiceFactory
 
@@ -165,3 +166,64 @@ class TestInvalidateOnChange:
         user.id = 'user-1'
         invalidate_on_user_change(user)
         mock_invalidate.assert_called_once_with(str(user.id))
+
+
+@pytest.mark.unit
+class TestRegisterCalendarCacheKey:
+    """Cover the read-modify-write retry loop in register_calendar_cache_key.
+
+    Regression: the original implementation had an unconditional `return`
+    inside the `for _ in range(3)` loop, so the retry never kicked in and
+    a racing writer could clobber the tracking set with a single-key set.
+    """
+
+    def setup_method(self, method):
+        from django.core.cache import cache as django_cache
+        django_cache.clear()
+
+    def test_register_two_keys_for_same_user_keeps_both(self):
+        from django.core.cache import cache as django_cache
+        register_calendar_cache_key('user-1', 'cal_key_a')
+        register_calendar_cache_key('user-1', 'cal_key_b')
+        tracked = django_cache.get('user_calendar_keys:user-1', set())
+        assert tracked == {'cal_key_a', 'cal_key_b'}
+
+    def test_register_idempotent_for_same_key(self):
+        from django.core.cache import cache as django_cache
+        register_calendar_cache_key('user-1', 'cal_key_a')
+        register_calendar_cache_key('user-1', 'cal_key_a')
+        tracked = django_cache.get('user_calendar_keys:user-1', set())
+        assert tracked == {'cal_key_a'}
+
+    def test_register_recovers_when_first_set_was_clobbered(self, monkeypatch):
+        """If a racing caller landed between our get and set, the verify-then-
+        retry loop must re-read and merge instead of leaving the new key out."""
+        from django.core import cache as cache_mod
+        cache = cache_mod.cache
+
+        register_calendar_cache_key('user-1', 'a')
+
+        original_set = cache.set
+        call_count = {'n': 0}
+
+        def racy_set(key, value, timeout=None, **kwargs):
+            # On the first set for our user's tracking key, simulate a racing
+            # writer that overwrote the value AFTER we read but BEFORE we
+            # write — i.e. our write lands first, then the racer's write
+            # immediately clobbers it. The retry must detect that and merge.
+            if key == 'user_calendar_keys:user-1' and call_count['n'] == 0:
+                call_count['n'] += 1
+                result = original_set(key, value, timeout=timeout, **kwargs)
+                # Simulate the racing clobber:
+                original_set(key, {'racer_only'}, timeout=timeout, **kwargs)
+                return result
+            return original_set(key, value, timeout=timeout, **kwargs)
+
+        monkeypatch.setattr(cache, 'set', racy_set)
+
+        register_calendar_cache_key('user-1', 'b')
+
+        tracked = cache.get('user_calendar_keys:user-1', set())
+        assert 'b' in tracked, (
+            'After a racing clobber, the retry loop must re-add our key'
+        )
