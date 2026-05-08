@@ -2362,15 +2362,20 @@ class ServiceViewSet(viewsets.ModelViewSet):
             # Surface the field-level error instead of swallowing it.
             raise drf_serializers.ValidationError({exc.field: exc.message})
 
+        user_param = self.request.query_params.get('user')
+
         # Onboarding tag fallback (#478): when an onboarded viewer with
         # declared skills hits the feed without an explicit tag filter,
         # prefer services tagged with their skills and top up from the
         # explore pool when too few match. Annotates `source` for the UI.
+        # Skipped when ?user= is set: profile pages must show every active
+        # service the owner has, regardless of whether the tags overlap the
+        # viewer's declared skills.
         explicit_tag = (
             self.request.query_params.get('tag')
             or self.request.query_params.getlist('tags')
         )
-        if not explicit_tag:
+        if not explicit_tag and not user_param:
             from .ranking import apply_onboarding_fallback
             queryset, _ = apply_onboarding_fallback(
                 queryset,
@@ -2389,7 +2394,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
             eligible_ids = [s.id for s in (*cold, *under, *stale)]
             queryset = queryset.filter(id__in=eligible_ids)
 
-        user_param = self.request.query_params.get('user')
         # Filter by owner user (for profile pages)
         if user_param:
             queryset = queryset.filter(user_id=user_param)
