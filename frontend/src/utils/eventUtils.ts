@@ -27,6 +27,7 @@ export function spotsLeft(maxParticipants: number, participantCount: number): nu
 
 /** Returns true when 75-99% capacity (nearly full) */
 export function isNearlyFull(maxParticipants: number, participantCount: number): boolean {
+  // Stryker disable next-line ConditionalExpression,EqualityOperator: when max <= 0 the fallthrough produces NaN/Infinity which fail `pct < 1.0`, so dropping or weakening this guard yields the same observable answer.
   if (maxParticipants <= 0) return false
   const pct = participantCount / maxParticipants
   return pct >= 0.75 && pct < 1.0

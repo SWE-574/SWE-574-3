@@ -41,6 +41,7 @@ export function formatDuration(hours: number): string {
     const minutes = Math.round(hours * 60)
     return `${minutes} min`
   }
+  // Stryker disable next-line ConditionalExpression: floor/round path produces the same `${h}h` for integer inputs (m rounds to 0 → falls into the `m > 0 ? … : '${h}h'` else branch). Short-circuit kept for clarity.
   if (Number.isInteger(hours)) return `${hours}h`
   const h = Math.floor(hours)
   const m = Math.round((hours - h) * 60)

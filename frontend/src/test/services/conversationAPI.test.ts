@@ -120,6 +120,29 @@ describe('groupChatAPI', () => {
     }))
   })
 
+  it('getMessages preserves non-empty participants and messages instead of replacing them with []', async () => {
+    apiMocks.get.mockResolvedValue({
+      data: {
+        service_id: 'svc-1',
+        service_title: 't',
+        participants: [{ id: 'u-1', name: 'A' }],
+        messages: [{ id: 'm-1', body: 'hi' }],
+      },
+    })
+    const out = await groupChatAPI.getMessages('svc-1')
+    expect(out.participants).toEqual([{ id: 'u-1', name: 'A' }])
+    expect(out.messages).toEqual([{ id: 'm-1', body: 'hi' }])
+  })
+
+  it('getMessages defaults participants and messages to [] when they are missing', async () => {
+    apiMocks.get.mockResolvedValue({
+      data: { service_id: 'svc-1', service_title: 't' },
+    })
+    const out = await groupChatAPI.getMessages('svc-1')
+    expect(out.participants).toEqual([])
+    expect(out.messages).toEqual([])
+  })
+
   it('getMessages with sessionId attaches the session_id param', async () => {
     apiMocks.get.mockResolvedValue({
       data: { service_id: 'svc-1', service_title: 't', participants: [], messages: [] },
@@ -144,15 +167,16 @@ describe('groupChatAPI', () => {
 })
 
 describe('eventChatAPI', () => {
-  it('getMessages flattens the room and messages.results pair', async () => {
+  it('getMessages flattens the room and messages.results pair and forwards the abort signal', async () => {
     apiMocks.get.mockResolvedValue({
       data: {
         room: { id: 'r-1', name: 'event', type: 'event', related_service: 'svc', created_at: 't' },
         messages: { results: [{ id: 'em-1' } as never] },
       },
     })
-    const out = await eventChatAPI.getMessages('svc-1')
-    expect(apiMocks.get).toHaveBeenCalledWith('/public-chat/svc-1/', expect.objectContaining({}))
+    const ac = new AbortController()
+    const out = await eventChatAPI.getMessages('svc-1', ac.signal)
+    expect(apiMocks.get).toHaveBeenCalledWith('/public-chat/svc-1/', { signal: ac.signal })
     expect(out.room.id).toBe('r-1')
     expect(out.messages).toEqual([{ id: 'em-1' }])
   })
