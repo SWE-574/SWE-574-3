@@ -75,6 +75,36 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends gdal-bin libgdal-dev libgeos-dev
 
+      - name: Start MinIO
+        run: |
+          docker run -d --name ci_minio \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin123 \
+            --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1" \
+            --health-interval 5s \
+            --health-timeout 3s \
+            --health-retries 20 \
+            minio/minio:latest server /data --console-address ":9001"
+
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ci_minio)
+            if [ "$STATUS" = "healthy" ]; then
+              echo "MinIO is healthy."
+              break
+            fi
+            if [ "$STATUS" = "unhealthy" ]; then
+              echo "::error::MinIO became unhealthy"
+              docker logs ci_minio
+              exit 1
+            fi
+            echo "Waiting for MinIO... status=$STATUS ($i/30)"
+            sleep 2
+          done
+
+
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -97,7 +127,6 @@ jobs:
         run: |
           .venv/bin/mutmut run || true
           .venv/bin/mutmut results > mutmut-results.txt
-          .venv/bin/mutmut html || true
 
       - name: Upload mutmut report
         if: always()
@@ -106,7 +135,6 @@ jobs:
           name: backend-mutation
           path: |
             backend/mutmut-results.txt
-            backend/html/
 
       # Only post a PR comment if mutmut produced at least one scored
       # mutant. With the current Django app-registry issue, every line in
