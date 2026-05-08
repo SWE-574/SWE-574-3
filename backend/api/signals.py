@@ -10,7 +10,7 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 from .models import (
     ActivityEvent, ChatMessage, ChatRoom, Comment, Handshake, NegativeRep,
-    Notification, ReputationRep, ScoreAuditLog, ServiceGroupChatMessage, Service, Tag, User, UserFollow,
+    Notification, PublicChatMessage, ReputationRep, ScoreAuditLog, ServiceGroupChatMessage, Service, Tag, User, UserFollow,
 )
 from .cache_utils import (
     invalidate_on_service_change,
@@ -540,8 +540,50 @@ def notify_on_group_chat_message(sender, instance, created, **kwargs):
         transaction.on_commit(_notify)
     except Exception:
         logger.exception('Failed to queue group chat notification for message %s', instance.pk)
-        
-        
+
+
+@receiver(post_save, sender=PublicChatMessage)
+def notify_on_event_chat_message(sender, instance, created, **kwargs):
+    """Notify event participants and organizer (except sender) when a new event chat message is posted."""
+    if not created:
+        return
+    from .utils import create_notification
+    try:
+        room = instance.room
+        if not room.related_service_id:
+            return
+        service = Service.objects.select_related('user').get(pk=room.related_service_id)
+        msg_sender = instance.sender
+
+        participant_ids = set(
+            Handshake.objects
+            .filter(service=service, status__in=['accepted', 'checked_in', 'attended'])
+            .exclude(requester_id=msg_sender.pk)
+            .values_list('requester_id', flat=True)
+        )
+        if service.user_id != msg_sender.pk:
+            participant_ids.add(service.user_id)
+
+        if not participant_ids:
+            return
+
+        recipients = list(User.objects.filter(pk__in=participant_ids))
+
+        def _notify(recipients=recipients, msg_sender=msg_sender, service=service):
+            for user in recipients:
+                create_notification(
+                    user=user,
+                    notification_type='chat_message',
+                    title='New Event Chat Message',
+                    message=f"{msg_sender.first_name} sent a message in the event '{service.title}'",
+                    service=service,
+                )
+
+        transaction.on_commit(_notify)
+    except Exception:
+        logger.exception('Failed to queue event chat notification for message %s', instance.pk)
+
+
 @receiver(post_save, sender=UserFollow)
 def notify_on_user_follow(sender, instance, created, **kwargs):
     """Notify the followed user when a new follow edge is created."""
