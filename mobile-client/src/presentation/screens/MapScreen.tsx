@@ -1,12 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Modal,
+  Animated,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -22,6 +23,7 @@ import type {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
+import Slider from "@react-native-community/slider";
 import { colors } from "../../constants/colors";
 import { listServices } from "../../api/services";
 import type { Service, ServiceType } from "../../api/types";
@@ -108,13 +110,16 @@ export default function MapScreen() {
   const [isLoadingServices, setIsLoadingServices] = useState(false);
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [selectedService, setSelectedService] = useState<Service | null>(null);
-
-  const locationCheckedRef = useRef(false);
-
-  const initialCenterRef = useRef({
+  const [searchQuery, setSearchQuery] = useState("");
+  const [distanceKm, setDistanceKm] = useState(15);
+  const [showRangeSlider, setShowRangeSlider] = useState(false);
+  const [mapCenter, setMapCenter] = useState({
     lat: DEFAULT_LOCATION.latitude,
     lng: DEFAULT_LOCATION.longitude,
   });
+
+  const locationCheckedRef = useRef(false);
+  const drawerAnim = useRef(new Animated.Value(0)).current; // 0 hidden, 1 shown
 
   useEffect(() => {
     let isMounted = true;
@@ -167,21 +172,48 @@ export default function MapScreen() {
           }
         }
 
-        // if (coords) {
-        //   // Write into the ref FIRST so the map mounts with the correct center
-        //   // even if React hasn't flushed the setUserLocation state update yet.
-        //   initialCenterRef.current = { lat: coords.latitude, lng: coords.longitude };
-        //   setUserLocation(coords);
-        // }
+        if (coords) {
+          setMapCenter({ lat: coords.latitude, lng: coords.longitude });
+          setUserLocation(coords);
+        }
       } catch {
-        // fall back to Istanbul default already set in initialCenterRef
+        // fall back to Istanbul default
       } finally {
         setLocationResolved(true);
       }
     })();
   }, []);
 
-  // Fetch services whenever location resolves
+  const recenterOnUser = useCallback(async () => {
+    try {
+      const { granted } = await Location.getForegroundPermissionsAsync();
+      let permission = granted;
+      if (!permission) {
+        const req = await Location.requestForegroundPermissionsAsync();
+        permission = req.granted;
+      }
+      if (!permission) {
+        Alert.alert(
+          "Location off",
+          "Enable location for The Hive in iOS Settings to recenter on your position.",
+        );
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const next = {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      };
+      setUserLocation(next);
+      setMapCenter({ lat: next.latitude, lng: next.longitude });
+    } catch {
+      // swallow — best-effort
+    }
+  }, []);
+
+  // Fetch services whenever location or distance changes
   const fetchServices = useCallback(async () => {
     try {
       setIsLoadingServices(true);
@@ -190,7 +222,7 @@ export default function MapScreen() {
             page_size: 500,
             lat: userLocation.latitude,
             lng: userLocation.longitude,
-            distance: 500,
+            distance: distanceKm,
           }
         : { page_size: 500 };
 
@@ -209,17 +241,44 @@ export default function MapScreen() {
     } finally {
       setIsLoadingServices(false);
     }
-  }, [userLocation]);
+  }, [userLocation, distanceKm]);
 
   useEffect(() => {
     fetchServices();
   }, [fetchServices]);
 
-  // Build markers for the active filter
-  const visibleServices =
-    activeFilter === "all"
-      ? services
-      : services.filter((s) => s.type === activeFilter);
+  // Build markers for the active filter + free-text search
+  const trimmedSearch = searchQuery.trim().toLowerCase();
+  const visibleServices = useMemo(() => {
+    let list = services;
+    if (activeFilter !== "all") {
+      list = list.filter((s) => s.type === activeFilter);
+    }
+    if (trimmedSearch) {
+      list = list.filter((s) => {
+        const haystack = [
+          s.title,
+          s.description,
+          ...(s.tags ?? []).map((t) => t.name),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(trimmedSearch);
+      });
+    }
+    return list;
+  }, [services, activeFilter, trimmedSearch]);
+
+  // Slide the bottom drawer up when a service is selected, down otherwise.
+  useEffect(() => {
+    Animated.spring(drawerAnim, {
+      toValue: selectedService ? 1 : 0,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 90,
+    }).start();
+  }, [selectedService, drawerAnim]);
 
   // Large translucent circles that show the approximate area (privacy-safe).
   const areaShapes = buildAreaShapes(visibleServices);
@@ -271,28 +330,56 @@ export default function MapScreen() {
     );
   }
 
+  const drawerTranslate = drawerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [DRAWER_HEIGHT, 0],
+  });
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <LeafletView
         source={{ html: webViewContent }}
-        mapCenterPosition={initialCenterRef.current}
-        zoom={10}
+        mapCenterPosition={mapCenter}
+        zoom={11}
         mapMarkers={markers}
         mapShapes={areaShapes as MapShape[]}
         onMessageReceived={handleMessage}
       />
 
-      {/* Top overlay row: back button + filter pills */}
-      <View style={[styles.overlayRow, { top: insets.top + 8 }]}>
-        {navigation.canGoBack() && (
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="arrow-back" size={20} color={colors.WHITE} />
-          </TouchableOpacity>
-        )}
+      {/* Top overlay: search bar + filter pills */}
+      <View style={[styles.topOverlay, { top: insets.top + 8 }]}>
+        <View style={styles.searchRow}>
+          {navigation.canGoBack() && (
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => navigation.goBack()}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="arrow-back" size={20} color={colors.WHITE} />
+            </TouchableOpacity>
+          )}
+          <View style={styles.searchInputWrap}>
+            <Ionicons
+              name="search-outline"
+              size={16}
+              color={colors.GRAY500}
+              style={{ marginRight: 6 }}
+            />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search title, description, tags…"
+              placeholderTextColor={colors.GRAY400}
+              style={styles.searchInput}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 ? (
+              <Pressable hitSlop={8} onPress={() => setSearchQuery("")}>
+                <Ionicons name="close-circle" size={16} color={colors.GRAY400} />
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
 
         <ScrollView
           horizontal
@@ -323,44 +410,95 @@ export default function MapScreen() {
               </TouchableOpacity>
             );
           })}
+          <TouchableOpacity
+            onPress={() => setShowRangeSlider((v) => !v)}
+            activeOpacity={0.8}
+            style={[
+              styles.pill,
+              showRangeSlider && {
+                backgroundColor: colors.GREEN,
+                borderColor: colors.GREEN,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.pillText,
+                showRangeSlider && styles.pillTextActive,
+              ]}
+            >
+              Range · {distanceKm}km
+            </Text>
+          </TouchableOpacity>
+          {isLoadingServices && (
+            <ActivityIndicator
+              size="small"
+              color={colors.GREEN}
+              style={styles.spinner}
+            />
+          )}
         </ScrollView>
 
-        {isLoadingServices && (
-          <ActivityIndicator
-            size="small"
-            color={colors.GREEN}
-            style={styles.spinner}
-          />
-        )}
+        {showRangeSlider ? (
+          <View style={styles.rangeRow}>
+            <Text style={styles.rangeLabel}>1km</Text>
+            <Slider
+              style={styles.rangeSlider}
+              minimumValue={1}
+              maximumValue={50}
+              step={1}
+              value={distanceKm}
+              onSlidingComplete={(v) => setDistanceKm(Math.round(v))}
+              minimumTrackTintColor={colors.GREEN}
+              maximumTrackTintColor={colors.GRAY300}
+              thumbTintColor={colors.GREEN}
+            />
+            <Text style={styles.rangeLabel}>50km</Text>
+          </View>
+        ) : null}
       </View>
 
-      {/* Marker summary bottom sheet */}
-      <Modal
-        visible={!!selectedService}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setSelectedService(null)}
+      {/* Find-me FAB */}
+      <TouchableOpacity
+        style={[
+          styles.findMeFab,
+          {
+            bottom:
+              insets.bottom +
+              (selectedService ? DRAWER_HEIGHT + 12 : 24),
+          },
+        ]}
+        onPress={recenterOnUser}
+        activeOpacity={0.85}
       >
-        <Pressable
-          style={styles.sheetBackdrop}
-          onPress={() => setSelectedService(null)}
-        >
-          <Pressable style={styles.sheet} onPress={() => {}}>
-            <View style={styles.sheetHandle} />
+        <Ionicons name="locate" size={22} color={colors.GREEN} />
+      </TouchableOpacity>
 
-            {selectedService && (
-              <MarkerSheet
-                service={selectedService}
-                onClose={() => setSelectedService(null)}
-                onViewDetail={handleViewDetail}
-              />
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Persistent bottom drawer for the selected service */}
+      <Animated.View
+        style={[
+          styles.drawer,
+          {
+            paddingBottom: insets.bottom + 12,
+            transform: [{ translateY: drawerTranslate }],
+          },
+        ]}
+        pointerEvents={selectedService ? "auto" : "none"}
+      >
+        <View style={styles.sheetHandle} />
+        {selectedService ? (
+          <MarkerSheet
+            service={selectedService}
+            onClose={() => setSelectedService(null)}
+            onViewDetail={handleViewDetail}
+          />
+        ) : null}
+      </Animated.View>
     </View>
   );
 }
+
+const DRAWER_HEIGHT = 360;
 
 
 const TYPE_COLOR: Record<string, string> = {
@@ -517,13 +655,38 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: colors.WHITE,
   },
-  overlayRow: {
+  topOverlay: {
     position: "absolute",
     left: 12,
     right: 12,
+    gap: 10,
+  },
+  searchRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  searchInputWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: colors.WHITE,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.GRAY900,
+    paddingVertical: 0,
   },
   backButton: {
     width: 38,
@@ -539,10 +702,11 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   pillsScroll: {
-    flex: 1,
+    flexGrow: 0,
   },
   pillsContent: {
     flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     paddingRight: 4,
   },
@@ -570,18 +734,64 @@ const styles = StyleSheet.create({
   spinner: {
     marginLeft: 4,
   },
-  sheetBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    justifyContent: "flex-end",
+  rangeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: colors.WHITE,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
-  sheet: {
+  rangeLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.GRAY500,
+  },
+  rangeSlider: {
+    flex: 1,
+    height: 28,
+  },
+  findMeFab: {
+    position: "absolute",
+    right: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.WHITE,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  drawer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    minHeight: DRAWER_HEIGHT,
     backgroundColor: colors.WHITE,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     paddingHorizontal: 20,
-    paddingBottom: 36,
     paddingTop: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 10,
   },
   sheetHandle: {
     width: 36,
