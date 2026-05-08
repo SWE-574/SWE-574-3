@@ -1,5 +1,8 @@
 /**
- * Tests for NotificationsPage routing logic (handleClick).
+ * Tests for NotificationDropdown routing logic.
+ *
+ * Each branch of handleClick is exercised by rendering the dropdown with a
+ * single notification and clicking it, then asserting the correct navigate() call.
  */
 import { ChakraProvider } from '@chakra-ui/react'
 import { render, screen, waitFor } from '@testing-library/react'
@@ -14,6 +17,10 @@ vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>()
   return { ...actual, useNavigate: () => navigateMock }
 })
+
+vi.mock('@/store/useAuthStore', () => ({
+  useAuthStore: () => ({ isAuthenticated: true, user: { id: 'me' } }),
+}))
 
 const markAsReadMock = vi.fn().mockResolvedValue(undefined)
 const markAllAsReadMock = vi.fn().mockResolvedValue(undefined)
@@ -36,31 +43,36 @@ function makeNotification(overrides: Partial<Notification>): Notification {
   }
 }
 
-async function renderPageWithNotification(notification: Notification) {
+async function renderDropdownWithNotification(notification: Notification) {
   vi.doMock('@/store/useNotificationStore', () => ({
     useNotificationStore: () => ({
       notifications: [notification],
       unreadCount: notification.is_read ? 0 : 1,
       isLoading: false,
       hasMore: false,
-      currentPage: 1,
       fetchNotifications: fetchNotificationsMock,
       markAsRead: markAsReadMock,
       markAllAsRead: markAllAsReadMock,
     }),
   }))
-  const { default: NotificationsPage } = await import('@/pages/NotificationsPage')
+
+  const { NotificationDropdown } = await import('@/components/NotificationDropdown')
+
   render(
     <MemoryRouter>
       <ChakraProvider value={system}>
-        <NotificationsPage />
+        <NotificationDropdown />
       </ChakraProvider>
     </MemoryRouter>
   )
+
+  // Open the dropdown by clicking the bell button
+  const bell = document.querySelector('button[aria-label], button') as HTMLElement
+  await userEvent.click(bell)
   await waitFor(() => screen.getByText(notification.title))
 }
 
-describe('NotificationsPage routing', () => {
+describe('NotificationDropdown routing', () => {
   beforeEach(() => {
     navigateMock.mockClear()
     markAsReadMock.mockClear()
@@ -68,72 +80,79 @@ describe('NotificationsPage routing', () => {
   })
 
   it('routes user_followed to /public-profile/:related_user', async () => {
-    const n = makeNotification({ type: 'user_followed', related_user: 'user-xyz' })
-    await renderPageWithNotification(n)
+    const n = makeNotification({ type: 'user_followed', related_user: 'user-abc' })
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
-    expect(navigateMock).toHaveBeenCalledWith('/public-profile/user-xyz')
+    expect(navigateMock).toHaveBeenCalledWith('/public-profile/user-abc')
   })
 
-  it('routes new_report to admin reports tab', async () => {
-    const n = makeNotification({ type: 'new_report', related_report: 'rpt-2' })
-    await renderPageWithNotification(n)
+  it('routes new_report to /admin reports tab', async () => {
+    const n = makeNotification({ type: 'new_report', related_report: 'rpt-1' })
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
-    expect(navigateMock).toHaveBeenCalledWith('/admin?tab=reports&reportId=rpt-2')
+    expect(navigateMock).toHaveBeenCalledWith('/admin?tab=reports&reportId=rpt-1')
   })
 
-  it('routes report_resolved to /profile?tab=reports', async () => {
-    const n = makeNotification({ type: 'report_resolved' })
-    await renderPageWithNotification(n)
+  it('routes report_received to /profile?tab=reports', async () => {
+    const n = makeNotification({ type: 'report_received' })
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
     expect(navigateMock).toHaveBeenCalledWith('/profile?tab=reports')
   })
 
   it('routes event chat_message to /service-detail/:id?tab=chat', async () => {
-    const n = makeNotification({ type: 'chat_message', related_service: 'svc-10', related_service_type: 'Event' })
-    await renderPageWithNotification(n)
+    const n = makeNotification({ type: 'chat_message', related_service: 'svc-1', related_service_type: 'Event' })
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
-    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-10?tab=chat')
+    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-1?tab=chat')
   })
 
   it('routes non-chat Event notification to /service-detail/:id', async () => {
-    const n = makeNotification({ type: 'handshake_request', related_service: 'svc-11', related_service_type: 'Event' })
-    await renderPageWithNotification(n)
+    const n = makeNotification({ type: 'handshake_request', related_service: 'svc-2', related_service_type: 'Event' })
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
-    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-11')
+    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-2')
   })
 
   it('routes group chat_message to /messages?group=:serviceId', async () => {
-    const n = makeNotification({ type: 'chat_message', related_service: 'svc-12', related_service_type: 'Offer', related_handshake: null })
-    await renderPageWithNotification(n)
+    const n = makeNotification({ type: 'chat_message', related_service: 'svc-3', related_service_type: 'Offer', related_handshake: null })
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
-    expect(navigateMock).toHaveBeenCalledWith('/messages?group=svc-12')
+    expect(navigateMock).toHaveBeenCalledWith('/messages?group=svc-3')
   })
 
   it('routes private chat_message to /messages/:handshakeId', async () => {
-    const n = makeNotification({ type: 'chat_message', related_handshake: 'hs-99', related_service: 'svc-13' })
-    await renderPageWithNotification(n)
+    const n = makeNotification({ type: 'chat_message', related_handshake: 'hs-1', related_service: 'svc-4' })
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
-    expect(navigateMock).toHaveBeenCalledWith('/messages/hs-99')
+    expect(navigateMock).toHaveBeenCalledWith('/messages/hs-1')
   })
 
-  it('routes service notification to /service-detail/:id', async () => {
-    const n = makeNotification({ type: 'handshake_request', related_service: 'svc-14' })
-    await renderPageWithNotification(n)
+  it('routes positive_rep to /service-detail/:id', async () => {
+    const n = makeNotification({ type: 'positive_rep', related_service: 'svc-5' })
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
-    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-14')
+    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-5')
   })
 
   it('falls back to /notifications when no related entity', async () => {
     const n = makeNotification({ type: 'admin_warning' })
-    await renderPageWithNotification(n)
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
     expect(navigateMock).toHaveBeenCalledWith('/notifications')
   })
 
-  it('marks notification as read on click', async () => {
+  it('marks unread notification as read when clicked', async () => {
     const n = makeNotification({ type: 'admin_warning', is_read: false })
-    await renderPageWithNotification(n)
+    await renderDropdownWithNotification(n)
     await userEvent.click(screen.getByText(n.title))
     expect(markAsReadMock).toHaveBeenCalledWith('notif-1')
+  })
+
+  it('does not call markAsRead for already-read notification', async () => {
+    const n = makeNotification({ type: 'admin_warning', is_read: true })
+    await renderDropdownWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(markAsReadMock).not.toHaveBeenCalled()
   })
 })
