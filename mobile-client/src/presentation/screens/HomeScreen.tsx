@@ -41,14 +41,12 @@ import { ApiNetworkError } from "../../api/client";
 
 type ServiceTypeFilter = "all" | "Offer" | "Need" | "Event";
 type LocationFilter = "all" | "nearby" | "in_person" | "online";
-type SortFilter = "latest" | "hot";
 type LocationStatus = "idle" | "granted" | "denied";
 type ToggleFilterKey = "nearlyFullOnly";
 
 interface DiscoveryFilters {
   serviceType: ServiceTypeFilter;
   locationMode: LocationFilter;
-  sortBy: SortFilter;
   distanceKm: number;
   nearlyFullOnly: boolean;
 }
@@ -56,7 +54,6 @@ interface DiscoveryFilters {
 const DEFAULT_FILTERS: DiscoveryFilters = {
   serviceType: "all",
   locationMode: "all",
-  sortBy: "latest",
   distanceKm: 15,
   nearlyFullOnly: false,
 };
@@ -77,7 +74,6 @@ function filtersAreDefault(
     debouncedSearch === "" &&
     filters.serviceType === DEFAULT_FILTERS.serviceType &&
     filters.locationMode === DEFAULT_FILTERS.locationMode &&
-    filters.sortBy === DEFAULT_FILTERS.sortBy &&
     filters.distanceKm === DEFAULT_FILTERS.distanceKm &&
     filters.nearlyFullOnly === DEFAULT_FILTERS.nearlyFullOnly
   );
@@ -207,7 +203,6 @@ export default function HomeScreen() {
       const params: ServicesListParams = {
         page_size: 30,
         search: debouncedSearch || undefined,
-        sort: filters.sortBy,
         type:
           filters.serviceType !== "all" && filters.serviceType !== "Event"
             ? filters.serviceType
@@ -332,7 +327,6 @@ export default function HomeScreen() {
     let c = 0;
     if (filters.serviceType !== "all") c++;
     if (filters.locationMode !== "all") c++;
-    if (filters.sortBy !== "latest") c++;
     if (filters.nearlyFullOnly) c++;
     return c;
   }, [filters]);
@@ -355,17 +349,6 @@ export default function HomeScreen() {
           const coords = await ensureDeviceLocation();
           if (coords) setFilters((c) => ({ ...c, locationMode: "nearby" }));
         },
-      },
-      {
-        id: "hot",
-        label: "Hot",
-        icon: "flame-outline",
-        selected: filters.sortBy === "hot",
-        onPress: () =>
-          setFilters((c) => ({
-            ...c,
-            sortBy: c.sortBy === "hot" ? "latest" : "hot",
-          })),
       },
       {
         id: "events",
@@ -419,6 +402,7 @@ export default function HomeScreen() {
         userLocation={userLocation}
         locationStatus={locationStatus}
         maxNearbyKm={filters.distanceKm}
+        isAuthenticated={isAuthenticated}
       />
     </>
   );
@@ -737,43 +721,6 @@ export default function HomeScreen() {
                 </View>
               </>
             )}
-
-            <Text style={styles.sectionTitle}>Sort</Text>
-            <View style={styles.optionGrid}>
-              {(
-                [
-                  { id: "latest", label: "Latest" },
-                  { id: "hot", label: "Hot" },
-                ] as const
-              ).map((option) => {
-                const selected = draftFilters.sortBy === option.id;
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    style={[
-                      styles.segmentButton,
-                      selected && styles.segmentButtonSelected,
-                    ]}
-                    onPress={() =>
-                      setDraftFilters((c) => ({
-                        ...c,
-                        sortBy: option.id as SortFilter,
-                      }))
-                    }
-                    activeOpacity={0.75}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentButtonLabel,
-                        selected && styles.segmentButtonLabelSelected,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
 
             <Text style={styles.sectionTitle}>Extra</Text>
             {(

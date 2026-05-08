@@ -64,6 +64,7 @@ interface FeaturedSectionProps {
   userLocation: Coordinates | null;
   locationStatus: "idle" | "granted" | "denied";
   maxNearbyKm?: number;
+  isAuthenticated: boolean;
 }
 
 export default function FeaturedSection({
@@ -72,6 +73,7 @@ export default function FeaturedSection({
   userLocation,
   locationStatus,
   maxNearbyKm = DEFAULT_MAX_NEARBY_KM,
+  isAuthenticated,
 }: FeaturedSectionProps) {
   const [featuredData, setFeaturedData] = useState<FeaturedResponse | null>(
     null,
@@ -84,6 +86,26 @@ export default function FeaturedSection({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+
+    // /featured/ requires auth (friends-of-friends data is per-user). For
+    // signed-out viewers, skip it and just load the hot fallback so the
+    // section still has something to show.
+    if (!isAuthenticated) {
+      setFeaturedData(null);
+      setApiFailed(false);
+      listServices({ sort: "hot", page_size: 8 })
+        .then(({ results }) => {
+          if (!cancelled) setHotFallback(results ?? []);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     getFeatured()
       .then((data) => {
         if (cancelled) return;
@@ -122,7 +144,7 @@ export default function FeaturedSection({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated]);
 
   const normalizeFeaturedService = (item: FeaturedService): Service => ({
     id: String(item.id),
@@ -242,6 +264,9 @@ export default function FeaturedSection({
 
   const getEmptyMessage = () => {
     if (activeTab === "friends") {
+      if (!isAuthenticated) {
+        return "Sign in to see what your friends are up to.";
+      }
       return apiFailed
         ? "Friend activity is unavailable right now."
         : "Follow people to see their activity here.";
