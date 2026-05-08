@@ -562,7 +562,8 @@ class ServiceSerializer(serializers.ModelSerializer):
             'location_type', 'location_area', 'session_exact_location', 'session_exact_location_lat', 'session_exact_location_lng', 'session_location_guide', 'location_lat', 'location_lng',
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
-            'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
+            'schedule_details', 'scheduled_time', 'recurrence_interval_days',
+            'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
             'is_saved',
             'is_newcomer_owner', 'source', 'for_you_signals', 'explore_pool',
@@ -731,6 +732,17 @@ class ServiceSerializer(serializers.ModelSerializer):
         service_type = data.get('type', getattr(instance, 'type', None))
         schedule_type = data.get('schedule_type', getattr(instance, 'schedule_type', None))
         max_participants = data.get('max_participants', getattr(instance, 'max_participants', 1))
+
+        # Recurrence is Event-only. Force Offer/Need rows to One-Time and
+        # strip any recurrence cadence the client may have sent.
+        if service_type in ('Offer', 'Need'):
+            if schedule_type == 'Recurrent':
+                data['schedule_type'] = 'One-Time'
+                schedule_type = 'One-Time'
+            data['recurrence_interval_days'] = None
+        elif service_type == 'Event' and schedule_type != 'Recurrent':
+            # One-time Events never have a recurrence cadence.
+            data['recurrence_interval_days'] = None
         location_type = data.get('location_type', getattr(instance, 'location_type', None))
         location_area = data.get('location_area', getattr(instance, 'location_area', ''))
         session_exact_location = data.get('session_exact_location', getattr(instance, 'session_exact_location', ''))

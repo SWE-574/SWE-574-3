@@ -293,6 +293,15 @@ class Service(models.Model):
     schedule_type = models.CharField(max_length=10, choices=SCHEDULE_CHOICES)
     schedule_details = models.TextField(blank=True, null=True)
     scheduled_time = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Event start time (required for Events)')
+    recurrence_interval_days = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            'For recurring Events only. When the organizer marks a recurring '
+            'Event as completed, a fresh copy is auto-created with '
+            'scheduled_time shifted forward by this many days.'
+        ),
+    )
     event_completed_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Timestamp when organizer marked an event as completed')
     tags = models.ManyToManyField(Tag, blank=True)
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
