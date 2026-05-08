@@ -3,12 +3,13 @@ import { test, expect } from '@playwright/test'
 import { createServiceViaApi, loginAs, uniqueTitle, USERS } from '../helpers'
 
 test('FR-13a: detail page shows core listing details including schedule, capacity, tags, and creation metadata', async ({ page }) => {
-  const title = uniqueTitle('FR-13a Offer')
+  const title = uniqueTitle('FR-13a Event')
 
-  // Create a tagged recurring offer so the detail page has all core fields to render.
+  // Recurrence is Event-only, so pick an Event to exercise the recurrent-schedule rendering
+  // alongside the rest of the metadata blocks (capacity, tags, location, posted-at).
   await loginAs(page, USERS.elif)
   const created = await createServiceViaApi(page, {
-    type: 'Offer',
+    type: 'Event',
     title,
     description: 'Feature 13 FR-13a verifies the core detail-page metadata rendering.',
     duration: 2,
@@ -27,7 +28,7 @@ test('FR-13a: detail page shows core listing details including schedule, capacit
   await expect(page.getByText('2 hours').first()).toBeVisible()
   await expect(page.getByText(/Recurrent.*Every Saturday 10:00/i).first()).toBeVisible()
   await expect(page.getByText('Online').first()).toBeVisible()
-  await expect(page.getByText(/0\/3 filled/i).first()).toBeVisible()
+  await expect(page.getByText(/3 left of 3/i).first()).toBeVisible()
   await expect(page.getByText('#Cooking')).toBeVisible()
   await expect(page.getByText(/Posted/i).first()).toBeVisible()
 })
