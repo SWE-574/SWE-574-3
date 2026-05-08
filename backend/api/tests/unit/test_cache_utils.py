@@ -175,43 +175,51 @@ class TestRegisterCalendarCacheKey:
     Regression: the original implementation had an unconditional `return`
     inside the `for _ in range(3)` loop, so the retry never kicked in and
     a racing writer could clobber the tracking set with a single-key set.
+
+    Each test mints its own user_id via uuid because pytest-xdist runs
+    these in parallel against a shared Redis on CI — a literal 'user-1'
+    would let workers trample each other's tracking sets, and a setup-
+    level `cache.clear()` would wreck other workers' in-flight state.
     """
 
-    def setup_method(self, method):
-        from django.core.cache import cache as django_cache
-        django_cache.clear()
-
     def test_register_two_keys_for_same_user_keeps_both(self):
+        import uuid
         from django.core.cache import cache as django_cache
-        register_calendar_cache_key('user-1', 'cal_key_a')
-        register_calendar_cache_key('user-1', 'cal_key_b')
-        tracked = django_cache.get('user_calendar_keys:user-1', set())
+        user_id = f'cache-test-{uuid.uuid4().hex[:8]}'
+        register_calendar_cache_key(user_id, 'cal_key_a')
+        register_calendar_cache_key(user_id, 'cal_key_b')
+        tracked = django_cache.get(f'user_calendar_keys:{user_id}', set())
         assert tracked == {'cal_key_a', 'cal_key_b'}
 
     def test_register_idempotent_for_same_key(self):
+        import uuid
         from django.core.cache import cache as django_cache
-        register_calendar_cache_key('user-1', 'cal_key_a')
-        register_calendar_cache_key('user-1', 'cal_key_a')
-        tracked = django_cache.get('user_calendar_keys:user-1', set())
+        user_id = f'cache-test-{uuid.uuid4().hex[:8]}'
+        register_calendar_cache_key(user_id, 'cal_key_a')
+        register_calendar_cache_key(user_id, 'cal_key_a')
+        tracked = django_cache.get(f'user_calendar_keys:{user_id}', set())
         assert tracked == {'cal_key_a'}
 
     def test_register_recovers_when_first_set_was_clobbered(self, monkeypatch):
         """If a racing caller landed between our get and set, the verify-then-
         retry loop must re-read and merge instead of leaving the new key out."""
+        import uuid
         from django.core import cache as cache_mod
         cache = cache_mod.cache
+        user_id = f'cache-test-{uuid.uuid4().hex[:8]}'
 
-        register_calendar_cache_key('user-1', 'a')
+        register_calendar_cache_key(user_id, 'a')
 
         original_set = cache.set
         call_count = {'n': 0}
+        tracking_key = f'user_calendar_keys:{user_id}'
 
         def racy_set(key, value, timeout=None, **kwargs):
             # On the first set for our user's tracking key, simulate a racing
             # writer that overwrote the value AFTER we read but BEFORE we
             # write — i.e. our write lands first, then the racer's write
             # immediately clobbers it. The retry must detect that and merge.
-            if key == 'user_calendar_keys:user-1' and call_count['n'] == 0:
+            if key == tracking_key and call_count['n'] == 0:
                 call_count['n'] += 1
                 result = original_set(key, value, timeout=timeout, **kwargs)
                 # Simulate the racing clobber:
@@ -221,9 +229,9 @@ class TestRegisterCalendarCacheKey:
 
         monkeypatch.setattr(cache, 'set', racy_set)
 
-        register_calendar_cache_key('user-1', 'b')
+        register_calendar_cache_key(user_id, 'b')
 
-        tracked = cache.get('user_calendar_keys:user-1', set())
+        tracked = cache.get(tracking_key, set())
         assert 'b' in tracked, (
             'After a racing clobber, the retry loop must re-add our key'
         )
