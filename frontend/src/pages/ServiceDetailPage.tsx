@@ -26,7 +26,7 @@ import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
   spotsLeft, formatEventDateTime, formatGroupOfferDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
 } from '@/utils/eventUtils'
-import type { Service, EventEvaluationSummary } from '@/types'
+import type { Service, EventEvaluationSummary, NotificationType } from '@/types'
 import type { Comment } from '@/services/commentAPI'
 import type { Handshake } from '@/services/handshakeAPI'
 
@@ -538,10 +538,20 @@ export default function ServiceDetailPage() {
     handshakeAPI.list().then(setHandshakes).catch(() => {})
   }, [isAuthenticated])
 
+  const REFRESH_TYPES: NotificationType[] = [
+    'handshake_accepted',
+    'handshake_cancelled',
+    'handshake_cancellation_requested',
+    'positive_rep',
+    'service_updated',
+    'service_confirmation',
+  ]
+
   // Re-fetch when a relevant notification arrives (e.g. check-in, handshake status change).
   useEffect(() => {
     if (!lastNotification || !service?.id) return
     if (String(lastNotification.related_service) !== String(service.id)) return
+    if (!REFRESH_TYPES.includes(lastNotification.type)) return
     // Refresh both the service (participant_count etc.) and the handshake list.
     serviceAPI.get(service.id).then(setService).catch(() => {})
     if (isAuthenticated) handshakeAPI.list().then(setHandshakes).catch(() => {})
@@ -1796,7 +1806,7 @@ export default function ServiceDetailPage() {
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'no_show' ? (
-                    /* Checked in but not marked attended — no-show */
+                    /* Was checked in but organizer closed event without marking attended */
                     <Stack gap={2}>
                       <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}
                         display="flex" alignItems="center" gap={3}

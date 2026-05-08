@@ -1930,7 +1930,7 @@ class EventHandshakeService:
             for accepted_hs in Handshake.objects.filter(service=service, status='accepted').select_related('requester'):
                 create_notification(
                     user=accepted_hs.requester,
-                    notification_type='handshake_cancelled',
+                    notification_type='service_updated',
                     title='Event Completed',
                     message=f"The event '{service.title}' has ended.",
                     handshake=accepted_hs,

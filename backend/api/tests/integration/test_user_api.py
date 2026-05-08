@@ -267,6 +267,29 @@ class TestUserHistoryView:
         assert response.data[0]['service_type'] == 'Event'
         assert response.data[0]['was_provider'] is True
 
+    def test_evaluation_pending_false_for_organizer(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now() - timedelta(hours=1),
+        )
+        HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+        response = client.get(f'/api/users/{organizer.id}/history/')
+
+        assert_api_response(response, 200)
+        event_entries = [e for e in response.data if e['service_type'] == 'Event']
+        assert all(not e['evaluation_pending'] for e in event_entries)
+
 
 @pytest.mark.django_db
 @pytest.mark.integration
