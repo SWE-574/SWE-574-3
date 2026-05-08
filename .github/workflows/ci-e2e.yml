@@ -36,7 +36,10 @@ jobs:
   e2e:
     name: Playwright E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
+    env:
+      DOCKER_BUILDKIT: "1"
+      COMPOSE_DOCKER_CLI_BUILD: "1"
 
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────────────
@@ -70,6 +73,13 @@ jobs:
           DISABLE_THROTTLING=1
           EOF
 
+      # ── 3b. Set up Docker Buildx with the GHA cache backend ──────────────
+      #    Required for the cache-from/cache-to mounts on the build below.
+      #    Without this step, BuildKit only sees the empty local layer cache
+      #    on a fresh runner and the gha cache exporter has nowhere to write.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       # ── 4. Start Docker image build in background ───────────────────────
       #    Building images (pip install, apt-get, npm ci inside container)
       #    is the slowest step (~2 min). Kick it off early so it runs in
@@ -78,9 +88,17 @@ jobs:
       #    to avoid bind-mount churn from disrupting the Vite file watcher.
       #    Uses nohup so the process survives the step's shell exit, and
       #    writes its exit code to a sentinel file for the wait step.
+      #    `docker buildx bake` with `--set *.cache-from/--set *.cache-to`
+      #    wires every compose service to the GHA cache scope hive-stack.
+      #    `--load` keeps the resulting images in the local Docker daemon so
+      #    `docker compose up -d` below can find them by name.
       - name: Build Docker images (background)
         run: |
-          nohup bash -c 'DJANGO_E2E=1 VITE_E2E=1 docker compose build > /tmp/docker-build.log 2>&1; echo $? > /tmp/docker-build.exit' &
+          nohup bash -c 'DJANGO_E2E=1 VITE_E2E=1 docker buildx bake \
+            --file docker-compose.yml \
+            --set "*.cache-from=type=gha,scope=hive-stack" \
+            --set "*.cache-to=type=gha,scope=hive-stack,mode=max" \
+            --load > /tmp/docker-build.log 2>&1; echo $? > /tmp/docker-build.exit' &
           echo $! > /tmp/docker-build.pid
 
       # ── 5. Set up Node.js ────────────────────────────────────────────────
@@ -102,9 +120,15 @@ jobs:
           restore-keys: npm-e2e-
 
       # ── 8. Install JS dependencies (includes @playwright/test) ───────────
+      # Stale tarball-extraction tmp files in ~/.npm/_cacache/tmp can cause
+      # `npm ci` to crash with `EEXIST: file already exists` after a cache
+      # restore. Wiping the tmp dir is safe and only adds a few ms.
+      - name: Clear npm cache tmp
+        run: rm -rf ~/.npm/_cacache/tmp
+
       - name: Install dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit
 
       # ── 9. Cache Playwright browsers ──────────────────────────────────────
       - name: Cache Playwright browsers

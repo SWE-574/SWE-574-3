@@ -93,17 +93,18 @@ from .services import (
 from .ranking_debug import build_service_debug_payload
 from .event_permissions import IsNotEventBanned, IsNotOrganizerBanned
 from .achievement_utils import check_and_assign_badges
-from .search_filters import SearchEngine
+from .search_filters import InvalidSearchParam, SearchEngine
 from .performance import track_performance
-from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max
-from django.db.models.functions import Coalesce
+from django.db.models import Count, Q, Prefetch, Exists, OuterRef, Case, When, UUIDField, Sum, Value, FloatField, ExpressionWrapper, Max, Subquery
+from django.db.models.functions import Coalesce, Greatest
 from .cache_utils import (
     get_cached_tag_list, cache_tag_list, invalidate_tag_list,
     invalidate_user_profile,
     get_cached_service_list, cache_service_list, invalidate_service_lists,
     get_cached_conversations, cache_conversations, invalidate_conversations,
     get_cached_transactions, cache_transactions, invalidate_transactions,
-    invalidate_user_services, CACHE_TTL_SHORT
+    invalidate_user_services, invalidate_user_calendar, CACHE_TTL_SHORT,
+    register_calendar_cache_key,
 )
 
 from django.contrib.auth import authenticate
@@ -1257,6 +1258,233 @@ class MyReportsView(generics.ListAPIView):
         )
 
 
+class MeCalendarView(APIView):
+    """
+    GET /api/users/me/calendar/?from=YYYY-MM-DD&to=YYYY-MM-DD
+
+    Returns the authenticated user's scheduled items within the given date window.
+    Defaults to today → today+365d. Window is capped at 3650 days.
+
+    Response shape (contract for Teams B, C, D):
+    {
+        "items": [
+            {
+                "id": "uuid",
+                "kind": "service_session" | "event_organized" | "event_joined" | "scheduled_commitment",
+                "title": "...",
+                "start": "ISO8601",
+                "end": "ISO8601",
+                "duration_hours": 2.0,
+                "location_type": "In-Person" | "Online" | null,
+                "location_label": "..." | null,
+                "service_type": "Offer" | "Need" | "Event" | null,
+                "service_id": "uuid" | null,
+                "handshake_id": "uuid" | null,
+                "chat_id": "uuid" | null,
+                "counterpart": {"id": "uuid", "name": "...", "avatar_url": "..."} | null,
+                "is_owner": true,
+                "status": "...",
+                "accent_token": "GREEN" | "BLUE" | "TEAL",
+                "link": {"type": "service" | "event" | "chat", "id": "uuid"}
+            }
+        ],
+        "conflicts": [{"item_id": "uuid", "overlaps_with": ["uuid", ...]}],
+        "range": {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}
+    }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    _CALENDAR_CACHE_TTL = 60  # 60 seconds — short TTL, supplemented by explicit invalidation
+
+    def get(self, request, *args, **kwargs):
+        from datetime import date
+        from django.core.cache import cache
+        from .schedule_utils import _user_scheduled_intervals, find_overlapping_pairs
+
+        today = timezone.now().date()
+
+        from_str = request.query_params.get('from')
+        to_str = request.query_params.get('to')
+
+        try:
+            from_date = date.fromisoformat(from_str) if from_str else today
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid "from" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            to_date = date.fromisoformat(to_str) if to_str else today + timedelta(days=365)
+        except (ValueError, TypeError):
+            return Response({'detail': 'Invalid "to" date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if to_date < from_date:
+            return Response({'detail': '"to" must not be before "from".'}, status=status.HTTP_400_BAD_REQUEST)
+
+        max_days = 3650
+        if (to_date - from_date).days > max_days:
+            return Response(
+                {'detail': f'Date window exceeds maximum of {max_days} days.', 'max_days': max_days},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cache_key = f"user_calendar:{request.user.id}:{from_date.isoformat()}:{to_date.isoformat()}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        window_start = timezone.make_aware(
+            timezone.datetime.combine(from_date, timezone.datetime.min.time())
+        )
+        window_end = timezone.make_aware(
+            timezone.datetime.combine(to_date, timezone.datetime.max.time())
+        )
+
+        user = request.user
+        intervals = self._dedupe_calendar_intervals(
+            list(_user_scheduled_intervals(user, window_start, window_end))
+        )
+        items = [self._serialize_interval(iv, user) for iv in intervals]
+        conflicts = find_overlapping_pairs(intervals)
+
+        response_data = {
+            'items': items,
+            'conflicts': conflicts,
+            'range': {
+                'from': from_date.isoformat(),
+                'to': to_date.isoformat(),
+            },
+        }
+        cache.set(cache_key, response_data, self._CALENDAR_CACHE_TTL)
+        # Register this key in the per-user tracking set so invalidate_user_calendar
+        # can find and delete it without pattern-delete support (spec §6.1).
+        # register_calendar_cache_key uses a bounded retry loop to reduce the
+        # read-modify-write race on concurrent requests (H2 fix).
+        register_calendar_cache_key(str(user.id), cache_key)
+        return Response(response_data)
+
+    def _dedupe_calendar_intervals(self, intervals):
+        """
+        Collapse group/event participant rows into one visible calendar item.
+
+        Service owners can have one Service interval plus one accepted Handshake
+        interval per participant for the same fixed group offer or event. The
+        calendar should show the session once, not once per participant.
+        """
+        deduped = {}
+        passthrough = []
+
+        def service_for(iv):
+            source = iv.source_obj
+            return source.service if iv.source_kind == 'handshake' else source
+
+        def dedupe_key(iv):
+            svc = service_for(iv)
+            if svc.type != 'Event' and int(getattr(svc, 'max_participants', 1) or 1) <= 1:
+                return None
+            source_status = getattr(iv.source_obj, 'status', None)
+            if source_status in ('Completed', 'completed'):
+                return (str(svc.id), 'completed', iv.end.date())
+            return (str(svc.id), iv.start, iv.end)
+
+        def priority(iv):
+            return 0 if iv.source_kind == 'service' else 1
+
+        for iv in intervals:
+            key = dedupe_key(iv)
+            if key is None:
+                passthrough.append(iv)
+                continue
+            current = deduped.get(key)
+            if current is None or priority(iv) < priority(current):
+                deduped[key] = iv
+
+        return sorted(
+            [*passthrough, *deduped.values()],
+            key=lambda iv: (iv.start, iv.end, str(iv.source_obj.id)),
+        )
+
+    def _serialize_interval(self, iv, user) -> dict:
+        from .schedule_utils import ScheduledInterval
+
+        source = iv.source_obj
+        is_handshake = iv.source_kind == 'handshake'
+
+        if is_handshake:
+            h = source
+            svc = h.service
+            service_id = str(svc.id)
+            handshake_id = str(h.id)
+            title = svc.title
+            location_type = svc.location_type
+            location_label = svc.location_area or None
+            service_type = svc.type
+            item_status = h.status
+
+            is_owner = (svc.user_id == user.id)
+            # counterpart is the other party
+            if is_owner:
+                cp = h.requester
+            else:
+                cp = svc.user
+            counterpart = {
+                'id': str(cp.id),
+                'name': f"{cp.first_name} {cp.last_name}".strip(),
+                'avatar_url': cp.avatar_url,
+            }
+
+            # Accent token
+            if svc.type == 'Event':
+                accent_token = 'BLUE'
+            else:
+                accent_token = 'GREEN'
+
+            # Calendar cards should open the service/event detail page; chat stays
+            # available from detail/messages surfaces, not from the calendar.
+            chat_id = handshake_id  # The chat channel is keyed by handshake id
+            link = {'type': 'service', 'id': service_id}
+
+        else:
+            svc = source
+            service_id = str(svc.id)
+            handshake_id = None
+            chat_id = None
+            title = svc.title
+            location_type = svc.location_type
+            location_label = svc.location_area or None
+            service_type = svc.type
+            item_status = svc.status
+            is_owner = True
+            counterpart = None
+
+            if svc.type == 'Event':
+                accent_token = 'BLUE'
+                link = {'type': 'service', 'id': service_id}
+            else:
+                accent_token = 'TEAL'
+                link = {'type': 'service', 'id': service_id}
+
+        duration_hours = (iv.end - iv.start).total_seconds() / 3600.0
+
+        return {
+            'id': str(source.id),
+            'kind': iv.kind,
+            'title': title,
+            'start': iv.start.isoformat(),
+            'end': iv.end.isoformat(),
+            'duration_hours': round(duration_hours, 2),
+            'location_type': location_type,
+            'location_label': location_label,
+            'service_type': service_type,
+            'service_id': service_id,
+            'handshake_id': handshake_id,
+            'chat_id': chat_id,
+            'counterpart': counterpart,
+            'is_owner': is_owner,
+            'status': item_status,
+            'accent_token': accent_token,
+            'link': link,
+        }
+
+
 class UserHistoryView(APIView):
     """
     User Transaction History
@@ -1852,16 +2080,33 @@ class ServiceViewSet(viewsets.ModelViewSet):
             sort_param == 'hot'
             and getattr(_ranking_settings, 'RANKING_EXPLORATION_RATE', 0.0) > 0
         )
+        explore_only_param = request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes')
         use_cache = not (
             (request.query_params.get('lat') and request.query_params.get('lng'))
             or (sort_param == 'hot' and request.user.is_authenticated)
+            or sort_param == 'for_you'
             or explore_enabled
+            or explore_only_param
         )
 
         if use_cache:
             cached_result = get_cached_service_list(cache_key_params)
             if cached_result is not None:
                 return Response(cached_result)
+
+        # For You feed (#481): viewer-specific re-ranking of the top hot
+        # candidates by tag overlap, follow affinity, handshake cooccurrence,
+        # and recency-of-viewing. Only authenticated, onboarded users with
+        # declared skills get a populated response; everyone else gets [].
+        if sort_param == 'for_you':
+            return self._list_for_you(request)
+
+        # Explore-only feed: surfaces Phase 3 candidates (cold-start,
+        # under-shown quality, stale recurring) as a standalone list rather
+        # than mixed into hot at slot 5. Powers the web "Try something new"
+        # carousel and any client that wants the rotation pool directly.
+        if request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes'):
+            return self._list_explore_only(request)
 
         queryset = self.filter_queryset(self.get_queryset())
         paginator = self.pagination_class()
@@ -1890,6 +2135,121 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if use_cache:
             cache_service_list(cache_key_params, response_data, ttl=CACHE_TTL_SHORT)
         return Response(response_data)
+
+    def _list_explore_only(self, request):
+        """Return Phase 3 explore candidates flat, tagged with their pool.
+
+        Mixes the three sub-buckets (cold-start, under-shown quality, stale
+        recurring) round-robin so the carousel surfaces all three pools when
+        each is non-empty. Caps at RANKING_EXPLORE_LIMIT (default 10).
+        """
+        from .ranking import _eligible_exploration
+
+        # Build the candidate pool from the same hot-sorted queryset the
+        # explore slot picks from at request time, capped to keep the
+        # eligibility scan bounded.
+        request.query_params._mutable = True if hasattr(request.query_params, '_mutable') else None
+        try:
+            request.query_params['sort'] = 'hot'
+        except Exception:
+            pass
+
+        queryset = self.filter_queryset(self.get_queryset())
+        candidates = list(queryset[:200])
+        cold, undershown, stale = _eligible_exploration(candidates)
+
+        for s in cold:
+            s.explore_pool = 'cold_start'
+            s.source = 'explore'
+        for s in undershown:
+            s.explore_pool = 'undershown_quality'
+            s.source = 'explore'
+        for s in stale:
+            s.explore_pool = 'stale_recurring'
+            s.source = 'explore'
+
+        # Round-robin across the three pools so the response surfaces each
+        # vocabulary when available, rather than draining cold first.
+        limit = int(getattr(settings, 'RANKING_EXPLORE_LIMIT', 10))
+        pools = [list(cold), list(undershown), list(stale)]
+        mixed = []
+        seen = set()
+        while len(mixed) < limit and any(pools):
+            for pool in pools:
+                if not pool:
+                    continue
+                item = pool.pop(0)
+                if item.id in seen:
+                    continue
+                mixed.append(item)
+                seen.add(item.id)
+                if len(mixed) >= limit:
+                    break
+
+        serializer = self.get_serializer(mixed, many=True)
+        return Response({
+            'count': len(mixed),
+            'next': None,
+            'previous': None,
+            'results': serializer.data,
+        })
+
+    def _list_for_you(self, request):
+        """For You feed (#481). Re-rank top hot candidates with viewer-specific
+        signals; cap at RANKING_FOR_YOU_LIMIT; record impressions for the
+        recency penalty and CTR proxy.
+        """
+        from .models import ForYouEvent
+        from .ranking_personalized import record_impressions, score_for_you
+
+        viewer = request.user
+        is_eligible = (
+            viewer.is_authenticated
+            and getattr(viewer, 'is_onboarded', False)
+            and viewer.skills.exists()
+        )
+        if not is_eligible:
+            return Response({'count': 0, 'next': None, 'previous': None, 'results': []})
+
+        # Force sort to hot when building the candidate pool so we re-rank a
+        # principled top slice rather than the chronological list.
+        request.query_params._mutable = True if hasattr(request.query_params, '_mutable') else None
+        try:
+            request.query_params['sort'] = 'hot'
+        except Exception:
+            pass
+
+        queryset = self.filter_queryset(self.get_queryset())
+        candidates = list(queryset[:200])
+        scored = score_for_you(candidates, viewer)
+        limit = int(getattr(settings, 'RANKING_FOR_YOU_LIMIT', 10))
+        top = scored[:limit]
+
+        # Stash signals on the model instance for the serializer to pick up.
+        services = []
+        for svc, score, signals in top:
+            svc.for_you_signals = signals
+            svc.source = 'for_you'
+            services.append(svc)
+
+        # Record impressions for recency-of-viewing decay AND for the
+        # CTR proxy (one ForYouEvent per impression, source=for_you).
+        record_impressions(viewer.id, [s.id for s in services])
+        ForYouEvent.objects.bulk_create([
+            ForYouEvent(
+                service=s, viewer=viewer,
+                kind=ForYouEvent.IMPRESSION, source=ForYouEvent.SOURCE_FOR_YOU,
+            )
+            for s in services
+        ])
+
+        serializer = self.get_serializer(services, many=True)
+        return Response({
+            'count': len(services),
+            'next': None,
+            'previous': None,
+            'results': serializer.data,
+        })
 
     @track_performance
     def get_queryset(self):
@@ -1920,7 +2280,42 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 capacity_handshakes_prefetch,
             )
         )
-        
+
+        # Save / Endorse list-time annotations (#483) so the serializer's
+        # is_saved / is_endorsed / endorsement_count fields don't fire one
+        # query per service in list responses. Detail view uses the per-row
+        # fallback in the serializer (one query is fine there).
+        from .models import Endorsement, SavedService
+        if self.request.user.is_authenticated:
+            queryset = queryset.annotate(
+                is_saved_anno=Exists(
+                    SavedService.objects.filter(
+                        user=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_endorsed_anno=Exists(
+                    Endorsement.objects.filter(
+                        endorser=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+            )
+        endorsement_count_subquery = (
+            Endorsement.objects
+            .filter(service=OuterRef('pk'))
+            .order_by()
+            .values('service')
+            .annotate(c=Count('id'))
+            .values('c')
+        )
+        from django.db.models import IntegerField
+        from django.db.models.functions import Coalesce
+        queryset = queryset.annotate(
+            endorsement_count_anno=Coalesce(
+                Subquery(endorsement_count_subquery, output_field=IntegerField()),
+                Value(0, output_field=IntegerField()),
+            ),
+        )
+
         # Filter by visibility - admins can see all, others only visible
         if not (self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES):
             queryset = queryset.filter(is_visible=True)
@@ -1936,9 +2331,43 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
             'distance': self.request.query_params.get('distance', 10),
+            # FR-12c — event date-range filter (only fires when type=Event).
+            'date_from': self.request.query_params.get('date_from'),
+            'date_to': self.request.query_params.get('date_to'),
         }
-        
-        queryset = search_engine.search(queryset, search_params)
+
+        try:
+            queryset = search_engine.search(queryset, search_params)
+        except InvalidSearchParam as exc:
+            # Surface the field-level error instead of swallowing it.
+            raise drf_serializers.ValidationError({exc.field: exc.message})
+
+        # Onboarding tag fallback (#478): when an onboarded viewer with
+        # declared skills hits the feed without an explicit tag filter,
+        # prefer services tagged with their skills and top up from the
+        # explore pool when too few match. Annotates `source` for the UI.
+        explicit_tag = (
+            self.request.query_params.get('tag')
+            or self.request.query_params.getlist('tags')
+        )
+        if not explicit_tag:
+            from .ranking import apply_onboarding_fallback
+            queryset, _ = apply_onboarding_fallback(
+                queryset,
+                self.request.user,
+                getattr(settings, 'RANKING_ONBOARDING_MIN_RESULTS', 10),
+            )
+
+        # explore_only=true (#480): restrict the feed to Phase 3 eligible
+        # services (cold-start, undershown quality, stale recurring) so the
+        # mobile "Try something new" carousel can fetch them in one call.
+        explore_only_raw = self.request.query_params.get('explore_only', '')
+        if str(explore_only_raw).strip().lower() in {'1', 'true', 'yes'}:
+            from .ranking import _eligible_exploration
+            sample = list(queryset[:200])
+            cold, under, stale = _eligible_exploration(sample)
+            eligible_ids = [s.id for s in (*cold, *under, *stale)]
+            queryset = queryset.filter(id__in=eligible_ids)
 
         user_param = self.request.query_params.get('user')
         # Filter by owner user (for profile pages)
@@ -1973,33 +2402,65 @@ class ServiceViewSet(viewsets.ModelViewSet):
         lng_param = self.request.query_params.get('lng')
         sort_param = self.request.query_params.get('sort', 'latest')
         
-        # If location-based search, distance ordering takes priority
-        if is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
-            queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
-        elif sort_param == 'hot':
+        # Hot sort wraps both viewer-aware factors (proximity + social).
+        # When the viewer has a location, hot_score is multiplied by a
+        # distance-decay factor so closer services rank higher even when
+        # base scores are equal. When the viewer has no location, the
+        # multiplier is 1.0 and ordering matches today's hot behavior.
+        if sort_param == 'hot':
+            from .ranking import apply_stochastic_social_proximity
+
+            proximity_active = (
+                is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param)
+            )
+            half_life_km = getattr(settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0)
+            if proximity_active and half_life_km > 0:
+                # PostGIS Distance annotation is in metres (srid=4326).
+                proximity_expr = ExpressionWrapper(
+                    Value(1.0, output_field=FloatField()) / (
+                        Value(1.0, output_field=FloatField())
+                        + F('distance') / Value(
+                            1000.0 * half_life_km, output_field=FloatField()
+                        )
+                    ),
+                    output_field=FloatField(),
+                )
+            else:
+                proximity_expr = Value(1.0, output_field=FloatField())
+            queryset = queryset.annotate(proximity_factor=proximity_expr)
+
+            social_addend = Value(0.0, output_field=FloatField())
             if self.request.user.is_authenticated:
-                # Apply social proximity boost (weight 0.5) for authenticated users.
-                # composite_score = hot_score + 0.5 * social_boost
-                # social_boost: 1.0 (1st-degree) or 0.5 (2nd-degree), 0 otherwise.
-                # Single SQL CTE call — no pre-evaluation of the service queryset.
                 boosts = get_social_proximity_boosts(self.request.user.id)
+                boosts = apply_stochastic_social_proximity(
+                    boosts,
+                    getattr(settings, 'RANKING_SOCIAL_PROXIMITY_PROBABILITY', 1.0),
+                )
                 if boosts:
-                    # boosts keys are UUID objects; user_id on Service is also UUID — no coercion needed.
                     whens = [
                         When(user_id=uid, then=Value(boost, output_field=FloatField()))
                         for uid, boost in boosts.items()
                     ]
                     queryset = queryset.annotate(
-                        social_boost=Case(*whens, default=Value(0.0, output_field=FloatField()), output_field=FloatField()),
-                        composite_score=ExpressionWrapper(
-                            F('hot_score') + Value(0.5, output_field=FloatField()) * F('social_boost'),
+                        social_boost=Case(
+                            *whens,
+                            default=Value(0.0, output_field=FloatField()),
                             output_field=FloatField(),
                         ),
-                    ).order_by('-is_pinned', '-composite_score', '-created_at')
-                else:
-                    queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
-            else:
-                queryset = queryset.order_by('-is_pinned', '-hot_score', '-created_at')
+                    )
+                    social_addend = Value(
+                        0.5, output_field=FloatField()
+                    ) * F('social_boost')
+
+            queryset = queryset.annotate(
+                composite_score=ExpressionWrapper(
+                    F('hot_score') * F('proximity_factor') + social_addend,
+                    output_field=FloatField(),
+                ),
+            ).order_by('-is_pinned', '-composite_score', '-created_at')
+        elif is_valid_coordinate(lat_param) and is_valid_coordinate(lng_param):
+            # Non-hot sorts with a location: distance-only ordering, as before.
+            queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         else:
             # Default: sort by latest (created_at descending)
             queryset = queryset.order_by('-is_pinned', '-created_at')
@@ -2123,6 +2584,25 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
         )
         instance = get_object_or_404(queryset, pk=kwargs['pk'])
+
+        # For You click attribution (#481): when the detail page is reached
+        # via ?from=for_you (or ?from=hot for CTR comparison), log a
+        # ForYouEvent click row. Used by the daily metrics rollup.
+        from_param = (request.query_params.get('from') or '').lower()
+        if (
+            request.user.is_authenticated
+            and from_param in ('for_you', 'hot')
+        ):
+            from .models import ForYouEvent
+            ForYouEvent.objects.create(
+                service=instance, viewer=request.user,
+                kind=ForYouEvent.CLICK,
+                source=(
+                    ForYouEvent.SOURCE_FOR_YOU if from_param == 'for_you'
+                    else ForYouEvent.SOURCE_HOT
+                ),
+            )
+
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
@@ -2268,6 +2748,133 @@ class ServiceViewSet(viewsets.ModelViewSet):
         invalidate_service_lists()
         invalidate_user_services(str(instance.user.id))
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(
+        detail=True,
+        methods=['post', 'delete'],
+        url_path='save',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def save_service(self, request, pk=None):
+        """Toggle a private save bookmark on a service (#483).
+
+        POST creates a SavedService row (idempotent on the unique constraint).
+        DELETE removes it. Returns the new is_saved state.
+        """
+        from .models import SavedService
+
+        service = self.get_object()
+        if request.method == 'DELETE':
+            SavedService.objects.filter(
+                user=request.user, service=service,
+            ).delete()
+            return Response({'is_saved': False})
+
+        SavedService.objects.get_or_create(
+            user=request.user, service=service,
+        )
+        return Response({'is_saved': True})
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='saved',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def saved(self, request):
+        """List the viewer's saved services, newest first (#483)."""
+        from .models import Endorsement, SavedService
+        from django.db.models import BooleanField, DateTimeField, IntegerField
+
+        user_badges_prefetch = Prefetch(
+            'user__badges',
+            queryset=UserBadge.objects.select_related('badge'),
+        )
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused', 'checked_in', 'attended', 'no_show']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+        saved_at_sq = (
+            SavedService.objects
+            .filter(user=request.user, service=OuterRef('pk'))
+            .values('created_at')[:1]
+        )
+        endorsement_count_sq = (
+            Endorsement.objects
+            .filter(service=OuterRef('pk'))
+            .order_by()
+            .values('service')
+            .annotate(c=Count('id'))
+            .values('c')
+        )
+        queryset = (
+            Service.objects
+            .filter(savers__user=request.user)
+            .select_related('user', 'event_evaluation_summary')
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
+            .annotate(
+                comment_count=Count('comments', filter=Q(comments__is_deleted=False)),
+                is_saved_anno=Value(True, output_field=BooleanField()),
+                is_endorsed_anno=Exists(
+                    Endorsement.objects.filter(
+                        endorser=request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                endorsement_count_anno=Coalesce(
+                    Subquery(endorsement_count_sq, output_field=IntegerField()),
+                    Value(0, output_field=IntegerField()),
+                ),
+                saved_at=Subquery(saved_at_sq, output_field=DateTimeField()),
+            )
+            .order_by('-saved_at')
+        )
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=['post', 'delete'],
+        url_path='endorse',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def endorse(self, request, pk=None):
+        """Toggle a public endorsement of the service's provider (#483).
+
+        Endorsements are public. Their integration into Wilson quality is a
+        planned follow-up; this PR ships the model, endpoints, and counts.
+        """
+        from .models import Endorsement
+
+        service = self.get_object()
+        if service.user_id == request.user.id:
+            return Response(
+                {'detail': 'You cannot endorse your own service.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if request.method == 'DELETE':
+            Endorsement.objects.filter(
+                endorser=request.user, service=service,
+            ).delete()
+            count = Endorsement.objects.filter(service=service).count()
+            return Response({'is_endorsed': False, 'endorsement_count': count})
+
+        Endorsement.objects.get_or_create(
+            endorser=request.user, service=service,
+        )
+        count = Endorsement.objects.filter(service=service).count()
+        return Response({'is_endorsed': True, 'endorsement_count': count})
 
     @action(detail=True, methods=['post'], url_path='toggle-visibility')
     def toggle_visibility(self, request, pk=None):
@@ -2539,6 +3146,92 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'created_at': token_obj.created_at.isoformat(),
             'expires_at': token_obj.expires_at.isoformat(),
             'qr_payload': qr_payload,
+        })
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='for-you-metrics',
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def for_you_metrics(self, request):
+        """Admin-only CTR proxy for the For You feed (#481).
+
+        Returns the last N days of impressions, clicks, and handshakes
+        bucketed by source ('for_you' vs 'hot'). Aggregated nightly by
+        roll_up_for_you_metrics; today's row is computed live so the
+        admin sees fresh numbers without waiting for the cron.
+
+        Each row exposes both `count` (raw event count - one row per
+        card per viewer per page load) and `unique_viewers` (distinct
+        viewer ids). count >> unique_viewers when one viewer reloads
+        the feed; the two fields are not interchangeable.
+
+        Re-running roll_up_for_you_metrics within the same day is
+        normally safe: the (date, kind, source) UniqueConstraint plus
+        the delete-then-insert pattern in the command keeps history
+        clean. The one edge case is calling the rollup mid-day when
+        today's row is also being computed live here - the response
+        will then include both today's rolled row and the live row,
+        double-counting today. The nightly cron runs after midnight
+        so this only matters if rollup is invoked manually.
+        """
+        from datetime import timedelta
+        from django.db.models import Count
+        from .models import ForYouDailyMetric, ForYouEvent
+
+        try:
+            days = int(request.query_params.get('days', '7'))
+        except ValueError:
+            days = 7
+        days = max(1, min(days, 90))
+
+        end = timezone.now().date()
+        start = end - timedelta(days=days - 1)
+
+        # Yesterday and earlier from the rolled-up table; today computed live
+        # to avoid the visible lag between events and the nightly rollup.
+        rolled = list(
+            ForYouDailyMetric.objects
+            .filter(date__gte=start, date__lt=end)
+            .values('date', 'kind', 'source', 'count', 'unique_viewers')
+            .order_by('date')
+        )
+        today_live = list(
+            ForYouEvent.objects
+            .filter(occurred_at__date=end)
+            .values('kind', 'source')
+            .annotate(
+                count=Count('id'),
+                unique_viewers=Count('viewer_id', distinct=True),
+            )
+        )
+        for row in today_live:
+            rolled.append({
+                'date': end, 'kind': row['kind'],
+                'source': row['source'], 'count': row['count'],
+                'unique_viewers': row['unique_viewers'],
+            })
+
+        return Response({
+            'days': days,
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'note': (
+                'count is total card impressions/clicks/handshakes (one row '
+                'per card per viewer per page load). unique_viewers is the '
+                'number of distinct viewer ids contributing to that count.'
+            ),
+            'rows': [
+                {
+                    'date': row['date'].isoformat() if hasattr(row['date'], 'isoformat') else row['date'],
+                    'kind': row['kind'],
+                    'source': row['source'],
+                    'count': row['count'],
+                    'unique_viewers': row.get('unique_viewers', 0),
+                }
+                for row in rolled
+            ],
         })
 
     @action(
@@ -5976,7 +6669,16 @@ class CommentViewSet(viewsets.ViewSet):
             # Only show verified reviews *about the service owner* (service.user).
             # For both Offer and Need handshakes, the review about service.user is written by handshake.requester.
             related_handshake__requester=F('user')
-        ).select_related('user', 'related_handshake', 'service').prefetch_related(
+        ).select_related(
+            # related_handshake__service + __requester are needed by
+            # get_reviewed_user_role()'s call to get_provider_and_receiver();
+            # without them each verified review fans out two extra queries.
+            'user',
+            'service',
+            'related_handshake',
+            'related_handshake__service',
+            'related_handshake__requester',
+        ).prefetch_related(
             user_badges_prefetch,
             Prefetch(
                 'replies',
@@ -6279,17 +6981,36 @@ class ForumCategoryViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         queryset = ForumCategory.objects.all()
-        
+
         # For public views, only show active categories
         if not self.request.user.is_staff:
             queryset = queryset.filter(is_active=True)
-        
-        # Annotate with counts for efficiency
+
+        # Annotate counts and last_activity inline so the serializer doesn't fan
+        # out into per-category queries. Subqueries keep this O(1) total.
+        latest_post_at = (
+            ForumPost.objects
+            .filter(topic__category=OuterRef('pk'), is_deleted=False)
+            .order_by('-created_at')
+            .values('created_at')[:1]
+        )
+        latest_topic_at = (
+            ForumTopic.objects
+            .filter(category=OuterRef('pk'))
+            .order_by('-created_at')
+            .values('created_at')[:1]
+        )
         queryset = queryset.annotate(
             topic_count_annotated=Count('topics', distinct=True),
-            post_count_annotated=Count('topics__posts', filter=Q(topics__posts__is_deleted=False), distinct=True)
+            post_count_annotated=Count('topics__posts', filter=Q(topics__posts__is_deleted=False), distinct=True),
+            last_activity_annotated=Coalesce(
+                Greatest(Subquery(latest_post_at), Subquery(latest_topic_at)),
+                Subquery(latest_post_at),
+                Subquery(latest_topic_at),
+                F('created_at'),
+            ),
         )
-        
+
         return queryset.order_by('display_order', 'name')
     
     @track_performance
@@ -6956,3 +7677,228 @@ class E2ESetBalanceView(APIView):
             'email': user.email,
             'balance': float(user.timebank_balance),
         })
+
+
+class SuggestedUsersView(generics.ListAPIView):
+    """Discover people to follow.
+
+    GET /api/users/suggested/
+
+    Returns active users the viewer doesn't already follow, ranked by:
+      1. Number of shared skill tags with the viewer (desc).
+      2. Karma score (desc) as a tiebreaker.
+      3. Recency of join (desc) as a final tiebreaker.
+
+    Excludes the viewer themselves, inactive users, and accounts the viewer
+    already follows. Paginated via the project's standard pagination.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+
+    def get_serializer_class(self):
+        from .serializers import UserSummarySerializer
+        return UserSummarySerializer
+
+    def get_queryset(self):
+        from django.db.models import Count, Q
+
+        from .models import UserFollow
+
+        viewer = self.request.user
+        followed_ids = list(
+            UserFollow.objects.filter(follower=viewer).values_list(
+                'following_id', flat=True,
+            )
+        )
+        viewer_skill_ids = list(viewer.skills.values_list('id', flat=True))
+
+        qs = (
+            User.objects
+            .filter(is_active=True)
+            .exclude(pk=viewer.pk)
+        )
+        if followed_ids:
+            qs = qs.exclude(pk__in=followed_ids)
+
+        if viewer_skill_ids:
+            qs = qs.annotate(
+                _shared_skills=Count(
+                    'skills',
+                    filter=Q(skills__id__in=viewer_skill_ids),
+                    distinct=True,
+                ),
+            )
+        else:
+            qs = qs.annotate(_shared_skills=Count('pk', filter=Q(pk__isnull=True)))
+
+        return qs.order_by('-_shared_skills', '-karma_score', '-date_joined')
+
+
+class ActivityFeedView(generics.ListAPIView):
+    """Activity feed (#482).
+
+    GET /api/activity/feed/?days=N
+
+    Returns ActivityEvent rows from the last N days (default 14, max 90)
+    where the actor is either someone the viewer follows OR an actor
+    whose own (or whose service's) location is within
+    `RANKING_PROXIMITY_HALF_LIFE_KM * 3` of the viewer's location.
+
+    Requires authentication. Anonymous viewers get 401. Viewers without
+    a known location only see events from people they follow.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+
+    def get_serializer_class(self):
+        from .serializers import ActivityEventSerializer
+        return ActivityEventSerializer
+
+    def get_queryset(self):
+        from datetime import timedelta
+        from django.contrib.gis.db.models.functions import Distance
+        from django.contrib.gis.geos import Point
+        from django.contrib.gis.measure import D
+        from django.db.models import Count, Prefetch, Q
+
+        from .models import ActivityEvent, ServiceMedia, UserFollow
+
+        viewer = self.request.user
+        try:
+            days = int(self.request.query_params.get('days', '14'))
+        except ValueError:
+            days = 14
+        days = max(1, min(days, 90))
+        cutoff = timezone.now() - timedelta(days=days)
+
+        followed_ids = list(
+            UserFollow.objects.filter(follower=viewer).values_list(
+                'following_id', flat=True,
+            )
+        )
+
+        filters = Q(actor_id__in=followed_ids) if followed_ids else Q(pk__in=[])
+        # Show follow events to the user being followed so they see "X started
+        # following you" without having to follow X back.
+        filters = filters | Q(
+            verb=ActivityEvent.USER_FOLLOWED, target_user=viewer,
+        )
+
+        lat = self.request.query_params.get('lat')
+        lng = self.request.query_params.get('lng')
+        try:
+            lat_f = float(lat) if lat is not None else None
+            lng_f = float(lng) if lng is not None else None
+        except (TypeError, ValueError):
+            lat_f = lng_f = None
+
+        viewer_point = None
+        if lat_f is not None and lng_f is not None:
+            half_life = float(getattr(
+                settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0,
+            ))
+            radius_km = half_life * 3.0
+            viewer_point = Point(lng_f, lat_f, srid=4326)
+            filters = filters | Q(
+                location__isnull=False,
+                location__distance_lte=(viewer_point, D(km=radius_km)),
+            )
+
+        # Prefetch the first photo for each service so the hero card thumbnail
+        # is one query instead of one-per-event.
+        media_prefetch = Prefetch(
+            'service__media',
+            queryset=ServiceMedia.objects.order_by('display_order', 'created_at'),
+        )
+
+        # Annotate committed-handshake count once for the whole page so
+        # event_capacity_pct doesn't query per-card.
+        committed_statuses = ('accepted', 'completed', 'checked_in', 'attended')
+        qs = (
+            ActivityEvent.objects
+            .filter(created_at__gte=cutoff)
+            .filter(filters)
+            .exclude(actor=viewer)
+            .select_related('actor', 'target_user', 'service', 'service__user')
+            .prefetch_related(media_prefetch, 'actor__skills')
+            .annotate(
+                _committed_count=Count(
+                    'service__handshakes',
+                    filter=Q(service__handshakes__status__in=committed_statuses),
+                    distinct=True,
+                ),
+            )
+        )
+
+        # When the viewer passes lat/lng we annotate distance and optionally
+        # sort by it for the right-rail "Active near you" pulse list.
+        sort = self.request.query_params.get('sort')
+        if viewer_point is not None:
+            qs = qs.annotate(_distance=Distance('location', viewer_point))
+            if sort == 'nearby':
+                qs = qs.filter(_distance__isnull=False).order_by('_distance', '-created_at')
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        # Cap the response when sort=nearby so the rail stays a small payload.
+        if request.query_params.get('sort') == 'nearby':
+            qs = self.filter_queryset(self.get_queryset())[:12]
+            self._annotate_extras(qs)
+            serializer = self.get_serializer(qs, many=True)
+            return Response({
+                'count': len(serializer.data),
+                'next': None,
+                'previous': None,
+                'results': serializer.data,
+            })
+        # Standard paginated response for the main feed.
+        response = super().list(request, *args, **kwargs)
+        # Annotate per-page extras so cards can show "0.4 km away" and the
+        # banked-hours flourish without per-card queries.
+        page = self.paginator.page if hasattr(self, 'paginator') and getattr(self.paginator, 'page', None) else None
+        if page is not None:
+            self._annotate_extras(page.object_list)
+            serializer = self.get_serializer(page.object_list, many=True)
+            response.data['results'] = serializer.data
+        return response
+
+    def _annotate_extras(self, events):
+        """Per-page extras for the serializer:
+        - `_distance_km`: convert the PostGIS Distance annotation to plain km.
+        - `_completed_handshake`: batch-fetch the matching Handshake row for
+          every HANDSHAKE_COMPLETED event in one query so the duration
+          flourish doesn't hit the DB per card.
+        """
+        from .models import ActivityEvent, Handshake
+
+        for ev in events:
+            d = getattr(ev, '_distance', None)
+            ev._distance_km = round(d.km, 2) if d is not None else None
+            ev._completed_handshake = None
+
+        completion_keys = {
+            (ev.service_id, ev.actor_id)
+            for ev in events
+            if ev.verb == ActivityEvent.HANDSHAKE_COMPLETED and ev.service_id
+        }
+        if not completion_keys:
+            return
+
+        service_ids = {sid for sid, _ in completion_keys}
+        actor_ids = {aid for _, aid in completion_keys}
+        rows = (
+            Handshake.objects
+            .filter(service_id__in=service_ids, requester_id__in=actor_ids, status='completed')
+            .order_by('-updated_at')
+        )
+        latest_by_key = {}
+        for hs in rows:
+            key = (hs.service_id, hs.requester_id)
+            if key in completion_keys and key not in latest_by_key:
+                latest_by_key[key] = hs
+
+        for ev in events:
+            if ev.verb != ActivityEvent.HANDSHAKE_COMPLETED:
+                continue
+            ev._completed_handshake = latest_by_key.get((ev.service_id, ev.actor_id))

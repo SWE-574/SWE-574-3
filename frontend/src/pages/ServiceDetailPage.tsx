@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import InterestRequesterRow from '@/components/service-detail/InterestRequesterRow'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Box, Flex, Grid, Stack, Text } from '@chakra-ui/react'
 import {
@@ -13,6 +14,7 @@ import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { MapView } from '@/components/MapView'
+import SaveEndorseControls from '@/components/SaveEndorseControls'
 import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import ReportModal, { type ReportOption } from '@/components/ReportModal'
@@ -20,7 +22,7 @@ import { AdminConfirmModal, ModalBackdrop, ModalCard, ModalHeader, ModalFooter, 
 import VerificationRequiredModal from '@/components/VerificationRequiredModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
-  spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
+  spotsLeft, formatEventDateTime, formatGroupOfferDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
 } from '@/utils/eventUtils'
 import type { Service, EventEvaluationSummary } from '@/types'
 import type { Comment } from '@/services/commentAPI'
@@ -34,21 +36,7 @@ import {
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
-
-// ─── Handshake badge config ───────────────────────────────────────────────────
-
-const HS_BADGE: Record<Handshake['status'], { label: string; bg: string; color: string }> = {
-  pending:    { label: 'Pending',    bg: '#fef9c3', color: '#854d0e' },
-  accepted:   { label: 'Accepted',   bg: '#dcfce7', color: '#166534' },
-  completed:  { label: 'Completed',  bg: '#d1fae5', color: '#065f46' },
-  denied:     { label: 'Declined',   bg: '#fee2e2', color: '#991b1b' },
-  cancelled:  { label: 'Cancelled',  bg: '#f3f4f6', color: '#6b7280' },
-  reported:   { label: 'Reported',   bg: '#fee2e2', color: '#991b1b' },
-  paused:     { label: 'Paused',     bg: '#e0f2fe', color: '#0369a1' },
-  checked_in: { label: 'Checked In', bg: '#d1fae5', color: '#065f46' },
-  attended:   { label: 'Attended',   bg: '#d1fae5', color: '#065f46' },
-  no_show:    { label: 'No-Show',    bg: '#fee2e2', color: '#991b1b' },
-}
+import { HS_BADGE } from '@/constants/handshakeBadges'
 
 // ─── Report options ───────────────────────────────────────────────────────────
 
@@ -218,6 +206,9 @@ function InfoTile({ icon, label, value, accentBg, accentColor }: {
     </Flex>
   )
 }
+
+const NEUTRAL_TILE_BG = GRAY100
+const NEUTRAL_TILE_COLOR = GRAY500
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
@@ -588,6 +579,7 @@ export default function ServiceDetailPage() {
     && (service.participant_count ?? 0) >= service.max_participants
   const isOffer    = service?.type === 'Offer'
   const isEvent    = service?.type === 'Event'
+  const isFixedGroupOffer = !!service && isOffer && service.schedule_type === 'One-Time' && service.max_participants > 1
 
   const openEventDetailModal = (tab: EventDetailModalTab = 'details') => {
     setEventDetailModalTab(tab)
@@ -616,12 +608,17 @@ export default function ServiceDetailPage() {
   })()
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
-  const eventEditLocked = isEvent && isWithinLockdownWindow(service?.scheduled_time)
+  // FR-11f / FR-11n: prefer the backend-canonical edit_locked flag when the
+  // server provided it (#267). Fall back to client-side math only for the
+  // brief window where an older API hasn't shipped the new field yet.
+  const eventEditLocked = isEvent && (
+    service?.edit_locked ?? isWithinLockdownWindow(service?.scheduled_time)
+  )
   const hasActiveApprovedSession = incoming.some((h) => ['accepted', 'reported', 'paused'].includes(h.status))
   const activeApprovedSessionEditLocked = !isEvent && !isRecurr && hasActiveApprovedSession
   const ownerEditLocked = isOwn && ((isEvent && eventEditLocked) || activeApprovedSessionEditLocked)
   const ownerEditLockReason = isEvent
-    ? 'Editing is locked during the final 24 hours before event start.'
+    ? (service?.edit_lock_reason || 'Editing is locked during the final 24 hours before event start.')
     : 'Editing is locked while an approved session is still active.'
   const reportedParticipantIds = new Set(
     incoming
@@ -966,6 +963,14 @@ export default function ServiceDetailPage() {
 
   const handleCancelEvent = async () => {
     if (!service || !cancelReason.trim()) return
+    // Prefer the API-provided edit_locked; fall back to client-side math
+    // when an older payload doesn't include the field yet (#267).
+    const inLockdown = service.edit_locked ?? isWithinLockdownWindow(service.scheduled_time)
+    const hasParticipants = (service.participant_count ?? 0) > 0
+    const confirmMsg = inLockdown && hasParticipants
+      ? 'You are in the 24h lockdown window. Cancelling now will apply a 30-day event creation ban. Continue?'
+      : 'Are you sure you want to cancel this event? All participants will be notified.'
+    if (!window.confirm(confirmMsg)) return
     setCancelLoading(true)
     setShowCancelModal(false)
     try {
@@ -1047,6 +1052,27 @@ export default function ServiceDetailPage() {
         >
           <FiArrowLeft size={15} /> Back to Browse
         </Box>
+
+        {/* FR-12g — cancellation banner above the fold for any cancelled service.
+            Detail-area inline messages still appear below as fallback context. */}
+        {service.status === 'Cancelled' && (
+          <Box
+            mb={4} p={4} borderRadius="12px"
+            bg={RED_LT}
+            border={`1px solid ${RED}40`}
+            display="flex" alignItems="center" gap={3}
+          >
+            <FiAlertTriangle size={18} color={RED} />
+            <Box>
+              <Text fontSize="14px" fontWeight={700} color={RED}>
+                {service.type === 'Event' ? 'This event was cancelled' : 'This listing was cancelled'}
+              </Text>
+              <Text fontSize="12px" color="#991B1B" mt="2px">
+                Joining, checking in, and evaluation are no longer available.
+              </Text>
+            </Box>
+          </Box>
+        )}
 
         <Grid templateColumns={{ base: '1fr', lg: '1fr 360px' }} gap={5} alignItems="start">
 
@@ -1158,6 +1184,12 @@ export default function ServiceDetailPage() {
                   )}
                 </Flex>
 
+                <SaveEndorseControls
+                  service={service}
+                  isOwn={isOwn}
+                  onChange={(patch) => setService((prev) => (prev ? { ...prev, ...patch } : prev))}
+                />
+
                 {/* Info tiles */}
                 <Grid templateColumns={{ base: '1fr 1fr', md: 'repeat(4, 1fr)' }} gap={3} mb={6}>
                   {isEvent ? (
@@ -1175,11 +1207,20 @@ export default function ServiceDetailPage() {
                     </>
                   ) : (
                     <>
-                      <InfoTile icon={<FiClock size={15} />} label="Duration" value={fmtDuration(service.duration)} />
+                      <InfoTile
+                        icon={<FiClock size={15} />} label="Duration"
+                        value={fmtDuration(service.duration)}
+                        accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : undefined}
+                        accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : undefined}
+                      />
                       <InfoTile
                         icon={<FiCalendar size={15} />} label="Schedule"
-                        value={`${service.schedule_type}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`}
-                        accentBg={AMBER_LT} accentColor={AMBER}
+                        value={isFixedGroupOffer && service.scheduled_time
+                          ? `${formatGroupOfferDateTime(service.scheduled_time)}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`
+                          : `${service.schedule_type}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`
+                        }
+                        accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : AMBER_LT}
+                        accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : AMBER}
                       />
                     </>
                   )}
@@ -1187,7 +1228,8 @@ export default function ServiceDetailPage() {
                     icon={service.location_type === 'Online' ? <FiMonitor size={15} /> : <FiMapPin size={15} />}
                     label="Location"
                     value={service.location_type === 'Online' ? 'Online' : service.location_area ?? 'In-Person'}
-                    accentBg={BLUE_LT} accentColor={BLUE}
+                    accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : BLUE_LT}
+                    accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : BLUE}
                   />
                   <InfoTile
                     icon={<FiUsers size={15} />}
@@ -1198,7 +1240,8 @@ export default function ServiceDetailPage() {
                         : `${service.participant_count ?? 0}/${service.max_participants} filled`
                       : String(service.max_participants)
                     }
-                    accentBg="#F3E8FF" accentColor="#7C3AED"
+                    accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : '#F3E8FF'}
+                    accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : '#7C3AED'}
                   />
                 </Grid>
 
@@ -1576,6 +1619,18 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
+                    ) : service.status === 'Cancelled' ? (
+                      <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiAlertTriangle size={20} color={RED} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={RED}>Event cancelled</Text>
+                          <Text fontSize="12px" color="#991B1B" mt="2px">
+                            Completing or cancelling this event is no longer available.
+                          </Text>
+                        </Box>
+                      </Box>
                     ) : (
                       <>
                         <Box as="button" w="full" py="11px" borderRadius="10px"
@@ -1915,44 +1970,30 @@ export default function ServiceDetailPage() {
                       {incoming.length === 0 ? (
                         <Text fontSize="13px" color={GRAY400} textAlign="center" py={3}>No requests yet.</Text>
                       ) : (
-                        <Stack gap={2}>
-                          {incoming.map((h) => {
-                            const cfg    = HS_BADGE[h.status] ?? { label: h.status, bg: GRAY100, color: GRAY500 }
-                            const active = ['pending', 'accepted'].includes(h.status)
-                            return (
-                              <Flex key={h.id} align="center" justify="space-between"
-                                p={3} bg={GRAY50} borderRadius="10px" gap={2}
-                                opacity={active ? 1 : 0.6}
-                              >
-                                <Box flex={1} minW={0}>
-                                  <Text fontSize="13px" fontWeight={600} color={GRAY800}
-                                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                  >
-                                    {h.requester_name}
-                                  </Text>
-                                  <Text fontSize="11px" color={GRAY400}>
-                                    {new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                  </Text>
-                                </Box>
-                                <Flex align="center" gap={2} flexShrink={0}>
-                                  <Box px="7px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700}
-                                    style={{ background: cfg.bg, color: cfg.color }}
-                                  >
-                                    {cfg.label}
-                                  </Box>
-                                  {active && (
-                                    <Box as="button" px="10px" py="5px" borderRadius="7px"
-                                      bg={GREEN} color={WHITE} fontSize="11px" fontWeight={700}
-                                      style={{ border: 'none', cursor: 'pointer' }}
-                                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigate(`/messages/${h.id}`) }}
-                                    >
-                                      Chat
-                                    </Box>
-                                  )}
-                                </Flex>
-                              </Flex>
-                            )
-                          })}
+                        <Stack gap={0}>
+                          {incoming.map((h) => (
+                            <InterestRequesterRow
+                              key={h.id}
+                              handshake={h}
+                              isOwner={isOwn}
+                              onAccept={h.status === 'pending'
+                                ? async () => {
+                                    try {
+                                      await handshakeAPI.accept(h.id)
+                                      setHandshakes(await handshakeAPI.list())
+                                    } catch { /* errors handled via toast elsewhere */ }
+                                  }
+                                : undefined}
+                              onReject={h.status === 'pending'
+                                ? async () => {
+                                    try {
+                                      await handshakeAPI.deny(h.id)
+                                      setHandshakes(await handshakeAPI.list())
+                                    } catch { /* errors handled via toast elsewhere */ }
+                                  }
+                                : undefined}
+                            />
+                          ))}
                         </Stack>
                       )}
 

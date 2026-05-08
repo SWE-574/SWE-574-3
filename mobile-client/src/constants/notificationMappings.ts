@@ -43,7 +43,7 @@ export function navigateToNotificationTarget(
   ) {
     navigation.navigate('Messages', {
       screen: 'Chat',
-      params: { handshakeId: related_handshake },
+      params: { handshakeId: related_handshake, notificationId: notification.id },
     });
     return;
   }

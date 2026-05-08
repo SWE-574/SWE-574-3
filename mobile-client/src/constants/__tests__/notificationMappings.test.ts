@@ -54,7 +54,7 @@ describe("navigateToNotificationTarget", () => {
     );
     expect(navigate).toHaveBeenCalledWith("Messages", {
       screen: "Chat",
-      params: { handshakeId: "hs-1" },
+      params: { handshakeId: "hs-1", notificationId: "n1" },
     });
   });
 
@@ -65,7 +65,7 @@ describe("navigateToNotificationTarget", () => {
     );
     expect(navigate).toHaveBeenCalledWith("Messages", {
       screen: "Chat",
-      params: { handshakeId: "hs-2" },
+      params: { handshakeId: "hs-2", notificationId: "n1" },
     });
   });
 
@@ -119,7 +119,7 @@ describe("navigateToNotificationTarget", () => {
     );
     expect(navigate).toHaveBeenCalledWith("Messages", {
       screen: "Chat",
-      params: { handshakeId: "hs-3" },
+      params: { handshakeId: "hs-3", notificationId: "n1" },
     });
   });
 

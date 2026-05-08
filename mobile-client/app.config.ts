@@ -43,12 +43,16 @@ const rootEnv = readRootEnv();
 const mobileConfig = baseConfig.expo;
 
 const apiUrl =
-  process.env.EXPO_PUBLIC_API_URL ||
-  rootEnv.EXPO_PUBLIC_API_URL ||
-  "https://apiary.selmangunes.com/api";
+  process.env.EXPO_PUBLIC_API_URL || rootEnv.EXPO_PUBLIC_API_URL;
 
-const mapboxToken =
-  rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || rootEnv.VITE_MAPBOX_TOKEN || "";
+if (!apiUrl) {
+  throw new Error(
+    "EXPO_PUBLIC_API_URL is not set. Run `make env` at the repo root, or " +
+      "use `npm run ios` / `npm run android` which set it inline."
+  );
+}
+
+const mapboxToken = rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || "";
 
 module.exports = {
   ...mobileConfig,

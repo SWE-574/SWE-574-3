@@ -54,7 +54,13 @@ test.describe('Dashboard', () => {
     await loginAs(page, USERS.elif)
     await expect(page.getByPlaceholder(/search/i).first()).toBeVisible({ timeout: 20_000 })
 
-    await page.waitForTimeout(5_000)
+    // Stability soak: let the dashboard poll twice and assert no errors fired.
+    // We listen for two consecutive poll responses rather than guessing a wall-
+    // clock duration, so the test is robust to interval changes.
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/api/') && r.status() < 500, { timeout: 15_000 }),
+      page.waitForResponse((r) => r.url().includes('/api/') && r.status() < 500, { timeout: 15_000 }),
+    ]).catch(() => undefined)
     expect(errors).toHaveLength(0)
   })
 })

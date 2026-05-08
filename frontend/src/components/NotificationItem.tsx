@@ -8,6 +8,7 @@ import {
   FiClock,
   FiBell,
   FiCheckCircle,
+  FiUserPlus,
   FiFlag,
   FiXCircle,
 } from 'react-icons/fi'
@@ -28,6 +29,7 @@ const ICON_MAP: Record<NotificationType, React.ElementType> = {
   service_reminder: FiClock,
   service_confirmation: FiCheckCircle,
   dispute_resolved: FiCheckCircle,
+  user_followed: FiUserPlus,
   new_report: FiFlag,
   report_received: FiFlag,
   report_resolved: FiCheckCircle,

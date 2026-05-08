@@ -7,7 +7,6 @@ import {
   Text,
   Input,
   Grid,
-  HStack,
   Spinner,
 } from '@chakra-ui/react'
 import {
@@ -28,22 +27,33 @@ import {
   FiLayers,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
+import { MapInfoStrip } from '@/components/MapInfoStrip'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useGeoStore } from '@/store/useGeoStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
+import ForYouCarousel from '@/components/ForYouCarousel'
+import ExploreCarousel from '@/components/ExploreCarousel'
+import { Avatar } from '@/components/Avatar'
+import RecommendationDebugBar from '@/components/RecommendationDebugBar'
 import type { Handshake } from '@/services/handshakeAPI'
+import DashboardTour from '@/components/dashboard-tour/DashboardTour'
 
 import {
   GREEN, GREEN_LT,
   AMBER, AMBER_LT,
   BLUE, BLUE_LT,
   RED, RED_LT,
-  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
+  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY800,
   WHITE,
 } from '@/theme/tokens'
-import { isNearlyFull } from '@/utils/eventUtils'
+import { formatGroupOfferDateTime, isNearlyFull } from '@/utils/eventUtils'
+import {
+  MAP_SCROLL_DEBOUNCE_MS,
+  nextMapCollapsedState,
+} from '@/utils/dashboardScroll'
 
 const TRANSPARENT = 'transparent'
 
@@ -51,6 +61,9 @@ const DEBOUNCE_SEARCH   = 400
 const DEBOUNCE_DISTANCE = 600
 const POLL_INTERVAL     = 60_000
 const GEO_TIMEOUT       = 10_000
+
+// Map collapse hysteresis constants are imported from utils/dashboardScroll
+// so they can be unit-tested without rendering the full dashboard.
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
@@ -92,13 +105,6 @@ function fmt(h: number | string | undefined | null) {
   const n = typeof h === 'string' ? parseFloat(h) : (h ?? 0)
   if (isNaN(n)) return '?'
   return Number.isInteger(n) ? String(n) : n.toFixed(1)
-}
-
-function initials(u?: { first_name?: string; last_name?: string; email?: string } | null) {
-  if (!u) return '?'
-  const f = u.first_name?.[0] ?? ''
-  const l = u.last_name?.[0] ?? ''
-  return (f || l) ? `${f}${l}`.toUpperCase() : (u.email?.[0] ?? '?').toUpperCase()
 }
 
 function fullName(u?: { first_name?: string; last_name?: string; email?: string } | null) {
@@ -144,22 +150,6 @@ function sortServicesByFeedPriority(a: Service, b: Service) {
 }
 
 // ─── Tiny reusable bits ───────────────────────────────────────────────────────
-
-function Avatar({ u, size = 36 }: { u?: { first_name?: string; last_name?: string; email?: string; avatar_url?: string } | null; size?: number }) {
-  return (
-    <Box
-      w={`${size}px`} h={`${size}px`} borderRadius="full" flexShrink={0}
-      bg={GREEN} color={WHITE} overflow="hidden"
-      display="flex" alignItems="center" justifyContent="center"
-      fontSize={`${Math.round(size * 0.34)}px`} fontWeight={700}
-    >
-      {u?.avatar_url
-        ? <img src={u.avatar_url} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        : initials(u)
-      }
-    </Box>
-  )
-}
 
 function Pill({ label, bg, color }: { label: string; bg: string; color: string }) {
   return (
@@ -245,7 +235,7 @@ function CardHeader({ service, gradient }: { service: Service; gradient: [string
 }
 
 function ServiceCard({
-  service, isOwn, handshake, incomingCount, pendingCount, onClick, onHover,
+  service, isOwn, handshake, incomingCount, pendingCount, onClick, onHover, dataTour,
 }: {
   service: Service
   isOwn: boolean
@@ -254,10 +244,12 @@ function ServiceCard({
   pendingCount: number
   onClick: () => void
   onHover?: () => void
+  dataTour?: string
 }) {
   const owner     = service.user ?? service.provider
   const isOffer   = service.type === 'Offer'
   const isRecurr  = service.schedule_type === 'Recurrent'
+  const isFixedGroupOffer = isOffer && service.schedule_type === 'One-Time' && service.max_participants > 1
   const gradient  = pickGradient(service)
 
   const showBadge = handshake && !(isRecurr && handshake.status === 'completed')
@@ -269,6 +261,7 @@ function ServiceCard({
       as="button" onClick={onClick} w="full" textAlign="left"
       onMouseEnter={onHover}
       onFocus={onHover}
+      data-tour={dataTour}
       bg={WHITE} borderRadius="16px"
       border="1px solid" borderColor={isOwn ? '#FED7AA' : GRAY200}
       overflow="hidden"
@@ -348,6 +341,9 @@ function ServiceCard({
               <Text fontSize="11px" color="#7C3AED" fontWeight={600} whiteSpace="nowrap">Recurring</Text>
             </Flex>
           )}
+          {isFixedGroupOffer && service.scheduled_time && (
+            <MetaChip icon={<FiCalendar size={10} />} label={formatGroupOfferDateTime(service.scheduled_time)} maxW="120px" />
+          )}
           {service.schedule_details && !isRecurr && (
             <MetaChip icon={<FiCalendar size={10} />} label={service.schedule_details} maxW="120px" />
           )}
@@ -398,6 +394,7 @@ const DashboardPage = () => {
   const [services, setServices]                     = useState<Service[]>([])
   const [allActiveServices, setAllActiveServices]   = useState<Service[]>([])
   const [mapOpen, setMapOpen]                       = useState(true)
+  const [mapCollapsed, setMapCollapsed]             = useState(false)
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
   const [userLocation, setUserLocation]             = useState<{ lat: number; lng: number } | null>(null)
@@ -411,10 +408,25 @@ const DashboardPage = () => {
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
   const [typeDropdownOpen, setTypeDropdownOpen]           = useState(false)
+  const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
+  const [rankingDebugEnabled, setRankingDebugEnabled] = useState(false)
 
   const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mapScrollTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const typeDropdownRef  = useRef<HTMLDivElement>(null)
+
+  const handleGridScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const top = e.currentTarget.scrollTop
+    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
+    mapScrollTimer.current = setTimeout(() => {
+      setMapCollapsed(prev => nextMapCollapsedState(prev, top))
+    }, MAP_SCROLL_DEBOUNCE_MS)
+  }, [])
+
+  useEffect(() => () => {
+    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
+  }, [])
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -428,10 +440,25 @@ const DashboardPage = () => {
     return () => { if (distanceTimer.current) clearTimeout(distanceTimer.current) }
   }, [distanceKm])
 
-  // Per #371 the ranking debug panel is admin-only and lives in the admin
-  // dashboard. The floating launcher and getRankingDebugAvailability poll
-  // were removed from the regular dashboard; non-admin clients no longer
-  // need to know whether the debug panel exists.
+  // Ranking debug bar (#476) lives back on the dashboard so admins can hover
+  // a card and see its Phase 2/3 breakdown live. The availability endpoint
+  // is admin-only per #371, so non-admins quietly get no result and the bar
+  // stays hidden. The PlatformSetting flag (toggled in the admin panel)
+  // controls whether the bar appears at all even for admins.
+  useEffect(() => {
+    let cancelled = false
+    serviceAPI
+      .getRankingDebugAvailability()
+      .then(({ enabled }) => {
+        if (!cancelled) setRankingDebugEnabled(Boolean(enabled))
+      })
+      .catch(() => {
+        if (!cancelled) setRankingDebugEnabled(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const fetchServices = useCallback(async (signal: AbortSignal) => {
     let raw: typeof services
@@ -501,6 +528,10 @@ const DashboardPage = () => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        useGeoStore.getState().setGeoLocation({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        })
         setLocationEnabled(true); localStorage.setItem('locationEnabled', 'true'); setLocationLoading(false)
       },
       (err) => {
@@ -631,6 +662,7 @@ const DashboardPage = () => {
 
               {/* Search */}
               <Flex
+                data-tour="search"
                 flex={1} align="center" gap={2}
                 bg={GRAY50} border={`1px solid ${GRAY200}`} borderRadius="10px"
                 px={3} overflow="hidden"
@@ -661,26 +693,28 @@ const DashboardPage = () => {
                 display={{ base: 'none', sm: 'flex' }}
                 flexShrink={0} align="center"
               >
-                {FILTERS.map((f) => (
-                  <Box
-                    key={f.id} as="button"
-                    onClick={() => setActiveFilter(f.id)}
-                    px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
-                    fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
-                    bg={activeFilter === f.id ? WHITE : 'transparent'}
-                    color={activeFilter === f.id ? GRAY800 : GRAY500}
-                    boxShadow={activeFilter === f.id ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
-                    cursor="pointer" transition="all 0.12s"
-                    display="flex" alignItems="center" gap="4px"
-                  >
-                    <Box color={activeFilter === f.id ? GREEN : GRAY400}>{f.icon}</Box>
-                    <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
-                  </Box>
-                ))}
+                <Flex data-tour="filters" gap="3px" align="center">
+                  {FILTERS.map((f) => (
+                    <Box
+                      key={f.id} as="button"
+                      onClick={() => setActiveFilter(f.id)}
+                      px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
+                      fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
+                      bg={activeFilter === f.id ? WHITE : 'transparent'}
+                      color={activeFilter === f.id ? GRAY800 : GRAY500}
+                      boxShadow={activeFilter === f.id ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                      cursor="pointer" transition="all 0.12s"
+                      display="flex" alignItems="center" gap="4px"
+                    >
+                      <Box color={activeFilter === f.id ? GREEN : GRAY400}>{f.icon}</Box>
+                      <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
+                    </Box>
+                  ))}
+                </Flex>
                 {/* Divider */}
                 <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
                 {/* Type filter icon button + dropdown */}
-                <Box position="relative" ref={typeDropdownRef as never}>
+                <Box data-tour="type-filter" position="relative" ref={typeDropdownRef as never}>
                   <Box
                     as="button"
                     onClick={() => setTypeDropdownOpen((v) => !v)}
@@ -730,6 +764,7 @@ const DashboardPage = () => {
               {/* Map toggle */}
               <Box
                 as="button" flexShrink={0}
+                data-tour="map-toggle"
                 px="11px" py="7px" borderRadius="9px"
                 bg={mapOpen ? GREEN : GRAY100}
                 color={mapOpen ? WHITE : GRAY600}
@@ -788,30 +823,30 @@ const DashboardPage = () => {
             </Flex>
           </Box>
 
-          {/* Map panel */}
+          {/* Map panel — collapses to a slim info strip when the feed scrolls
+              past a small threshold, so the feed reclaims the 280px the map
+              would otherwise hold. Tap the strip (or scroll back to top) to
+              re-expand. */}
           {mapOpen && (
-            <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0}>
-              <Flex align="center" px={5} py="10px" gap={4}>
-                <Text fontSize="12px" fontWeight={600} color={GRAY700}>Map View</Text>
-                <HStack gap={3} fontSize="11px" color={GRAY500}>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={GREEN} />Offers</Flex>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={BLUE} />Wants</Flex>
-                  <Flex align="center" gap="5px"><Box w="7px" h="7px" borderRadius="full" bg={AMBER} />Events</Flex>
-                </HStack>
-                {isLoading && services.length > 0 && (
-                  <Flex align="center" gap="5px" ml="auto">
-                    <Spinner size="xs" color="gray.400" />
-                    <Text fontSize="11px" color={GRAY400}>Refreshing</Text>
-                  </Flex>
-                )}
-              </Flex>
-              <MapView
-                services={displayServices}
-                height="280px"
-                onServiceClick={(id) => navigate(`/service-detail/${id}`)}
-                userLocation={userLocation}
+            mapCollapsed ? (
+              <MapInfoStrip
+                area={displayServices[0]?.location_area || null}
+                offerCount={displayServices.filter(s => s.type === 'Offer').length}
+                needCount={displayServices.filter(s => s.type === 'Need').length}
+                eventCount={displayServices.filter(s => s.type === 'Event').length}
+                onExpand={() => setMapCollapsed(false)}
               />
-            </Box>
+            ) : (
+              <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
+                <MapView
+                  services={displayServices}
+                  height="280px"
+                  onServiceClick={(id) => navigate(`/service-detail/${id}`)}
+                  userLocation={userLocation}
+                  isRefreshing={isLoading && services.length > 0}
+                />
+              </Box>
+            )
           )}
 
           {/* Results count */}
@@ -822,7 +857,16 @@ const DashboardPage = () => {
           </Box>
 
           {/* Grid */}
-          <Box flex={1} overflowY="auto" px={{ base: 3, md: 6 }} pt={2} pb={8}>
+          <Box
+            flex={1}
+            overflowY="auto"
+            px={{ base: 3, md: 6 }}
+            pt={2}
+            pb={8}
+            onScroll={handleGridScroll}
+          >
+            <ForYouCarousel />
+            <ExploreCarousel />
             {isLoading && displayServices.length === 0 ? (
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
             ) : fetchError && displayServices.length === 0 ? (
@@ -849,7 +893,7 @@ const DashboardPage = () => {
                 gap={4}
                 alignItems="stretch"
               >
-                {displayServices.map((service) => {
+                {displayServices.map((service, idx) => {
                   const owner    = service.user ?? service.provider
                   const isOwn    = !!user && owner?.id === user.id
                   const hs       = handshakeMap.get(service.id)
@@ -868,6 +912,12 @@ const DashboardPage = () => {
                       incomingCount={aCount}
                       pendingCount={pCount}
                       onClick={() => navigate(`/service-detail/${service.id}`)}
+                      onHover={
+                        rankingDebugEnabled
+                          ? () => setHoveredServiceId(service.id)
+                          : undefined
+                      }
+                      dataTour={idx === 0 ? 'listing-card' : undefined}
                     />
                   )
                 })}
@@ -876,6 +926,18 @@ const DashboardPage = () => {
           </Box>
         </Flex>
       </Box>
+      <DashboardTour />
+      {rankingDebugEnabled && (
+        <RecommendationDebugBar
+          services={displayServices}
+          hoveredServiceId={hoveredServiceId}
+          activeFilter={activeFilter}
+          search={debouncedSearch}
+          lat={userLocation?.lat}
+          lng={userLocation?.lng}
+          distance={debouncedDistance}
+        />
+      )}
     </Box>
   )
 }

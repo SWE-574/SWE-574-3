@@ -739,7 +739,12 @@ def create_demo_service(*, user, title, description, service_type, duration,
     print(f"  Created: {service.title}")
     return service
 
-manti_demo_time = now - timedelta(days=1, hours=2)
+# Keep at least three demo items in the future so the calendar always has near-future
+# content for screenshots and QA. The *_seed_time values above are also future, but
+# sync_fixed_group_offer_time() can override them — so we set manti_demo_time to
+# +3 days to ensure the accepted handshake (Zeynep) and the service itself remain
+# visible in the calendar view. (Spec §GAP-2 requirement.)
+manti_demo_time = now + timedelta(days=3)  # was: now - timedelta(days=1, hours=2)
 borek_demo_time = now - timedelta(days=3, hours=1)
 gardening_demo_time = now - timedelta(days=2, hours=3)
 photography_demo_time = now - timedelta(days=1, hours=5)
@@ -1354,7 +1359,7 @@ elif_photo_event = create_demo_service(
     location_lng=Decimal('28.9350'),
     max_participants=4,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=4, hours=7),
+    scheduled_time=now + timedelta(days=7),  # was: now + timedelta(days=4, hours=7); set to +7d for calendar QA
     schedule_details='Saturday morning, meets at Eyüp Ferry Dock at 08:00',
     tags=[photography_tag, art_tag],
     created_days_ago=5,

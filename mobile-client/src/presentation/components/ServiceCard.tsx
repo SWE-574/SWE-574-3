@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import type { Service } from "../../api/types";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
+import { formatGroupOfferDateTime } from "../../utils/eventUtils";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
@@ -49,6 +50,10 @@ export default function ServiceCard({
       .filter(Boolean)
       .join(" ") || "Unknown";
   const isRecurring = service.schedule_type === "Recurrent";
+  const isFixedGroupOffer =
+    service.type === "Offer" &&
+    service.schedule_type === "One-Time" &&
+    service.max_participants > 1;
 
   return (
     <View style={[styles.card, style]}>
@@ -137,6 +142,11 @@ export default function ServiceCard({
               <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
             </View>
           )}
+          {service.is_newcomer_owner && (
+            <View style={styles.newcomerBadge}>
+              <Text style={styles.newcomerBadgeText}>New</Text>
+            </View>
+          )}
         </View>
 
         <Text style={styles.description} numberOfLines={3}>
@@ -170,6 +180,18 @@ export default function ServiceCard({
                 color={colors.GRAY500}
               />
               <Text style={styles.tagText}>{service.schedule_details}</Text>
+            </View>
+          )}
+          {isFixedGroupOffer && service.scheduled_time && (
+            <View style={styles.tag}>
+              <Ionicons
+                name="calendar-clear-outline"
+                size={14}
+                color={colors.GRAY500}
+              />
+              <Text style={styles.tagText}>
+                {formatGroupOfferDateTime(service.scheduled_time)}
+              </Text>
             </View>
           )}
           {isRecurring && (
@@ -286,6 +308,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     color: colors.RED,
+  },
+  newcomerBadge: {
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: colors.PURPLE_LT,
+    marginLeft: 4,
+  },
+  newcomerBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.PURPLE,
   },
   typeOfferBadgeText: {
     fontSize: 11,

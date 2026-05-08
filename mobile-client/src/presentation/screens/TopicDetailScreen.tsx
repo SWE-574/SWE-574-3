@@ -147,7 +147,6 @@ function EditActionButtons({
   );
 }
 
-// ─── TopicHeader ─────────────────────────────────────────────────────────────
 
 interface TopicHeaderProps {
   topic: ForumTopic;
@@ -278,7 +277,6 @@ function TopicHeader({
   );
 }
 
-// ─── PostItem ────────────────────────────────────────────────────────────────
 
 interface PostItemProps {
   post: ForumPost;
@@ -370,7 +368,6 @@ function PostItem({
   );
 }
 
-// ─── TopicDetailScreen ───────────────────────────────────────────────────────
 
 export default function TopicDetailScreen() {
   const navigation = useNavigation<NavProp>();
@@ -789,7 +786,6 @@ export default function TopicDetailScreen() {
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {

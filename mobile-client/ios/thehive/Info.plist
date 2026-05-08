@@ -34,6 +34,7 @@
         <key>CFBundleURLSchemes</key>
         <array>
           <string>exp+the-hive</string>
+          <string>thehive</string>
         </array>
       </dict>
     </array>

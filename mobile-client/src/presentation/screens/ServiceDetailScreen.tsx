@@ -58,14 +58,18 @@ import {
   isEventFull,
   spotsLeft,
   isEventBanned,
+  formatGroupOfferDateTime,
 } from "../../utils/eventUtils";
 import type { Service } from "../../api/types";
 import { useAuth } from "../../context/AuthContext";
+import { useScreenCache } from "../../hooks/useScreenCache";
+import { ApiNetworkError } from "../../api/client";
 import { getMapboxToken } from "../../constants/env";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../constants/colors";
 import ImagePreviewModal from "../components/ImagePreviewModal";
+import SaveEndorseButtons from "../components/SaveEndorseButtons";
 import { ChatEvaluationModal } from "../components/chat/ChatEvaluationModal";
 import { EventEvaluationSummaryCard } from "../components/service/EventEvaluationSummaryCard";
 import ServiceCommentsSection from "../components/service/ServiceCommentsSection";
@@ -264,6 +268,11 @@ export default function ServiceDetailScreen() {
   );
 
   const { id } = route.params;
+  const cache = useScreenCache<Service>(
+    currentUser?.id ?? null,
+    `service-detail-${id}`,
+  );
+  const hydratedRef = useRef(false);
   const [service, setService] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -297,13 +306,26 @@ export default function ServiceDetailScreen() {
       setError(null);
       const next = await getService(id);
       setService(next);
+      cache.persist(next);
       return next;
     } catch (e) {
+      // Network failure: try the disk cache so the user sees the last
+      // version of this service they viewed instead of an error.
+      if (e instanceof ApiNetworkError) {
+        const seed = await cache.hydrate();
+        if (seed) {
+          setService(seed.data);
+          setError(null);
+          return seed.data;
+        }
+        setError("You are offline.");
+        throw e;
+      }
       const message = e instanceof Error ? e.message : "Failed to load";
       setError(message);
       throw e;
     }
-  }, [id]);
+  }, [id, cache]);
 
   const loadHandshakes = useCallback(async (targetService?: Service | null) => {
     const activeService = targetService;
@@ -355,8 +377,23 @@ export default function ServiceDetailScreen() {
 
   useEffect(() => {
     loadService()
+      .catch(() => {
+        /* loadService already wrote setError; nothing else to do */
+      })
       .finally(() => setLoading(false));
   }, [loadService]);
+
+  // Cold-start: paint the cached service immediately so the screen is not
+  // blank while the network round-trip resolves.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (!cache.enabled) return;
+    if (service) return;
+    hydratedRef.current = true;
+    cache.hydrate().then((seed) => {
+      if (seed) setService((prev) => prev ?? seed.data);
+    });
+  }, [cache, service]);
 
   useEffect(() => {
     if (!service) return;
@@ -831,6 +868,15 @@ export default function ServiceDetailScreen() {
     });
   };
 
+  const openRequesterPublicProfile = (handshake: Handshake) => {
+    const userId = getIdFromField(handshake.requester);
+    if (!userId) return;
+    navigation.navigate("Profile", {
+      screen: "PublicProfile",
+      params: { userId },
+    });
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
@@ -912,6 +958,10 @@ export default function ServiceDetailScreen() {
       .join(" ") || "Unknown";
   const initials = getInitials(service.user.first_name, service.user.last_name);
   const isRecurring = service.schedule_type === "Recurrent";
+  const isFixedGroupOffer =
+    service.type === "Offer" &&
+    service.schedule_type === "One-Time" &&
+    service.max_participants > 1;
   const createdLabel = formatScheduledDateTime(service.created_at);
   const serviceStatusLower = service.status?.toLowerCase();
 
@@ -939,9 +989,14 @@ export default function ServiceDetailScreen() {
       ? {
           key: "schedule",
           icon: "calendar-outline" as const,
-          text: `${service.schedule_type ?? ""}${
-            service.schedule_details ? ` · ${service.schedule_details}` : ""
-          }`,
+          text:
+            isFixedGroupOffer && service.scheduled_time
+              ? `${formatGroupOfferDateTime(service.scheduled_time)}${
+                  service.schedule_details ? ` · ${service.schedule_details}` : ""
+                }`
+              : `${service.schedule_type ?? ""}${
+                  service.schedule_details ? ` · ${service.schedule_details}` : ""
+                }`,
         }
       : null,
     isEvent && service.scheduled_time
@@ -1271,6 +1326,14 @@ export default function ServiceDetailScreen() {
             </View>
           </View>
 
+          <SaveEndorseButtons
+            service={service}
+            isOwner={isOwner}
+            onChange={(patch) =>
+              setService((prev) => (prev ? { ...prev, ...patch } : prev))
+            }
+          />
+
           <View style={styles.sectionBlock}>
             <Text style={styles.sectionLabel}>Description</Text>
             <Text style={styles.description}>{service.description || "—"}</Text>
@@ -1457,31 +1520,50 @@ export default function ServiceDetailScreen() {
 
                 {ownerIncomingHandshakes.length > 0 ? (
                   <View style={styles.ownerList}>
-                    {ownerIncomingHandshakes.map((handshake) => (
-                      <View key={handshake.id} style={styles.ownerRequestRow}>
-                        <View style={styles.ownerRequestMeta}>
-                          <Text style={styles.ownerRequestName}>
-                            {getHandshakeRequesterName(handshake)}
-                          </Text>
-                          <Text style={styles.ownerRequestSub}>
-                            {formatScheduledDateTime(handshake.created_at)} · {handshake.status}
-                          </Text>
+                    {ownerIncomingHandshakes.map((handshake) => {
+                      const requesterId = getIdFromField(handshake.requester);
+                      const requesterName = getHandshakeRequesterName(handshake);
+
+                      return (
+                        <View key={handshake.id} style={styles.ownerRequestRow}>
+                          <TouchableOpacity
+                            style={styles.ownerRequestMeta}
+                            onPress={() => openRequesterPublicProfile(handshake)}
+                            activeOpacity={0.72}
+                            disabled={!requesterId}
+                            accessibilityRole={requesterId ? "link" : undefined}
+                            accessibilityLabel={
+                              requesterId ? `View ${requesterName} profile` : undefined
+                            }
+                          >
+                            <View style={styles.ownerRequestNameRow}>
+                              <Text style={styles.ownerRequestName}>
+                                {requesterName}
+                              </Text>
+                              {requesterId ? (
+                                <Ionicons name="chevron-forward" size={15} color={colors.GRAY400} />
+                              ) : null}
+                            </View>
+                            <Text style={styles.ownerRequestSub}>
+                              {formatScheduledDateTime(handshake.created_at)} · {handshake.status}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.chatActionButton}
+                            onPress={() =>
+                              openChatForHandshake(
+                                handshake,
+                                displayName,
+                                service.user.avatar_url,
+                              )
+                            }
+                          >
+                            <Ionicons name="chatbubble-ellipses-outline" size={15} color={colors.WHITE} />
+                            <Text style={styles.chatActionButtonText}>Chat</Text>
+                          </TouchableOpacity>
                         </View>
-                        <TouchableOpacity
-                          style={styles.chatActionButton}
-                          onPress={() =>
-                            openChatForHandshake(
-                              handshake,
-                              displayName,
-                              service.user.avatar_url,
-                            )
-                          }
-                        >
-                          <Ionicons name="chatbubble-ellipses-outline" size={15} color={colors.WHITE} />
-                          <Text style={styles.chatActionButtonText}>Chat</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
+                      );
+                    })}
                   </View>
                 ) : (
                   <Text style={styles.ownerEmptyText}>No incoming requests yet.</Text>
@@ -1490,7 +1572,6 @@ export default function ServiceDetailScreen() {
             </View>
           ) : null}
 
-          {/* ─── Event lifecycle CTA ─── */}
           {isEvent && !isOwner && (() => {
             const status = myEventHandshake?.status;
             const banned = isEventBanned(currentUser?.is_organizer_banned_until);
@@ -1581,7 +1662,6 @@ export default function ServiceDetailScreen() {
             return null;
           })()}
 
-          {/* ─── Non-event: Express Interest ─── */}
           {!isEvent && !isOwner && (
             <>
             {showOpenChat && myHandshake ? (
@@ -2617,6 +2697,11 @@ const getStyles = (topInset: number, bottomInset: number) =>
     },
     ownerRequestMeta: {
       flex: 1,
+    },
+    ownerRequestNameRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
     },
     ownerRequestName: {
       fontSize: 14,

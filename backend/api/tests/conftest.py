@@ -1,6 +1,44 @@
 import pytest
 
 
+def pytest_collection_modifyitems(config, items):
+    """Network isolation policy.
+
+    Both unit and integration tests are restricted to loopback so external
+    HTTP cannot leak into the suite. The in-process Redis cache, postgres
+    test DB, and MinIO setup all need 127.0.0.1; anything beyond that is a
+    test smell. Websocket-marked tests are exempt because Channels' in-memory
+    communicator opens an internal socket pair on some platforms.
+    """
+    try:
+        import pytest_socket  # noqa: F401
+    except ImportError:
+        return
+
+    LOOPBACK = ['127.0.0.1', '::1', 'localhost']
+    for item in items:
+        if 'websocket' in item.keywords:
+            continue
+        if 'unit' in item.keywords or 'integration' in item.keywords:
+            item.add_marker(pytest.mark.allow_hosts(LOOPBACK))
+
+
+@pytest.fixture(autouse=True)
+def _assert_in_memory_channels(request, settings):
+    """Unit tests must use the in-memory channel layer.
+
+    Hitting Redis from unit tests is a leak — slow, flaky, and silently
+    coupled to whatever else is in the layer. Reset to in-memory at the
+    start of every unit test so a misconfigured CI environment cannot sneak
+    by.
+    """
+    if 'unit' not in request.keywords:
+        return
+    settings.CHANNEL_LAYERS = {
+        'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'},
+    }
+
+
 @pytest.fixture(autouse=True)
 def seed_badges(db):
     """Pre-create all badge rows so that check_and_assign_badges() never hits

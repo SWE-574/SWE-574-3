@@ -4,7 +4,7 @@ Unit tests for Django signals
 import pytest
 from unittest.mock import patch
 
-from api.models import Service, Comment, ReputationRep, ChatRoom
+from api.models import Service, Comment, ReputationRep, ChatRoom, ScoreAuditLog
 from api.tests.helpers.factories import (
     ServiceFactory, CommentFactory, ReputationRepFactory, HandshakeFactory, UserFactory
 )
@@ -70,3 +70,33 @@ class TestSilentErrorLogged:
         call_args = mock_logger.exception.call_args
         assert 'hot_score update failed' in call_args[0][0]
         assert call_args[0][1] == service.pk
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestServiceDeleteCascade:
+    """Deleting a Service must not raise an FK violation via the
+    ScoreAuditLog write that the post_delete handlers on its children
+    (Comment, ReputationRep, NegativeRep) would otherwise enqueue.
+    """
+
+    def test_delete_service_with_comments_does_not_violate_fk(self):
+        service = ServiceFactory(status='Active', type='Offer')
+        CommentFactory(service=service)
+        CommentFactory(service=service)
+
+        # No IntegrityError at COMMIT.
+        service.delete()
+
+        assert not Service.objects.filter(pk=service.pk).exists()
+        assert not ScoreAuditLog.objects.filter(service_id=service.pk).exists()
+
+    def test_bulk_delete_services_does_not_violate_fk(self):
+        s1 = ServiceFactory(status='Active', type='Offer')
+        s2 = ServiceFactory(status='Active', type='Offer')
+        CommentFactory(service=s1)
+        CommentFactory(service=s2)
+
+        Service.objects.filter(pk__in=[s1.pk, s2.pk]).delete()
+
+        assert not Service.objects.filter(pk__in=[s1.pk, s2.pk]).exists()
