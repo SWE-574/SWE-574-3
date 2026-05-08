@@ -21,6 +21,8 @@ from .views import (
     UserVerifiedReviewsView,
     SuggestedUsersView,
     ActivityFeedView,
+    PulseStatsView,
+    PulseVisitView,
     UserFollowView,
     UserFollowersListView,
     UserFollowingListView,
@@ -349,6 +351,10 @@ urlpatterns = [
     # Activity feed (#482) — chronological events from followed actors and
     # actors within the configured proximity radius of the viewer.
     path('activity/feed/', ActivityFeedView.as_view(), name='activity-feed'),
+
+    # Pulse — personal stats row + visit tracking.
+    path('pulse/stats/', PulseStatsView.as_view(), name='pulse-stats'),
+    path('pulse/visit/', PulseVisitView.as_view(), name='pulse-visit'),
 
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

@@ -2200,7 +2200,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
         recency penalty and CTR proxy.
         """
         from .models import ForYouEvent
-        from .ranking_personalized import record_impressions, score_for_you
+        from .ranking_personalized import (
+            apply_mmr_diversification, record_impressions, score_for_you,
+        )
 
         viewer = request.user
         is_eligible = (
@@ -2220,8 +2222,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
             pass
 
         queryset = self.filter_queryset(self.get_queryset())
+        # Hard-exclude services the viewer has dismissed via Pulse's
+        # "Not interested" action; the dismissal is private to this viewer.
+        queryset = queryset.exclude(dismissed_by__viewer=viewer)
         candidates = list(queryset[:200])
         scored = score_for_you(candidates, viewer)
+        # Diversify the head of the ranked list by tag overlap so the
+        # user doesn't see five near-duplicates back-to-back.
+        scored = apply_mmr_diversification(scored)
         limit = int(getattr(settings, 'RANKING_FOR_YOU_LIMIT', 10))
         top = scored[:limit]
 
@@ -2281,15 +2289,21 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
         )
 
-        # Save list-time annotation so the serializer's is_saved field doesn't
-        # fire one query per service in list responses. Detail view uses the
-        # per-row fallback in the serializer (one query is fine there).
-        from .models import SavedService
+        # Save / Dismiss list-time annotations so the serializer's per-viewer
+        # fields don't fire one query per service in list responses. Detail
+        # view uses the per-row fallback in the serializer (one query is fine
+        # there).
+        from .models import SavedService, ServiceDismissal
         if self.request.user.is_authenticated:
             queryset = queryset.annotate(
                 is_saved_anno=Exists(
                     SavedService.objects.filter(
                         user=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_dismissed_anno=Exists(
+                    ServiceDismissal.objects.filter(
+                        viewer=self.request.user, service=OuterRef('pk'),
                     ),
                 ),
             )
@@ -2320,15 +2334,20 @@ class ServiceViewSet(viewsets.ModelViewSet):
             # Surface the field-level error instead of swallowing it.
             raise drf_serializers.ValidationError({exc.field: exc.message})
 
+        user_param = self.request.query_params.get('user')
+
         # Onboarding tag fallback (#478): when an onboarded viewer with
         # declared skills hits the feed without an explicit tag filter,
         # prefer services tagged with their skills and top up from the
         # explore pool when too few match. Annotates `source` for the UI.
+        # Skipped when ?user= is set: profile pages must show every active
+        # service the owner has, regardless of whether the tags overlap the
+        # viewer's declared skills.
         explicit_tag = (
             self.request.query_params.get('tag')
             or self.request.query_params.getlist('tags')
         )
-        if not explicit_tag:
+        if not explicit_tag and not user_param:
             from .ranking import apply_onboarding_fallback
             queryset, _ = apply_onboarding_fallback(
                 queryset,
@@ -2347,7 +2366,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
             eligible_ids = [s.id for s in (*cold, *under, *stale)]
             queryset = queryset.filter(id__in=eligible_ids)
 
-        user_param = self.request.query_params.get('user')
         # Filter by owner user (for profile pages)
         if user_param:
             queryset = queryset.filter(user_id=user_param)
@@ -2359,10 +2377,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 scheduled_time__isnull=False,
                 scheduled_time__lte=timezone.now(),
             )
+            # Past events: drop anything whose scheduled_time has passed,
+            # OR that an organiser has manually marked completed.
             queryset = queryset.exclude(
                 type='Event',
                 scheduled_time__isnull=False,
                 scheduled_time__lte=timezone.now(),
+            )
+            queryset = queryset.exclude(
+                type='Event',
+                event_completed_at__isnull=False,
             )
         
         # Apply ordering based on sort parameter
@@ -2723,6 +2747,28 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 release_timebank_for_need_service(instance)
             instance.status = 'Cancelled'
             instance.save(update_fields=['status', 'updated_at'])
+
+            denied_user_ids = list(
+                instance.handshakes
+                .filter(status='denied')
+                .values_list('requester_id', flat=True)
+                .distinct()
+            )
+
+        if denied_user_ids:
+            denied_users = User.objects.in_bulk(denied_user_ids)
+            for requester_id in denied_user_ids:
+                u = denied_users.get(requester_id)
+                if u is None:
+                    continue
+                create_notification(
+                    user=u,
+                    notification_type='handshake_cancelled',
+                    title='Group offer cancelled',
+                    message=f"The offer '{instance.title}' was cancelled by the organiser.",
+                    service=instance,
+                )
+
         invalidate_service_lists()
         invalidate_user_services(str(instance.user.id))
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -2752,6 +2798,34 @@ class ServiceViewSet(viewsets.ModelViewSet):
             user=request.user, service=service,
         )
         return Response({'is_saved': True})
+
+    @action(
+        detail=True,
+        methods=['post', 'delete'],
+        url_path='dismiss',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def dismiss(self, request, pk=None):
+        """Toggle a per-viewer 'Not interested' dismissal on a service.
+
+        POST creates a ServiceDismissal row (idempotent on the unique
+        constraint). DELETE removes it. The dismissal is private to the
+        viewer and hard-excludes the service from their personalised feed
+        (see ranking_personalized.score_for_you).
+        """
+        from .models import ServiceDismissal
+
+        service = self.get_object()
+        if request.method == 'DELETE':
+            ServiceDismissal.objects.filter(
+                viewer=request.user, service=service,
+            ).delete()
+            return Response({'is_dismissed': False})
+
+        ServiceDismissal.objects.get_or_create(
+            viewer=request.user, service=service,
+        )
+        return Response({'is_dismissed': True})
 
     @action(
         detail=False,
@@ -7644,6 +7718,7 @@ class SuggestedUsersView(generics.ListAPIView):
             User.objects
             .filter(is_active=True)
             .exclude(pk=viewer.pk)
+            .exclude(role__in=['admin', 'moderator', 'super_admin'])
         )
         if followed_ids:
             qs = qs.exclude(pk__in=followed_ids)
@@ -7830,3 +7905,99 @@ class ActivityFeedView(generics.ListAPIView):
             if ev.verb != ActivityEvent.HANDSHAKE_COMPLETED:
                 continue
             ev._completed_handshake = latest_by_key.get((ev.service_id, ev.actor_id))
+
+
+class PulseStatsView(APIView):
+    """GET /api/pulse/stats/ — counts that drive the personal stats row.
+
+    Returns three integers (capped at 99 each, so the UI renders a single
+    chip per number):
+
+    - new_since_last_visit: services tagged with one of the viewer's skills
+      that have been posted since the viewer's last Pulse visit (defaults to
+      the past 7 days when last_pulse_visit_at is null). Excludes the viewer's
+      own services.
+    - saved_count: total saved services for this viewer.
+    - follow_handshakes_week: handshake-accepted/completed events from people
+      the viewer follows in the past 7 days.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import (
+            ActivityEvent, SavedService, Service, UserFollow,
+        )
+
+        viewer = request.user
+        now = timezone.now()
+        last_visit = viewer.last_pulse_visit_at or (now - timedelta(days=7))
+
+        skill_ids = list(viewer.skills.values_list('id', flat=True))
+        if skill_ids:
+            new_since_last_visit = (
+                Service.objects
+                .filter(
+                    status='Active', is_visible=True,
+                    created_at__gt=last_visit,
+                    tags__id__in=skill_ids,
+                )
+                .exclude(user=viewer)
+                .distinct()
+                .count()
+            )
+        else:
+            new_since_last_visit = 0
+
+        saved_count = SavedService.objects.filter(user=viewer).count()
+
+        week_ago = now - timedelta(days=7)
+        followed_ids = list(
+            UserFollow.objects
+            .filter(follower=viewer)
+            .values_list('following_id', flat=True)
+        )
+        # A handshake "from your follows" is one where either the requester
+        # (actor) is someone you follow OR the service belongs to someone you
+        # follow. Both sides are visible activity from the viewer's network.
+        follow_handshakes_week = (
+            ActivityEvent.objects
+            .filter(
+                verb__in=[
+                    ActivityEvent.HANDSHAKE_ACCEPTED,
+                    ActivityEvent.HANDSHAKE_COMPLETED,
+                ],
+                created_at__gte=week_ago,
+            )
+            .filter(
+                Q(actor_id__in=followed_ids)
+                | Q(service__user_id__in=followed_ids),
+            )
+            .count()
+        )
+
+        return Response({
+            'new_since_last_visit': min(new_since_last_visit, 99),
+            'saved_count': min(saved_count, 99),
+            'follow_handshakes_week': min(follow_handshakes_week, 99),
+        })
+
+
+class PulseVisitView(APIView):
+    """POST /api/pulse/visit/ — records that the viewer just opened Pulse.
+
+    Updates last_pulse_visit_at on the user, which drives the
+    "new_since_last_visit" count. The frontend calls this on page mount
+    (or unload, depending on whichever is later wins client-side).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from django.utils import timezone
+
+        request.user.last_pulse_visit_at = timezone.now()
+        request.user.save(update_fields=['last_pulse_visit_at'])
+        return Response({
+            'last_pulse_visit_at': request.user.last_pulse_visit_at.isoformat(),
+        })

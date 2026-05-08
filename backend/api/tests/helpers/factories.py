@@ -12,6 +12,7 @@ from api.models import (
     Comment, NegativeRep, TransactionHistory, Badge, UserBadge,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia, ServiceGroupChatMessage,
     ChatRoom, PublicChatMessage, Notification,
+    SavedService, ServiceDismissal,
 )
 
 User = get_user_model()
@@ -275,3 +276,23 @@ class NotificationFactory(factory.django.DjangoModelFactory):
     title = factory.Faker('sentence', nb_words=4)
     message = factory.Faker('sentence', nb_words=8)
     is_read = False
+
+
+class SavedServiceFactory(factory.django.DjangoModelFactory):
+    """Factory for creating SavedService (private bookmark) instances"""
+    class Meta:
+        model = SavedService
+
+    user = factory.SubFactory(UserFactory)
+    service = factory.SubFactory(ServiceFactory)
+
+
+class ServiceDismissalFactory(factory.django.DjangoModelFactory):
+    """Factory for creating ServiceDismissal (private "Not interested") instances"""
+    class Meta:
+        model = ServiceDismissal
+
+    viewer = factory.SubFactory(UserFactory)
+    service = factory.SubFactory(ServiceFactory)
+
+

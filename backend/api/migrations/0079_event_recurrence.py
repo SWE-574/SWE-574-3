@@ -26,6 +26,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('api', '0078_drop_endorsement'),
+        ('api', '0078_merge_20260508_1230'),
     ]
 
     operations = [

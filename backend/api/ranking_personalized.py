@@ -68,6 +68,48 @@ def tag_overlap(service, viewer) -> float:
     return len(intersection) / len(union)
 
 
+def engagement_signal(
+    service_tag_qids: set, saved_tag_qids: set,
+) -> float:
+    """Jaccard overlap between the candidate's tags and the aggregate tag
+    set of services the viewer has saved (private bookmarks).
+
+    Completed handshakes are deliberately excluded — they would anchor the
+    viewer too tightly to past collaborations.
+
+    Returns a value in [0, 1].
+    """
+    if not saved_tag_qids or not service_tag_qids:
+        return 0.0
+    intersection = service_tag_qids & saved_tag_qids
+    union = service_tag_qids | saved_tag_qids
+    if not union:
+        return 0.0
+    return len(intersection) / len(union)
+
+
+def dismissed_similarity(
+    service_tag_qids: set, dismissed_tag_qids: set,
+) -> float:
+    """Jaccard overlap between the candidate's tags and the aggregate tag
+    set of services the viewer has dismissed.
+
+    Used as a soft penalty in the blend; the existing hard exclusion in
+    the list view still removes the exact dismissed services from the
+    candidate set, so this only affects services *like* the dismissed
+    ones.
+
+    Returns a value in [0, 1].
+    """
+    if not dismissed_tag_qids or not service_tag_qids:
+        return 0.0
+    intersection = service_tag_qids & dismissed_tag_qids
+    union = service_tag_qids | dismissed_tag_qids
+    if not union:
+        return 0.0
+    return len(intersection) / len(union)
+
+
 def follow_affinity(service, boosts: dict) -> float:
     """Return the social proximity boost for the service's owner.
     Boosts come from api.services.get_social_proximity_boosts(viewer_id):
@@ -117,27 +159,39 @@ def blend_for_you_score(
     follow: float,
     cooccur: float,
     recency_penalty_value: float,
+    engagement: float = 0.0,
+    dismissed_similarity_value: float = 0.0,
 ) -> tuple[float, dict]:
     """Additive blend on top of hot_score using the configured weights.
     Returns (score, signals_dict) so the caller can serialize per-card
     signal breakdowns for the admin debug surface.
+
+    `engagement` and `dismissed_similarity_value` are optional and
+    default to 0.0 so callers that haven't been threaded through the
+    new pre-fetch (older tests, the cooccur builder) keep working.
     """
     w_tag = float(getattr(settings, 'RANKING_FOR_YOU_TAG_WEIGHT', 0.3))
     w_follow = float(getattr(settings, 'RANKING_FOR_YOU_FOLLOW_WEIGHT', 0.4))
     w_cooccur = float(getattr(settings, 'RANKING_FOR_YOU_COOCCUR_WEIGHT', 0.2))
     w_recency = float(getattr(settings, 'RANKING_FOR_YOU_RECENCY_WEIGHT', 0.1))
+    w_engagement = float(getattr(settings, 'RANKING_FOR_YOU_ENGAGEMENT_WEIGHT', 0.25))
+    w_dismissed = float(getattr(settings, 'RANKING_FOR_YOU_DISMISSED_SIMILARITY_WEIGHT', 0.20))
     score = (
         float(hot_score)
         + w_tag * tag
         + w_follow * follow
         + w_cooccur * cooccur
         - w_recency * recency_penalty_value
+        + w_engagement * engagement
+        - w_dismissed * dismissed_similarity_value
     )
     return score, {
         'tag': tag,
         'follow': follow,
         'cooccur': cooccur,
         'recency_penalty': recency_penalty_value,
+        'engagement': engagement,
+        'dismissed_similarity': dismissed_similarity_value,
     }
 
 
@@ -243,6 +297,26 @@ def record_impressions(viewer_id, service_ids) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _aggregate_tag_qids_for_services(service_ids) -> set:
+    """Return the union of tag QIDs and their parent_qids for the given
+    service ids. Empty set when the input is empty.
+    """
+    from .models import Tag
+
+    if not service_ids:
+        return set()
+    rows = Tag.objects.filter(service__id__in=service_ids).values_list(
+        'id', 'parent_qid',
+    ).distinct()
+    qids: set = set()
+    for tid, parent in rows:
+        if tid:
+            qids.add(tid)
+        if parent:
+            qids.add(parent)
+    return qids
+
+
 def score_for_you(services, viewer) -> list[tuple]:
     """Score a list of candidate services for the viewer.
 
@@ -250,10 +324,13 @@ def score_for_you(services, viewer) -> list[tuple]:
     descending. Anonymous viewers fall back to hot_score-only ordering.
 
     All viewer-aware lookups (social proximity, viewer history, impressions,
-    cooccurrence rows) are issued exactly once and joined in Python so this
-    stays O(N) per request in the size of the candidate set.
+    cooccurrence rows, saved/dismissed tag aggregates) are issued exactly
+    once and joined in Python so this stays O(N) per request in the size
+    of the candidate set.
     """
-    from .models import Handshake, HandshakeCooccurrence
+    from .models import (
+        Handshake, HandshakeCooccurrence, SavedService, ServiceDismissal,
+    )
     from .services import get_social_proximity_boosts
 
     services = list(services)
@@ -272,6 +349,24 @@ def score_for_you(services, viewer) -> list[tuple]:
                 requester_id=viewer_id, status='completed',
             ).values_list('service_id', flat=True)
         )
+
+    # Pre-fetch saved + dismissed service tag aggregates for the new
+    # engagement / dismissed_similarity signals. Saves only.
+    saved_tag_qids: set = set()
+    dismissed_tag_qids: set = set()
+    if viewer_id:
+        saved_ids = list(
+            SavedService.objects.filter(user_id=viewer_id).values_list(
+                'service_id', flat=True,
+            )
+        )
+        saved_tag_qids = _aggregate_tag_qids_for_services(saved_ids)
+        dismissed_ids = list(
+            ServiceDismissal.objects.filter(viewer_id=viewer_id).values_list(
+                'service_id', flat=True,
+            )
+        )
+        dismissed_tag_qids = _aggregate_tag_qids_for_services(dismissed_ids)
 
     # Cooccurrence lookup keyed both directions for O(1) access.
     candidate_ids = [s.id for s in services]
@@ -297,6 +392,12 @@ def score_for_you(services, viewer) -> list[tuple]:
         follow = follow_affinity(svc, boosts)
         cooccur = cooccurrence_signal(svc, viewer_history_ids, cooccur_lookup)
 
+        # Compute the candidate's tag set once and reuse for all
+        # tag-overlap-shaped signals.
+        svc_tag_qids = _service_tag_qids(svc)
+        engagement = engagement_signal(svc_tag_qids, saved_tag_qids)
+        dismissed = dismissed_similarity(svc_tag_qids, dismissed_tag_qids)
+
         last_seen = impressions.get(str(svc.id))
         seconds_since = (now - last_seen) if last_seen else None
         recency = recency_penalty(seconds_since, half_life_hours)
@@ -307,8 +408,75 @@ def score_for_you(services, viewer) -> list[tuple]:
             follow=follow,
             cooccur=cooccur,
             recency_penalty_value=recency,
+            engagement=engagement,
+            dismissed_similarity_value=dismissed,
         )
         scored.append((svc, score, signals))
 
     scored.sort(key=lambda triple: triple[1], reverse=True)
     return scored
+
+
+def apply_mmr_diversification(
+    scored, lambda_: float | None = None, top_k: int | None = None,
+) -> list[tuple]:
+    """Re-rank the top-K candidates by Maximal Marginal Relevance so the
+    visible feed isn't dominated by near-duplicates of a single tag
+    cluster.
+
+    For each pick, the adjusted score is:
+        original_score - lambda * max(jaccard(candidate, selected))
+    where jaccard is over the parent-expanded tag set. Tag overlap is
+    the only diversity axis — service type and owner are intentionally
+    not penalized so a small community where one prolific neighbor
+    posts a lot doesn't get suppressed.
+
+    `scored` is the list returned by score_for_you (triples of
+    (service, score, signals)). Anything past `top_k` is left in its
+    original order.
+    """
+    if lambda_ is None:
+        lambda_ = float(getattr(settings, 'RANKING_FOR_YOU_MMR_LAMBDA', 0.3))
+    if top_k is None:
+        top_k = int(getattr(settings, 'RANKING_FOR_YOU_MMR_TOP_K', 20))
+    if lambda_ <= 0 or top_k <= 1 or len(scored) <= 1:
+        return scored
+
+    head = scored[:top_k]
+    tail = scored[top_k:]
+
+    # Cache each candidate's parent-expanded tag set once.
+    tag_sets: list[set] = [_service_tag_qids(triple[0]) for triple in head]
+
+    selected: list[tuple] = []
+    selected_indices: set[int] = set()
+    remaining = list(range(len(head)))
+
+    while remaining:
+        best_idx = None
+        best_adjusted = None
+        for idx in remaining:
+            svc_tags = tag_sets[idx]
+            if selected_indices and svc_tags:
+                max_sim = 0.0
+                for sel_idx in selected_indices:
+                    sel_tags = tag_sets[sel_idx]
+                    if not sel_tags:
+                        continue
+                    union = svc_tags | sel_tags
+                    if not union:
+                        continue
+                    sim = len(svc_tags & sel_tags) / len(union)
+                    if sim > max_sim:
+                        max_sim = sim
+            else:
+                max_sim = 0.0
+            adjusted = head[idx][1] - lambda_ * max_sim
+            if best_adjusted is None or adjusted > best_adjusted:
+                best_adjusted = adjusted
+                best_idx = idx
+        selected.append(head[best_idx])
+        selected_indices.add(best_idx)
+        remaining.remove(best_idx)
+
+    return selected + tail

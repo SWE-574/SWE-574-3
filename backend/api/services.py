@@ -24,7 +24,12 @@ from .utils import (
     notify_reporter_of_receipt,
     notify_reporter_of_state_change,
 )
-from .cache_utils import invalidate_conversations, invalidate_transactions
+from .cache_utils import (
+    invalidate_conversations,
+    invalidate_service_lists,
+    invalidate_transactions,
+    invalidate_user_services,
+)
 
 
 def _to_bool(value):
@@ -276,11 +281,57 @@ class HandshakeService:
         """Validates service hasn't reached max_participants."""
         capacity_statuses = HandshakeService._capacity_statuses(service)
         current_participants = Handshake.objects.filter(service=service, status__in=capacity_statuses).count()
-        
+
         if current_participants >= service.max_participants:
             raise ValueError(
                 f'Service has reached maximum capacity ({service.max_participants} participants)'
             )
+
+    @staticmethod
+    def _enforce_capacity(service: Service, exclude_handshake_id=None) -> None:
+        """Re-check capacity inside a state transition, raising HandshakeServiceError on overflow.
+
+        Caller must hold a row lock on ``service`` (via ``select_for_update``)
+        so two concurrent transitions can't both pass this check.
+        """
+        from .exceptions import ErrorCodes
+
+        capacity_statuses = HandshakeService._capacity_statuses(service)
+        qs = Handshake.objects.filter(service=service, status__in=capacity_statuses)
+        if exclude_handshake_id is not None:
+            qs = qs.exclude(pk=exclude_handshake_id)
+        if qs.count() >= service.max_participants:
+            raise HandshakeServiceError(
+                f'Service has reached maximum capacity ({service.max_participants} participants)',
+                code=ErrorCodes.INVALID_STATE,
+            )
+
+    @staticmethod
+    def _close_remaining_when_full(service: Service, just_accepted_handshake: Handshake) -> list:
+        """When capacity is reached on a One-Time service, deny other pending
+        requesters and move the service into ``Agreed``. Returns the list of
+        denied requester ids so the caller can fan out notifications outside
+        the transaction.
+        """
+        if service.schedule_type != 'One-Time':
+            return []
+
+        accepted_count = Handshake.objects.filter(
+            service=service,
+            status__in=HandshakeService._capacity_statuses(service),
+        ).count()
+        if accepted_count < service.max_participants:
+            return []
+
+        other_pending = Handshake.objects.filter(
+            service=service, status='pending',
+        ).exclude(pk=just_accepted_handshake.pk)
+        denied_ids = list(other_pending.values_list('requester_id', flat=True))
+        other_pending.update(status='denied')
+
+        if service.status == 'Active':
+            Service.objects.filter(pk=service.pk).update(status='Agreed')
+        return denied_ids
     
     @staticmethod
     def _check_existing_handshake(service: Service, user: User) -> None:
@@ -620,6 +671,7 @@ class HandshakeService:
                 .select_related('service', 'requester', 'service__user')
                 .get(pk=handshake.pk)
             )
+            service = Service.objects.select_for_update().get(pk=handshake.service_id)
 
             if handshake.requester != user:
                 raise HandshakeServiceError(
@@ -632,6 +684,8 @@ class HandshakeService:
                 raise HandshakeServiceError(
                     'Provider must initiate the handshake first', code=ErrorCodes.INVALID_STATE,
                 )
+
+            HandshakeService._enforce_capacity(service, exclude_handshake_id=handshake.pk)
             # Online sessions do not share an exact location, but in-person sessions still require it.
             requires_exact_location = handshake.service.location_type != 'Online'
             if requires_exact_location:
@@ -664,6 +718,8 @@ class HandshakeService:
             handshake.status = 'accepted'
             handshake.requester_initiated = True
             handshake.save()
+
+            denied_user_ids = HandshakeService._close_remaining_when_full(service, handshake)
 
             from django.utils import timezone as tz
             from datetime import timedelta as _timedelta
@@ -723,13 +779,37 @@ class HandshakeService:
                         service=handshake.service,
                     )
 
+        if denied_user_ids:
+            users_by_id = User.objects.in_bulk(denied_user_ids)
+            for requester_id in denied_user_ids:
+                u = users_by_id.get(requester_id)
+                if u is None:
+                    continue
+                create_notification(
+                    user=u,
+                    notification_type='handshake_denied',
+                    title='Request Not Accepted',
+                    message=f"All slots for '{handshake.service.title}' are now filled.",
+                    service=handshake.service,
+                )
+                invalidate_conversations(str(requester_id))
+
+        invalidate_service_lists()
+        invalidate_user_services(str(handshake.service.user_id))
+
         return handshake, approve_msg
 
     @staticmethod
     def accept(handshake: Handshake, user: User) -> Handshake:
         """
-        Service provider accepts a pending handshake (Need/Offer without the
-        initiate→approve flow, or when provider is the one accepting interest).
+        Service provider accepts a pending handshake.
+
+        For ``Event`` services, this is the canonical path: the provider can
+        directly accept an interested participant.
+
+        For ``Offer`` and ``Need`` services, the provider MUST first initiate
+        session details so the requester can review and approve them. Direct
+        accept on Offer/Need is rejected to enforce the propose→approve flow.
 
         Raises:
             HandshakeServiceError: On permission or business rule violations.
@@ -744,6 +824,14 @@ class HandshakeService:
         if handshake.status != 'pending':
             raise HandshakeServiceError('Handshake is not pending', code=ErrorCodes.INVALID_STATE)
 
+        if handshake.service.type in ('Offer', 'Need'):
+            err = HandshakeServiceError(
+                'Set session details first via Initiate so the requester can review and approve.',
+                code=ErrorCodes.INVALID_STATE,
+            )
+            err.extra = {'requires_initiate': True}
+            raise err
+
         try:
             ensure_accepted_handshake_reservation(handshake)
         except ValueError as exc:
@@ -752,43 +840,36 @@ class HandshakeService:
             ) from exc
 
         service = handshake.service
+        denied_user_ids: list = []
         with transaction.atomic():
+            service = Service.objects.select_for_update().get(pk=service.pk)
+
+            HandshakeService._enforce_capacity(service, exclude_handshake_id=handshake.pk)
+
             handshake.status = 'accepted'
             handshake.save()
 
-            if service.schedule_type == 'One-Time':
-                accepted_count = Handshake.objects.filter(
+            denied_user_ids = HandshakeService._close_remaining_when_full(service, handshake)
+
+        if denied_user_ids:
+            users_by_id = User.objects.in_bulk(denied_user_ids)
+            for requester_id in denied_user_ids:
+                u = users_by_id.get(requester_id)
+                if u is None:
+                    continue
+                create_notification(
+                    user=u,
+                    notification_type='handshake_denied',
+                    title='Request Not Accepted',
+                    message=f"All slots for '{service.title}' are now filled.",
                     service=service,
-                    status__in=['accepted', 'completed', 'reported', 'paused'],
-                ).count()
-
-                if accepted_count >= service.max_participants:
-                    other_pending = Handshake.objects.filter(
-                        service=service, status='pending',
-                    ).exclude(pk=handshake.pk)
-
-                    denied_requesters = list(other_pending.values_list('requester_id', flat=True))
-                    other_pending.update(status='denied')
-
-                    users_by_id = User.objects.in_bulk(denied_requesters)
-                    for requester_id in denied_requesters:
-                        u = users_by_id.get(requester_id)
-                        if u is None:
-                            continue
-                        create_notification(
-                            user=u,
-                            notification_type='handshake_denied',
-                            title='Request Not Accepted',
-                            message=f"All slots for '{service.title}' are now filled.",
-                            service=service,
-                        )
-                        invalidate_conversations(str(requester_id))
-
-                    if service.status == 'Active':
-                        Service.objects.filter(pk=service.pk).update(status='Agreed')
+                )
+                invalidate_conversations(str(requester_id))
 
         invalidate_conversations(str(handshake.requester.id))
         invalidate_conversations(str(service.user.id))
+        invalidate_service_lists()
+        invalidate_user_services(str(service.user.id))
 
         create_notification(
             user=handshake.requester,

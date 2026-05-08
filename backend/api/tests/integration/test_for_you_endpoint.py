@@ -7,6 +7,8 @@ from rest_framework.test import APIClient
 
 from api.tests.helpers.factories import (
     HandshakeFactory,
+    SavedServiceFactory,
+    ServiceDismissalFactory,
     ServiceFactory,
     UserFactory,
 )
@@ -48,6 +50,7 @@ class TestForYouFeedEndpoint:
         signals = results[0]['for_you_signals']
         assert set(signals.keys()) == {
             'tag', 'follow', 'cooccur', 'recency_penalty',
+            'engagement', 'dismissed_similarity',
         }
 
     def test_anonymous_viewer_gets_empty_for_you(self):
@@ -214,3 +217,100 @@ class TestForYouMetricsEndpoint:
         client.force_authenticate(user=viewer)
         resp = client.get('/api/services/for-you-metrics/?days=7')
         assert_problem_detail(resp, 403)
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestForYouEngagementSignals:
+    """Round 3 — saves are a positive signal, dismissals are a soft negative
+    signal.
+    """
+    def _signals_for(self, results, service_id):
+        for row in results:
+            if row['id'] == str(service_id):
+                return row['for_you_signals']
+        return None
+
+    def test_saved_service_boosts_similar_candidates(self):
+        viewer, skill_tag = _onboarded_with_skill('Q_seed')
+        cooking = _make_tag('Q_cooking')
+
+        # The viewer has saved a cooking-tagged service in the past.
+        already_saved = ServiceFactory(type='Offer', status='Active')
+        already_saved.tags.add(cooking)
+        SavedServiceFactory(user=viewer, service=already_saved)
+
+        # Two fresh candidates: one cooking-tagged, one unrelated.
+        cooking_candidate = ServiceFactory(type='Offer', status='Active')
+        cooking_candidate.tags.add(skill_tag, cooking)
+        neutral_candidate = ServiceFactory(type='Offer', status='Active')
+        neutral_candidate.tags.add(skill_tag)
+
+        client = APIClient()
+        client.force_authenticate(user=viewer)
+        resp = client.get('/api/services/?sort=for_you')
+        assert_api_response(resp, 200)
+        results = resp.json()['results']
+        cooking_signals = self._signals_for(results, cooking_candidate.id)
+        neutral_signals = self._signals_for(results, neutral_candidate.id)
+        assert cooking_signals is not None
+        assert neutral_signals is not None
+        # Cooking candidate shares the saved tag set; neutral does not.
+        assert cooking_signals['engagement'] > neutral_signals['engagement']
+
+    def test_dismissed_service_penalises_similar_candidates(self):
+        viewer, skill_tag = _onboarded_with_skill('Q_seed')
+        cooking = _make_tag('Q_cooking')
+
+        # The viewer dismissed a cooking-tagged service.
+        dismissed = ServiceFactory(type='Offer', status='Active')
+        dismissed.tags.add(cooking)
+        ServiceDismissalFactory(viewer=viewer, service=dismissed)
+
+        cooking_candidate = ServiceFactory(type='Offer', status='Active')
+        cooking_candidate.tags.add(skill_tag, cooking)
+        neutral_candidate = ServiceFactory(type='Offer', status='Active')
+        neutral_candidate.tags.add(skill_tag)
+
+        client = APIClient()
+        client.force_authenticate(user=viewer)
+        resp = client.get('/api/services/?sort=for_you')
+        assert_api_response(resp, 200)
+        results = resp.json()['results']
+        cooking_signals = self._signals_for(results, cooking_candidate.id)
+        neutral_signals = self._signals_for(results, neutral_candidate.id)
+        assert cooking_signals is not None
+        assert neutral_signals is not None
+        # Cooking candidate shares the dismissed tag set; the dismissed
+        # similarity score reflects that. Neutral candidate is unaffected.
+        assert cooking_signals['dismissed_similarity'] > neutral_signals['dismissed_similarity']
+
+    def test_mmr_top_results_are_diverse(self):
+        from django.test import override_settings
+
+        viewer, skill_tag = _onboarded_with_skill('Q_seed')
+        common = _make_tag('Q_common')
+        outlier_tag = _make_tag('Q_outlier')
+
+        # Six services share the common tag (and the viewer's skill).
+        for _ in range(6):
+            svc = ServiceFactory(type='Offer', status='Active')
+            svc.tags.add(skill_tag, common)
+
+        # One outlier with a different secondary tag.
+        outlier = ServiceFactory(type='Offer', status='Active')
+        outlier.tags.add(skill_tag, outlier_tag)
+
+        client = APIClient()
+        client.force_authenticate(user=viewer)
+        with override_settings(
+            RANKING_FOR_YOU_MMR_LAMBDA=0.6, RANKING_FOR_YOU_MMR_TOP_K=10,
+            RANKING_FOR_YOU_LIMIT=4,
+        ):
+            resp = client.get('/api/services/?sort=for_you')
+        assert_api_response(resp, 200)
+        results = resp.json()['results']
+        # The outlier should land in the top-4 because MMR penalises the
+        # near-duplicates of the common-tagged services.
+        top_ids = {row['id'] for row in results[:4]}
+        assert str(outlier.id) in top_ids

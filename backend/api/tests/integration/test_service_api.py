@@ -823,6 +823,8 @@ class TestServiceRetrieveStatusVisibility:
             'duration': 2.0,
             'location_type': 'In-Person',
             'location_area': 'Beşiktaş Culture Center',
+            'location_lat': '41.042200',
+            'location_lng': '29.008900',
             'max_participants': 5,
             'schedule_type': 'Recurrent',
         })
@@ -842,6 +844,8 @@ class TestServiceRetrieveStatusVisibility:
             'type': 'Offer',
             'duration': 2.0,
             'location_type': 'In-Person',
+            'location_lat': '41.042200',
+            'location_lng': '29.008900',
             'max_participants': 3,
             'schedule_type': 'One-Time',
         })

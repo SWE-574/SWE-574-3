@@ -55,6 +55,26 @@ def _pending_handshake(service, requester):
     )
 
 
+def _accept_via_approve_flow(handshake):
+    """Drive an Offer/Need handshake to 'accepted' via propose→approve.
+
+    Direct accept on Offer/Need is rejected by the backend (#521); the
+    canonical path is provider-initiate then requester-approve.
+    """
+    from datetime import timedelta
+    from django.utils import timezone
+    handshake.refresh_from_db()
+    handshake.exact_duration = handshake.service.duration
+    handshake.scheduled_time = timezone.now() + timedelta(days=1)
+    if handshake.service.location_type == 'In-Person':
+        handshake.exact_location = '123 Test Address'
+    handshake.provider_initiated = True
+    handshake.save()
+    HandshakeService.approve(handshake, handshake.requester)
+    handshake.refresh_from_db()
+    return handshake
+
+
 # ── 1. _capacity_statuses ─────────────────────────────────────────────────────
 
 @pytest.mark.unit
@@ -207,22 +227,14 @@ class TestAutoDenyOnAccept:
 
     def test_other_pending_become_denied_only_when_capacity_full(self):
         """h3 must be denied only AFTER all slots (max_p=1) are filled — i.e., after h2 is accepted."""
-        from rest_framework.test import APIClient
         provider, u2, u3, svc, h2, h3 = self._setup()  # max_p=1
-        client = APIClient()
-        client.force_authenticate(user=provider)
-
-        resp = client.post(f'/api/handshakes/{h2.id}/accept/')
-        assert resp.status_code == 200
+        _accept_via_approve_flow(h2)
 
         h3.refresh_from_db()
         assert h3.status == 'denied', f"Expected denied when capacity full, got {h3.status}"
 
     def test_pending_not_denied_while_slots_remain(self):
         """For a max_p=2 service, accepting the first should NOT deny the second pending."""
-        from api.utils import provision_timebank
-        from rest_framework.test import APIClient
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
         u3 = UserFactory(timebank_balance=Decimal('5'))
@@ -234,11 +246,8 @@ class TestAutoDenyOnAccept:
                                status='pending', provisioned_hours=Decimal('1'))
         h3 = HandshakeFactory(service=svc, requester=u3,
                                status='pending', provisioned_hours=Decimal('1'))
-        provision_timebank(h2)
 
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        client.post(f'/api/handshakes/{h2.id}/accept/')
+        _accept_via_approve_flow(h2)
 
         h3.refresh_from_db()
         assert h3.status == 'pending', (
@@ -247,30 +256,21 @@ class TestAutoDenyOnAccept:
 
     def test_denied_users_receive_notification_when_capacity_full(self):
         """Denied notification must be sent when the last slot is filled."""
-        from rest_framework.test import APIClient
         provider, u2, u3, svc, h2, h3 = self._setup()  # max_p=1
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        client.post(f'/api/handshakes/{h2.id}/accept/')
+        _accept_via_approve_flow(h2)
 
         notifs = Notification.objects.filter(user=u3, type='handshake_denied')
         assert notifs.exists(), "Denied user should receive a notification when capacity is full"
 
     def test_accepted_handshake_stays_accepted(self):
-        from rest_framework.test import APIClient
         provider, u2, u3, svc, h2, h3 = self._setup()
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        client.post(f'/api/handshakes/{h2.id}/accept/')
+        _accept_via_approve_flow(h2)
 
         h2.refresh_from_db()
         assert h2.status == 'accepted'
 
     def test_recurrent_does_not_auto_deny_others(self):
         """Recurrent services accept independently — no auto-deny ever."""
-        from api.utils import provision_timebank
-        from rest_framework.test import APIClient
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
         u3 = UserFactory(timebank_balance=Decimal('5'))
@@ -282,12 +282,8 @@ class TestAutoDenyOnAccept:
                                status='pending', provisioned_hours=Decimal('1'))
         h3 = HandshakeFactory(service=svc, requester=u3,
                                status='pending', provisioned_hours=Decimal('1'))
-        provision_timebank(h2)
 
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        resp = client.post(f'/api/handshakes/{h2.id}/accept/')
-        assert resp.status_code == 200
+        _accept_via_approve_flow(h2)
 
         h3.refresh_from_db()
         assert h3.status == 'pending', (
@@ -301,14 +297,7 @@ class TestAutoDenyOnAccept:
 class TestAgreedStatusTransitions:
 
     def _accept_handshake(self, provider, handshake):
-        from api.utils import provision_timebank
-        from rest_framework.test import APIClient
-        provision_timebank(handshake)
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        resp = client.post(f'/api/handshakes/{handshake.id}/accept/')
-        assert resp.status_code == 200, resp.data
-        return resp
+        _accept_via_approve_flow(handshake)
 
     def test_one_time_service_becomes_agreed_when_full(self):
         provider = UserFactory(timebank_balance=Decimal('20'))
@@ -330,8 +319,6 @@ class TestAgreedStatusTransitions:
         Only when the last slot is filled should Agreed be set and remaining
         pending handshakes (if any) be denied.
         """
-        from api.utils import provision_timebank
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
         u3 = UserFactory(timebank_balance=Decimal('5'))
@@ -352,7 +339,6 @@ class TestAgreedStatusTransitions:
         assert h3.status == 'pending', "Second pending should NOT be denied yet"
 
         # Accept second — 2/2 filled, service becomes Agreed
-        provision_timebank(h3)
         self._accept_handshake(provider, h3)
         svc.refresh_from_db()
         assert svc.status == 'Agreed', "Should be Agreed after all slots filled"

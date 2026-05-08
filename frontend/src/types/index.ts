@@ -212,6 +212,7 @@ export interface Service {
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
   is_saved?: boolean
+  is_dismissed?: boolean
   source?: 'tag_match' | 'explore_topup' | 'for_you' | 'explore' | null
   for_you_signals?: ForYouSignals | null
   explore_pool?: 'cold_start' | 'undershown_quality' | 'stale_recurring' | null
@@ -227,6 +228,8 @@ export interface ForYouSignals {
   follow: number
   cooccur: number
   recency_penalty: number
+  engagement?: number
+  dismissed_similarity?: number
 }
 
 export interface EventEvaluationSummary {
