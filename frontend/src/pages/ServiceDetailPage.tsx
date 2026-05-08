@@ -10,6 +10,7 @@ import {
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useNotificationStore } from '@/store/useNotificationStore'
 import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
@@ -483,6 +484,7 @@ export default function ServiceDetailPage() {
   const navigate   = useNavigate()
   const [searchParams] = useSearchParams()
   const { isAuthenticated, user, refreshUser, updateUserOptimistically } = useAuthStore()
+  const lastNotification = useNotificationStore((s) => s.notifications[0])
 
   const [service, setService]           = useState<Service | null>(null)
   const [loading, setLoading]           = useState(true)
@@ -535,6 +537,15 @@ export default function ServiceDetailPage() {
     if (!isAuthenticated) return
     handshakeAPI.list().then(setHandshakes).catch(() => {})
   }, [isAuthenticated])
+
+  // Re-fetch when a relevant notification arrives (e.g. check-in, handshake status change).
+  useEffect(() => {
+    if (!lastNotification || !service?.id) return
+    if (String(lastNotification.related_service) !== String(service.id)) return
+    // Refresh both the service (participant_count etc.) and the handshake list.
+    serviceAPI.get(service.id).then(setService).catch(() => {})
+    if (isAuthenticated) handshakeAPI.list().then(setHandshakes).catch(() => {})
+  }, [lastNotification, service?.id, isAuthenticated])
 
   useEffect(() => {
     if (!user?.id || !service?.id) return
@@ -1765,7 +1776,7 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
-                      {!myEventHandshake.user_has_reviewed && (
+                      {service?.status === 'Completed' && !myEventHandshake.user_has_reviewed && (
                         <Box as="button" w="full" py="11px" borderRadius="10px"
                           bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
                           display="flex" alignItems="center" justifyContent="center" gap="7px"
@@ -1782,6 +1793,36 @@ export default function ServiceDetailPage() {
                         style={{ border: 'none', cursor: 'pointer' }}
                       >
                         <FiMessageSquare size={14} /> Event Chat
+                      </Box>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'no_show' ? (
+                    /* Checked in but not marked attended — no-show */
+                    <Stack gap={2}>
+                      <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiAlertTriangle size={20} color={RED} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={RED}>Marked as No-Show</Text>
+                          <Text fontSize="12px" color="#991B1B" mt="2px">
+                            The event ended without your attendance being confirmed.
+                          </Text>
+                        </Box>
+                      </Box>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'accepted' && service.status === 'Completed' ? (
+                    /* Joined but event completed without check-in */
+                    <Stack gap={2}>
+                      <Box bg={GRAY100} borderRadius="12px" p={4} border={`1px solid ${GRAY200}`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiCheckCircle size={20} color={GRAY400} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={GRAY700}>Event Completed</Text>
+                          <Text fontSize="12px" color={GRAY500} mt="2px">
+                            This event has been marked as completed.
+                          </Text>
+                        </Box>
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'accepted' && isFutureEvent(service.scheduled_time) ? (
@@ -1838,21 +1879,6 @@ export default function ServiceDetailPage() {
                         style={{ border: 'none', cursor: 'pointer' }}
                       >
                         <FiMessageSquare size={14} /> Event Chat
-                      </Box>
-                    </Stack>
-                  ) : myEventHandshake?.status === 'accepted' && service.status === 'Completed' ? (
-                    /* Joined but event completed without check-in */
-                    <Stack gap={2}>
-                      <Box bg={GRAY100} borderRadius="12px" p={4} border={`1px solid ${GRAY200}`}
-                        display="flex" alignItems="center" gap={3}
-                      >
-                        <FiCheckCircle size={20} color={GRAY400} />
-                        <Box>
-                          <Text fontSize="13px" fontWeight={700} color={GRAY700}>Event Completed</Text>
-                          <Text fontSize="12px" color={GRAY500} mt="2px">
-                            This event has been marked as completed.
-                          </Text>
-                        </Box>
                       </Box>
                     </Stack>
                   ) : !isFutureEvent(service.scheduled_time) ? (
@@ -2408,7 +2434,7 @@ export default function ServiceDetailPage() {
         />
       )}
 
-      {isEvent && myEventHandshake?.status === 'attended' && !myEventHandshake.user_has_reviewed && (
+      {isEvent && service?.status === 'Completed' && myEventHandshake?.status === 'attended' && !myEventHandshake.user_has_reviewed && (
         <ServiceEvaluationModal
           isOpen={showEvaluationModal}
           onClose={() => setShowEvaluationModal(false)}

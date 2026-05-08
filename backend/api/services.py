@@ -1926,6 +1926,17 @@ class EventHandshakeService:
                     service=service,
                 )
 
+            # Notify accepted (registered but never checked-in) participants that the event is over.
+            for accepted_hs in Handshake.objects.filter(service=service, status='accepted').select_related('requester'):
+                create_notification(
+                    user=accepted_hs.requester,
+                    notification_type='handshake_cancelled',
+                    title='Event Completed',
+                    message=f"The event '{service.title}' has ended.",
+                    handshake=accepted_hs,
+                    service=service,
+                )
+
             service.status = 'Completed'
             service.event_completed_at = timezone.now()
             service.save(update_fields=['status', 'event_completed_at', 'updated_at'])
