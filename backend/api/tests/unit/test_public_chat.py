@@ -4,283 +4,214 @@ Unit tests for Public Chat feature.
 Tests the ChatRoom model, signal-based auto-creation, and PublicChatMessage functionality.
 """
 from decimal import Decimal
-from django.test import TestCase
-from django.urls import reverse
-from rest_framework.test import APITestCase, APIClient
-from rest_framework import status
+from types import SimpleNamespace
 
-from api.models import User, Service, ChatRoom, PublicChatMessage
+import pytest
+from rest_framework.test import APIClient
 
-
-class ChatRoomSignalTestCase(TestCase):
-    """Test cases for automatic ChatRoom creation on Service creation."""
-
-    def setUp(self):
-        """Set up test data."""
-        self.user = User.objects.create_user(
-            email='test@test.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User',
-            timebank_balance=Decimal('10.00')
-        )
-
-    def test_chat_room_created_on_service_creation(self):
-        """Test that a ChatRoom is created when a Service is created."""
-        service = Service.objects.create(
-            user=self.user,
-            title='Test Service',
-            description='A test service',
-            type='Offer',
-            duration=Decimal('2.00'),
-            location_type='Online',
-            max_participants=1,
-            schedule_type='One-Time'
-        )
-
-        # Verify ChatRoom was created
-        self.assertTrue(ChatRoom.objects.filter(related_service=service).exists())
-        
-        room = ChatRoom.objects.get(related_service=service)
-        self.assertEqual(room.type, 'public')
-        self.assertIn(service.title, room.name)
-
-    def test_chat_room_type_is_public(self):
-        """Test that auto-created ChatRoom has type 'public'."""
-        service = Service.objects.create(
-            user=self.user,
-            title='Test Service',
-            description='A test service',
-            type='Need',
-            duration=Decimal('1.00'),
-            location_type='In-Person',
-            location_area='Test Area',
-            max_participants=5,
-            schedule_type='Recurrent'
-        )
-
-        room = service.chat_room
-        self.assertEqual(room.type, 'public')
-
-    def test_chat_room_one_to_one_relationship(self):
-        """Test that Service and ChatRoom have OneToOne relationship."""
-        service = Service.objects.create(
-            user=self.user,
-            title='Test Service',
-            description='A test service',
-            type='Offer',
-            duration=Decimal('2.00'),
-            location_type='Online',
-            max_participants=1,
-            schedule_type='One-Time'
-        )
-
-        # Access chat_room via related_name
-        room = service.chat_room
-        self.assertIsNotNone(room)
-        self.assertEqual(room.related_service, service)
+from api.models import ChatRoom, PublicChatMessage, Service, User
 
 
-class PublicChatMessageTestCase(TestCase):
-    """Test cases for PublicChatMessage model."""
-
-    def setUp(self):
-        """Set up test data."""
-        self.user1 = User.objects.create_user(
-            email='user1@test.com',
-            password='testpass123',
-            first_name='User',
-            last_name='One',
-            timebank_balance=Decimal('10.00')
-        )
-        self.user2 = User.objects.create_user(
-            email='user2@test.com',
-            password='testpass123',
-            first_name='User',
-            last_name='Two',
-            timebank_balance=Decimal('5.00')
-        )
-        
-        self.service = Service.objects.create(
-            user=self.user1,
-            title='Test Service',
-            description='A test service',
-            type='Offer',
-            duration=Decimal('2.00'),
-            location_type='Online',
-            max_participants=1,
-            schedule_type='One-Time'
-        )
-        
-        self.room = self.service.chat_room
-
-    def test_create_public_chat_message(self):
-        """Test creating a public chat message."""
-        message = PublicChatMessage.objects.create(
-            room=self.room,
-            sender=self.user2,
-            body='Hello, this is a public message!'
-        )
-
-        self.assertIsNotNone(message.id)
-        self.assertEqual(message.room, self.room)
-        self.assertEqual(message.sender, self.user2)
-        self.assertEqual(message.body, 'Hello, this is a public message!')
-
-    def test_multiple_users_can_post_messages(self):
-        """Test that multiple users can post messages to the same room."""
-        message1 = PublicChatMessage.objects.create(
-            room=self.room,
-            sender=self.user1,
-            body='Message from user 1'
-        )
-        message2 = PublicChatMessage.objects.create(
-            room=self.room,
-            sender=self.user2,
-            body='Message from user 2'
-        )
-
-        messages = PublicChatMessage.objects.filter(room=self.room)
-        self.assertEqual(messages.count(), 2)
-
-    def test_messages_ordered_by_created_at(self):
-        """Test that messages are ordered by created_at ascending."""
-        PublicChatMessage.objects.create(
-            room=self.room,
-            sender=self.user1,
-            body='First message'
-        )
-        PublicChatMessage.objects.create(
-            room=self.room,
-            sender=self.user2,
-            body='Second message'
-        )
-
-        messages = list(PublicChatMessage.objects.filter(room=self.room))
-        self.assertEqual(messages[0].body, 'First message')
-        self.assertEqual(messages[1].body, 'Second message')
+@pytest.fixture
+def user(db):
+    return User.objects.create_user(
+        email='test@test.com', password='testpass123',
+        first_name='Test', last_name='User',
+        timebank_balance=Decimal('10.00'),
+    )
 
 
-class PublicChatAPITestCase(APITestCase):
-    """Test cases for Public Chat API endpoints."""
+@pytest.mark.django_db
+def test_chat_room_created_on_service_creation(user):
+    service = Service.objects.create(
+        user=user, title='Test Service', description='A test service',
+        type='Offer', duration=Decimal('2.00'), location_type='Online',
+        max_participants=1, schedule_type='One-Time',
+    )
 
-    def setUp(self):
-        """Set up test data."""
-        self.user = User.objects.create_user(
-            email='test@test.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User',
-            timebank_balance=Decimal('10.00')
-        )
-        self.other_user = User.objects.create_user(
-            email='other@test.com',
-            password='testpass123',
-            first_name='Other',
-            last_name='User',
-            timebank_balance=Decimal('5.00')
-        )
-        
-        self.service = Service.objects.create(
-            user=self.user,
-            title='Test Service',
-            description='A test service',
-            type='Offer',
-            duration=Decimal('2.00'),
-            location_type='Online',
-            max_participants=1,
-            schedule_type='One-Time'
-        )
-        
-        self.client = APIClient()
+    assert ChatRoom.objects.filter(related_service=service).exists()
+    room = ChatRoom.objects.get(related_service=service)
+    assert room.type == 'public'
+    assert service.title in room.name
 
-    def test_get_public_chat_authenticated(self):
-        """Test that authenticated users can retrieve public chat."""
-        self.client.force_authenticate(user=self.other_user)
-        
-        response = self.client.get(f'/api/public-chat/{self.service.id}/')
-        
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('room', response.data)
-        self.assertIn('messages', response.data)
 
-    def test_get_public_chat_unauthenticated(self):
-        """Test that unauthenticated users cannot access public chat."""
-        response = self.client.get(f'/api/public-chat/{self.service.id}/')
-        
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+@pytest.mark.django_db
+def test_chat_room_type_is_public(user):
+    service = Service.objects.create(
+        user=user, title='Test Service', description='A test service',
+        type='Need', duration=Decimal('1.00'), location_type='In-Person',
+        location_area='Test Area', max_participants=5, schedule_type='Recurrent',
+    )
+    assert service.chat_room.type == 'public'
 
-    def test_send_message_authenticated(self):
-        """Test that authenticated users can send messages."""
-        self.client.force_authenticate(user=self.other_user)
-        
-        response = self.client.post(f'/api/public-chat/{self.service.id}/', {
-            'body': 'Hello from the lobby!'
-        })
-        
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['body'], 'Hello from the lobby!')
-        self.assertEqual(response.data['sender_name'], 'Other User')
 
-    def test_send_message_unauthenticated(self):
-        """Test that unauthenticated users cannot send messages."""
-        response = self.client.post(f'/api/public-chat/{self.service.id}/', {
-            'body': 'Hello!'
-        })
-        
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+@pytest.mark.django_db
+def test_chat_room_one_to_one_relationship(user):
+    service = Service.objects.create(
+        user=user, title='Test Service', description='A test service',
+        type='Offer', duration=Decimal('2.00'), location_type='Online',
+        max_participants=1, schedule_type='One-Time',
+    )
+    room = service.chat_room
+    assert room is not None
+    assert room.related_service == service
 
-    def test_send_empty_message_fails(self):
-        """Test that empty messages are rejected."""
-        self.client.force_authenticate(user=self.user)
-        
-        response = self.client.post(f'/api/public-chat/{self.service.id}/', {
-            'body': ''
-        })
-        
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_send_message_whitespace_only_fails(self):
-        """Test that whitespace-only messages are rejected."""
-        self.client.force_authenticate(user=self.user)
-        
-        response = self.client.post(f'/api/public-chat/{self.service.id}/', {
-            'body': '   '
-        })
-        
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+@pytest.fixture
+def message_env(db):
+    user1 = User.objects.create_user(
+        email='user1@test.com', password='testpass123',
+        first_name='User', last_name='One',
+        timebank_balance=Decimal('10.00'),
+    )
+    user2 = User.objects.create_user(
+        email='user2@test.com', password='testpass123',
+        first_name='User', last_name='Two',
+        timebank_balance=Decimal('5.00'),
+    )
+    service = Service.objects.create(
+        user=user1, title='Test Service', description='A test service',
+        type='Offer', duration=Decimal('2.00'), location_type='Online',
+        max_participants=1, schedule_type='One-Time',
+    )
+    return SimpleNamespace(user1=user1, user2=user2, service=service, room=service.chat_room)
 
-    def test_get_nonexistent_service(self):
-        """Test getting public chat for nonexistent service."""
-        self.client.force_authenticate(user=self.user)
-        
-        response = self.client.get('/api/public-chat/00000000-0000-0000-0000-000000000000/')
-        
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_message_sanitization(self):
-        """Test that HTML in messages is sanitized."""
-        self.client.force_authenticate(user=self.user)
-        
-        response = self.client.post(f'/api/public-chat/{self.service.id}/', {
-            'body': '<script>alert("xss")</script>Hello'
-        })
-        
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertNotIn('<script>', response.data['body'])
-        self.assertIn('Hello', response.data['body'])
+@pytest.mark.django_db
+def test_create_public_chat_message(message_env):
+    message = PublicChatMessage.objects.create(
+        room=message_env.room,
+        sender=message_env.user2,
+        body='Hello, this is a public message!',
+    )
 
-    def test_chat_room_auto_created_on_first_access(self):
-        """Test that ChatRoom is created on first access if missing."""
-        # Create a service without triggering the signal (manually delete the room)
-        room = self.service.chat_room
-        room.delete()
-        
-        self.client.force_authenticate(user=self.user)
-        
-        response = self.client.get(f'/api/public-chat/{self.service.id}/')
-        
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # Room should be recreated
-        self.assertTrue(ChatRoom.objects.filter(related_service=self.service).exists())
+    assert message.id is not None
+    assert message.room == message_env.room
+    assert message.sender == message_env.user2
+    assert message.body == 'Hello, this is a public message!'
 
+
+@pytest.mark.django_db
+def test_multiple_users_can_post_messages(message_env):
+    PublicChatMessage.objects.create(
+        room=message_env.room, sender=message_env.user1, body='Message from user 1',
+    )
+    PublicChatMessage.objects.create(
+        room=message_env.room, sender=message_env.user2, body='Message from user 2',
+    )
+
+    messages = PublicChatMessage.objects.filter(room=message_env.room)
+    assert messages.count() == 2
+
+
+@pytest.mark.django_db
+def test_messages_ordered_by_created_at(message_env):
+    PublicChatMessage.objects.create(
+        room=message_env.room, sender=message_env.user1, body='First message',
+    )
+    PublicChatMessage.objects.create(
+        room=message_env.room, sender=message_env.user2, body='Second message',
+    )
+
+    messages = list(PublicChatMessage.objects.filter(room=message_env.room))
+    assert messages[0].body == 'First message'
+    assert messages[1].body == 'Second message'
+
+
+@pytest.fixture
+def api_env(db):
+    user = User.objects.create_user(
+        email='test@test.com', password='testpass123',
+        first_name='Test', last_name='User',
+        timebank_balance=Decimal('10.00'),
+    )
+    other_user = User.objects.create_user(
+        email='other@test.com', password='testpass123',
+        first_name='Other', last_name='User',
+        timebank_balance=Decimal('5.00'),
+    )
+    service = Service.objects.create(
+        user=user, title='Test Service', description='A test service',
+        type='Offer', duration=Decimal('2.00'), location_type='Online',
+        max_participants=1, schedule_type='One-Time',
+    )
+    return SimpleNamespace(user=user, other_user=other_user, service=service, client=APIClient())
+
+
+@pytest.mark.django_db
+def test_get_public_chat_authenticated(api_env):
+    api_env.client.force_authenticate(user=api_env.other_user)
+    response = api_env.client.get(f'/api/public-chat/{api_env.service.id}/')
+    assert response.status_code == 200
+    assert 'room' in response.data
+    assert 'messages' in response.data
+
+
+@pytest.mark.django_db
+def test_get_public_chat_unauthenticated(api_env):
+    response = api_env.client.get(f'/api/public-chat/{api_env.service.id}/')
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_send_message_authenticated(api_env):
+    api_env.client.force_authenticate(user=api_env.other_user)
+    response = api_env.client.post(
+        f'/api/public-chat/{api_env.service.id}/', {'body': 'Hello from the lobby!'},
+    )
+    assert response.status_code == 201
+    assert response.data['body'] == 'Hello from the lobby!'
+    assert response.data['sender_name'] == 'Other User'
+
+
+@pytest.mark.django_db
+def test_send_message_unauthenticated(api_env):
+    response = api_env.client.post(
+        f'/api/public-chat/{api_env.service.id}/', {'body': 'Hello!'},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_send_empty_message_fails(api_env):
+    api_env.client.force_authenticate(user=api_env.user)
+    response = api_env.client.post(f'/api/public-chat/{api_env.service.id}/', {'body': ''})
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_send_message_whitespace_only_fails(api_env):
+    api_env.client.force_authenticate(user=api_env.user)
+    response = api_env.client.post(f'/api/public-chat/{api_env.service.id}/', {'body': '   '})
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_get_nonexistent_service(api_env):
+    api_env.client.force_authenticate(user=api_env.user)
+    response = api_env.client.get('/api/public-chat/00000000-0000-0000-0000-000000000000/')
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_message_sanitization(api_env):
+    api_env.client.force_authenticate(user=api_env.user)
+    response = api_env.client.post(
+        f'/api/public-chat/{api_env.service.id}/',
+        {'body': '<script>alert("xss")</script>Hello'},
+    )
+    assert response.status_code == 201
+    assert '<script>' not in response.data['body']
+    assert 'Hello' in response.data['body']
+
+
+@pytest.mark.django_db
+def test_chat_room_auto_created_on_first_access(api_env):
+    room = api_env.service.chat_room
+    room.delete()
+
+    api_env.client.force_authenticate(user=api_env.user)
+    response = api_env.client.get(f'/api/public-chat/{api_env.service.id}/')
+
+    assert response.status_code == 200
+    assert ChatRoom.objects.filter(related_service=api_env.service).exists()
