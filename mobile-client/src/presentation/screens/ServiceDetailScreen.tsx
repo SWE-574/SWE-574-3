@@ -1589,14 +1589,19 @@ export default function ServiceDetailScreen() {
               </View>
             );
 
-            if (status === "cancelled") return (
-              <View style={styles.sectionBlock}>
-                <View style={styles.dangerBanner}>
-                  <Ionicons name="close-circle" size={20} color={colors.RED} />
-                  <Text style={[styles.bannerText, { color: colors.RED }]}>Removed from event</Text>
+            if (status === "cancelled") {
+              const userLeft = myEventHandshake?.cancellation_reason === "user_left";
+              return (
+                <View style={styles.sectionBlock}>
+                  <View style={styles.dangerBanner}>
+                    <Ionicons name="close-circle" size={20} color={colors.RED} />
+                    <Text style={[styles.bannerText, { color: colors.RED }]}>
+                      {userLeft ? "You left this event" : "Removed from event"}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            );
+              );
+            }
 
             if (status === "attended") return (
               <View style={styles.sectionBlock}>

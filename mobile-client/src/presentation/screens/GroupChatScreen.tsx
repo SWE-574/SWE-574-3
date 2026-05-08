@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRoute, useNavigation } from "@react-navigation/native";
+import { useRoute, useNavigation, StackActions } from "@react-navigation/native";
 import type {
   NativeStackNavigationProp,
   NativeStackScreenProps,
@@ -204,7 +204,19 @@ export default function GroupChatScreen() {
   }, [groupId, dedupeMessages, scrollToBottom]);
 
   useEffect(() => {
-    navigation.setOptions({ headerTitle: threadTitle || groupTitle });
+    const isRootScreen = navigation.getState().index === 0;
+    navigation.setOptions({
+      headerTitle: threadTitle || groupTitle,
+      headerLeft: isRootScreen ? () => (
+        <TouchableOpacity
+          onPress={() => navigation.dispatch(StackActions.replace("MessagesList"))}
+          hitSlop={8}
+          style={{ paddingRight: 8 }}
+        >
+          <Ionicons name="chevron-back" size={28} color="#007AFF" />
+        </TouchableOpacity>
+      ) : undefined,
+    });
   }, [navigation, groupTitle, threadTitle]);
 
   const openParticipantProfile = useCallback(
