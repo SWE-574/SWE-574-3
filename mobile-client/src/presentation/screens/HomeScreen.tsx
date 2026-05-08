@@ -34,7 +34,6 @@ import {
   isInPersonService,
   isNearlyFullService,
   isOnlineService,
-  isRecurringService,
   type Coordinates,
 } from "../../utils/discovery";
 import { useScreenCache } from "../../hooks/useScreenCache";
@@ -44,14 +43,13 @@ type ServiceTypeFilter = "all" | "Offer" | "Need" | "Event";
 type LocationFilter = "all" | "nearby" | "in_person" | "online";
 type SortFilter = "latest" | "hot";
 type LocationStatus = "idle" | "granted" | "denied";
-type ToggleFilterKey = "recurringOnly" | "nearlyFullOnly";
+type ToggleFilterKey = "nearlyFullOnly";
 
 interface DiscoveryFilters {
   serviceType: ServiceTypeFilter;
   locationMode: LocationFilter;
   sortBy: SortFilter;
   distanceKm: number;
-  recurringOnly: boolean;
   nearlyFullOnly: boolean;
 }
 
@@ -60,7 +58,6 @@ const DEFAULT_FILTERS: DiscoveryFilters = {
   locationMode: "all",
   sortBy: "latest",
   distanceKm: 15,
-  recurringOnly: false,
   nearlyFullOnly: false,
 };
 
@@ -82,7 +79,6 @@ function filtersAreDefault(
     filters.locationMode === DEFAULT_FILTERS.locationMode &&
     filters.sortBy === DEFAULT_FILTERS.sortBy &&
     filters.distanceKm === DEFAULT_FILTERS.distanceKm &&
-    filters.recurringOnly === DEFAULT_FILTERS.recurringOnly &&
     filters.nearlyFullOnly === DEFAULT_FILTERS.nearlyFullOnly
   );
 }
@@ -317,7 +313,6 @@ export default function HomeScreen() {
         break;
     }
 
-    if (filters.recurringOnly) list = list.filter(isRecurringService);
     if (filters.nearlyFullOnly) list = list.filter(isNearlyFullService);
 
     if (search.trim()) {
@@ -338,7 +333,6 @@ export default function HomeScreen() {
     if (filters.serviceType !== "all") c++;
     if (filters.locationMode !== "all") c++;
     if (filters.sortBy !== "latest") c++;
-    if (filters.recurringOnly) c++;
     if (filters.nearlyFullOnly) c++;
     return c;
   }, [filters]);
@@ -402,14 +396,6 @@ export default function HomeScreen() {
         selected: filters.nearlyFullOnly,
         onPress: () =>
           setFilters((c) => ({ ...c, nearlyFullOnly: !c.nearlyFullOnly })),
-      },
-      {
-        id: "recurring",
-        label: "Recurring",
-        icon: "repeat-outline",
-        selected: filters.recurringOnly,
-        onPress: () =>
-          setFilters((c) => ({ ...c, recurringOnly: !c.recurringOnly })),
       },
     ],
     [ensureDeviceLocation, filters, userLocation],
@@ -792,11 +778,6 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Extra</Text>
             {(
               [
-                {
-                  key: "recurringOnly",
-                  label: "Recurring only",
-                  icon: "repeat-outline",
-                },
                 {
                   key: "nearlyFullOnly",
                   label: "Nearly full only",

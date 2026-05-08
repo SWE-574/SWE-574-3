@@ -396,7 +396,8 @@ function MarkerSheet({
       .filter(Boolean)
       .join(" ") || "Unknown";
   const initials = getInitials(service.user.first_name, service.user.last_name);
-  const isRecurring = service.schedule_type === "Recurrent";
+  const isRecurring =
+    service.type === "Event" && service.schedule_type === "Recurrent";
 
   return (
     <>
