@@ -200,6 +200,46 @@ class TestOnboardingFallback:
         assert all(getattr(s, 'source', None) is None for s in results)
         assert svc_with_other_tag.id in [s.id for s in results]
 
+    def test_user_param_skips_fallback_so_owner_sees_their_own_post(self):
+        """Profile pages call ?user=<id>; the fallback must not run there.
+
+        Regression: when an onboarded viewer has declared skills and the
+        platform already has enough skill-tagged content to satisfy the
+        threshold, the global queryset is filtered down to skill matches
+        before ?user= is applied. A creator's brand-new service whose tags
+        do not overlap their own declared skills is then dropped from
+        their own profile page. The fix gates the fallback on
+        ``not user_param``; this test pins that.
+        """
+        from api.views import ServiceViewSet
+
+        viewer, tag = self._onboarded_with_skill()
+        # Five matching services owned by other users, plenty to clear the
+        # threshold so the fallback would normally engage.
+        other_owner = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+        for _ in range(5):
+            self._service_with_tag(other_owner, tag, hot_score=1.0)
+
+        # Viewer's own service carries no tag overlap with their skills.
+        own_unrelated = ServiceFactory(
+            user=viewer, type='Offer', status='Active',
+        )
+
+        request = _make_request(viewer, {'sort': 'hot', 'user': str(viewer.id)})
+        viewset = ServiceViewSet()
+        viewset.action = 'list'
+        viewset.request = request
+        with override_settings(RANKING_ONBOARDING_MIN_RESULTS=3):
+            qs = viewset.get_queryset()
+            results = list(qs)
+
+        ids = [s.id for s in results]
+        assert own_unrelated.id in ids, (
+            "owner must see their own tag-less service on their profile page"
+        )
+        # Fallback skipped → no source annotation.
+        assert all(getattr(s, 'source', None) is None for s in results)
+
 
 @pytest.mark.django_db
 @pytest.mark.unit
