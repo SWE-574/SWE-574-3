@@ -39,17 +39,34 @@ paths_to_mutate = [
 # `-o addopts=` because the inherited --cov=api / --cov-fail-under=70 /
 # --html=... options break inside the mutants/ working tree.
 tests_dir = ["api/tests/unit"]
-pytest_add_cli_args = ["-o", "addopts=", "-x", "-q", "--no-header", "-p", "no:cacheprovider"]
-# pytest-django needs hive_project/ on the path to load DJANGO_SETTINGS_MODULE,
-# and `manage.py` is the conventional entry point pytest-django pokes at.
-# mutmut 3.x only ships tests/, setup.cfg, pyproject.toml, pytest.ini and
-# .gitignore by default — everything else has to be enumerated here.
+pytest_add_cli_args = [
+    "-o", "addopts=",
+    "-x", "-q", "--no-header",
+    "-p", "no:cacheprovider",
+]
+# also_copy ships the modules pytest-django needs to bootstrap inside the
+# mutants/ working tree. The top-level conftest.py at backend/conftest.py
+# pins sys.path so Django's app registry resolves through the mirrored
+# `api/` package rather than the original one on the outer sys.path —
+# this is the fix for the "AUTH_USER_MODEL refers to model 'api.User' that
+# has not been installed" error that previously broke end-to-end mutmut runs.
+# `api` is included so the rest of the package (models.py, __init__.py,
+# migrations/, management/, etc.) is mirrored — without these, Django's
+# app loading at django.setup() fails with `AUTH_USER_MODEL refers to
+# model 'api.User' that has not been installed` because mutmut otherwise
+# only copies the 6 specific files in paths_to_mutate. Restored here.
 #
-# NOTE: end-to-end mutmut runs against this Django app are not yet stable.
-# `mutants/api/` confuses Django's app registry (`AUTH_USER_MODEL refers to
-# model 'api.User' that has not been installed`) because mutmut moves the
-# whole `api` package into the mutants tree and Django's app loading does
-# not see the original location. Bridging that gap is tracked as follow-up
-# work; the CI job (.github/workflows/ci-mutation.yml) already tolerates
-# the non-zero exit so PR comments still surface whatever score is produced.
-also_copy = ["hive_project", "manage.py", "conftest.py", "logs"]
+# Bootstrap status (2026-05-08):
+#   FIXED: AUTH_USER_MODEL refers to model 'api.User' that has not been
+#          installed — root cause was incomplete `mutants/api/` tree.
+#   FIXED: DB_NAME=None TypeError on test_db_signature — root cause was
+#          relative .env resolution; backend/conftest.py loads the .env
+#          explicitly and applies hardcoded local-dev fallbacks.
+#   TODO:  RuntimeError "context has already been set" during
+#          ServiceFactory creation in pytest-django session setup. The
+#          single test that triggers this is fine outside mutmut. This
+#          appears to be subprocess/async-context pollution specific to
+#          mutmut's test runner; the next investigation should look at
+#          --forked / --no-database-creation or scoping pytest-django
+#          fixtures to function level.
+also_copy = ["api", "hive_project", "manage.py", "conftest.py", "logs", "pytest.ini"]
