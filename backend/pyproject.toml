@@ -21,19 +21,23 @@ exclude_lines = [
 
 [tool.mutmut]
 # Hot-module mutation scope. The CI gate (.github/workflows/ci-mutation.yml)
-# only mutates `event_permissions.py` so the run finishes inside the 45-min
-# job timeout — the full hot-module list (~4290 LOC, ~2700 mutants, ~7+ hrs
-# at CI pytest-cold-start speed) is impossible to gate per-PR.
+# only mutates `badge_utils.py` so the run finishes inside the 45-min job
+# timeout — the full hot-module list (~4290 LOC, ~2700 mutants, ~7+ hrs at
+# CI pytest-cold-start speed) is impossible to gate per-PR. badge_utils
+# was picked because it is small (~300 LOC, ~200 mutants) AND covered by
+# the unit suite — event_permissions / ranking / search_filters / services
+# are either too large or not exercised under api/tests/unit/, which makes
+# mutmut bail with "could not find any test case for any mutant".
 #
 # To exercise the broader scope locally, append any of the following back
 # to `paths_to_mutate` before running `make test-mutation`:
 #   "api/ranking.py",            # 609 LOC — scoring weights
 #   "api/achievement_utils.py",  # 421 LOC — badge progress / stats
-#   "api/badge_utils.py",        # 304 LOC — badge assignment
+#   "api/event_permissions.py",  #  54 LOC — needs an integration tests_dir
 #   "api/services.py",           # 2509 LOC — handshake/transaction domain
 #   "api/search_filters.py",     # 393 LOC — search strategies
 paths_to_mutate = [
-    "api/event_permissions.py",
+    "api/badge_utils.py",
 ]
 # mutmut 3.x drives pytest internally — `runner` is no longer supported.
 # `tests_dir` is a list of paths fed as positional pytest args, and
