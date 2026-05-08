@@ -58,6 +58,8 @@ const NotificationsPage = () => {
         navigate(`/messages/${notification.related_handshake}`)
       } else if (notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)
+      } else {
+        navigate('/notifications')
       }
     },
     [markAsRead, navigate],

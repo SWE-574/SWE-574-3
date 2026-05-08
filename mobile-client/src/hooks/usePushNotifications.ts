@@ -53,6 +53,7 @@ export function usePushNotifications(
           related_service: (data.related_service as string) ?? null,
           related_service_type: (data.related_service_type as 'Offer' | 'Need' | 'Event') ?? null,
           related_report: (data.related_report as string) ?? null,
+          related_user: (data.related_user as string) ?? null,
           created_at: '',
         },
         navigationRef,

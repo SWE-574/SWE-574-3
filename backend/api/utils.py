@@ -635,6 +635,7 @@ def _send_push_notification(notification: Notification) -> None:
         'related_service': str(notification.related_service_id) if notification.related_service_id else None,
         'related_service_type': notification.related_service.type if notification.related_service else None,
         'related_report': str(notification.related_report_id) if notification.related_report_id else None,
+        'related_user': str(notification.related_user_id) if notification.related_user_id else None,
     }
 
     messages = [

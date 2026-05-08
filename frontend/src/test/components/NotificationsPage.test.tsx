@@ -123,6 +123,13 @@ describe('NotificationsPage routing', () => {
     expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-14')
   })
 
+  it('falls back to /notifications when no related entity', async () => {
+    const n = makeNotification({ type: 'admin_warning' })
+    await renderPageWithNotification(n)
+    await userEvent.click(screen.getByText(n.title))
+    expect(navigateMock).toHaveBeenCalledWith('/notifications')
+  })
+
   it('marks notification as read on click', async () => {
     const n = makeNotification({ type: 'admin_warning', is_read: false })
     await renderPageWithNotification(n)
