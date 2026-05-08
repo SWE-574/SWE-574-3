@@ -71,7 +71,6 @@ const FILTERS = [
   { id: 'all',       label: 'All',       icon: <FiGrid size={12} /> },
   { id: 'newest',    label: 'New',        icon: <FiTrendingUp size={12} /> },
   { id: 'online',    label: 'Online',     icon: <FiWifi size={12} /> },
-  { id: 'recurrent', label: 'Recurrent',  icon: <FiRefreshCw size={12} /> },
   { id: 'weekend',   label: 'Weekend',    icon: <FiCalendar size={12} /> },
 ]
 
@@ -248,7 +247,7 @@ function ServiceCard({
 }) {
   const owner     = service.user ?? service.provider
   const isOffer   = service.type === 'Offer'
-  const isRecurr  = service.schedule_type === 'Recurrent'
+  const isRecurr  = service.type === 'Event' && service.schedule_type === 'Recurrent'
   const isFixedGroupOffer = isOffer && service.schedule_type === 'One-Time' && service.max_participants > 1
   const gradient  = pickGradient(service)
 
@@ -478,7 +477,6 @@ const DashboardPage = () => {
     setAllActiveServices(unique)
     let filtered = unique.filter((service) => matchesDashboardSearch(service, debouncedSearch))
     if (activeFilter === 'online')    filtered = filtered.filter((s) => s.location_type === 'Online')
-    if (activeFilter === 'recurrent') filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
     if (activeFilter === 'newest')    filtered = [...filtered].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     if (activeFilter === 'weekend')   filtered = filtered.filter((s) => /saturday|sunday|weekend/i.test(s.schedule_details ?? ''))
     if (activeFilter !== 'newest') {
