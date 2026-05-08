@@ -100,4 +100,45 @@ describe('getErrorMessage', () => {
     const err = withResponse({ error: 42 } as unknown as Record<string, unknown>)
     expect(getErrorMessage(err)).toBe('42')
   })
+
+  it('does not treat an Array response body as a field-error map', () => {
+    // Arrays pass `typeof === 'object'`, so without the `!Array.isArray`
+    // guard the function would iterate them as field keys and emit "a. b".
+    const err = withResponse(['a', 'b'] as unknown as Record<string, unknown>)
+    expect(getErrorMessage(err)).toBe('axios error')
+  })
+
+  it('does not treat a string response body as a field-error map', () => {
+    // The `typeof === 'object'` guard must reject string payloads — otherwise
+    // each character becomes a field key and the output is "h. e. l. l. o".
+    const err = withResponse('hello' as unknown as Record<string, unknown>)
+    expect(getErrorMessage(err)).toBe('axios error')
+  })
+
+  it('renders a top-level messages array (not in the known-keys set as a singular)', () => {
+    // 'messages' (plural) is in the known-top-keys set so it should NOT be
+    // surfaced as an inline field error. Asserting on its absence pins the
+    // membership of that key in the set.
+    const err = withResponse({ messages: ['err1', 'err2'] })
+    expect(getErrorMessage(err)).toBe('axios error')
+  })
+
+  it('joins multiple field-error arrays with ". " between them', () => {
+    const err = withResponse({
+      detail: 'Invalid input',
+      field_errors: {
+        email: ['required'],
+        password: ['too short'],
+      },
+    })
+    // Both inline (none here) + field_errors are joined with ". " in `${detail}: …`.
+    expect(getErrorMessage(err)).toBe('Invalid input: required. too short')
+  })
+
+  it('joins items inside one field-error array with ", " (not ". ")', () => {
+    const err = withResponse({
+      field_errors: { email: ['Invalid email.', 'Already taken.'] },
+    })
+    expect(getErrorMessage(err)).toBe('Invalid email., Already taken.')
+  })
 })

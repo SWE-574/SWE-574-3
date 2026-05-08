@@ -11,6 +11,7 @@ from api.tests.helpers.factories import (
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Notification
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -28,14 +29,13 @@ class TestNotificationViewSet:
         client.authenticate_user(user)
 
         response = client.get('/api/notifications/?page=1')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['count'] == 3
+        assert_api_response(response, 200, schema={'count': 3})
         assert len(response.data['results']) == 3
 
     def test_list_requires_auth(self):
         client = AuthenticatedAPIClient()
         response = client.get('/api/notifications/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_retrieve_own_notification(self):
         user = UserFactory()
@@ -45,8 +45,7 @@ class TestNotificationViewSet:
         client.authenticate_user(user)
 
         response = client.get(f'/api/notifications/{notification.id}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['id'] == str(notification.id)
+        assert_api_response(response, 200, schema={'id': str(notification.id)})
 
     def test_cannot_retrieve_other_users_notification(self):
         user = UserFactory()
@@ -57,7 +56,7 @@ class TestNotificationViewSet:
         client.authenticate_user(user)
 
         response = client.get(f'/api/notifications/{notification.id}/')
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
     def test_unread_count(self):
         user = UserFactory()
@@ -68,8 +67,7 @@ class TestNotificationViewSet:
         client.authenticate_user(user)
 
         response = client.get('/api/notifications/unread-count/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['count'] == 2
+        assert_api_response(response, 200, schema={'count': 2})
 
     def test_mark_single_as_read(self):
         user = UserFactory()
@@ -79,7 +77,7 @@ class TestNotificationViewSet:
         client.authenticate_user(user)
 
         response = client.patch(f'/api/notifications/{notification.id}/read/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['is_read'] is True
 
         notification.refresh_from_db()
@@ -93,7 +91,7 @@ class TestNotificationViewSet:
         client.authenticate_user(user)
 
         response = client.post('/api/notifications/read/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         assert Notification.objects.filter(user=user, is_read=False).count() == 0
 

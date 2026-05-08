@@ -21,6 +21,7 @@ from api.tests.helpers.factories import (
     ServiceFactory,
     HandshakeFactory,
 )
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +49,7 @@ class TestAdminPinEvent:
 
         resp = client.post(f'/api/services/{event.id}/pin-event/')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         event.refresh_from_db()
         assert event.is_pinned is True
 
@@ -59,7 +60,7 @@ class TestAdminPinEvent:
 
         resp = client.post(f'/api/services/{event.id}/pin-event/')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         event.refresh_from_db()
         assert event.is_pinned is False
 
@@ -72,7 +73,7 @@ class TestAdminPinEvent:
 
         resp = client.post(f'/api/services/{event.id}/pin-event/')
 
-        assert resp.status_code == 403
+        assert_problem_detail(resp, 403)
 
     def test_pin_endpoint_rejects_non_event_service(self):
         """Offer and Need services cannot be pinned via the event pin endpoint."""
@@ -90,7 +91,7 @@ class TestAdminPinEvent:
 
         client = APIClient()
         resp = client.get('/api/services/?type=Event')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
 
         results = resp.data.get('results', [])
         pinned_idx = next(
@@ -134,7 +135,7 @@ class TestAdminShowcaseFeatured:
 
         resp = client.post(f'/api/services/{event.id}/feature/')
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         event.refresh_from_db()
         assert getattr(event, 'is_featured', False) is True
 
@@ -150,7 +151,7 @@ class TestAdminShowcaseFeatured:
 
         # Fetch the featured feed
         resp = client.get('/api/services/featured/')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         result_ids = [s['id'] for s in resp.data.get('results', [])]
         assert str(featured_event.id) in result_ids
 
@@ -167,7 +168,7 @@ class TestAdminShowcaseFeatured:
             data={'expires_at': expiry},
             format='json',
         )
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +256,7 @@ class TestFollowSystem:
         client.post(f'/api/users/{followed_provider.id}/follow/')
 
         resp = client.get('/api/services/?type=Offer')
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         results = resp.data.get('results', [])
         ids = [str(s['id']) for s in results]
 
@@ -272,7 +273,7 @@ class TestFollowSystem:
 
         resp = client.post(f'/api/users/{followed.id}/follow/')
 
-        assert resp.status_code == 401
+        assert_problem_detail(resp, 401)
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +307,7 @@ class TestDiscoveryFeedPerformance:
         resp = client.get('/api/services/')
         elapsed = time.monotonic() - start
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert elapsed < self.FEED_SLA_SECONDS, (
             f"Discovery feed took {elapsed:.3f}s — exceeds the {self.FEED_SLA_SECONDS}s NFR-19a SLA."
         )
@@ -328,7 +329,7 @@ class TestDiscoveryFeedPerformance:
         resp = client.get('/api/services/?lat=41.012345&lng=28.974321&distance=10')
         elapsed = time.monotonic() - start
 
-        assert resp.status_code == 200
+        assert_api_response(resp, 200)
         assert elapsed < self.FEED_SLA_SECONDS, (
             f"Location-filtered feed took {elapsed:.3f}s — exceeds the NFR-19a SLA."
         )

@@ -27,7 +27,16 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Backend mutmut runs on a nightly schedule + manual dispatch only — NOT
+  # on every PR. The CI scope (currently just badge_utils.py to fit the
+  # 45-min job timeout) doesn't earn its ~10 min of runner time per PR
+  # when the rest of the hot-module list isn't actually being gated. Keep
+  # the wiring so the bootstrap stays exercised by the nightly run, and
+  # so anyone debugging mutation testing can trigger it on demand from
+  # the Actions tab. To temporarily run it on a PR, dispatch this
+  # workflow against the PR's branch from the GitHub UI.
   backend-mutmut:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -75,6 +84,36 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends gdal-bin libgdal-dev libgeos-dev
 
+      - name: Start MinIO
+        run: |
+          docker run -d --name ci_minio \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin123 \
+            --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1" \
+            --health-interval 5s \
+            --health-timeout 3s \
+            --health-retries 20 \
+            minio/minio:latest server /data --console-address ":9001"
+
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ci_minio)
+            if [ "$STATUS" = "healthy" ]; then
+              echo "MinIO is healthy."
+              break
+            fi
+            if [ "$STATUS" = "unhealthy" ]; then
+              echo "::error::MinIO became unhealthy"
+              docker logs ci_minio
+              exit 1
+            fi
+            echo "Waiting for MinIO... status=$STATUS ($i/30)"
+            sleep 2
+          done
+
+
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -97,7 +136,11 @@ jobs:
         run: |
           .venv/bin/mutmut run || true
           .venv/bin/mutmut results > mutmut-results.txt
-          .venv/bin/mutmut html || true
+          # `mutmut results` only prints SURVIVED/timeout/suspicious mutants,
+          # not the killed ones — counting it would always read killed=0.
+          # `export-cicd-stats` writes a JSON tally with the actual totals,
+          # which is what the PR comment script reads.
+          .venv/bin/mutmut export-cicd-stats || true
 
       - name: Upload mutmut report
         if: always()
@@ -106,52 +149,51 @@ jobs:
           name: backend-mutation
           path: |
             backend/mutmut-results.txt
-            backend/html/
+            backend/mutants/mutmut-cicd-stats.json
 
-      # Only post a PR comment if mutmut produced at least one scored
-      # mutant. With the current Django app-registry issue, every line in
-      # results.txt is "not checked" — pasting that wall is noise. When a
-      # scored mutant appears, the comment summarises killed / survived /
-      # not-checked counts in a tight code block.
+      # Read the cicd-stats JSON so killed/survived/total are accurate.
+      # Only post when mutmut actually scored a mutant — when the bootstrap
+      # is broken everything ends up in `segfault` / `not_checked` and the
+      # comment would just be noise.
       - name: Comment mutation summary on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const path = 'backend/mutmut-results.txt';
+            const path = 'backend/mutants/mutmut-cicd-stats.json';
             if (!fs.existsSync(path)) {
-              core.info('No mutmut results file produced; skipping PR comment.');
+              core.info('No mutmut cicd-stats file produced; skipping PR comment.');
               return;
             }
-            const text = fs.readFileSync(path, 'utf8');
-            const lines = text.split('\n').filter(Boolean);
-            const tally = { killed: 0, survived: 0, suspicious: 0, timeout: 0, skipped: 0, not_checked: 0 };
-            for (const line of lines) {
-              const m = line.match(/:\s*([a-z_]+)\s*$/);
-              if (!m) continue;
-              const status = m[1];
-              if (tally[status] !== undefined) tally[status] += 1;
-              else if (status === 'ok_killed') tally.killed += 1;
-              else if (status === 'bad_survived') tally.survived += 1;
-            }
-            const scored = tally.killed + tally.survived + tally.timeout + tally.suspicious;
+            const stats = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const killed = stats.killed ?? 0;
+            const survived = stats.survived ?? 0;
+            const timeout = stats.timeout ?? 0;
+            const suspicious = stats.suspicious ?? 0;
+            const skipped = stats.skipped ?? 0;
+            const segfault = stats.segfault ?? 0;
+            const noTests = stats.no_tests ?? 0;
+            const total = stats.total ?? (killed + survived + timeout + suspicious + skipped + segfault + noTests);
+            const scored = killed + survived;
             if (scored === 0) {
               core.info('mutmut produced no scored mutants this run; skipping PR comment.');
               return;
             }
-            const score = tally.killed / (tally.killed + tally.survived);
-            const pct = isFinite(score) ? (score * 100).toFixed(1) : 'n/a';
+            const pct = ((killed / scored) * 100).toFixed(1);
             const body = [
               '### Backend mutation testing (mutmut)',
               '',
               '```',
               'mutation score : ' + pct + '%',
-              'killed         : ' + tally.killed,
-              'survived       : ' + tally.survived,
-              'timeout        : ' + tally.timeout,
-              'suspicious     : ' + tally.suspicious,
-              'not checked    : ' + tally.not_checked,
+              'killed         : ' + killed,
+              'survived       : ' + survived,
+              'timeout        : ' + timeout,
+              'suspicious     : ' + suspicious,
+              'skipped        : ' + skipped,
+              'segfault       : ' + segfault,
+              'no_tests       : ' + noTests,
+              'total          : ' + total,
               '```',
             ].join('\n');
             await github.rest.issues.createComment({
@@ -191,9 +233,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-mutation
-          path: |
-            frontend/reports/
-            frontend/tests/reports/mutation/
+          path: frontend/tests/reports/mutation/
 
       # Stryker's JSON schema (1.0) does not carry an aggregate score field,
       # so compute it from the per-file mutant tallies. The clear-text
@@ -205,7 +245,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const path = 'frontend/reports/mutation/mutation.json';
+            const path = 'frontend/tests/reports/mutation/mutation.json';
             if (!fs.existsSync(path)) {
               core.warning('No Stryker report produced.');
               return;

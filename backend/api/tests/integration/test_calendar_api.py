@@ -12,6 +12,7 @@ from unittest.mock import patch
 from api.models import Handshake, Service
 from api.tests.helpers.factories import UserFactory, ServiceFactory, HandshakeFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 CALENDAR_URL = '/api/users/me/calendar/'
@@ -23,13 +24,13 @@ class TestMeCalendarAuth:
     def test_requires_auth_returns_401(self):
         client = AuthenticatedAPIClient()
         response = client.get(CALENDAR_URL)
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_authenticated_user_gets_200(self):
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get(CALENDAR_URL)
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
 
 @pytest.mark.django_db
@@ -39,7 +40,7 @@ class TestMeCalendarResponseShape:
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get(CALENDAR_URL)
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         data = response.json()
         assert 'items' in data
         assert 'conflicts' in data
@@ -73,7 +74,7 @@ class TestMeCalendarQueryParams:
         from_dt = '2026-06-01'
         to_dt = '2026-07-01'
         response = client.get(CALENDAR_URL, {'from': from_dt, 'to': to_dt})
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         r = response.json()['range']
         assert r['from'] == from_dt
         assert r['to'] == to_dt
@@ -84,7 +85,7 @@ class TestMeCalendarQueryParams:
         from_dt = '2020-01-01'
         to_dt = '2048-01-01'  # > max window
         response = client.get(CALENDAR_URL, {'from': from_dt, 'to': to_dt})
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         data = response.json()
         assert 'max_days' in data
         assert data['max_days'] == 3650
@@ -93,13 +94,13 @@ class TestMeCalendarQueryParams:
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get(CALENDAR_URL, {'from': 'not-a-date'})
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_invalid_to_date_returns_400(self):
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get(CALENDAR_URL, {'to': 'not-a-date'})
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
 
 @pytest.mark.django_db
@@ -138,7 +139,7 @@ class TestMeCalendarItems:
         )
         client = AuthenticatedAPIClient().authenticate_user(provider)
         resp = client.get(CALENDAR_URL)
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         items = resp.json()['items']
         assert len(items) >= 1
         item = items[0]
@@ -177,7 +178,7 @@ class TestMeCalendarItems:
         client = AuthenticatedAPIClient().authenticate_user(owner)
         resp = client.get(CALENDAR_URL)
 
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         matching = [item for item in resp.json()['items'] if item['service_id'] == str(svc.id)]
         assert len(matching) == 1
         assert matching[0]['link'] == {'type': 'service', 'id': str(svc.id)}
@@ -208,7 +209,7 @@ class TestMeCalendarItems:
         client = AuthenticatedAPIClient().authenticate_user(owner)
         resp = client.get(CALENDAR_URL)
 
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         matching = [item for item in resp.json()['items'] if item['service_id'] == str(svc.id)]
         assert len(matching) == 1
         assert matching[0]['link'] == {'type': 'service', 'id': str(svc.id)}
@@ -272,7 +273,7 @@ class TestMeCalendarItems:
             },
         )
 
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         matching = [item for item in resp.json()['items'] if item['service_id'] == str(svc.id)]
         assert len(matching) == 1
         assert matching[0]['id'] == str(svc.id)
@@ -348,12 +349,12 @@ class TestMeCalendarCaching:
         )
         client = AuthenticatedAPIClient().authenticate_user(user)
         resp1 = client.get(CALENDAR_URL)
-        assert resp1.status_code == status.HTTP_200_OK
+        assert_api_response(resp1, 200)
         data1 = resp1.json()
 
         # Second call — no mutations, cache still valid
         resp2 = client.get(CALENDAR_URL)
-        assert resp2.status_code == status.HTTP_200_OK
+        assert_api_response(resp2, 200)
         data2 = resp2.json()
         # Same data: same item count and same item IDs
         assert len(data2['items']) == len(data1['items'])
@@ -380,7 +381,7 @@ class TestMeCalendarCacheInvalidation:
 
         # First call: populates cache, handshake is visible
         resp1 = client.get(CALENDAR_URL)
-        assert resp1.status_code == status.HTTP_200_OK
+        assert_api_response(resp1, 200)
         assert len(resp1.json()['items']) >= 1
 
         # Transition handshake to cancelled (triggers post_save signal → invalidation)
@@ -389,7 +390,7 @@ class TestMeCalendarCacheInvalidation:
 
         # Second call: cache was invalidated, so fresh DB read — item gone
         resp2 = client.get(CALENDAR_URL)
-        assert resp2.status_code == status.HTTP_200_OK
+        assert_api_response(resp2, 200)
         item_ids = [item['id'] for item in resp2.json()['items']]
         assert str(hs.id) not in item_ids, (
             "Cancelled handshake still in calendar — cache was not invalidated"
@@ -409,7 +410,7 @@ class TestMeCalendarCacheInvalidation:
 
         # First call: pending handshake is NOT in calendar (only accepted statuses appear)
         resp1 = client.get(CALENDAR_URL)
-        assert resp1.status_code == status.HTTP_200_OK
+        assert_api_response(resp1, 200)
         item_ids_before = [item['id'] for item in resp1.json()['items']]
         assert str(hs.id) not in item_ids_before
 
@@ -419,7 +420,7 @@ class TestMeCalendarCacheInvalidation:
 
         # Second call: cache invalidated, new accepted handshake is now visible
         resp2 = client.get(CALENDAR_URL)
-        assert resp2.status_code == status.HTTP_200_OK
+        assert_api_response(resp2, 200)
         item_ids_after = [item['id'] for item in resp2.json()['items']]
         assert str(hs.id) in item_ids_after, (
             "Newly accepted handshake not in calendar — cache was not invalidated"
@@ -437,7 +438,7 @@ class TestMeCalendarCacheInvalidation:
 
         # First call: event is visible for organiser
         resp1 = client.get(CALENDAR_URL)
-        assert resp1.status_code == status.HTTP_200_OK
+        assert_api_response(resp1, 200)
         assert len(resp1.json()['items']) >= 1
 
         # Cancel the event (triggers post_save signal → invalidation via invalidate_on_service_change)
@@ -446,7 +447,7 @@ class TestMeCalendarCacheInvalidation:
 
         # Second call: cache invalidated, cancelled event no longer in calendar
         resp2 = client.get(CALENDAR_URL)
-        assert resp2.status_code == status.HTTP_200_OK
+        assert_api_response(resp2, 200)
         item_ids = [item['id'] for item in resp2.json()['items']]
         assert str(svc.id) not in item_ids, (
             "Cancelled event still in organiser's calendar — cache was not invalidated"
@@ -483,11 +484,11 @@ class TestMeCalendarCacheTrackingSet:
 
         # Fetch window 1 — populates cache and registers key
         resp1 = client.get(CALENDAR_URL, {'from': from_w1, 'to': to_w1})
-        assert resp1.status_code == status.HTTP_200_OK
+        assert_api_response(resp1, 200)
 
         # Fetch window 2 — populates cache and registers a different key
         resp2 = client.get(CALENDAR_URL, {'from': from_w2, 'to': to_w2})
-        assert resp2.status_code == status.HTTP_200_OK
+        assert_api_response(resp2, 200)
 
         # Both keys should be in the tracking set
         tracking_key = f"user_calendar_keys:{user.id}"
@@ -507,7 +508,7 @@ class TestMeCalendarCacheTrackingSet:
 
         # Verify fresh responses reflect the cancellation (handshake no longer in calendar)
         resp3 = client.get(CALENDAR_URL, {'from': from_w1, 'to': to_w1})
-        assert resp3.status_code == status.HTTP_200_OK
+        assert_api_response(resp3, 200)
         item_ids_w1 = [item['id'] for item in resp3.json()['items']]
         assert str(hs.id) not in item_ids_w1, (
             "Cancelled handshake still visible in window-1 after invalidation"

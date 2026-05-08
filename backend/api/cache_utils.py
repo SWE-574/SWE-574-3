@@ -323,7 +323,14 @@ def register_calendar_cache_key(user_id: str, cache_key: str) -> None:
         new_set.add(cache_key)
         # Use the same TTL as the item so the tracking set expires with it.
         cache.set(tracking_key, new_set, timeout=_CALENDAR_CACHE_TTL)
-        return
+        # Verify the write actually stuck. A racing writer between our get
+        # and set could clobber our value with a stale set; we re-read and
+        # retry up to 3 times to re-add our key.
+        confirmed = cache.get(tracking_key, set())
+        if cache_key in confirmed:
+            return
+    # Final attempt failed — give up silently. The TTL bounds staleness;
+    # the next request will re-register the key.
 
 
 def invalidate_user_calendar(user_id: str) -> None:

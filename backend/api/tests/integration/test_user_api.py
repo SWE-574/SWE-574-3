@@ -21,6 +21,7 @@ from api.models import (
     UserFollow,
     UserFollowEvent,
 )
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -40,10 +41,7 @@ class TestUserProfileView:
         client.authenticate_user(user)
         
         response = client.get('/api/users/me/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['email'] == user.email
-        assert response.data['first_name'] == user.first_name
-        assert response.data['last_name'] == user.last_name
+        assert_api_response(response, 200, schema={'email': user.email, 'first_name': user.first_name, 'last_name': user.last_name})
         assert response.data['bio'] == user.bio
         assert response.data['avatar_url'] == user.avatar_url
         assert response.data['date_joined'].startswith(user.date_joined.date().isoformat())
@@ -72,10 +70,7 @@ class TestUserProfileView:
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get('/api/users/me/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert 'created_events' in response.data
-        assert 'joined_events' in response.data
-        assert 'invited_events' in response.data
+        assert_api_response(response, 200, contains={'created_events', 'joined_events', 'invited_events'})
 
         created_ids = {event['id'] for event in response.data['created_events']}
         joined_ids = {event['id'] for event in response.data['joined_events']}
@@ -99,10 +94,7 @@ class TestUserProfileView:
             'show_history': False,
             'email': 'should-not-change@example.com',
         })
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['bio'] == 'Updated bio'
-        assert response.data['first_name'] == 'Updated'
-        assert response.data['last_name'] == 'Profile'
+        assert_api_response(response, 200, schema={'bio': 'Updated bio', 'first_name': 'Updated', 'last_name': 'Profile'})
         assert response.data['avatar_url'] == 'https://example.com/avatars/updated.jpg'
         assert response.data['show_history'] is False
         assert response.data['email'] == user.email
@@ -124,7 +116,7 @@ class TestUserProfileView:
         response = client.patch('/api/users/me/', {
             'bio': 'x' * 1001  # Exceeds limit
         })
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert 'field_errors' in response.data
         assert 'bio' in response.data['field_errors']
         user.refresh_from_db()
@@ -137,9 +129,7 @@ class TestUserProfileView:
         UserFollow.objects.create(follower=user, following=peer)
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get('/api/users/me/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['followers_count'] == 1
-        assert response.data['following_count'] == 1
+        assert_api_response(response, 200, schema={'followers_count': 1, 'following_count': 1})
         assert response.data['is_following'] is False
 
     def test_other_user_profile_is_following_and_counts(self):
@@ -149,7 +139,7 @@ class TestUserProfileView:
         UserFollow.objects.create(follower=UserFactory(), following=target)
         client = AuthenticatedAPIClient().authenticate_user(viewer)
         response = client.get(f'/api/users/{target.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['is_following'] is True
         assert response.data['followers_count'] == 2
         assert response.data['following_count'] == 0
@@ -175,7 +165,7 @@ class TestUserHistoryView:
         client.authenticate_user(user)
         
         response = client.get(f'/api/users/{user.id}/history/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert isinstance(response.data, list)
     
     def test_user_history_empty(self):
@@ -185,7 +175,7 @@ class TestUserHistoryView:
         client.authenticate_user(user)
         
         response = client.get(f'/api/users/{user.id}/history/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data == []
 
     def test_get_user_history_includes_completed_event_attendance(self):
@@ -207,7 +197,7 @@ class TestUserHistoryView:
         client = AuthenticatedAPIClient().authenticate_user(participant)
         response = client.get(f'/api/users/{participant.id}/history/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data) == 1
         assert response.data[0]['service_type'] == 'Event'
         assert Decimal(str(response.data[0]['duration'])) == Decimal('2.50')
@@ -231,7 +221,7 @@ class TestUserHistoryView:
         client = AuthenticatedAPIClient().authenticate_user(participant)
         response = client.get(f'/api/users/{participant.id}/history/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data) == 1
         assert response.data[0]['service_type'] == 'Event'
 
@@ -254,7 +244,7 @@ class TestUserHistoryView:
         client = AuthenticatedAPIClient().authenticate_user(organizer)
         response = client.get(f'/api/users/{organizer.id}/history/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data) == 1
         assert response.data[0]['service_type'] == 'Event'
         assert response.data[0]['was_provider'] is True
@@ -272,7 +262,7 @@ class TestUserHistoryView:
         client = AuthenticatedAPIClient().authenticate_user(organizer)
         response = client.get(f'/api/users/{organizer.id}/history/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data) == 1
         assert response.data[0]['service_type'] == 'Event'
         assert response.data[0]['was_provider'] is True
@@ -294,8 +284,7 @@ class TestUserBadgeProgressView:
         client.authenticate_user(user)
         
         response = client.get(f'/api/users/{user.id}/badge-progress/')
-        assert response.status_code == status.HTTP_200_OK
-        assert 'first-service' in response.data
+        assert_api_response(response, 200, contains={'first-service'})
         assert 'achievement' in response.data['first-service']
     
     def test_get_achievement_progress_other_user(self):
@@ -307,7 +296,7 @@ class TestUserBadgeProgressView:
         client.authenticate_user(user1)
         
         response = client.get(f'/api/users/{user2.id}/badge-progress/')
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
 
 @pytest.mark.django_db
@@ -339,7 +328,7 @@ class TestUserVerifiedReviewsView:
         client.authenticate_user(user)
         
         response = client.get(f'/api/users/{user.id}/verified-reviews/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert isinstance(response.data, dict)
         assert 'results' in response.data
         if len(response.data['results']) > 0:
@@ -367,8 +356,7 @@ class TestUserVerifiedReviewsView:
 
         client = AuthenticatedAPIClient().authenticate_user(provider)
         hidden_response = client.get(f'/api/users/{provider.id}/verified-reviews/')
-        assert hidden_response.status_code == status.HTTP_200_OK
-        assert hidden_response.data['count'] == 0
+        assert_api_response(hidden_response, 200, schema={'count': 0})
 
         ReputationRep.objects.create(
             handshake=handshake,
@@ -380,8 +368,7 @@ class TestUserVerifiedReviewsView:
         )
 
         revealed_response = client.get(f'/api/users/{provider.id}/verified-reviews/')
-        assert revealed_response.status_code == status.HTTP_200_OK
-        assert revealed_response.data['count'] == 1
+        assert_api_response(revealed_response, 200, schema={'count': 1})
 
     def test_role_filter_offer_provider(self):
         """Offer: target user is provider; role=provider returns review, role=receiver returns none."""
@@ -404,8 +391,8 @@ class TestUserVerifiedReviewsView:
         client = AuthenticatedAPIClient().authenticate_user(provider)
         r_provider = client.get(f'/api/users/{provider.id}/verified-reviews/', {'role': 'provider'})
         r_receiver = client.get(f'/api/users/{provider.id}/verified-reviews/', {'role': 'receiver'})
-        assert r_provider.status_code == status.HTTP_200_OK
-        assert r_receiver.status_code == status.HTTP_200_OK
+        assert_api_response(r_provider, 200)
+        assert_api_response(r_receiver, 200)
         assert r_provider.data['count'] == 1
         assert r_receiver.data['count'] == 0
         assert r_provider.data['results'][0].get('reviewed_user_role') == 'provider'
@@ -431,8 +418,8 @@ class TestUserVerifiedReviewsView:
         client = AuthenticatedAPIClient().authenticate_user(requester)
         r_provider = client.get(f'/api/users/{requester.id}/verified-reviews/', {'role': 'provider'})
         r_receiver = client.get(f'/api/users/{requester.id}/verified-reviews/', {'role': 'receiver'})
-        assert r_provider.status_code == status.HTTP_200_OK
-        assert r_receiver.status_code == status.HTTP_200_OK
+        assert_api_response(r_provider, 200)
+        assert_api_response(r_receiver, 200)
         assert r_provider.data['count'] == 0
         assert r_receiver.data['count'] == 1
         assert r_receiver.data['results'][0].get('reviewed_user_role') == 'receiver'
@@ -458,8 +445,8 @@ class TestUserVerifiedReviewsView:
         client = AuthenticatedAPIClient().authenticate_user(requester)
         r_provider = client.get(f'/api/users/{requester.id}/verified-reviews/', {'role': 'provider'})
         r_receiver = client.get(f'/api/users/{requester.id}/verified-reviews/', {'role': 'receiver'})
-        assert r_provider.status_code == status.HTTP_200_OK
-        assert r_receiver.status_code == status.HTTP_200_OK
+        assert_api_response(r_provider, 200)
+        assert_api_response(r_receiver, 200)
         assert r_provider.data['count'] == 1
         assert r_receiver.data['count'] == 0
         assert r_provider.data['results'][0].get('reviewed_user_role') == 'provider'
@@ -485,8 +472,8 @@ class TestUserVerifiedReviewsView:
         client = AuthenticatedAPIClient().authenticate_user(need_owner)
         r_provider = client.get(f'/api/users/{need_owner.id}/verified-reviews/', {'role': 'provider'})
         r_receiver = client.get(f'/api/users/{need_owner.id}/verified-reviews/', {'role': 'receiver'})
-        assert r_provider.status_code == status.HTTP_200_OK
-        assert r_receiver.status_code == status.HTTP_200_OK
+        assert_api_response(r_provider, 200)
+        assert_api_response(r_receiver, 200)
         assert r_provider.data['count'] == 0
         assert r_receiver.data['count'] == 1
         assert r_receiver.data['results'][0].get('reviewed_user_role') == 'receiver'
@@ -521,8 +508,7 @@ class TestUserVerifiedReviewsView:
         )
         client = AuthenticatedAPIClient().authenticate_user(provider)
         r = client.get(f'/api/users/{provider.id}/verified-reviews/', {'role': 'provider'})
-        assert r.status_code == status.HTTP_200_OK
-        assert r.data['count'] == 1
+        assert_api_response(r, 200, schema={'count': 1})
 
 
 @pytest.mark.django_db
@@ -537,10 +523,7 @@ class TestPublicUserProfile:
         client.authenticate_user(user)
         
         response = client.get(f'/api/users/{user.id}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['id'] == str(user.id)
-        assert 'achievements' in response.data
-        assert 'services' in response.data
+        assert_api_response(response, 200, contains={'achievements', 'services'}, schema={'id': str(user.id)})
     
     def test_public_profile_excludes_sensitive_data(self):
         """Test public profile excludes sensitive information"""
@@ -551,7 +534,7 @@ class TestPublicUserProfile:
         client.authenticate_user(user)
         
         response = client.get(f'/api/users/{other_user.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert 'email' not in response.data
         assert 'role' not in response.data
         assert 'timebank_balance' not in response.data
@@ -580,9 +563,7 @@ class TestPublicUserProfile:
         client = AuthenticatedAPIClient().authenticate_user(viewer)
         response = client.get(f'/api/users/{profile_user.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert 'created_events' in response.data
-        assert 'joined_events' in response.data
+        assert_api_response(response, 200, contains={'created_events', 'joined_events'})
         assert 'invited_events' not in response.data
 
         created_ids = {event['id'] for event in response.data['created_events']}
@@ -656,8 +637,7 @@ class TestEventCommentsHistoryOnProfile:
         client = AuthenticatedAPIClient().authenticate_user(viewer)
         response = client.get(f'/api/users/{organizer.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert 'event_comments_history' in response.data
+        assert_api_response(response, 200, contains={'event_comments_history'})
         history = response.data['event_comments_history']
         assert len(history) == 2
 
@@ -695,7 +675,7 @@ class TestEventCommentsHistoryOnProfile:
 
         # Comment must be visible even before the organizer submits any evaluation.
         response = client.get(f'/api/users/{organizer.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data['event_comments_history']) == 1, (
             'Event review must be visible immediately — blind-review suppression '
             'must not apply to Event handshakes.'
@@ -715,7 +695,7 @@ class TestEventCommentsHistoryOnProfile:
         )
 
         after_response = client.get(f'/api/users/{organizer.id}/')
-        assert after_response.status_code == status.HTTP_200_OK
+        assert_api_response(after_response, 200)
         assert len(after_response.data['event_comments_history']) == 1
 
 
@@ -729,8 +709,7 @@ class TestUserFollowView:
         target = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(follower)
         response = client.post(f'/api/users/{target.id}/follow/')
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data['message'] == 'Successfully followed user.'
+        assert_api_response(response, 201, schema={'message': 'Successfully followed user.'})
         assert response.data['follow']['follower_id'] == str(follower.id)
         assert response.data['follow']['following_id'] == str(target.id)
         assert 'id' in response.data['follow']
@@ -745,14 +724,14 @@ class TestUserFollowView:
     def test_follow_target_not_found(self):
         client = AuthenticatedAPIClient().authenticate_user(UserFactory())
         response = client.post(f'/api/users/{uuid.uuid4()}/follow/')
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
         assert response.data['code'] == 'NOT_FOUND'
 
     def test_follow_self_returns_400(self):
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.post(f'/api/users/{user.id}/follow/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert response.data['code'] == 'VALIDATION_ERROR'
 
     def test_follow_duplicate_returns_400(self):
@@ -761,7 +740,7 @@ class TestUserFollowView:
         UserFollow.objects.create(follower=follower, following=target)
         client = AuthenticatedAPIClient().authenticate_user(follower)
         response = client.post(f'/api/users/{target.id}/follow/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert response.data['code'] == 'ALREADY_EXISTS'
 
     def test_follow_requires_authentication(self):
@@ -770,7 +749,7 @@ class TestUserFollowView:
         target = UserFactory()
         client = APIClient()
         response = client.post(f'/api/users/{target.id}/follow/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_follow_invalidates_cached_me_profile(self):
         follower = UserFactory()
@@ -799,8 +778,7 @@ class TestUserFollowView:
         UserFollow.objects.create(follower=follower, following=target)
         client = AuthenticatedAPIClient().authenticate_user(follower)
         response = client.delete(f'/api/users/{target.id}/follow/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['message'] == 'Successfully unfollowed user.'
+        assert_api_response(response, 200, schema={'message': 'Successfully unfollowed user.'})
         assert not UserFollow.objects.filter(follower=follower, following=target).exists()
         assert UserFollowEvent.objects.filter(
             follower=follower,
@@ -811,14 +789,14 @@ class TestUserFollowView:
     def test_unfollow_target_not_found(self):
         client = AuthenticatedAPIClient().authenticate_user(UserFactory())
         response = client.delete(f'/api/users/{uuid.uuid4()}/follow/')
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
         assert response.data['code'] == 'NOT_FOUND'
 
     def test_unfollow_self_returns_400(self):
         user = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.delete(f'/api/users/{user.id}/follow/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert response.data['code'] == 'VALIDATION_ERROR'
 
     def test_unfollow_when_not_following_returns_400(self):
@@ -826,7 +804,7 @@ class TestUserFollowView:
         target = UserFactory()
         client = AuthenticatedAPIClient().authenticate_user(follower)
         response = client.delete(f'/api/users/{target.id}/follow/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert response.data['code'] == 'INVALID_STATE'
 
     def test_unfollow_requires_authentication(self):
@@ -835,7 +813,7 @@ class TestUserFollowView:
         target = UserFactory()
         client = APIClient()
         response = client.delete(f'/api/users/{target.id}/follow/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 @pytest.mark.django_db
@@ -851,7 +829,7 @@ class TestUserFollowListViews:
         UserFollow.objects.create(follower=follower_b, following=target)
         client = AuthenticatedAPIClient().authenticate_user(UserFactory())
         response = client.get(f'/api/users/{target.id}/followers/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data['results']
         assert len(results) == 2
         ids = {row['id'] for row in results}
@@ -868,7 +846,7 @@ class TestUserFollowListViews:
         UserFollow.objects.create(follower=source, following=u2)
         client = AuthenticatedAPIClient().authenticate_user(UserFactory())
         response = client.get(f'/api/users/{source.id}/following/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data['results']
         assert len(results) == 2
         ids = {row['id'] for row in results}
@@ -878,7 +856,7 @@ class TestUserFollowListViews:
     def test_followers_list_user_not_found(self):
         client = AuthenticatedAPIClient().authenticate_user(UserFactory())
         response = client.get(f'/api/users/{uuid.uuid4()}/followers/')
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
         assert response.data['code'] == 'NOT_FOUND'
 
     def test_followers_list_requires_authentication(self):
@@ -886,14 +864,14 @@ class TestUserFollowListViews:
 
         target = UserFactory()
         response = APIClient().get(f'/api/users/{target.id}/followers/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_following_list_requires_authentication(self):
         from rest_framework.test import APIClient
 
         source = UserFactory()
         response = APIClient().get(f'/api/users/{source.id}/following/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_inactive_follower_excluded_from_list_and_count(self):
         target = UserFactory()
@@ -903,7 +881,7 @@ class TestUserFollowListViews:
         UserFollow.objects.create(follower=inactive_follower, following=target)
         client = AuthenticatedAPIClient().authenticate_user(UserFactory())
         response = client.get(f'/api/users/{target.id}/followers/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data['results']
         ids = {row['id'] for row in results}
         assert str(active_follower.id) in ids
@@ -917,7 +895,7 @@ class TestUserFollowListViews:
         UserFollow.objects.create(follower=source, following=inactive_target)
         client = AuthenticatedAPIClient().authenticate_user(UserFactory())
         response = client.get(f'/api/users/{source.id}/following/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results = response.data['results']
         ids = {row['id'] for row in results}
         assert str(active_target.id) in ids

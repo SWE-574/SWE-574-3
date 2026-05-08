@@ -7,6 +7,7 @@ import pytest
 from api.models import Service, UserFollow
 from api.tests.helpers.factories import ServiceFactory, UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -54,7 +55,7 @@ class TestServiceHotSocialBoost:
         client = AuthenticatedAPIClient().authenticate_user(viewer)
         response = client.get('/api/services/?sort=hot&search=[SPB]')
 
-        assert response.status_code == 200
+        assert_api_response(response, 200)
         ordered_ids = self._service_ids_in_order(response.data)
         assert str(connected_service.id) == ordered_ids[0]
         assert str(disconnected_service.id) == ordered_ids[1]
@@ -96,7 +97,7 @@ class TestServiceHotSocialBoost:
         client = AuthenticatedAPIClient().authenticate_user(viewer)
         response = client.get('/api/services/?sort=hot&search=[SPB]')
 
-        assert response.status_code == 200
+        assert_api_response(response, 200)
         ordered_ids = self._service_ids_in_order(response.data)
         assert str(second_degree_service.id) == ordered_ids[0]
         assert str(disconnected_service.id) == ordered_ids[1]
