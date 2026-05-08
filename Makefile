@@ -7,7 +7,8 @@
         prod-up prod-down prod-logs prod-build prod-reset prod-demo \
         shell-backend shell-db shell-redis \
         test test-unit test-integration test-docker coverage coverage-backend coverage-frontend coverage-report \
-        test-mutation test-mutation-html test-perf test-mobile-unit
+        test-mutation test-mutation-html test-perf test-mobile-unit \
+        test-assert-sweep
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -441,6 +442,17 @@ test-perf: ## Run k6 perf gates against the running stack
 
 test-mobile-unit: ## Run mobile-client Jest test suite
 	@cd mobile-client && npm test -- --watchAll=false
+
+test-assert-sweep: ## Lint guardrail: forbid raw status_code asserts and TestCase subclasses
+	$(call _log,"Checking for raw status_code asserts under api/tests/integration/...")
+	@cd backend && $(PYEXEC) -m scripts.codemods.sweep_status_assertions --check api/tests/integration/
+	$(call _log,"Checking no TestCase subclasses survive in api/tests/unit/...")
+	@if grep -rEn "class \w+\((TestCase|APITestCase|TransactionTestCase|HypothesisTestCase)\)" \
+	     backend/api/tests/unit/ --include="*.py" 2>/dev/null; then \
+	   printf '\033[1;31mERROR: TestCase subclasses found in unit tests:\033[0m\n'; \
+	   exit 1; \
+	 fi
+	$(call _ok,"Assertion sweep guardrail clean.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

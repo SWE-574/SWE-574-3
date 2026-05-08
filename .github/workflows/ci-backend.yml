@@ -226,3 +226,30 @@ jobs:
       - name: Stop MinIO
         if: always()
         run: docker rm -f ci_minio || true
+
+  assert-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    name: assert-sweep guardrail
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install libcst
+        run: pip install "libcst>=1.4"
+
+      - name: Run codemod in --check mode
+        working-directory: backend
+        run: python -m scripts.codemods.sweep_status_assertions --check api/tests/integration/
+
+      - name: Forbid TestCase subclasses in unit tests
+        working-directory: backend
+        run: |
+          set -e
+          if grep -rEn 'class \w+\((TestCase|APITestCase|TransactionTestCase|HypothesisTestCase)\)' api/tests/unit/ --include='*.py' 2>/dev/null; then
+            echo "::error::TestCase subclasses found in api/tests/unit/."
+            exit 1
+          fi
