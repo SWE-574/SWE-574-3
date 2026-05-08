@@ -248,6 +248,8 @@ class TestForYouBlend:
             'follow': 1.0,
             'cooccur': 2.0,
             'recency_penalty': 0.25,
+            'engagement': 0.0,
+            'dismissed_similarity': 0.0,
         }
 
     def test_neutral_signals_recover_hot_score(self):
@@ -435,3 +437,123 @@ class TestCooccurrenceBuilder:
         assert HandshakeCooccurrence.objects.count() == 1
         surviving = HandshakeCooccurrence.objects.get()
         assert surviving.count == 42
+
+
+# ---------------------------------------------------------------------------
+# engagement_signal (Round 3 — saves-only positive signal)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestEngagementSignal:
+    def test_empty_saved_set_returns_zero(self):
+        from api.ranking_personalized import engagement_signal
+
+        assert engagement_signal({'Q1', 'Q2'}, set()) == 0.0
+
+    def test_empty_service_tags_returns_zero(self):
+        from api.ranking_personalized import engagement_signal
+
+        assert engagement_signal(set(), {'Q1'}) == 0.0
+
+    def test_full_overlap_returns_one(self):
+        from api.ranking_personalized import engagement_signal
+
+        assert engagement_signal({'Q1'}, {'Q1'}) == 1.0
+
+    def test_partial_overlap_returns_jaccard(self):
+        from api.ranking_personalized import engagement_signal
+
+        # intersection {Q2}, union {Q1, Q2, Q3} -> 1/3
+        assert engagement_signal({'Q1', 'Q2'}, {'Q2', 'Q3'}) == pytest.approx(1.0 / 3.0)
+
+
+# ---------------------------------------------------------------------------
+# dismissed_similarity (Round 3 — soft penalty)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestDismissedSimilarity:
+    def test_empty_dismissed_set_returns_zero(self):
+        from api.ranking_personalized import dismissed_similarity
+
+        assert dismissed_similarity({'Q1', 'Q2'}, set()) == 0.0
+
+    def test_full_overlap_returns_one(self):
+        from api.ranking_personalized import dismissed_similarity
+
+        assert dismissed_similarity({'Q1'}, {'Q1'}) == 1.0
+
+    def test_partial_overlap_returns_jaccard(self):
+        from api.ranking_personalized import dismissed_similarity
+
+        # intersection {Q2}, union {Q1, Q2, Q3} -> 1/3
+        assert dismissed_similarity({'Q1', 'Q2'}, {'Q2', 'Q3'}) == pytest.approx(1.0 / 3.0)
+
+
+# ---------------------------------------------------------------------------
+# apply_mmr_diversification (Round 3 — diversity re-rank)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestMMRDiversification:
+    """MMR penalises candidates whose tag set overlaps with already-selected
+    results, so the visible feed isn't five near-duplicates back-to-back.
+    """
+    def _make_tag(self, qid):
+        from api.models import Tag
+        return Tag.objects.get_or_create(id=qid, defaults={'name': qid})[0]
+
+    def _service_with_tag(self, tag):
+        svc = ServiceFactory(type='Offer', status='Active')
+        svc.tags.add(tag)
+        return svc
+
+    def test_outlier_is_promoted_into_top_three(self):
+        from api.ranking_personalized import apply_mmr_diversification
+
+        common = self._make_tag('Q_common')
+        outlier = self._make_tag('Q_outlier')
+
+        # Five services share a single tag; one outlier has a different tag.
+        # Original scores order them dup1 .. dup5 then outlier last.
+        scored = []
+        for i in range(5):
+            scored.append((self._service_with_tag(common), 5.0 - i * 0.01, {}))
+        scored.append((self._service_with_tag(outlier), 4.5, {}))
+
+        diversified = apply_mmr_diversification(scored, lambda_=0.5, top_k=10)
+        top_three_ids = {triple[0].id for triple in diversified[:3]}
+        outlier_service_id = scored[-1][0].id
+        assert outlier_service_id in top_three_ids
+
+    def test_zero_lambda_is_no_op(self):
+        from api.ranking_personalized import apply_mmr_diversification
+
+        common = self._make_tag('Q_common')
+        # Build a deterministic order; lambda_=0 must preserve it.
+        scored = [
+            (self._service_with_tag(common), 5.0 - i * 0.01, {})
+            for i in range(4)
+        ]
+        diversified = apply_mmr_diversification(scored, lambda_=0.0, top_k=10)
+        assert [triple[0].id for triple in diversified] == [
+            triple[0].id for triple in scored
+        ]
+
+    def test_top_k_caps_the_diversification_window(self):
+        from api.ranking_personalized import apply_mmr_diversification
+
+        common = self._make_tag('Q_common')
+        scored = [
+            (self._service_with_tag(common), 5.0 - i * 0.01, {})
+            for i in range(6)
+        ]
+        # With top_k=2 only the first two get re-ranked; the rest stay put.
+        diversified = apply_mmr_diversification(scored, lambda_=0.9, top_k=2)
+        original_tail_ids = [triple[0].id for triple in scored[2:]]
+        diversified_tail_ids = [triple[0].id for triple in diversified[2:]]
+        assert diversified_tail_ids == original_tail_ids

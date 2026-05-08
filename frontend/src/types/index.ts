@@ -229,6 +229,8 @@ export interface ForYouSignals {
   follow: number
   cooccur: number
   recency_penalty: number
+  engagement?: number
+  dismissed_similarity?: number
 }
 
 export interface EventEvaluationSummary {

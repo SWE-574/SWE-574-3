@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Box, Flex, Spinner, Stack, Text } from '@chakra-ui/react'
-import { Link as RouterLink } from 'react-router-dom'
+import { Box, Flex, Grid, Spinner, Stack, Text } from '@chakra-ui/react'
+import { useNavigate } from 'react-router-dom'
 import { FiBookmark } from 'react-icons/fi'
 
 import { serviceAPI } from '@/services/serviceAPI'
+import RecommendationCard from '@/components/pulse/RecommendationCard'
+import { GREEN, GREEN_LT, GRAY200, WHITE } from '@/theme/tokens'
 import type { Service } from '@/types'
 
 export default function SavedServicesPage() {
+  const navigate = useNavigate()
   const [services, setServices] = useState<Service[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -18,7 +21,8 @@ export default function SavedServicesPage() {
       .then(rows => {
         if (!cancelled) setServices(rows)
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('SavedServicesPage: load failed', err)
         if (!cancelled) setError('Could not load saved services right now.')
       })
       .finally(() => {
@@ -29,66 +33,84 @@ export default function SavedServicesPage() {
     }
   }, [])
 
-  return (
-    <Box maxW="640px" mx="auto" px={4} py={6}>
-      <Flex align="center" mb={4} gap={2}>
-        <FiBookmark />
-        <Text fontSize="xl" fontWeight="800" color="gray.900">
-          Saved
-        </Text>
-      </Flex>
-      <Text fontSize="sm" color="gray.600" mb={4}>
-        Services you've bookmarked privately for later.
-      </Text>
+  const handleDismissed = (serviceId: string) => {
+    setServices((cur) => cur.filter((s) => s.id !== serviceId))
+  }
 
-      {loading ? (
-        <Flex h="120px" align="center" justify="center">
-          <Spinner color="purple.500" />
-        </Flex>
-      ) : error ? (
-        <Box bg="red.50" p={3} borderRadius="md">
-          <Text fontSize="sm" color="red.700">{error}</Text>
-        </Box>
-      ) : services.length === 0 ? (
-        <Box bg="gray.50" p={6} borderRadius="md">
-          <Text fontSize="sm" color="gray.600">
-            Nothing saved yet. Tap the bookmark icon on any service to keep it here.
+  return (
+    <Box minH="100vh" bg="gray.50">
+      <Box maxW="1080px" mx="auto" px={{ base: 4, md: 6 }} py={{ base: 5, md: 8 }}>
+        <Flex align="center" gap={3} mb="6px">
+          <Flex
+            w="40px" h="40px"
+            borderRadius="12px"
+            bg={GREEN_LT}
+            color={GREEN}
+            align="center"
+            justify="center"
+          >
+            <FiBookmark size={18} />
+          </Flex>
+          <Text fontSize="2xl" fontWeight={800} color="gray.900">
+            Saved
           </Text>
-        </Box>
-      ) : (
-        <Stack gap={2}>
-          {services.map(service => (
-            <RouterLink
-              key={service.id}
-              to={`/service-detail/${service.id}`}
-              style={{ textDecoration: 'none' }}
+        </Flex>
+        <Text fontSize="sm" color="gray.600" mb={6}>
+          Your bookmarked services. Tap the bookmark icon on any card to remove it.
+        </Text>
+
+        {loading ? (
+          <Flex h="160px" align="center" justify="center">
+            <Spinner color={GREEN} size="lg" />
+          </Flex>
+        ) : error ? (
+          <Box bg="red.50" p={4} borderRadius="md" borderWidth="1px" borderColor="red.100">
+            <Text fontSize="sm" color="red.700">{error}</Text>
+          </Box>
+        ) : services.length === 0 ? (
+          <Stack
+            bg={WHITE}
+            borderWidth="1px"
+            borderColor={GRAY200}
+            borderRadius="14px"
+            p={8}
+            align="center"
+            gap={3}
+          >
+            <Box as={FiBookmark} fontSize="32px" color="gray.400" />
+            <Text fontSize="sm" color="gray.600" textAlign="center" maxW="360px">
+              Nothing saved yet. Tap the bookmark icon on any service to keep it here for later.
+            </Text>
+            <Box
+              as="button"
+              onClick={() => navigate('/dashboard')}
+              px={5} py="9px"
+              borderRadius="9999px"
+              bg={GREEN} color={WHITE}
+              fontSize="13px" fontWeight={700}
+              cursor="pointer"
+              _hover={{ opacity: 0.9 }}
+              transition="opacity 0.15s"
             >
-              <Flex
-                align="center"
-                gap={3}
-                p={3}
-                borderRadius="lg"
-                bg="white"
-                borderWidth="1px"
-                borderColor="gray.200"
-                _hover={{ bg: 'gray.50', cursor: 'pointer' }}
-              >
-                <Box flex="1">
-                  <Text fontSize="11px" fontWeight="700" color="purple.600" textTransform="uppercase">
-                    {service.type}
-                  </Text>
-                  <Text fontSize="sm" fontWeight="700" color="gray.900" lineClamp={2}>
-                    {service.title}
-                  </Text>
-                  <Text fontSize="xs" color="gray.500" lineClamp={1}>
-                    {service.user?.first_name} {service.user?.last_name}
-                  </Text>
-                </Box>
-              </Flex>
-            </RouterLink>
-          ))}
-        </Stack>
-      )}
+              Browse services
+            </Box>
+          </Stack>
+        ) : (
+          <Grid
+            templateColumns={{ base: '1fr', md: 'repeat(2, minmax(0, 1fr))' }}
+            gap={3}
+          >
+            {services.map((service) => (
+              <RecommendationCard
+                key={service.id}
+                service={service}
+                lane="for_you"
+                onDismissed={handleDismissed}
+              />
+            ))}
+          </Grid>
+        )}
+      </Box>
     </Box>
   )
 }

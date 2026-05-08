@@ -17,9 +17,6 @@ import {
   FiMonitor,
   FiCalendar,
   FiRefreshCw,
-  FiChevronDown,
-  FiChevronUp,
-  FiTrendingUp,
   FiGrid,
   FiWifi,
   FiMenu,
@@ -27,7 +24,6 @@ import {
   FiLayers,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
-import { MapInfoStrip } from '@/components/MapInfoStrip'
 import { serviceAPI } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -48,10 +44,6 @@ import {
   WHITE,
 } from '@/theme/tokens'
 import { formatGroupOfferDateTime, isNearlyFull } from '@/utils/eventUtils'
-import {
-  MAP_SCROLL_DEBOUNCE_MS,
-  nextMapCollapsedState,
-} from '@/utils/dashboardScroll'
 
 const TRANSPARENT = 'transparent'
 
@@ -60,17 +52,14 @@ const DEBOUNCE_DISTANCE = 600
 const POLL_INTERVAL     = 60_000
 const GEO_TIMEOUT       = 10_000
 
-// Map collapse hysteresis constants are imported from utils/dashboardScroll
-// so they can be unit-tested without rendering the full dashboard.
-
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
 const FILTERS = [
   { id: 'all',       label: 'All',       icon: <FiGrid size={12} /> },
-  { id: 'newest',    label: 'New',        icon: <FiTrendingUp size={12} /> },
-  { id: 'online',    label: 'Online',     icon: <FiWifi size={12} /> },
-  { id: 'recurrent', label: 'Recurrent',  icon: <FiRefreshCw size={12} /> },
-  { id: 'weekend',   label: 'Weekend',    icon: <FiCalendar size={12} /> },
+  { id: 'online',    label: 'Online',    icon: <FiWifi size={12} /> },
+  { id: 'in_person', label: 'In-person', icon: <FiMapPin size={12} /> },
+  { id: 'recurrent', label: 'Recurrent', icon: <FiRefreshCw size={12} /> },
+  { id: 'one_time',  label: 'One-time',  icon: <FiCalendar size={12} /> },
 ]
 
 const TYPE_FILTERS = [
@@ -391,8 +380,6 @@ const DashboardPage = () => {
   const [debouncedSearch, setDebouncedSearch]       = useState('')
   const [services, setServices]                     = useState<Service[]>([])
   const [allActiveServices, setAllActiveServices]   = useState<Service[]>([])
-  const [mapOpen, setMapOpen]                       = useState(true)
-  const [mapCollapsed, setMapCollapsed]             = useState(false)
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
   const [userLocation, setUserLocation]             = useState<{ lat: number; lng: number } | null>(null)
@@ -411,20 +398,7 @@ const DashboardPage = () => {
 
   const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const mapScrollTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const typeDropdownRef  = useRef<HTMLDivElement>(null)
-
-  const handleGridScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const top = e.currentTarget.scrollTop
-    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
-    mapScrollTimer.current = setTimeout(() => {
-      setMapCollapsed(prev => nextMapCollapsedState(prev, top))
-    }, MAP_SCROLL_DEBOUNCE_MS)
-  }, [])
-
-  useEffect(() => () => {
-    if (mapScrollTimer.current) clearTimeout(mapScrollTimer.current)
-  }, [])
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -476,12 +450,10 @@ const DashboardPage = () => {
     setAllActiveServices(unique)
     let filtered = unique.filter((service) => matchesDashboardSearch(service, debouncedSearch))
     if (activeFilter === 'online')    filtered = filtered.filter((s) => s.location_type === 'Online')
+    if (activeFilter === 'in_person') filtered = filtered.filter((s) => s.location_type === 'In-Person')
     if (activeFilter === 'recurrent') filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
-    if (activeFilter === 'newest')    filtered = [...filtered].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    if (activeFilter === 'weekend')   filtered = filtered.filter((s) => /saturday|sunday|weekend/i.test(s.schedule_details ?? ''))
-    if (activeFilter !== 'newest') {
-      filtered = [...filtered].sort(sortServicesByFeedPriority)
-    }
+    if (activeFilter === 'one_time')  filtered = filtered.filter((s) => s.schedule_type === 'One-Time')
+    filtered = [...filtered].sort(sortServicesByFeedPriority)
     setServices(filtered)
   }, [activeFilter, debouncedSearch, locationEnabled, userLocation, debouncedDistance])
 
@@ -759,22 +731,6 @@ const DashboardPage = () => {
                 </Box>
               </Flex>
 
-              {/* Map toggle */}
-              <Box
-                as="button" flexShrink={0}
-                data-tour="map-toggle"
-                px="11px" py="7px" borderRadius="9px"
-                bg={mapOpen ? GREEN : GRAY100}
-                color={mapOpen ? WHITE : GRAY600}
-                fontSize="12px" fontWeight={600}
-                display="flex" alignItems="center" gap="5px"
-                onClick={() => setMapOpen((v) => !v)}
-                _hover={{ opacity: 0.9 }} transition="all 0.15s"
-              >
-                <FiMapPin size={12} />
-                <Box display={{ base: 'none', sm: 'block' }}>Map</Box>
-                {mapOpen ? <FiChevronUp size={11} /> : <FiChevronDown size={11} />}
-              </Box>
             </Flex>
 
             {/* Filter + type chips row — mobile only */}
@@ -821,31 +777,16 @@ const DashboardPage = () => {
             </Flex>
           </Box>
 
-          {/* Map panel — collapses to a slim info strip when the feed scrolls
-              past a small threshold, so the feed reclaims the 280px the map
-              would otherwise hold. Tap the strip (or scroll back to top) to
-              re-expand. */}
-          {mapOpen && (
-            mapCollapsed ? (
-              <MapInfoStrip
-                area={displayServices[0]?.location_area || null}
-                offerCount={displayServices.filter(s => s.type === 'Offer').length}
-                needCount={displayServices.filter(s => s.type === 'Need').length}
-                eventCount={displayServices.filter(s => s.type === 'Event').length}
-                onExpand={() => setMapCollapsed(false)}
-              />
-            ) : (
-              <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
-                <MapView
-                  services={displayServices}
-                  height="280px"
-                  onServiceClick={(id) => navigate(`/service-detail/${id}`)}
-                  userLocation={userLocation}
-                  isRefreshing={isLoading && services.length > 0}
-                />
-              </Box>
-            )
-          )}
+          {/* Map panel — always visible, fixed height. */}
+          <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
+            <MapView
+              services={displayServices}
+              height="280px"
+              onServiceClick={(id) => navigate(`/service-detail/${id}`)}
+              userLocation={userLocation}
+              isRefreshing={isLoading && services.length > 0}
+            />
+          </Box>
 
           {/* Results count */}
           <Box px={{ base: 4, md: 6 }} pt={4} pb={2} flexShrink={0} bgColor={TRANSPARENT}>
@@ -861,7 +802,6 @@ const DashboardPage = () => {
             px={{ base: 3, md: 6 }}
             pt={2}
             pb={8}
-            onScroll={handleGridScroll}
           >
             {isLoading && displayServices.length === 0 ? (
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>

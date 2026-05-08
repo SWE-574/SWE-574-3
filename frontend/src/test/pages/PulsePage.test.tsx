@@ -11,6 +11,7 @@ const {
   feedMock,
   getStatsMock,
   recordVisitMock,
+  getSuggestedMock,
   useAuthStoreMock,
   useGeoStoreMock,
   useAcquireLocationMock,
@@ -19,6 +20,7 @@ const {
   feedMock: vi.fn(),
   getStatsMock: vi.fn(),
   recordVisitMock: vi.fn(),
+  getSuggestedMock: vi.fn(),
   useAuthStoreMock: vi.fn(),
   useGeoStoreMock: vi.fn(),
   useAcquireLocationMock: vi.fn(),
@@ -42,6 +44,13 @@ vi.mock('@/services/pulseAPI', () => ({
     getStats: getStatsMock,
     recordVisit: recordVisitMock,
     setDismissed: vi.fn(),
+  },
+}))
+
+vi.mock('@/services/userAPI', () => ({
+  userAPI: {
+    getSuggested: getSuggestedMock,
+    followUser: vi.fn(),
   },
 }))
 
@@ -96,20 +105,24 @@ describe('PulsePage', () => {
       follow_handshakes_week: 2,
     })
     recordVisitMock.mockReset().mockResolvedValue({ last_pulse_visit_at: 'now' })
+    getSuggestedMock.mockReset().mockResolvedValue({ results: [], next: null, count: 0 })
     useAcquireLocationMock.mockReset()
   })
   afterEach(() => vi.clearAllMocks())
 
-  it('renders the title and the stats row from getStats', async () => {
+  it('renders the sidebar with title and stat tiles from getStats', async () => {
     setUser()
     setGeo(null)
     listMock.mockResolvedValue([])
     renderPage()
-    expect(screen.getByText('Pulse')).toBeInTheDocument()
+    expect(screen.getAllByText('Pulse').length).toBeGreaterThan(0)
     await waitFor(() => {
-      expect(screen.getByText(/3 new picks since you last visited/i)).toBeInTheDocument()
-      expect(screen.getByText(/5 saved/i)).toBeInTheDocument()
-      expect(screen.getByText(/2 handshakes from your follows this week/i)).toBeInTheDocument()
+      expect(screen.getByText('New picks')).toBeInTheDocument()
+      expect(screen.getByText('3')).toBeInTheDocument()
+      expect(screen.getByText('Saved')).toBeInTheDocument()
+      expect(screen.getByText('5')).toBeInTheDocument()
+      expect(screen.getByText(/handshakes from follows/i)).toBeInTheDocument()
+      expect(screen.getByText('2')).toBeInTheDocument()
     })
   })
 
@@ -165,15 +178,59 @@ describe('PulsePage', () => {
     expect(screen.queryByText(/Test New/i)).not.toBeInTheDocument()
   })
 
-  it('hides the Nearby lane when the user has no location', async () => {
+  it('renders an Enable location button when the user has no location', async () => {
     setUser()
     setGeo(null)
     listMock.mockResolvedValue([])
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText(/Enable location to surface neighbours/i)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /enable location/i })).toBeInTheDocument()
     })
-    expect(screen.queryByTestId('pulse-lane-nearby')).not.toBeInTheDocument()
+  })
+
+  it('renders the Events for you lane when events are returned', async () => {
+    setUser()
+    setGeo(null)
+    listMock.mockImplementation((params: { type?: string } | undefined) => {
+      if (params?.type === 'Event') {
+        return Promise.resolve([
+          {
+            id: 'evt-1',
+            title: 'Saturday Coding Meetup',
+            type: 'Event',
+            user: { id: 'u-2', first_name: 'Ada', last_name: 'L', avatar_url: null },
+            location_area: 'Beşiktaş',
+            location_type: 'In-Person',
+            duration: 2,
+            schedule_type: 'One-Time',
+          },
+        ])
+      }
+      return Promise.resolve([])
+    })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('Saturday Coding Meetup')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('pulse-lane-events-for-you')).toBeInTheDocument()
+  })
+
+  it('renders the People to follow lane when suggestions are returned', async () => {
+    setUser()
+    setGeo(null)
+    listMock.mockResolvedValue([])
+    getSuggestedMock.mockResolvedValue({
+      results: [
+        { id: 'u-2', email: 'ada@example.com', first_name: 'Ada', last_name: 'Lovelace', avatar_url: null },
+      ],
+      next: null,
+      count: 1,
+    })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText(/Ada Lovelace/i)).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('pulse-lane-people-to-follow')).toBeInTheDocument()
   })
 
   it('records a visit on mount', async () => {

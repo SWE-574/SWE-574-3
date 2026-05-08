@@ -71,3 +71,17 @@ class TestSuggestedUsersView:
         resp = client.get('/api/users/suggested/')
         order = [row['id'] for row in resp.data['results']]
         assert order.index(str(high.id)) < order.index(str(low.id))
+
+    def test_excludes_staff_roles(self):
+        viewer = UserFactory()
+        admin = UserFactory(role='admin')
+        moderator = UserFactory(role='moderator')
+        super_admin = UserFactory(role='super_admin')
+        member = UserFactory(role='member')
+        client = AuthenticatedAPIClient().authenticate_user(viewer)
+        resp = client.get('/api/users/suggested/')
+        ids = {row['id'] for row in resp.data['results']}
+        assert str(admin.id) not in ids
+        assert str(moderator.id) not in ids
+        assert str(super_admin.id) not in ids
+        assert str(member.id) in ids

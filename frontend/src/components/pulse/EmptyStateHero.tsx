@@ -27,16 +27,16 @@ export default function EmptyStateHero({ reason }: Props) {
     <Box
       borderRadius="18px"
       p="22px 24px"
-      background="linear-gradient(135deg, rgba(124, 58, 237, 0.10) 0%, rgba(10, 136, 136, 0.10) 100%)"
+      background="linear-gradient(135deg, rgba(45, 92, 78, 0.08) 0%, rgba(248, 200, 74, 0.10) 100%)"
       borderWidth="1px"
-      borderColor="purple.100"
+      borderColor="green.100"
       data-testid="empty-state-hero"
     >
       <Stack gap={3} maxW="640px">
         <Text
           fontSize="11px"
           fontWeight={700}
-          color="purple.700"
+          color="green.700"
           textTransform="uppercase"
           letterSpacing="0.05em"
         >
@@ -50,7 +50,7 @@ export default function EmptyStateHero({ reason }: Props) {
         </Text>
         <Box>
           <Button
-            colorPalette="purple"
+            colorPalette="green"
             onClick={() => navigate(ctaTarget)}
             aria-label={ctaLabel}
           >

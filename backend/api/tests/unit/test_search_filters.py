@@ -927,13 +927,22 @@ class TestServiceViewSetOrdering:
         import time
         
         self.client = APIClient()
-        
+
         self.user = User.objects.create_user(
             email='testuser@test.com',
             password='testpass123',
             first_name='Test',
             last_name='User',
             timebank_balance=Decimal('10.00')
+        )
+        # Viewer is a separate user from the service owner so the dashboard's
+        # exclusion of the viewer's own listings doesn't strip the test fixtures.
+        self.viewer = User.objects.create_user(
+            email='viewer@test.com',
+            password='testpass123',
+            first_name='View',
+            last_name='Er',
+            timebank_balance=Decimal('10.00'),
         )
         
         # Create services with different creation times
@@ -968,7 +977,7 @@ class TestServiceViewSetOrdering:
             schedule_type='One-Time'
         )
         
-        self.client.force_authenticate(user=self.user)
+        self.client.force_authenticate(user=self.viewer)
     
     def _get_results(self, response):
         """Extract results from paginated or non-paginated response."""

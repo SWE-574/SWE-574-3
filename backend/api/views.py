@@ -2200,7 +2200,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
         recency penalty and CTR proxy.
         """
         from .models import ForYouEvent
-        from .ranking_personalized import record_impressions, score_for_you
+        from .ranking_personalized import (
+            apply_mmr_diversification, record_impressions, score_for_you,
+        )
 
         viewer = request.user
         is_eligible = (
@@ -2225,6 +2227,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
         queryset = queryset.exclude(dismissed_by__viewer=viewer)
         candidates = list(queryset[:200])
         scored = score_for_you(candidates, viewer)
+        # Diversify the head of the ranked list by tag overlap so the
+        # user doesn't see five near-duplicates back-to-back.
+        scored = apply_mmr_diversification(scored)
         limit = int(getattr(settings, 'RANKING_FOR_YOU_LIMIT', 10))
         top = scored[:limit]
 
@@ -2389,6 +2394,10 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if user_param:
             queryset = queryset.filter(user_id=user_param)
         elif self.action == 'list':
+            # Hide the viewer's own services from the general feed; the
+            # sidebar's "My listings" widget covers them separately.
+            if self.request.user.is_authenticated:
+                queryset = queryset.exclude(user=self.request.user)
             queryset = queryset.exclude(
                 type='Offer',
                 schedule_type='One-Time',
@@ -2396,10 +2405,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 scheduled_time__isnull=False,
                 scheduled_time__lte=timezone.now(),
             )
+            # Past events: drop anything whose scheduled_time has passed,
+            # OR that an organiser has manually marked completed.
             queryset = queryset.exclude(
                 type='Event',
                 scheduled_time__isnull=False,
                 scheduled_time__lte=timezone.now(),
+            )
+            queryset = queryset.exclude(
+                type='Event',
+                event_completed_at__isnull=False,
             )
         
         # Apply ordering based on sort parameter
@@ -7754,6 +7769,7 @@ class SuggestedUsersView(generics.ListAPIView):
             User.objects
             .filter(is_active=True)
             .exclude(pk=viewer.pk)
+            .exclude(role__in=['admin', 'moderator', 'super_admin'])
         )
         if followed_ids:
             qs = qs.exclude(pk__in=followed_ids)

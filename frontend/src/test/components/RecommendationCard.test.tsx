@@ -95,6 +95,30 @@ describe('RecommendationCard', () => {
     await waitFor(() => expect(setSavedMock).toHaveBeenCalledWith('svc-1', true))
   })
 
+  it('Why this? toggle renders an explanation when tag signal is non-zero', () => {
+    renderCard(makeService())
+    // Panel hidden by default.
+    expect(screen.queryByTestId('why-this-panel')).not.toBeInTheDocument()
+    // Click the info button to open it.
+    fireEvent.click(screen.getByLabelText(/Why this recommendation/i))
+    const panel = screen.getByTestId('why-this-panel')
+    expect(panel).toBeInTheDocument()
+    // Panel should contain the matched-interests reason (panel-scoped to
+    // disambiguate from the chip label that also says "Matches your interests").
+    expect(panel.textContent).toMatch(/Matches your interests/i)
+  })
+
+  it('Why this? falls back to a generic reason when no signals fire', () => {
+    renderCard(
+      makeService({
+        for_you_signals: { tag: 0, follow: 0, cooccur: 0, recency_penalty: 0 },
+      }),
+    )
+    fireEvent.click(screen.getByLabelText(/Why this recommendation/i))
+    const panel = screen.getByTestId('why-this-panel')
+    expect(panel.textContent).toMatch(/trending in your area/i)
+  })
+
   it('dismiss invokes pulseAPI and triggers the onDismissed callback', async () => {
     const onDismissed = vi.fn()
     render(
@@ -108,8 +132,7 @@ describe('RecommendationCard', () => {
         </MemoryRouter>
       </ChakraProvider>,
     )
-    fireEvent.click(screen.getByLabelText(/More options/i))
-    fireEvent.click(screen.getByText(/Not interested/i))
+    fireEvent.click(screen.getByLabelText(/Not interested/i))
     await waitFor(() => expect(setDismissedMock).toHaveBeenCalledWith('svc-1', true))
     await waitFor(() => expect(onDismissed).toHaveBeenCalledWith('svc-1'))
   })
