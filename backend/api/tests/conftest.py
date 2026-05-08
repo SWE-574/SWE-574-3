@@ -25,14 +25,16 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(autouse=True)
 def _assert_in_memory_channels(request, settings):
-    """Unit tests must use the in-memory channel layer.
+    """Unit and websocket-marked tests must use the in-memory channel layer.
 
-    Hitting Redis from unit tests is a leak — slow, flaky, and silently
-    coupled to whatever else is in the layer. Reset to in-memory at the
-    start of every unit test so a misconfigured CI environment cannot sneak
+    Hitting Redis from tests is a leak — slow, flaky, and silently coupled
+    across xdist workers (each worker shares Redis but uses its own DB
+    transaction, so channel groups created by one worker can bleed into
+    another). Reset to in-memory at the start of every unit and
+    websocket-marked test so a misconfigured CI environment cannot sneak
     by.
     """
-    if 'unit' not in request.keywords:
+    if 'unit' not in request.keywords and 'websocket' not in request.keywords:
         return
     settings.CHANNEL_LAYERS = {
         'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'},
