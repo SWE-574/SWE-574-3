@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import InterestRequesterRow from '@/components/service-detail/InterestRequesterRow'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, Flex, Grid, Stack, Text } from '@chakra-ui/react'
 import {
   FiArrowLeft, FiClock, FiCalendar, FiMapPin, FiMonitor,
@@ -480,6 +480,7 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
 export default function ServiceDetailPage() {
   const { id }     = useParams<{ id: string }>()
   const navigate   = useNavigate()
+  const [searchParams] = useSearchParams()
   const { isAuthenticated, user, refreshUser, updateUserOptimistically } = useAuthStore()
 
   const [service, setService]           = useState<Service | null>(null)
@@ -585,6 +586,12 @@ export default function ServiceDetailPage() {
     setEventDetailModalTab(tab)
     setIsEventDetailModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'chat') {
+      openEventDetailModal('chat')
+    }
+  }, [searchParams])
 
   const closeEventDetailModal = () => {
     setIsEventDetailModalOpen(false)

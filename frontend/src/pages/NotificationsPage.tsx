@@ -44,6 +44,8 @@ const NotificationsPage = () => {
         || notification.type === 'report_dismissed'
       ) {
         navigate('/profile?tab=reports')
+      } else if (notification.type === 'chat_message' && notification.related_service_type === 'Event' && notification.related_service) {
+        navigate(`/service-detail/${notification.related_service}?tab=chat`)
       } else if (notification.related_service_type === 'Event' && notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)
       } else if (notification.related_service && notification.type === 'positive_rep') {
