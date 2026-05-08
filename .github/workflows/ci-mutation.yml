@@ -219,9 +219,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-mutation
-          path: |
-            frontend/reports/
-            frontend/tests/reports/mutation/
+          path: frontend/tests/reports/mutation/
 
       # Stryker's JSON schema (1.0) does not carry an aggregate score field,
       # so compute it from the per-file mutant tallies. The clear-text
@@ -233,7 +231,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const path = 'frontend/reports/mutation/mutation.json';
+            const path = 'frontend/tests/reports/mutation/mutation.json';
             if (!fs.existsSync(path)) {
               core.warning('No Stryker report produced.');
               return;
