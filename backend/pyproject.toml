@@ -44,17 +44,18 @@ pytest_add_cli_args = [
     "-x", "-q", "--no-header",
     "-p", "no:cacheprovider",
 ]
-# also_copy ships the modules pytest-django needs to bootstrap inside the
-# mutants/ working tree. The top-level conftest.py at backend/conftest.py
-# pins sys.path so Django's app registry resolves through the mirrored
-# `api/` package rather than the original one on the outer sys.path —
-# this is the fix for the "AUTH_USER_MODEL refers to model 'api.User' that
-# has not been installed" error that previously broke end-to-end mutmut runs.
-# `api` is included so the rest of the package (models.py, __init__.py,
-# migrations/, management/, etc.) is mirrored — without these, Django's
-# app loading at django.setup() fails with `AUTH_USER_MODEL refers to
-# model 'api.User' that has not been installed` because mutmut otherwise
-# only copies the 6 specific files in paths_to_mutate. Restored here.
+# also_copy ships the supporting files pytest-django needs to bootstrap
+# inside the mutants/ working tree. Two pieces of the AUTH_USER_MODEL fix:
+#
+#   - `api` mirrors the entire package (models.py, __init__.py, migrations/,
+#     management/, etc.) into mutants/api/, so Django's app loading at
+#     django.setup() can actually find the User model. Without this, mutmut
+#     only copies the 6 paths_to_mutate files and Django bails with
+#     `AUTH_USER_MODEL refers to model 'api.User' that has not been installed`.
+#   - `conftest.py` ships the top-level backend/conftest.py into the mutants
+#     tree so it can load .env and apply local-dev fallbacks for DB / Redis
+#     env vars (settings.py's BASE_DIR-relative .env resolution otherwise
+#     points at the wrong directory inside mutants/).
 #
 # Bootstrap status (2026-05-08):
 #   FIXED: AUTH_USER_MODEL refers to model 'api.User' that has not been
