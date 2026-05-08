@@ -807,7 +807,7 @@ const DashboardPage = () => {
                   const owner    = service.user ?? service.provider
                   const isOwn    = !!user && owner?.id === user.id
                   const hs       = handshakeMap.get(service.id)
-                  const isRecurr = service.schedule_type === 'Recurrent'
+                  const isRecurr = isEventRecurrent(service)
                   const showBadge = hs && !(isRecurr && hs.status === 'completed')
                   const inList   = isOwn ? (incomingMap.get(service.id) ?? []) : []
                   const pCount   = inList.filter((h) => h.status === 'pending').length
