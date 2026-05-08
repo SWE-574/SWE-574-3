@@ -13,10 +13,10 @@ import MessagesStack from "./MessagesStack";
 import type { MessagesStackParamList } from "./MessagesStack";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../constants/colors";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ProfileStack, { ProfileStackParamList } from "./ProfileStack";
 import { useNotificationStore } from "../store/useNotificationStore";
 import MapTabButton from "../presentation/components/MapTabButton";
+import AnimatedTabBar from "../presentation/components/AnimatedTabBar";
 
 export type BottomTabParamList = {
   Home: NavigatorScreenParams<HomeStackParamList>;
@@ -30,7 +30,6 @@ export type BottomTabParamList = {
 const Tab = createBottomTabNavigator<BottomTabParamList>();
 
 export default function BottomTabNavigator() {
-  const insets = useSafeAreaInsets();
   const notifications = useNotificationStore((s) => s.notifications);
 
   const chatUnreadCount = notifications.filter(
@@ -44,23 +43,12 @@ export default function BottomTabNavigator() {
   return (
     <Tab.Navigator
       initialRouteName="Home"
+      tabBar={(props) => <AnimatedTabBar {...props} />}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.GREEN,
         tabBarInactiveTintColor: colors.GRAY500,
         tabBarHideOnKeyboard: true,
-        tabBarItemStyle: {
-          paddingTop: 6,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: "600",
-          marginBottom: 2,
-        },
-        tabBarStyle: {
-          height: 60 + insets.bottom,
-          paddingBottom: insets.bottom,
-        },
       }}
     >
       <Tab.Screen
