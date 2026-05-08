@@ -46,9 +46,12 @@ export function navigateToNotificationTarget(
     return;
   }
 
-  // Handshake-related and chat notifications → Chat screen
+  // Handshake-related and chat notifications → Chat screen.
+  // service_confirmation also lands here when related_service is absent
+  // (i.e. only a handshake link is available) so the user can confirm
+  // completion directly from the conversation.
   if (
-    (type.startsWith('handshake_') || type === 'chat_message') &&
+    (type.startsWith('handshake_') || type === 'chat_message' || type === 'service_confirmation') &&
     related_handshake
   ) {
     navigation.navigate('Messages', {

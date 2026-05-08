@@ -551,10 +551,13 @@ def notify_on_event_chat_message(sender, instance, created, **kwargs):
         return
     from .utils import create_notification
     try:
+        instance = PublicChatMessage.objects.select_related(
+            'room__related_service__user', 'sender'
+        ).get(pk=instance.pk)
         room = instance.room
         if not room.related_service_id:
             return
-        service = Service.objects.select_related('user').get(pk=room.related_service_id)
+        service = room.related_service
         msg_sender = instance.sender
 
         participant_ids = set(
