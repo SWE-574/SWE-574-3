@@ -972,6 +972,7 @@ class TestPendingCapacityIntegration:
 
         # u2 tries to express interest — service is now Agreed (hidden) or full
         # Backend returns 404 (service not in Active queryset) or 400 (capacity)
+        client = AuthenticatedAPIClient()
         client.authenticate_user(u2)
         resp = client.post(f'/api/services/{svc.id}/interest/')
         assert resp.status_code in (

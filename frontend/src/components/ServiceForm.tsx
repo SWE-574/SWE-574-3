@@ -13,6 +13,10 @@ import { useAuthStore } from '@/store/useAuthStore'
 import WikidataTagAutocomplete from './WikidataTagAutocomplete'
 import { LocationPickerMap } from './LocationPickerMap'
 import type { Service, ServiceMedia, Tag } from '@/types'
+import {
+  maxParticipantsFloor,
+  validateMaxParticipantsValue,
+} from '@/utils/serviceFormCapacity'
 
 import {
   GREEN, GREEN_LT,
@@ -1006,39 +1010,37 @@ export default function ServiceForm({
                 />
                 <ErrTxt msg={errors.duration?.message} />
               </Box>
-              {type !== 'Need' && (() => {
-                const acceptedFloor = isEditMode
-                  ? Math.max(1, Number(initialService?.participant_count ?? 0))
-                  : 1
-                return (
-                  <Box>
-                    <Label required>Max participants</Label>
-                    <Input
-                      type="number" min={acceptedFloor} max={100} placeholder="1"
-                      {...register('max_participants', {
-                        validate: (value) => {
-                          if (!isEditMode) return true
-                          return Number(value) >= acceptedFloor
-                            || `Cannot lower below the current accepted count (${acceptedFloor}).`
-                        },
-                      })}
-                      style={inputStyle}
-                      _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
-                    />
-                    <ErrTxt msg={errors.max_participants?.message} />
-                    {isGroupOffer && (
-                      <Text fontSize="11px" color={GRAY400} mt="5px">
-                        One-time group offers have a fixed date, location, and capacity. Recurring group offers allow participants to re-join after completion.
-                      </Text>
-                    )}
-                    {isEditMode && acceptedFloor > 1 && (
-                      <Text fontSize="11px" color={GRAY400} mt="5px">
-                        {acceptedFloor} participant{acceptedFloor === 1 ? '' : 's'} already accepted. The cap can't go below that.
-                      </Text>
-                    )}
-                  </Box>
-                )
-              })()}
+              {type !== 'Need' && (
+                <Box>
+                  <Label required>Max participants</Label>
+                  <Input
+                    type="number"
+                    min={maxParticipantsFloor(isEditMode, initialService?.participant_count)}
+                    max={100}
+                    placeholder="1"
+                    {...register('max_participants', {
+                      validate: (value) => validateMaxParticipantsValue(
+                        value,
+                        isEditMode,
+                        maxParticipantsFloor(isEditMode, initialService?.participant_count),
+                      ),
+                    })}
+                    style={inputStyle}
+                    _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
+                  />
+                  <ErrTxt msg={errors.max_participants?.message} />
+                  {isGroupOffer && (
+                    <Text fontSize="11px" color={GRAY400} mt="5px">
+                      One-time group offers have a fixed date, location, and capacity. Recurring group offers allow participants to re-join after completion.
+                    </Text>
+                  )}
+                  {isEditMode && maxParticipantsFloor(isEditMode, initialService?.participant_count) > 1 && (
+                    <Text fontSize="11px" color={GRAY400} mt="5px">
+                      {initialService?.participant_count} already accepted. The cap can't go below that.
+                    </Text>
+                  )}
+                </Box>
+              )}
             </Grid>
 
             <Box>

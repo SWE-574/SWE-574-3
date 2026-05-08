@@ -13,6 +13,7 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
+import { canDirectlyAcceptHandshake } from '@/utils/handshakeActions'
 import { MapView } from '@/components/MapView'
 import SaveEndorseControls from '@/components/SaveEndorseControls'
 import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
@@ -1974,7 +1975,7 @@ export default function ServiceDetailPage() {
                               key={h.id}
                               handshake={h}
                               isOwner={isOwn}
-                              onAccept={h.status === 'pending' && service.type === 'Event'
+                              onAccept={canDirectlyAcceptHandshake(h.status, service.type)
                                 ? async () => {
                                     try {
                                       await handshakeAPI.accept(h.id)
