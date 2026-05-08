@@ -73,16 +73,11 @@ class TestEventFeedAnonymousAccess:
         assert 'Visible Event' in titles
 
     def test_authenticated_user_can_list_events(self):
-        """FR-12a: authenticated user also gets the event feed.
-
-        Viewer is different from the event owner so the dashboard's
-        exclusion of own listings doesn't strip the fixture.
-        """
-        owner = UserFactory()
-        viewer = UserFactory()
-        make_event(user=owner, title='Auth User Event')
+        """FR-12a: authenticated user also gets the event feed."""
+        user = UserFactory()
+        make_event(user=user, title='Auth User Event')
         client = AuthenticatedAPIClient()
-        client.authenticate_user(viewer)
+        client.authenticate_user(user)
 
         response = client.get('/api/services/?type=Event')
 

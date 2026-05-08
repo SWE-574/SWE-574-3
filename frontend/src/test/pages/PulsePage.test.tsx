@@ -183,9 +183,8 @@ describe('PulsePage', () => {
     setGeo(null)
     listMock.mockResolvedValue([])
     renderPage()
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /enable location/i })).toBeInTheDocument()
-    })
+    expect(await screen.findByText(/see what's around you/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /enable location/i })).toBeInTheDocument()
   })
 
   it('renders the Events for you lane when events are returned', async () => {

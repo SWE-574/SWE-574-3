@@ -2394,10 +2394,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if user_param:
             queryset = queryset.filter(user_id=user_param)
         elif self.action == 'list':
-            # Hide the viewer's own services from the general feed; the
-            # sidebar's "My listings" widget covers them separately.
-            if self.request.user.is_authenticated:
-                queryset = queryset.exclude(user=self.request.user)
             queryset = queryset.exclude(
                 type='Offer',
                 schedule_type='One-Time',
