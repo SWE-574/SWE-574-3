@@ -7,6 +7,7 @@ import {
   BLUE, BLUE_LT,
   GRAY100, GRAY500, GRAY800,
 } from '@/theme/tokens'
+import { recurrenceLabel } from '@/utils/eventRecurrence'
 
 const fmtDur = (d: number | string) => `${Number(d)}h`
 
@@ -91,7 +92,7 @@ export function ServiceCard({
         )}
         {showSchedule && service.type === 'Event' && service.schedule_type && (
           <Flex align="center" gap="3px" fontSize="11px" color={GRAY500} fontWeight={500}>
-            <FiCalendar size={10} />{service.schedule_type === 'Recurrent' ? 'Recurring' : 'One-time'}
+            <FiCalendar size={10} />{recurrenceLabel(service.schedule_type)}
           </Flex>
         )}
       </Flex>

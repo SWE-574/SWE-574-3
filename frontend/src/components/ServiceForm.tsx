@@ -17,6 +17,10 @@ import {
   maxParticipantsFloor,
   validateMaxParticipantsValue,
 } from '@/utils/serviceFormCapacity'
+import {
+  effectiveScheduleType,
+  recurrenceIntervalForSubmission,
+} from '@/utils/eventRecurrence'
 
 import {
   GREEN, GREEN_LT,
@@ -790,18 +794,13 @@ export default function ServiceForm({
           fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
         }
         if (scheduleTypeChanged || type === 'Event') {
-          // Only Events can be recurring; Offer/Need are always One-Time.
-          fd.append('schedule_type', type === 'Event' ? values.schedule_type : 'One-Time')
+          fd.append('schedule_type', effectiveScheduleType(type, values.schedule_type))
         }
-        if (
-          type === 'Event'
-          && values.schedule_type === 'Recurrent'
-          && values.recurrence_interval_days
-        ) {
-          fd.append(
-            'recurrence_interval_days',
-            String(values.recurrence_interval_days),
-          )
+        const recurrenceDays = recurrenceIntervalForSubmission(
+          type, values.schedule_type, values.recurrence_interval_days,
+        )
+        if (recurrenceDays !== null) {
+          fd.append('recurrence_interval_days', String(recurrenceDays))
         }
         if (dirtyFields.schedule_details || scheduleTypeChanged) {
           fd.append('schedule_details', values.schedule_details ?? '')
@@ -914,16 +913,14 @@ export default function ServiceForm({
           fd.append('session_location_guide', '')
         }
         fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
-        fd.append('schedule_type', type === 'Event' ? values.schedule_type : 'One-Time')
-        if (
-          type === 'Event'
-          && values.schedule_type === 'Recurrent'
-          && values.recurrence_interval_days
-        ) {
-          fd.append(
-            'recurrence_interval_days',
-            String(values.recurrence_interval_days),
+        fd.append('schedule_type', effectiveScheduleType(type, values.schedule_type))
+        {
+          const recurrenceDays = recurrenceIntervalForSubmission(
+            type, values.schedule_type, values.recurrence_interval_days,
           )
+          if (recurrenceDays !== null) {
+            fd.append('recurrence_interval_days', String(recurrenceDays))
+          }
         }
         if (type === 'Event') {
           fd.append('requires_qr_checkin', requiresQrCheckin ? 'true' : 'false')

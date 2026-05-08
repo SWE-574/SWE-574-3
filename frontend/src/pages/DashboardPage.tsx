@@ -44,6 +44,7 @@ import {
   WHITE,
 } from '@/theme/tokens'
 import { formatGroupOfferDateTime, isNearlyFull } from '@/utils/eventUtils'
+import { isEventRecurrent } from '@/utils/eventRecurrence'
 
 const TRANSPARENT = 'transparent'
 
@@ -237,7 +238,7 @@ function ServiceCard({
 }) {
   const owner     = service.user ?? service.provider
   const isOffer   = service.type === 'Offer'
-  const isRecurr  = service.type === 'Event' && service.schedule_type === 'Recurrent'
+  const isRecurr  = isEventRecurrent(service)
   const isFixedGroupOffer = isOffer && service.schedule_type === 'One-Time' && service.max_participants > 1
   const gradient  = pickGradient(service)
 
