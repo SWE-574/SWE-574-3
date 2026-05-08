@@ -112,10 +112,13 @@ export function deleteCategory(slug: string): Promise<void> {
   return apiRequest<void>(`/forum/categories/${encodeURIComponent(slug)}/`, { method: 'DELETE' });
 }
 
+export type TopicSortOption = 'newest' | 'most_active';
+
 export function listTopics(params?: {
   page?: number;
   page_size?: number;
   category?: string;
+  sort?: TopicSortOption;
 }): Promise<PaginatedResponse<ForumTopic>> {
   return apiRequest<PaginatedResponse<ForumTopic>>(
     '/forum/topics/',
