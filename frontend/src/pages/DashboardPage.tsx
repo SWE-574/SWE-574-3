@@ -34,8 +34,6 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { useGeoStore } from '@/store/useGeoStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
-import ForYouCarousel from '@/components/ForYouCarousel'
-import ExploreCarousel from '@/components/ExploreCarousel'
 import { Avatar } from '@/components/Avatar'
 import RecommendationDebugBar from '@/components/RecommendationDebugBar'
 import type { Handshake } from '@/services/handshakeAPI'
@@ -865,8 +863,6 @@ const DashboardPage = () => {
             pb={8}
             onScroll={handleGridScroll}
           >
-            <ForYouCarousel />
-            <ExploreCarousel />
             {isLoading && displayServices.length === 0 ? (
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
             ) : fetchError && displayServices.length === 0 ? (

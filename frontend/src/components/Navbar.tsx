@@ -202,7 +202,7 @@ const Navbar = () => {
           >
             <NavLink to="/dashboard" icon={<FiGrid size={15} />} active={p === '/dashboard'}>Browse</NavLink>
             <NavLink to="/forum" icon={<FiMessageCircle size={15} />} active={p.startsWith('/forum')}>Forum</NavLink>
-            <NavLink to="/activity" icon={<FiActivity size={15} />} active={p === '/activity'}>Activity</NavLink>
+            <NavLink to="/pulse" icon={<FiActivity size={15} />} active={p === '/pulse' || p === '/activity'}>Pulse</NavLink>
             <NavLink to="/messages" icon={<FiMessageSquare size={15} />} active={p === '/messages' || p.startsWith('/messages/')}>Messages</NavLink>
           </Flex>
         )}
