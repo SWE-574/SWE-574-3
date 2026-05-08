@@ -1557,7 +1557,10 @@ export default function ServiceDetailPage() {
                           // Event reports should not alter owner-facing attendance/status display.
                           const alreadyReportedParticipant = reportedParticipantIds.has(exId(h.requester) ?? '')
                           const displayStatus = h.status === 'reported' ? 'accepted' : h.status
-                          const cfg = HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 }
+                          const isSkipped = displayStatus === 'accepted' && service?.status === 'Completed'
+                          const cfg = isSkipped
+                            ? { label: 'Skipped', bg: '#f3f4f6', color: '#6b7280' }
+                            : (HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 })
                           return (
                             <Flex key={h.id} align="center" justify="space-between"
                               p="10px" bg={GRAY50} borderRadius="9px" gap={2}
