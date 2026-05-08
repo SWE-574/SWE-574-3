@@ -27,7 +27,16 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Backend mutmut runs on a nightly schedule + manual dispatch only — NOT
+  # on every PR. The CI scope (currently just badge_utils.py to fit the
+  # 45-min job timeout) doesn't earn its ~10 min of runner time per PR
+  # when the rest of the hot-module list isn't actually being gated. Keep
+  # the wiring so the bootstrap stays exercised by the nightly run, and
+  # so anyone debugging mutation testing can trigger it on demand from
+  # the Actions tab. To temporarily run it on a PR, dispatch this
+  # workflow against the PR's branch from the GitHub UI.
   backend-mutmut:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
