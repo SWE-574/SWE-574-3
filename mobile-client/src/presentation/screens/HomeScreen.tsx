@@ -242,9 +242,7 @@ export default function HomeScreen() {
           setLoadError("You are offline.");
         }
       } else {
-        setLoadError(
-          error instanceof Error ? error.message : "Unable to load services.",
-        );
+        setLoadError("Couldn't load services. Pull down to retry.");
       }
     } finally {
       setIsLoading(false);
@@ -491,18 +489,6 @@ export default function HomeScreen() {
               <Text style={styles.filterCountText}>{activeFilterCount}</Text>
             </View>
           )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => navigation.navigate("Activity")}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={{ marginRight: 12 }}
-        >
-          <Ionicons
-            name="pulse-outline"
-            size={24}
-            color={colors.GRAY600}
-          />
         </TouchableOpacity>
 
         <TouchableOpacity
