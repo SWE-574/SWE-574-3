@@ -39,8 +39,8 @@ export default function SuggestedUsersPage() {
             w="38px"
             h="38px"
             borderRadius="12px"
-            bg="teal.50"
-            color="teal.600"
+            bg="green.50"
+            color="green.700"
           >
             <Box as={FiUsers} fontSize="20px" />
           </Box>

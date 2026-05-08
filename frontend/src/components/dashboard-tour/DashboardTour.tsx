@@ -182,18 +182,6 @@ const ALL_STEPS: TourStep[] = [
     ),
   },
   {
-    id: 'map-toggle',
-    target: '[data-tour="map-toggle"]',
-    placement: 'bottom',
-    title: 'Map view',
-    content: (
-      <p>
-        Switch to the map to see listings in context. Orange markers indicate
-        offers; blue markers indicate requests for help.
-      </p>
-    ),
-  },
-  {
     id: 'listing-card',
     target: '[data-tour="listing-card"]',
     placement: 'top',

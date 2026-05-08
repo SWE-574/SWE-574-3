@@ -896,6 +896,21 @@ RANKING_FOR_YOU_FOLLOW_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_FOLLOW_WEI
 RANKING_FOR_YOU_COOCCUR_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_COOCCUR_WEIGHT', '0.2'))
 RANKING_FOR_YOU_RECENCY_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_RECENCY_WEIGHT', '0.1'))
 RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS = float(os.environ.get('RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS', '24'))
+# Engagement signal: tag-overlap with services the viewer has saved (bookmarks).
+# Endorsements deliberately excluded — they're a public quality signal, not
+# a private preference. Net effect of adding ENGAGEMENT(+0.25) and
+# DISMISSED(-0.20) on top of the base weights is a slight +0.05 nudge toward
+# engaged-with content; intentional, not a wholesale rebalance.
+RANKING_FOR_YOU_ENGAGEMENT_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_ENGAGEMENT_WEIGHT', '0.25'))
+# Soft penalty: tag-similarity to services the viewer has dismissed.
+# Layered on top of the existing hard exclusion of the dismissed services
+# themselves (see ServiceViewSet._list_for_you).
+RANKING_FOR_YOU_DISMISSED_SIMILARITY_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_DISMISSED_SIMILARITY_WEIGHT', '0.20'))
+# MMR diversification at re-rank time: penalise candidates whose tag set
+# overlaps with already-selected results so the visible feed isn't five
+# near-duplicates in a row. Lambda=0 makes MMR a no-op.
+RANKING_FOR_YOU_MMR_LAMBDA = float(os.environ.get('RANKING_FOR_YOU_MMR_LAMBDA', '0.3'))
+RANKING_FOR_YOU_MMR_TOP_K = int(os.environ.get('RANKING_FOR_YOU_MMR_TOP_K', '20'))
 RANKING_COOCCUR_MIN_USERS = int(os.environ.get('RANKING_COOCCUR_MIN_USERS', '3'))
 RANKING_FOR_YOU_LIMIT = int(os.environ.get('RANKING_FOR_YOU_LIMIT', '10'))
 # Click-to-handshake attribution window for the For You CTR proxy. A handshake

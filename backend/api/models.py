@@ -117,6 +117,10 @@ class User(AbstractUser):
         blank=True,
     )
 
+    # Last time the viewer opened the Pulse page; drives the "X new since
+    # last visit" stat and follows-lane unread badge.
+    last_pulse_visit_at = models.DateTimeField(null=True, blank=True)
+
     objects = CustomUserManager()
 
     USERNAME_FIELD = 'email'
@@ -1401,6 +1405,37 @@ class Endorsement(models.Model):
 
     def __str__(self):
         return f'Endorsement({self.endorser_id}, {self.service_id})'
+
+
+class ServiceDismissal(models.Model):
+    """Per-viewer dismissal of a service surfaced in Pulse / For You.
+
+    A negative-signal toggle: when the viewer hits "Not interested" on a
+    recommended service, the service is hard-excluded from their personalised
+    feed. Dismissals are private to the viewer and are not factored into any
+    public ranking signal.
+    """
+    viewer = models.ForeignKey(
+        'User', on_delete=models.CASCADE, related_name='service_dismissals',
+    )
+    service = models.ForeignKey(
+        Service, on_delete=models.CASCADE, related_name='dismissed_by',
+    )
+    dismissed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['viewer', 'service'], name='service_dismissal_unique',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['viewer', '-dismissed_at']),
+        ]
+        ordering = ['-dismissed_at']
+
+    def __str__(self):
+        return f'ServiceDismissal({self.viewer_id}, {self.service_id})'
 
 
 class ActivityEvent(models.Model):

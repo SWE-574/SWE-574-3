@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { Box } from '@chakra-ui/react'
 import { useAuthStore } from '@/store/useAuthStore'
 import ProtectedRoute from '@/components/ProtectedRoute'
@@ -31,7 +31,7 @@ const PublicProfile          = lazy(() => import('@/pages/PublicProfile'))
 const TransactionHistoryPage = lazy(() => import('@/pages/TransactionHistoryPage'))
 const NotificationsPage      = lazy(() => import('@/pages/NotificationsPage'))
 const SavedServicesPage      = lazy(() => import('@/pages/SavedServicesPage'))
-const ActivityPage           = lazy(() => import('@/pages/ActivityPage'))
+const PulsePage              = lazy(() => import('@/pages/PulsePage'))
 const SuggestedUsersPage     = lazy(() => import('@/pages/SuggestedUsersPage'))
 const AdminDashboard         = lazy(() => import('@/pages/AdminDashboard'))
 const AdminUserDetailPage    = lazy(() => import('@/pages/AdminUserDetailPage'))
@@ -264,12 +264,18 @@ function App() {
             }
           />
           <Route
-            path="/activity"
+            path="/pulse"
             element={
               <ProtectedRoute>
-                <ActivityPage />
+                <PulsePage />
               </ProtectedRoute>
             }
+          />
+          {/* Old /activity URL redirects to the rebranded Pulse page so any
+              external links keep working. */}
+          <Route
+            path="/activity"
+            element={<Navigate to="/pulse" replace />}
           />
           <Route
             path="/users/suggested"

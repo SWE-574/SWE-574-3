@@ -131,7 +131,7 @@ class TestNotificationViewSet:
         client.authenticate_user(user)
 
         response = client.get('/api/notifications/?page=1')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         results_by_id = {r['id']: r for r in response.data['results']}
 
         assert results_by_id[str(n_event.id)]['related_service_type'] == 'Event'

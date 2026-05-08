@@ -927,7 +927,7 @@ class TestServiceViewSetOrdering:
         import time
         
         self.client = APIClient()
-        
+
         self.user = User.objects.create_user(
             email='testuser@test.com',
             password='testpass123',

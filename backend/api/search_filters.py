@@ -35,7 +35,10 @@ class InvalidSearchParam(ValueError):
 # Social proximity is gated on FR-DIS-05 (social graph) -- placeholder until then.
 TITLE_WEIGHT = 1.0
 TAG_WEIGHT = 0.8
+OWNER_WEIGHT = 0.6
+LOCATION_WEIGHT = 0.5
 DESC_WEIGHT = 0.4
+MIN_SEARCH_LENGTH = 2
 SOCIAL_PROXIMITY_WEIGHT = 0.0  # TODO: wire when social graph lands (FR-DIS-05)
 
 
@@ -150,11 +153,12 @@ class TextStrategy(SearchStrategy):
             return queryset
 
         search = search.strip()
-        if not search:
+        if not search or len(search) < MIN_SEARCH_LENGTH:
             return queryset
 
-        # Weighted scoring: title (1.0) > tag (0.8) > description (0.4).
-        # Tie-break by hot_score so Phase 2 still matters on equal-quality matches.
+        # Weighted scoring: title (1.0) > tag (0.8) > owner name (0.6) >
+        # location_area (0.5) > description (0.4). Tie-break by hot_score
+        # so Phase 2 still matters on equal-quality matches.
         # FR-17g / FR-SEA-01 / #306, #324.
         queryset = queryset.annotate(
             _match_score=(
@@ -165,6 +169,20 @@ class TextStrategy(SearchStrategy):
                 )
                 + Case(
                     When(tags__name__icontains=search, then=Value(TAG_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(
+                        Q(user__first_name__icontains=search)
+                        | Q(user__last_name__icontains=search),
+                        then=Value(OWNER_WEIGHT),
+                    ),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(location_area__icontains=search, then=Value(LOCATION_WEIGHT)),
                     default=Value(0.0),
                     output_field=FloatField(),
                 )

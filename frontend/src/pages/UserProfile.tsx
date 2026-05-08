@@ -185,6 +185,15 @@ const UserProfile = () => {
       setActiveTab('reports')
     }
   }, [searchParams, routerLocation.pathname])
+
+  useEffect(() => {
+    const editParam = searchParams.get('edit')
+    const allowedDrawerTabs = ['identity', 'media', 'skills', 'showcase', 'privacy'] as const
+    if (editParam && (allowedDrawerTabs as readonly string[]).includes(editParam)) {
+      setEditInitialTab(editParam as typeof allowedDrawerTabs[number])
+      setDrawerOpen(true)
+    }
+  }, [searchParams])
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
   const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
   const heroCardRef = useRef<HTMLDivElement | null>(null)
