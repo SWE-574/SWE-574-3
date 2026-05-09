@@ -143,6 +143,18 @@ describe('useAuthStore.refreshUser', () => {
     expect(apiMocks.get).not.toHaveBeenCalled()
   })
 
+  it('skips soft refresh after checkAuth already confirmed the user', async () => {
+    vi.setSystemTime(1_000)
+    apiMocks.get.mockResolvedValueOnce({ data: { id: 'u-fresh' } })
+    await useAuthStore.getState().checkAuth(true)
+
+    apiMocks.get.mockClear()
+    vi.setSystemTime(5_000)
+    await useAuthStore.getState().refreshUser({ force: false })
+
+    expect(apiMocks.get).not.toHaveBeenCalled()
+  })
+
   it('sets error on 429 but keeps existing state', async () => {
     useAuthStore.setState({ user: { id: 'cached' } as never, isAuthenticated: true })
     apiMocks.get.mockRejectedValue(Object.assign(new Error('429'), { response: { status: 429 } }))
