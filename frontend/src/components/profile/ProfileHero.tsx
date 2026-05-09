@@ -112,8 +112,8 @@ function CommunityStatValue({
   if (followers == null && following == null) return '—'
 
   const items = [
-    { label: 'Followers', value: followers ?? 0, onClick: onFollowersClick },
-    { label: 'Following', value: following ?? 0, onClick: onFollowingClick },
+    { label: 'Followers', value: followers ?? 0, onClick: onFollowersClick, title: 'View followers' },
+    { label: 'Following', value: following ?? 0, onClick: onFollowingClick, title: 'View following' },
   ]
 
   return (
@@ -123,6 +123,8 @@ function CommunityStatValue({
           key={item.label}
           as="button"
           onClick={item.onClick}
+          title={item.onClick ? item.title : undefined}
+          aria-label={item.onClick ? item.title : undefined}
           textAlign="left"
           style={{
             background: 'transparent',
