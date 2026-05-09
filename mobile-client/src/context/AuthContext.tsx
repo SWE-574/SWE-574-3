@@ -20,6 +20,7 @@ import { getMe } from "../api/users";
 import { getStoredTokens } from "../api/storage";
 import {
   setAuthTokens,
+  getAuthToken,
   getRefreshToken,
   ApiHttpError,
   ApiNetworkError,
@@ -58,6 +59,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isStale, setIsStale] = useState(false);
 
   const persistUser = useCallback((u: UserSummary) => {
+    // Drop stale API results if the session was cleared while getMe was in flight
+    // (e.g. user logged out during ProfileScreen useFocusEffect → refreshUser).
+    if (!getAuthToken()) return;
     setUser(u);
     setIsStale(false);
     try {
@@ -130,9 +134,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     const prevId = user?.id ?? null;
-    await authApi.logout();
-    useNotificationStore.getState().reset();
-    await clearSessionLocal(prevId);
+    try {
+      await authApi.logout();
+    } finally {
+      useNotificationStore.getState().reset();
+      await clearSessionLocal(prevId);
+    }
   }, [user, clearSessionLocal]);
 
   useEffect(() => {
