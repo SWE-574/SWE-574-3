@@ -1,6 +1,6 @@
 import React from 'react'
 import { Box, Flex, Grid, Text } from '@chakra-ui/react'
-import { FiCamera, FiClock, FiEdit2, FiFlag, FiMapPin, FiMessageSquare, FiStar } from 'react-icons/fi'
+import { FiCamera, FiClock, FiEdit2, FiMapPin, FiStar } from 'react-icons/fi'
 import { Link } from 'react-router-dom'
 import type { User, BadgeDetail } from '@/types'
 import HeroSurface from '@/components/ui/HeroSurface'
@@ -53,8 +53,6 @@ type Props = {
   compact?: boolean
   featuredBadges?: BadgeDetail[]
   onEditClick?: () => void
-  onMessageClick?: () => void
-  onReportClick?: () => void
   onAvatarClick?: () => void
   onBadgePickerOpen?: () => void
   followStats?: { followers: number; following: number }
@@ -190,8 +188,6 @@ const ProfileHero = ({
   compact = false,
   featuredBadges = [],
   onEditClick,
-  onMessageClick,
-  onReportClick,
   onAvatarClick,
   onBadgePickerOpen,
   followStats,
@@ -359,22 +355,13 @@ const ProfileHero = ({
           )}
 
           {/* Action row */}
-          <Flex gap={2} flexWrap="wrap">
-            {mode === 'own' ? (
+          {mode === 'own' && (
+            <Flex gap={2} flexWrap="wrap">
               <HeroBtn primary icon={<FiEdit2 size={13} />} onClick={onEditClick}>
                 Edit profile
               </HeroBtn>
-            ) : (
-              <>
-                <HeroBtn primary icon={<FiMessageSquare size={13} />} onClick={onMessageClick}>
-                  Message
-                </HeroBtn>
-                <HeroBtn icon={<FiFlag size={13} />} onClick={onReportClick}>
-                  Report
-                </HeroBtn>
-              </>
-            )}
-          </Flex>
+            </Flex>
+          )}
         </Box>
 
         {/* ── Stats strip ───────────────────────────────── */}

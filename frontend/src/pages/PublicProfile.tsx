@@ -146,7 +146,6 @@ const PublicProfile = () => {
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
   const [followActionLoading, setFollowActionLoading] = useState(false)
   const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
-  const [, setReportModalOpen] = useState(false)
   const [activePublicTab, setActivePublicTab] = useState<PublicProfileTab>('services')
 
   useEffect(() => {
@@ -258,14 +257,6 @@ const PublicProfile = () => {
           user={profileUser}
           mode="public"
           featuredBadges={profileUser.featured_badges_detail ?? []}
-          onMessageClick={() => {
-            if (!isAuthenticated) {
-              toast.info('Sign in to message this user.')
-              return
-            }
-            toast.info('Messaging coming soon.')
-          }}
-          onReportClick={() => setReportModalOpen(true)}
           onFollowersClick={() => {
             if (!isAuthenticated) { toast.info('Sign in to see followers.'); return }
             setFollowListModal('followers')

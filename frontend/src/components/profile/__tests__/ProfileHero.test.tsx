@@ -124,14 +124,14 @@ describe('ProfileHero — own mode', () => {
 })
 
 describe('ProfileHero — public mode', () => {
-  it('renders Message and Report buttons', () => {
+  it('does NOT render Message or Report buttons', () => {
     render(
       <Wrapper>
         <ProfileHero user={baseUser} mode="public" />
       </Wrapper>,
     )
-    expect(screen.getByText('Message')).toBeInTheDocument()
-    expect(screen.getByText('Report')).toBeInTheDocument()
+    expect(screen.queryByText('Message')).toBeNull()
+    expect(screen.queryByText('Report')).toBeNull()
   })
 
   it('does NOT render Edit profile button', () => {
@@ -162,14 +162,4 @@ describe('ProfileHero — public mode', () => {
     expect(screen.getByText('Reputation')).toBeInTheDocument()
   })
 
-  it('calls onMessageClick when Message is clicked', () => {
-    const onMessageClick = vi.fn()
-    render(
-      <Wrapper>
-        <ProfileHero user={baseUser} mode="public" onMessageClick={onMessageClick} />
-      </Wrapper>,
-    )
-    fireEvent.click(screen.getByText('Message'))
-    expect(onMessageClick).toHaveBeenCalledTimes(1)
-  })
 })
