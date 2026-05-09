@@ -1,4 +1,3 @@
-import type { MouseEvent } from 'react'
 import { Box, Flex, Text, Spinner } from '@chakra-ui/react'
 import { FiX } from 'react-icons/fi'
 import {
@@ -157,7 +156,6 @@ export default function MultiUseDetailsModal({
                   {item.actionLabel && item.onActionClick && (
                     <Box
                       as="button"
-                      type="button"
                       flexShrink={0}
                       px="10px"
                       py="6px"
@@ -168,7 +166,7 @@ export default function MultiUseDetailsModal({
                       bg={WHITE}
                       color={GRAY700}
                       style={{ cursor: item.actionLoading ? 'wait' : 'pointer', opacity: item.actionLoading ? 0.75 : 1 }}
-                      onClick={(e: MouseEvent<HTMLButtonElement>) => {
+                      onClick={(e) => {
                         e.stopPropagation()
                         if (!item.actionLoading) item.onActionClick?.()
                       }}

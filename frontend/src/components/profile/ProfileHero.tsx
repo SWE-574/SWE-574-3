@@ -164,23 +164,22 @@ function HeroBtn({
 }) {
   const busy = Boolean(loading)
   return (
-    <Box
-      as="button"
+    <button
       type="button"
       onClick={busy ? undefined : onClick}
-      display="inline-flex"
-      alignItems="center"
-      gap="5px"
-      px="12px"
-      py="6px"
-      borderRadius="999px"
-      fontSize="11px"
-      fontWeight={700}
-      flexShrink={0}
-      aria-busy={busy}
       disabled={busy}
+      aria-busy={busy}
       aria-label={ariaLabel}
       style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '5px',
+        padding: '6px 12px',
+        borderRadius: '999px',
+        fontSize: '11px',
+        fontWeight: 700,
+        flexShrink: 0,
+        fontFamily: 'inherit',
         background: primary ? WHITE : 'rgba(255,255,255,0.2)',
         border: primary ? 'none' : '1px solid rgba(255,255,255,0.35)',
         color: primary ? GREEN : WHITE,
@@ -192,7 +191,7 @@ function HeroBtn({
     >
       {busy ? <Spinner size="xs" color={primary ? GREEN : WHITE} /> : icon}
       {children}
-    </Box>
+    </button>
   )
 }
 
