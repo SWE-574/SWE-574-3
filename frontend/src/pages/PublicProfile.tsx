@@ -32,6 +32,19 @@ import { ProfileReviewRow } from '@/components/profile/ProfileReviewRow'
 
 type PublicProfileTab = 'services' | 'history' | 'reviews'
 
+/** Axios / fetch abort — do not surface as profile load failure (Strict Mode + effect re-runs). */
+function isAbortLikeError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const e = err as { name?: string; code?: string; message?: string }
+  return (
+    e.name === 'AbortError' ||
+    e.name === 'CanceledError' ||
+    e.code === 'ERR_CANCELED' ||
+    e.message === 'canceled' ||
+    e.message === 'Canceled'
+  )
+}
+
 const AVATAR_PALETTE = [GREEN, BLUE, TEAL, AMBER, '#0D9488', ORANGE]
 const AVATAR_IMAGE_BG = `linear-gradient(180deg, ${WHITE} 0%, ${GRAY100} 100%)`
 const fmtDate     = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -282,6 +295,7 @@ const PublicProfile = () => {
   const { userId } = useParams<{ userId: string }>()
   const navigate   = useNavigate()
   const currentUser = useAuthStore((s) => s.user)
+  const viewerId = currentUser?.id ?? null
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
   const [profileUser, setProfileUser] = useState<User | null>(null)
@@ -303,7 +317,7 @@ const PublicProfile = () => {
 
   useEffect(() => {
     if (!userId) return
-    if (currentUser && currentUser.id === userId) {
+    if (viewerId && viewerId === userId) {
       navigate('/profile', { replace: true })
       return
     }
@@ -333,6 +347,7 @@ const PublicProfile = () => {
           setReviewsAsTaker(rTaker.results)
         }).catch(() => {}).finally(() => setReviewsLoading(false))
       } catch (err) {
+        if (isAbortLikeError(err)) return
         const status = (err as { response?: { status?: number } })?.response?.status
         if (status === 404) setNotFound(true)
         else if (status === 401 || status === 403) {
@@ -349,7 +364,9 @@ const PublicProfile = () => {
     void loadProfile()
 
     return () => ac.abort()
-  }, [userId, currentUser, navigate, retryKey])
+    // Use viewer id only — full `user` object identity changes on Zustand updates and would
+    // abort in-flight requests when opening a profile from the follow list.
+  }, [userId, viewerId, navigate, retryKey])
 
   const ownHistory = history.filter(isOwnHistoryItem)
   const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
