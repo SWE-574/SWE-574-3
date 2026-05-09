@@ -145,7 +145,10 @@ const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false)
   const mobileRef = useRef<HTMLDivElement>(null)
 
-  const handleLogout = () => { logout(); navigate('/') }
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login', { replace: true })
+  }
 
   // Close mobile menu on route change
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -477,7 +480,7 @@ const Navbar = () => {
               display="flex" alignItems="center" gap="10px"
               fontSize="14px" fontWeight={500} color={RED}
               bg="transparent"
-              onClick={() => { handleLogout(); setMobileOpen(false) }}
+              onClick={async () => { setMobileOpen(false); await handleLogout() }}
               _hover={{ bg: RED_LT }} transition="background 0.15s"
             >
               <FiLogOut size={16} /> Log Out
