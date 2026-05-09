@@ -3,6 +3,7 @@ import {
   groupActiveAgreements,
   groupTransactionRows,
   completedGroupOfferParticipantCount,
+  completedGroupOfferParticipants,
   isTimeActivityParticipantStatus,
   timeActivityVisibleParticipants,
   transactionGroupDetailParticipants,
@@ -138,6 +139,19 @@ describe('timeActivityGrouping', () => {
   it('uses completed participant count over active session count for completed group transfer rows', () => {
     expect(completedGroupOfferParticipantCount({ participantCount: 5, completedCount: 3 })).toBe(3)
     expect(completedGroupOfferParticipantCount({ participantCount: 2, completedCount: 0 })).toBe(2)
+  })
+
+  it('uses completed participant avatars over active session avatars for completed group transfer rows', () => {
+    const participants = [
+      { ...baseAgreement, id: 'accepted-1', counterpart_name: 'Accepted One', status: 'accepted' as const },
+      { ...baseAgreement, id: 'accepted-2', counterpart_name: 'Accepted Two', status: 'accepted' as const },
+      { ...baseAgreement, id: 'completed-1', counterpart_name: 'Completed One', status: 'completed' as const },
+    ]
+    const completedParticipants = participants.filter((item) => item.status === 'completed')
+
+    expect(completedGroupOfferParticipants({ participants, completedParticipants }).map((item) => item.id)).toEqual([
+      'completed-1',
+    ])
   })
 
   it('excludes inactive handshake statuses from group offer participant displays', () => {

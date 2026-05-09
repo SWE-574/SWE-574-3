@@ -99,6 +99,18 @@ export function completedGroupOfferParticipantCount({
   return completedCount && completedCount > 0 ? completedCount : participantCount ?? null
 }
 
+export function completedGroupOfferParticipants<T>({
+  participants,
+  completedParticipants,
+}: {
+  participants?: T[] | null
+  completedParticipants?: T[] | null
+}) {
+  return completedParticipants && completedParticipants.length > 0
+    ? completedParticipants
+    : participants
+}
+
 export function timeActivityVisibleParticipants<T>(participants?: T[] | null): T[] {
   return participants ?? []
 }

@@ -13,6 +13,7 @@ import type { Transaction, TransactionSummary, User } from '@/types'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 import {
   completedGroupOfferParticipantCount,
+  completedGroupOfferParticipants,
   groupActiveAgreements,
   groupTransactionRows,
   isTimeActivityParticipantStatus,
@@ -628,6 +629,19 @@ const TransactionHistoryPage = () => {
     return map
   }, [handshakes, user])
 
+  const completedGroupOfferParticipantsByServiceId = useMemo(() => {
+    const map = new Map<string, ExpectedAgreement[]>()
+    for (const handshake of handshakes) {
+      if (!isMultiUseHandshake(handshake) || handshake.service_type !== 'Offer') continue
+      if (handshake.status !== 'completed') continue
+
+      const agreement = toExpectedAgreement(handshake, user)
+      if (!agreement?.service_id) continue
+      map.set(agreement.service_id, [...(map.get(agreement.service_id) ?? []), agreement])
+    }
+    return map
+  }, [handshakes, user])
+
   const activeAgreementSections = useMemo(() => {
     return INSIGHT_SERVICE_TYPES
       .map((type) => ({
@@ -671,12 +685,21 @@ const TransactionHistoryPage = () => {
         })
       },
       participants: (transaction) => {
-        return transaction.service_id
-          ? groupOfferParticipantsByServiceId.get(transaction.service_id)
-          : undefined
+        if (!transaction.service_id) return undefined
+        return completedGroupOfferParticipants({
+          participants: groupOfferParticipantsByServiceId.get(transaction.service_id),
+          completedParticipants: completedGroupOfferParticipantsByServiceId.get(transaction.service_id),
+        })
       },
     })
-  }, [activeAgreementByServiceId, completedMultiUseByService, groupOfferParticipantsByServiceId, transactions, user?.id])
+  }, [
+    activeAgreementByServiceId,
+    completedGroupOfferParticipantsByServiceId,
+    completedMultiUseByService,
+    groupOfferParticipantsByServiceId,
+    transactions,
+    user?.id,
+  ])
 
   const fetchTransactions = useCallback(async (signal?: AbortSignal) => {
     const requestId = ++requestIdRef.current
