@@ -1,5 +1,7 @@
 import { expect, type Page } from '@playwright/test'
 
+import { futureDateParts } from './common'
+
 export interface Feature13ServiceOptions {
   type: 'Offer' | 'Need' | 'Event'
   title: string
@@ -30,7 +32,19 @@ export async function createServiceViaApi(
   page: Page,
   options: Feature13ServiceOptions,
 ): Promise<Feature13CreatedService> {
-  const result = await page.evaluate(async (payload) => {
+  // Group offers and Events with schedule_type=One-Time require a scheduled
+  // date/time on creation. Default to a slot a few days out so callers don't
+  // need to fabricate one for every fixture.
+  const needsScheduledTime = !options.scheduledTime
+    && (options.scheduleType ?? 'One-Time') === 'One-Time'
+    && (options.type === 'Event' || (options.maxParticipants ?? 1) > 1)
+  const enrichedOptions: Feature13ServiceOptions = needsScheduledTime
+    ? (() => {
+        const { date, time } = futureDateParts(3)
+        return { ...options, scheduledTime: `${date}T${time}:00` }
+      })()
+    : options
+  const result = await page.evaluate(async (payload: Feature13ServiceOptions) => {
     const formData = new FormData()
     formData.append('type', payload.type)
     formData.append('title', payload.title)
@@ -85,7 +99,7 @@ export async function createServiceViaApi(
       status: response.status,
       body: await response.text(),
     }
-  }, options)
+  }, enrichedOptions)
 
   expect(result.ok, `Create service failed: ${result.status} ${result.body}`).toBeTruthy()
 
