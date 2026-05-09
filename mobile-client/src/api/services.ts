@@ -49,6 +49,9 @@ export interface ServicesListParams {
   explore_only?: boolean;
   /** Exclude services owned by the requester. Mirrors the web Browse contract. */
   exclude_own?: boolean;
+  /** Bypass the implicit skill-based slice so the full active catalog
+   *  surfaces; the engine just reorders. Matches web Browse policy. */
+  skip_onboarding?: boolean;
 }
 
 function normalizeService(service: Service): Service {

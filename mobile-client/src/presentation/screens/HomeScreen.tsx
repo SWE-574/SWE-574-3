@@ -201,6 +201,11 @@ export default function HomeScreen() {
       const params: ServicesListParams = {
         page_size: 30,
         exclude_own: true,
+        // Match the web client: always show every active service, the
+        // ranking engine reorders. Without skip_onboarding the implicit
+        // skill filter would hide unmatched-tag services (e.g. a fresh
+        // event by an account whose tags don't overlap the viewer's).
+        skip_onboarding: true,
         search: debouncedSearch || undefined,
         type:
           filters.serviceType !== "all" && filters.serviceType !== "Event"
@@ -208,10 +213,15 @@ export default function HomeScreen() {
             : undefined,
       };
 
-      if (filters.locationMode === "nearby" && userLocation) {
+      // Location is always-on as a ranking signal whenever permission is
+      // granted -- no hard radius cutoff. The "nearby" filter mode is the
+      // opt-in for the hard radius (mirrors the web More-filters slider).
+      if (userLocation) {
         params.lat = userLocation.latitude;
         params.lng = userLocation.longitude;
-        params.distance = filters.distanceKm;
+        if (filters.locationMode === "nearby") {
+          params.distance = filters.distanceKm;
+        }
       }
 
       if (activeTagQid) {
@@ -400,8 +410,14 @@ export default function HomeScreen() {
     filters.locationMode === "nearby" &&
     (resolvingLocation || locationMessage != null);
 
-  const showLocationBanner =
-    locationStatus === "idle" && !userLocation && !resolvingLocation;
+  // Banner shows whenever we don't have a location fix. After a denial the
+  // status flips to "denied"; we still want the prompt visible so the user
+  // can retry / open Settings, since location feeds the ranking signal.
+  const showLocationBanner = !userLocation && !resolvingLocation;
+  const locationBannerMessage =
+    locationStatus === "denied"
+      ? "Location off. Tap to grant for closer-first ranking."
+      : "Enable location for closer-first ranking.";
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -481,7 +497,9 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Location banner -- shown when permission not yet requested */}
+      {/* Location prompt -- sits directly above the Wikidata tag chips so
+          the viewer can opt in without digging into filters. Visible whenever
+          there is no fix (idle or denied); message changes accordingly. */}
       {showLocationBanner && (
         <Pressable
           style={styles.locationBanner}
@@ -489,7 +507,7 @@ export default function HomeScreen() {
         >
           <Ionicons name="location-outline" size={18} color={colors.GREEN} />
           <Text style={styles.locationBannerText}>
-            Enable location for nearby services
+            {locationBannerMessage}
           </Text>
           <Ionicons name="chevron-forward" size={16} color={colors.GRAY400} />
         </Pressable>
