@@ -351,7 +351,7 @@ const ProfileHero = ({
             <Text
               minW={0}
               flexShrink={1}
-              noOfLines={1}
+              lineClamp={1}
               title={displayName}
               fontSize={compact ? { base: '32px', md: '38px' } : { base: '34px', md: '40px' }}
               fontWeight={900}
