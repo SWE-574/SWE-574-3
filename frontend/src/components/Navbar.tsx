@@ -344,6 +344,7 @@ const Navbar = () => {
                 bg={mobileOpen ? GRAY100 : 'transparent'}
                 color={GRAY600}
                 onClick={() => setMobileOpen((v) => !v)}
+                aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
                 style={{ border: 'none', cursor: 'pointer', flexShrink: 0 }}
               >
                 {mobileOpen ? <FiX size={20} /> : <FiMenu size={20} />}
