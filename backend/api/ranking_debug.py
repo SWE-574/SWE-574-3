@@ -98,6 +98,46 @@ def _factor_breakdown(service: Service) -> dict:
     }
 
 
+def _ranking_sankey_from_factors(factors: dict) -> dict:
+    """Compact nodes/links for the admin Recommendation Showcase sankey chart.
+
+    The UI only needs non-empty `nodes` and `links`; values are relative weights.
+    """
+    if factors.get('kind') == 'event':
+        v = max(0.001, float(factors.get('velocity') or 0))
+        oq = max(0.001, float(factors.get('organiser_quality') or 0))
+        return {
+            'nodes': [
+                {'id': 'velocity', 'label': 'Velocity'},
+                {'id': 'organiser_quality', 'label': 'Organiser quality'},
+                {'id': 'final', 'label': 'Event hot score'},
+            ],
+            'links': [
+                {'source': 'velocity', 'target': 'final', 'value': v},
+                {'source': 'organiser_quality', 'target': 'final', 'value': oq},
+            ],
+        }
+    q = max(0.001, float(factors.get('quality') or 0))
+    a = max(0.001, float(factors.get('activity') or 0))
+    c = max(0.001, float(factors.get('capacity_multiplier') or 0))
+    n = max(0.001, float(factors.get('newcomer_boost') or 0))
+    return {
+        'nodes': [
+            {'id': 'quality', 'label': 'Wilson quality'},
+            {'id': 'activity', 'label': 'Activity'},
+            {'id': 'capacity_multiplier', 'label': 'Capacity multiplier'},
+            {'id': 'newcomer_boost', 'label': 'Newcomer boost'},
+            {'id': 'final', 'label': 'Hot score'},
+        ],
+        'links': [
+            {'source': 'quality', 'target': 'final', 'value': q},
+            {'source': 'activity', 'target': 'final', 'value': a},
+            {'source': 'capacity_multiplier', 'target': 'final', 'value': c},
+            {'source': 'newcomer_boost', 'target': 'final', 'value': n},
+        ],
+    }
+
+
 def _formula_lines_with_substitutions(factors: dict) -> list[str]:
     """Render the ranking formulas with the actual numeric values so the
     debug panel reads as 'Wilson(1, 2) = 0.21' rather than the algebraic
@@ -638,5 +678,6 @@ def build_service_debug_payload(
             },
             'formula_lines': new_formula_lines,
             'notes': notes,
+            'sankey': _ranking_sankey_from_factors(factors),
         },
     }
