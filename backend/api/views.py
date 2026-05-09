@@ -1582,6 +1582,15 @@ class UserHistoryView(APIView):
             'service', 'service__user', 'requester'
         ).order_by('-updated_at')[:50]  # Limit to last 50
         
+        # Pre-fetch handshake IDs where the target user already submitted a review,
+        # so we can set evaluation_pending=False for those without per-row queries.
+        reviewed_handshake_ids = set(
+            ReputationRep.objects.filter(
+                handshake__in=completed_handshakes,
+                giver=target_user,
+            ).values_list('handshake_id', flat=True)
+        )
+
         history = []
         for handshake in completed_handshakes:
             provider, receiver = get_provider_and_receiver(handshake)
@@ -1614,8 +1623,13 @@ class UserHistoryView(APIView):
                 'partner_avatar_url': partner.avatar_url,
                 'completed_date': handshake.updated_at,
                 'was_provider': was_provider,
-                # For events: True when the attendee's evaluation window is still open.
-                'evaluation_pending': handshake.service.type == 'Event' and handshake.status == 'attended',
+                # For events: True only for attendees (not the organizer) with an open evaluation window.
+                'evaluation_pending': (
+                    handshake.service.type == 'Event'
+                    and handshake.status == 'attended'
+                    and not was_provider
+                    and handshake.id not in reviewed_handshake_ids
+                ),
             })
 
         # Include owner-completed events that currently have no qualifying
@@ -6307,7 +6321,7 @@ class PublicChatViewSet(viewsets.ViewSet):
         has_active_hs = Handshake.objects.filter(
             service=service,
             requester=user,
-            status__in=['accepted', 'checked_in', 'attended'],
+            status__in=['accepted', 'checked_in', 'attended', 'completed', 'no_show'],
         ).exists()
         if has_active_hs:
             return None

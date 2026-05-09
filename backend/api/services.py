@@ -1596,7 +1596,8 @@ class EventHandshakeService:
                 )
 
             locked_handshake.status = 'cancelled'
-            locked_handshake.save(update_fields=['status', 'updated_at'])
+            locked_handshake.cancellation_reason = 'user_left'
+            locked_handshake.save(update_fields=['status', 'cancellation_reason', 'updated_at'])
 
             create_notification(
                 user=locked_handshake.service.user,
@@ -1884,10 +1885,10 @@ class EventHandshakeService:
             service = Service.objects.select_for_update().get(pk=service.pk)
             organizer = User.objects.select_for_update().get(pk=organizer.pk)
 
-            # Bulk-mark non-attended participants as no-shows (single SQL UPDATE)
+            # Only checked_in participants become no-shows; accepted (never showed up) stay as-is.
             no_show_qs = Handshake.objects.filter(
                 service=service,
-                status__in=['accepted', 'checked_in'],
+                status='checked_in',
             )
             no_show_requester_ids = list(no_show_qs.values_list('requester_id', flat=True).distinct())
             no_show_qs.update(status='no_show', updated_at=timezone.now())
@@ -1922,6 +1923,17 @@ class EventHandshakeService:
                         if user.no_show_count >= BAN_THRESHOLD else ''
                     ),
                     handshake=handshake,
+                    service=service,
+                )
+
+            # Notify accepted (registered but never checked-in) participants that the event is over.
+            for accepted_hs in Handshake.objects.filter(service=service, status='accepted').select_related('requester'):
+                create_notification(
+                    user=accepted_hs.requester,
+                    notification_type='service_updated',
+                    title='Event Completed',
+                    message=f"The event '{service.title}' has ended.",
+                    handshake=accepted_hs,
                     service=service,
                 )
 
