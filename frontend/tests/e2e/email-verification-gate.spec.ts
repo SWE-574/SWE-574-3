@@ -45,6 +45,14 @@ test.describe('post-* route email verification gate', () => {
   ]) {
     test(`unverified user is blocked on ${path}`, async ({ page }) => {
       await loginAs(page, USERS.cem, { is_verified: false })
+      // Sentinel: confirm the unverified state has been hydrated into the
+      // auth store by waiting for the dashboard's "Limited access" banner.
+      // Without this wait the subsequent navigation can race ahead of the
+      // /users/me/ stub being applied, leaving `user.is_verified` undefined
+      // when RequireVerifiedEmail mounts (it then falls through to children).
+      await expect(
+        page.locator('text=Limited access').first(),
+      ).toBeVisible({ timeout: 15_000 })
       const callsOf = await stubSendVerification(page)
 
       await page.goto(path)
@@ -80,11 +88,17 @@ test.describe('post-* route email verification gate', () => {
 test.describe('service detail join/request email verification gate', () => {
   test('unverified user sees the verification modal when requesting an Offer', async ({ page }) => {
     await loginAs(page, USERS.cem, { is_verified: false })
+    // Sentinel: confirm the unverified state has been hydrated into the
+    // auth store before exercising any flow that reads `is_verified`.
+    await expect(
+      page.locator('text=Limited access').first(),
+    ).toBeVisible({ timeout: 15_000 })
     const callsOf = await stubSendVerification(page)
 
     // Find an Offer in the dashboard listings authored by someone other than
     // the logged-in user, so the "Request this Service" CTA is rendered.
     await page.goto('/dashboard')
+    await page.waitForLoadState('networkidle').catch(() => { /* ignore */ })
     const ownerEmail = USERS.cem.email
     const offerLink = page
       .locator('a[href^="/service-detail/"]')
