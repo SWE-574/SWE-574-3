@@ -289,6 +289,8 @@ export async function createAcceptedOfferExchange(page: Page, options: {
   await acceptPendingHandshakeViaApi(page, {
     serviceId,
     requesterName: options.requester.name,
+    owner: options.owner,
+    requester: options.requester,
   })
 
   return { title, detailUrl, serviceId }
@@ -323,11 +325,13 @@ export async function createAcceptedGroupOfferExchanges(page: Page, options: {
     await requestOfferFromDetail(page)
   }
 
-  await switchUser(page, options.owner)
   for (const requester of options.requesters) {
+    await switchUser(page, options.owner)
     await acceptPendingHandshakeViaApi(page, {
       serviceId,
       requesterName: requester.name,
+      owner: options.owner,
+      requester,
     })
   }
 
