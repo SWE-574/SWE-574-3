@@ -231,10 +231,10 @@ export default function RecommendationDebugPanel({
       <Flex align="start" justify="space-between" mb={4}>
         <Box>
           <Text fontSize="sm" fontWeight="900" color="orange.600">
-            Feed Debug
+            Recommendation Showcase
           </Text>
           <Text fontSize="xs" color="gray.500">
-            Ranking signals for the card under your cursor.
+            Hover a card to see how each ranking phase scored it.
           </Text>
         </Box>
         {isRefreshing ? <StatusChip label="Syncing" icon={<FiRefreshCw size={11} />} /> : null}
@@ -359,11 +359,122 @@ export default function RecommendationDebugPanel({
         ) : (
           <SectionCard bg="gray.50">
             <Text fontSize="sm" color="gray.600">
-              Open the panel and hover a visible card to inspect its ranking inputs.
+              Hover a visible card to inspect how each phase scored it.
             </Text>
           </SectionCard>
         )}
+
+        <PhaseGuide />
       </Stack>
+    </Box>
+  )
+}
+
+function PhaseGuide() {
+  return (
+    <Box>
+      <Text fontSize="11px" fontWeight="900" color="gray.700" mb={2} mt={1}
+        style={{ letterSpacing: '0.06em', textTransform: 'uppercase' }}
+      >
+        How the feed is built
+      </Text>
+      <Stack gap={2}>
+        <PhaseCard
+          phase="Phase 1"
+          title="Base eligibility"
+          color="gray.50"
+          tone="gray.700"
+        >
+          Active, visible services owned by someone other than you. Past
+          events and completed group offers drop out before any ranking runs.
+        </PhaseCard>
+        <PhaseCard
+          phase="Phase 2"
+          title="Hot composite score"
+          color="orange.50"
+          tone="orange.800"
+        >
+          <code>quality × activity × capacity × newcomerBoost</code>.
+          Quality uses the Wilson lower bound on positive vs negative
+          reputation. Activity is <code>log₂(2 + hours_exchanged) + 0.5 × log₂(2 + comments)</code>.
+          Capacity multiplies by 1.5× when an event/group offer is between
+          75% and 100% full. Owners new to the platform get a small
+          stochastic boost so the feed isn&apos;t dominated by veterans.
+        </PhaseCard>
+        <PhaseCard
+          phase="Phase 3"
+          title="Exploration pool"
+          color="purple.50"
+          tone="purple.800"
+        >
+          A rotating pool that prevents the feed from collapsing onto the
+          same cards. Three sub-buckets: <strong>cold start</strong> (owners
+          with very few completed handshakes), <strong>undershown quality</strong>
+          (high-quality services that haven&apos;t been touched in N days),
+          and <strong>stale recurring</strong> (recurring offers flagged by
+          the growth check). Discovery surfaces this pool directly.
+        </PhaseCard>
+        <PhaseCard
+          phase="Viewer overlays"
+          title="Proximity & social"
+          color="green.50"
+          tone="green.800"
+        >
+          When you enable location, hot scores are multiplied by a
+          distance-decay curve (half-life ~10 km by default). Authenticated
+          viewers also get a small boost for owners they follow or have
+          previously transacted with.
+        </PhaseCard>
+        <PhaseCard
+          phase="Search"
+          title="Match scoring"
+          color="blue.50"
+          tone="blue.800"
+        >
+          When you type a query, results are re-ranked by where the match
+          lands: title 1.0 &gt; tag 0.8 &gt; owner name 0.6 &gt; location 0.5
+          &gt; description 0.4. Ties break by hot score so quality still
+          matters on equal-text matches.
+        </PhaseCard>
+      </Stack>
+    </Box>
+  )
+}
+
+function PhaseCard({
+  phase,
+  title,
+  color,
+  tone,
+  children,
+}: {
+  phase: string
+  title: string
+  color: string
+  tone: string
+  children: ReactNode
+}) {
+  return (
+    <Box
+      bg={color}
+      borderRadius="14px"
+      p={3}
+      border="1px solid"
+      borderColor="whiteAlpha.700"
+    >
+      <Flex align="center" gap={2} mb={1}>
+        <Text fontSize="9px" fontWeight="900" color={tone}
+          style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
+        >
+          {phase}
+        </Text>
+        <Text fontSize="xs" fontWeight="800" color={tone}>
+          {title}
+        </Text>
+      </Flex>
+      <Text fontSize="11px" color={tone} lineHeight="1.5">
+        {children}
+      </Text>
     </Box>
   )
 }

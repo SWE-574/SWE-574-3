@@ -126,11 +126,23 @@ describe('DashboardPage (Browse)', () => {
     expect(call.exclude_own).toBe(true)
   })
 
-  it('defaults to For-you ranking when the viewer is onboarded with skills', async () => {
+  it('defaults to All (no sort, skip_onboarding=true)', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
     const call = listPagedMock.mock.calls[0][0]
-    expect(call.sort).toBe('for_you')
+    expect(call.sort).toBeUndefined()
+    expect(call.skip_onboarding).toBe(true)
+  })
+
+  it('Discovery sends explore_only=true with no sort param', async () => {
+    renderPage()
+    await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByText('Discovery'))
+    await waitFor(() => {
+      const last = listPagedMock.mock.calls.at(-1)?.[0]
+      expect(last?.explore_only).toBe(true)
+      expect(last?.sort).toBeUndefined()
+    })
   })
 
   it('switches to sort=latest when Newest is clicked', async () => {
@@ -143,31 +155,21 @@ describe('DashboardPage (Browse)', () => {
     })
   })
 
-  it('switches to no sort param when All is clicked', async () => {
-    renderPage()
-    await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
-    fireEvent.click(screen.getByText('All'))
-    await waitFor(() => {
-      const last = listPagedMock.mock.calls.at(-1)?.[0]
-      expect(last?.sort).toBeUndefined()
-    })
-  })
-
-  it('does not render the recurrent filter, the Trending button, or a result count', async () => {
+  it('does not render the recurrent filter, For-you/Trending buttons, or a result count', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
     expect(screen.queryByText('Recurrent')).not.toBeInTheDocument()
     expect(screen.queryByText('Trending')).not.toBeInTheDocument()
+    expect(screen.queryByText('For you')).not.toBeInTheDocument()
     expect(screen.queryByText(/\d+ services?$/)).not.toBeInTheDocument()
   })
 
-  it('renders the ranking buttons (no Trending; All on the right)', async () => {
+  it('renders the four ranking buttons in order (Discovery, Newest, Nearby, All)', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
-    for (const label of ['For you', 'Discovery', 'Newest', 'Nearby', 'All']) {
+    for (const label of ['Discovery', 'Newest', 'Nearby', 'All']) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
-    expect(screen.queryByText('Trending')).not.toBeInTheDocument()
   })
 
   it('renders the ranking row below the map element', async () => {

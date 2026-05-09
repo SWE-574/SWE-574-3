@@ -25,6 +25,9 @@ export interface ServiceListParams {
   user_id?: string
   explore_only?: boolean
   exclude_own?: boolean
+  // Browse's "All" mode opts out of the implicit skill-based slice that
+  // `apply_onboarding_fallback` otherwise applies to onboarded viewers.
+  skip_onboarding?: boolean
   // FR-12c — only honored when type='Event'. ISO-8601 dates.
   date_from?: string
   date_to?: string
@@ -103,6 +106,7 @@ export const serviceAPI = {
     if (params?.user_id) queryParams.set('user', params.user_id)
     if (params?.explore_only) queryParams.set('explore_only', 'true')
     if (params?.exclude_own) queryParams.set('exclude_own', 'true')
+    if (params?.skip_onboarding) queryParams.set('skip_onboarding', 'true')
     if (params?.date_from) queryParams.set('date_from', params.date_from)
     if (params?.date_to) queryParams.set('date_to', params.date_to)
 
@@ -140,6 +144,7 @@ export const serviceAPI = {
     if (params?.user_id) queryParams.set('user', params.user_id)
     if (params?.explore_only) queryParams.set('explore_only', 'true')
     if (params?.exclude_own) queryParams.set('exclude_own', 'true')
+    if (params?.skip_onboarding) queryParams.set('skip_onboarding', 'true')
     if (params?.date_from) queryParams.set('date_from', params.date_from)
     if (params?.date_to) queryParams.set('date_to', params.date_to)
 

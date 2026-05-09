@@ -23,7 +23,6 @@ import {
   FiZap,
   FiCompass,
   FiNavigation,
-  FiStar,
   FiCheck,
   FiGrid,
 } from 'react-icons/fi'
@@ -42,7 +41,7 @@ import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
 import { Avatar } from '@/components/Avatar'
 import { Pagination } from '@/components/Pagination'
-import RecommendationDebugBar from '@/components/RecommendationDebugBar'
+import RecommendationShowcaseBar from '@/components/RecommendationShowcaseBar'
 import type { Handshake } from '@/services/handshakeAPI'
 import DashboardTour from '@/components/dashboard-tour/DashboardTour'
 
@@ -65,7 +64,7 @@ const PAGE_SIZE         = 15
 
 // ─── Ranking modes ────────────────────────────────────────────────────────────
 
-type RankingMode = 'for_you' | 'discovery' | 'newest' | 'nearby' | 'all'
+type RankingMode = 'discovery' | 'newest' | 'nearby' | 'all'
 
 interface RankingButtonDef {
   id: RankingMode
@@ -74,7 +73,6 @@ interface RankingButtonDef {
 }
 
 const RANKING_BUTTONS: RankingButtonDef[] = [
-  { id: 'for_you',   label: 'For you',   icon: <FiStar size={12} /> },
   { id: 'discovery', label: 'Discovery', icon: <FiCompass size={12} /> },
   { id: 'newest',    label: 'Newest',    icon: <FiZap size={12} /> },
   { id: 'nearby',    label: 'Nearby',    icon: <FiNavigation size={12} /> },
@@ -443,10 +441,7 @@ const DashboardPage = () => {
   const [searchParams, setSearchParams]             = useSearchParams()
   const page                                         = Math.max(1, Number(searchParams.get('page') ?? 1))
 
-  const isOnboardedWithSkills = Boolean(user?.is_onboarded && user?.skills?.length)
-  const [rankingMode, setRankingMode]               = useState<RankingMode>(
-    isOnboardedWithSkills ? 'for_you' : 'all',
-  )
+  const [rankingMode, setRankingMode]               = useState<RankingMode>('all')
   const [activeTypes, setActiveTypes]               = useState<Set<'Offer' | 'Need' | 'Event'>>(new Set())
   const [secondaryFilters, setSecondaryFilters]     = useState<Set<SecondaryFilter>>(new Set())
   const [searchQuery, setSearchQuery]               = useState('')
@@ -468,7 +463,7 @@ const DashboardPage = () => {
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
   const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
-  const [rankingDebugEnabled, setRankingDebugEnabled] = useState(false)
+  const [showcaseEnabled, setShowcaseEnabled] = useState(false)
 
   const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -520,18 +515,18 @@ const DashboardPage = () => {
 
   // Ranking debug bar (#476) lives back on the dashboard so admins can hover
   // a card and see its Phase 2/3 breakdown live. The availability endpoint
-  // is admin-only per #371, so non-admins quietly get no result and the bar
-  // stays hidden. The PlatformSetting flag (toggled in the admin panel)
-  // controls whether the bar appears at all even for admins.
+  // The PlatformSetting toggle (managed by moderators) drives whether the
+  // Recommendation Showcase appears for everyone. The endpoint returns
+  // `enabled: false` for unauthenticated viewers so the panel stays hidden.
   useEffect(() => {
     let cancelled = false
     serviceAPI
       .getRankingDebugAvailability()
       .then(({ enabled }) => {
-        if (!cancelled) setRankingDebugEnabled(Boolean(enabled))
+        if (!cancelled) setShowcaseEnabled(Boolean(enabled))
       })
       .catch(() => {
-        if (!cancelled) setRankingDebugEnabled(false)
+        if (!cancelled) setShowcaseEnabled(false)
       })
     return () => {
       cancelled = true
@@ -548,14 +543,12 @@ const DashboardPage = () => {
     }
 
     // Map ranking button → backend sort/explore/lat-lng knobs. `all` is the
-    // explicit "no ranking lens" choice — leave `sort` unset and the backend
-    // falls back to its default `-is_pinned, -created_at` ordering.
+    // explicit "no ranking lens" choice — `skip_onboarding` opts out of the
+    // implicit skill-based slice so the viewer sees the full active catalog.
     switch (rankingMode) {
-      case 'for_you':
-        baseParams.sort = 'for_you'
-        break
       case 'discovery':
-        baseParams.sort = 'for_you'
+        // `_list_for_you` short-circuits on `sort=for_you`, so leave sort
+        // unset and rely on `explore_only` to surface the Phase 3 pool.
         baseParams.explore_only = true
         break
       case 'newest':
@@ -571,7 +564,7 @@ const DashboardPage = () => {
         break
       case 'all':
       default:
-        // No `sort` param — backend default ordering kicks in.
+        baseParams.skip_onboarding = true
         break
     }
 
@@ -926,8 +919,6 @@ const DashboardPage = () => {
               {RANKING_BUTTONS.map((btn) => {
                 const isActive = rankingMode === btn.id
                 const disabled = isRankingButtonDisabled(btn.id, {
-                  isAuthenticated,
-                  isOnboarded: Boolean(user?.is_onboarded && user?.skills?.length),
                   hasGeo: Boolean(locationEnabled && userLocation),
                 })
                 return (
@@ -937,13 +928,9 @@ const DashboardPage = () => {
                     flexShrink={0}
                     title={
                       disabled
-                        ? btn.id === 'for_you'
-                          ? 'Add your skills to unlock For you'
-                          : btn.id === 'discovery'
-                            ? 'Add your skills to unlock Discovery'
-                            : btn.id === 'nearby'
-                              ? 'Enable location to see nearby services'
-                              : ''
+                        ? btn.id === 'nearby'
+                          ? 'Enable location to see nearby services'
+                          : ''
                         : ''
                     }
                     onClick={() => !disabled && setRankingMode(btn.id)}
@@ -1027,7 +1014,7 @@ const DashboardPage = () => {
                       pendingCount={pCount}
                       onClick={() => navigate(`/service-detail/${service.id}`)}
                       onHover={
-                        rankingDebugEnabled
+                        showcaseEnabled
                           ? () => setHoveredServiceId(service.id)
                           : undefined
                       }
@@ -1048,8 +1035,8 @@ const DashboardPage = () => {
         </Flex>
       </Box>
       <DashboardTour />
-      {rankingDebugEnabled && (
-        <RecommendationDebugBar
+      {showcaseEnabled && (
+        <RecommendationShowcaseBar
           services={displayServices}
           hoveredServiceId={hoveredServiceId}
           activeFilter={rankingMode}
@@ -1066,14 +1053,10 @@ const DashboardPage = () => {
 // ─── Helpers used by the topbar ───────────────────────────────────────────────
 
 interface RankingDisabledContext {
-  isAuthenticated: boolean
-  isOnboarded: boolean
   hasGeo: boolean
 }
 
 function isRankingButtonDisabled(id: RankingMode, ctx: RankingDisabledContext): boolean {
-  if (id === 'for_you') return !ctx.isAuthenticated || !ctx.isOnboarded
-  if (id === 'discovery') return !ctx.isAuthenticated || !ctx.isOnboarded
   if (id === 'nearby') return !ctx.hasGeo
   return false
 }
