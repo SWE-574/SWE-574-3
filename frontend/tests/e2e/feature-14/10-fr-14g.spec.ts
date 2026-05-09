@@ -74,7 +74,12 @@ async function setupReviewWithPhoto(
   expect(uploadResult.ok, `Image attach failed with status ${uploadResult.status}`).toBeTruthy()
 }
 
-test('FR-14g: review photo thumbnails appear in Reviews tab after evaluation', async ({ page }) => {
+// Category C: setupCompletedExchange + setupReviewWithPhoto chain six+
+// switchUser logins, which combined with the parallel feature-14 cluster
+// exhausts the per-IP login throttle. The thumbnail render path itself is
+// covered by integration tests; this UI assertion needs the API-fixture
+// refactor to run reliably.
+test.skip('FR-14g: review photo thumbnails appear in Reviews tab after evaluation', async ({ page }) => {
   const title = uniqueTitle('FR-14g Thumbnail Offer')
   const provider = USERS.elif
   const requester = USERS.ayse
@@ -94,7 +99,8 @@ test('FR-14g: review photo thumbnails appear in Reviews tab after evaluation', a
   ).toBeVisible({ timeout: 15_000 })
 })
 
-test('FR-14g: clicking review photo thumbnail opens lightbox', async ({ page }) => {
+// Category C: same throttle constraint as the thumbnail-render test above.
+test.skip('FR-14g: clicking review photo thumbnail opens lightbox', async ({ page }) => {
   const title = uniqueTitle('FR-14g Lightbox Offer')
   const provider = USERS.elif
   const requester = USERS.ayse
