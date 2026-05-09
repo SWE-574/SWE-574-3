@@ -71,6 +71,7 @@ test.describe('@a11y baseline', () => {
   test('@a11y create event modal', async ({ page }) => {
     await loginAs(page, USERS.regular)
     await page.goto('/dashboard')
+    await page.waitForLoadState('networkidle')
     const createEvent = page.getByRole('button', { name: /create.*event/i }).first()
     if (!(await createEvent.isVisible().catch(() => false))) {
       test.skip(true, 'No create-event entry point on this dashboard variant')
