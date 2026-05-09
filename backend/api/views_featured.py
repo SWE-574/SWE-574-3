@@ -116,7 +116,12 @@ class FeaturedView(APIView):
         if not friend_ids:
             return []
 
-        service_qs = (
+        # Events get more handshakes per service (one per RSVP) than 1:1
+        # services, so a single friend-attended event used to drown out
+        # offers and needs that friends own. Cap events to FRIENDS_EVENT_CAP
+        # so the tab keeps offer/need variety even when the social graph
+        # mostly RSVPs together.
+        base_qs = (
             Service.objects.filter(
                 status='Active',
                 is_visible=True,
@@ -140,8 +145,20 @@ class FeaturedView(APIView):
                     distinct=True,
                 ),
             )
-            .order_by('-friend_count')[:10]
         )
+        FRIENDS_LIMIT = 10
+        FRIENDS_EVENT_CAP = 3
+        events = list(base_qs.filter(type='Event').order_by('-friend_count')[:FRIENDS_EVENT_CAP])
+        non_events = list(
+            base_qs.exclude(type='Event').order_by('-friend_count')[:FRIENDS_LIMIT]
+        )
+        # Merge and re-sort by friend_count so the strongest signal still
+        # leads, then trim to the overall limit.
+        service_qs = sorted(
+            events + non_events,
+            key=lambda s: s.friend_count,
+            reverse=True,
+        )[:FRIENDS_LIMIT]
 
         service_ids = [s.id for s in service_qs]
         friend_name_map: dict[str, list[str]] = {}

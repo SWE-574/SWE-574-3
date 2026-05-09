@@ -522,15 +522,14 @@ const DashboardPage = () => {
     }
 
     // Single sort path: ranking engine sorts the full catalog, viewer's
-    // location boosts proximate cards when available. The four old mode
-    // buttons (Discovery / Newest / Nearby / All) collapsed into this one
-    // call as part of the unified browse / home redesign -- the YouTube-style
+    // location boosts proximate cards through the composite_score's proximity
+    // factor (no hard radius cutoff -- the radius lives on the Featured /
+    // Nearby tab, where it scopes the carousel slice only). YouTube-style
     // "always show everything, just reorder" policy.
     baseParams.sort = 'hot'
     if (locationEnabled && userLocation) {
       baseParams.lat = userLocation.lat
       baseParams.lng = userLocation.lng
-      baseParams.distance = debouncedDistance
     }
 
     // Multi-type chip selection rides on the new repeated `?type=` keys —
@@ -550,7 +549,6 @@ const DashboardPage = () => {
     secondaryFilters,
     locationEnabled,
     userLocation,
-    debouncedDistance,
   ])
 
   const { isLoading, error: fetchError } = usePolling(fetchServices, [fetchServices], { interval: POLL_INTERVAL })
@@ -874,12 +872,15 @@ const DashboardPage = () => {
           {/* Featured section — three tabs (Friends / Nearby / Nearly Full)
               feed a horizontal carousel below the map. The main grid below
               this row stays sorted by composite_score regardless of which tab
-              is active; the tabs are slice previews, not list filters. */}
+              is active; the tabs are slice previews, not list filters. The
+              radius slider lives inside the Nearby tab so it scopes only the
+              carousel and never empties the main grid. */}
           <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} px={{ base: 3, md: 5 }} py="10px">
             <FeaturedSection
               services={displayServices}
               userLocation={locationEnabled && userLocation ? userLocation : null}
-              maxNearbyKm={debouncedDistance}
+              maxNearbyKm={distanceKm}
+              onMaxNearbyKmChange={setDistanceKm}
               isAuthenticated={isAuthenticated}
               onServicePress={(id) => navigate(`/service-detail/${id}`)}
             />

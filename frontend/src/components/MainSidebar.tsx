@@ -13,7 +13,7 @@ import {
 import { useAuthStore } from '@/store/useAuthStore'
 import {
   GREEN, GREEN_LT, AMBER, AMBER_LT, BLUE, BLUE_LT,
-  GRAY50, GRAY100, GRAY200, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800, WHITE,
+  GRAY50, GRAY100, GRAY200, GRAY400, GRAY500, GRAY700, GRAY800, WHITE,
 } from '@/theme/tokens'
 
 function initials(u?: { first_name?: string; last_name?: string; email?: string } | null) {
@@ -74,8 +74,8 @@ interface MainSidebarProps {
 export function MainSidebar({
   pendingHs = 0, acceptedHs = 0, completedHs = 0,
   myServices = [], incomingMap = new Map(),
-  locationEnabled, locationLoading, locationError, userLocation, distanceKm, distanceLabel,
-  toggleLocation, setDistanceKm,
+  locationEnabled, locationLoading, locationError, userLocation,
+  toggleLocation,
   hideLocationFilters = false,
 }: MainSidebarProps) {
   const navigate = useNavigate()
@@ -255,28 +255,15 @@ export function MainSidebar({
               {locationLoading
                 ? <><FiLoader size={12} /> Getting location…</>
                 : locationEnabled
-                  ? <><FiMapPin size={12} /> By distance — ON</>
+                  ? <><FiMapPin size={12} /> Use my location — ON</>
                   : <><FiNavigation size={12} /> Enable location</>}
             </Box>
             {locationError && <Text fontSize="11px" color="red.500" mb={2}>{locationError}</Text>}
-            {userLocation && (
-              <Box>
-                <Flex justify="space-between" mb="6px">
-                  <Text fontSize="11px" color={GRAY600} fontWeight={500}>
-                    {locationEnabled ? `${distanceKm} km` : 'Disabled'}
-                  </Text>
-                  <Text fontSize="11px" color={GRAY400}>{locationEnabled ? distanceLabel : '—'}</Text>
-                </Flex>
-                <input
-                  type="range" min={1} max={50} step={1} value={distanceKm}
-                  onChange={(e) => { setDistanceKm?.(Number(e.target.value)); if (!locationEnabled) toggleLocation?.() }}
-                  style={{ width: '100%', accentColor: GREEN, height: '4px', cursor: 'pointer', opacity: locationEnabled ? 1 : 0.5 }}
-                />
-                <Flex justify="space-between" mt="4px">
-                  <Text fontSize="9px" color={GRAY400}>1 km</Text>
-                  <Text fontSize="9px" color={GRAY400}>50 km</Text>
-                </Flex>
-              </Box>
+            {userLocation && locationEnabled && (
+              <Text fontSize="10px" color={GRAY500} lineHeight="1.4">
+                Proximity boosts ranked results in Browse. Use the radius
+                slider on the Nearby tab to tune the carousel cutoff.
+              </Text>
             )}
           </Box>
         )}

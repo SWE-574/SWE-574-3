@@ -47,6 +47,8 @@ export interface ServicesListParams {
   distance?: number;
   /** Restrict to Phase 3 explore-eligible services for the "Try something new" carousel. */
   explore_only?: boolean;
+  /** Exclude services owned by the requester. Mirrors the web Browse contract. */
+  exclude_own?: boolean;
 }
 
 function normalizeService(service: Service): Service {

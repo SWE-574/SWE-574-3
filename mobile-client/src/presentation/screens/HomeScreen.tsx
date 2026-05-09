@@ -199,6 +199,7 @@ export default function HomeScreen() {
 
       const params: ServicesListParams = {
         page_size: 30,
+        exclude_own: true,
         search: debouncedSearch || undefined,
         type:
           filters.serviceType !== "all" && filters.serviceType !== "Event"

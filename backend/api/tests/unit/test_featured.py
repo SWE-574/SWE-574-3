@@ -252,6 +252,45 @@ class TestFeaturedEndpoint:
     # ------------------------------------------------------------------ #
     # 9. Friends tab excludes pending-only handshakes
     # ------------------------------------------------------------------ #
+    def test_friends_caps_events_so_offers_and_needs_still_surface(self):
+        """Events accumulate handshakes per RSVP, so an unrestricted friends
+        query drowns out 1:1 services. The cap keeps offer/need variety in
+        the slice even when the social graph mostly RSVPs together."""
+        me = UserFactory()
+        friend = UserFactory()
+        UserFollow.objects.create(follower=me, following=friend)
+
+        # 6 events with friend handshakes (well past the 3-event cap).
+        for i in range(6):
+            event = ServiceFactory(
+                title=f"Event {i}", type="Event", status="Active", is_visible=True,
+                max_participants=20,
+                scheduled_time=timezone.now() + timedelta(days=3),
+            )
+            HandshakeFactory(service=event, requester=friend, status="accepted")
+
+        # 4 offers/needs with friend handshakes.
+        offer_titles = [f"Offer {i}" for i in range(4)]
+        for title in offer_titles:
+            offer = ServiceFactory(
+                title=title, type="Offer", status="Active", is_visible=True,
+            )
+            HandshakeFactory(service=offer, requester=friend, status="completed")
+
+        client = _auth_client(me)
+        response = client.get(FEATURED_URL)
+        data = response.json()
+        friends_list = data["friends"]
+
+        event_count = sum(1 for s in friends_list if s["type"] == "Event")
+        offer_count = sum(1 for s in friends_list if s["type"] == "Offer")
+        assert event_count <= 3, (
+            f"events should be capped at 3, got {event_count}: {[s['title'] for s in friends_list]}"
+        )
+        assert offer_count >= 1, (
+            "at least one offer/need should surface alongside the events"
+        )
+
     def test_friends_excludes_pending_only_handshakes(self):
         me = UserFactory()
         friend = UserFactory(first_name="Bob", last_name="Jones")

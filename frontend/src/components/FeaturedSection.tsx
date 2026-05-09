@@ -42,6 +42,7 @@ interface FeaturedSectionProps {
   services: Service[]
   userLocation?: { lat: number; lng: number } | null
   maxNearbyKm?: number
+  onMaxNearbyKmChange?: (value: number) => void
   isAuthenticated: boolean
   onServicePress?: (id: string) => void
 }
@@ -91,6 +92,7 @@ export default function FeaturedSection({
   services,
   userLocation,
   maxNearbyKm = DEFAULT_MAX_NEARBY_KM,
+  onMaxNearbyKmChange,
   isAuthenticated,
   onServicePress,
 }: FeaturedSectionProps) {
@@ -282,6 +284,26 @@ export default function FeaturedSection({
           )
         })}
       </Flex>
+
+      {activeTab === 'nearby' && userLocation && onMaxNearbyKmChange ? (
+        <Flex align="center" gap={2} mb={2}>
+          <Text fontSize="11px" color="gray.600" fontWeight="700" minW="64px">
+            Within {maxNearbyKm} km
+          </Text>
+          <Box flex={1}>
+            <input
+              type="range"
+              min={1}
+              max={50}
+              step={1}
+              value={maxNearbyKm}
+              onChange={(e) => onMaxNearbyKmChange(Number(e.target.value))}
+              style={{ width: '100%' }}
+              aria-label="Nearby radius in kilometres"
+            />
+          </Box>
+        </Flex>
+      ) : null}
 
       {currentItems.length === 0 ? (
         <Box bg="gray.50" border="1px solid" borderColor="gray.200" borderRadius="14px" p={4}>
