@@ -130,9 +130,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     const prevId = user?.id ?? null;
-    await authApi.logout();
-    useNotificationStore.getState().reset();
+    // Clear local UI state first so the user is signed out from the app's
+    // perspective even if token/notification teardown throws.
     await clearSessionLocal(prevId);
+    try {
+      useNotificationStore.getState().reset();
+    } catch {
+      /* best-effort */
+    }
+    try {
+      await authApi.logout();
+    } catch {
+      /* in-memory state already cleared */
+    }
   }, [user, clearSessionLocal]);
 
   useEffect(() => {
