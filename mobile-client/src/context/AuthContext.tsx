@@ -181,7 +181,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // earlier order awaited token storage and the notification reset before
     // touching `user`; if either threw, the screen stayed on the cached
     // profile and the viewer appeared still signed in.
-    // clearSessionLocal bumps sessionGenerationRef synchronously, so any
+    // clearSessionLocal also bumps sessionGenerationRef synchronously, so any
     // in-flight refreshUser race becomes a no-op (same effect as a separate
     // pre-bump).
     await clearSessionLocal(prevId);

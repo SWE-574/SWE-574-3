@@ -139,8 +139,11 @@ export async function initiateOnlineHandshakeViaApi(page: Page, options: {
   let result: { ok: boolean; status: number; body: string } | null = null
   const minutes = ['00', '15', '30', '45']
   const seed = Date.now()
+  const totalAttempts = 24
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+    // Spread across roughly 6 days and 32 hourly slots so concurrent workers
+    // sharing a demo user fan out instead of repeatedly probing a busy slot.
     const { date } = futureDateParts((options.daysAhead ?? 3) + Math.floor(attempt / 4))
     const slotHour = 9 + ((seed + attempt) % 8)
     const slotMinute = minutes[(Math.floor(seed / 1000) + attempt) % minutes.length] ?? '00'

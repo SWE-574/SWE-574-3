@@ -4,6 +4,7 @@ import {
   completeOfferExchange,
   createAcceptedOfferExchange,
   fetchCurrentUser,
+  findLedgerTransaction,
   listTransactions,
   pickUsersWithBalanceAtLeast,
   openTimeActivity,
@@ -29,18 +30,22 @@ test('NFR-07c: ledger rows and visible balances remain transactionally consisten
   })
   await switchUser(page, owner)
 
+  // Wait for the ledger to reflect the completed exchange so the cross-check
+  // is comparing against a fully-committed snapshot, not an in-flight one.
+  const relatedRow = await findLedgerTransaction(
+    page,
+    (transaction) => transaction.service_title === title && transaction.transaction_type === 'transfer',
+    { direction: 'credit' },
+  )
+
   // Compare API-visible balance state with the summary and newest ledger row for the same completed exchange.
   const currentUser = await fetchCurrentUser(page)
   const transactions = await listTransactions(page, 'credit')
-  const relatedRow = transactions.results.find((transaction) => (
-    transaction.service_title === title && transaction.transaction_type === 'transfer'
-  ))
 
-  expect(relatedRow).toBeTruthy()
   expect(transactions.summary.current_balance).toBe(currentUser.timebank_balance)
-  expect(relatedRow?.balance_after).toBe(currentUser.timebank_balance)
+  expect(relatedRow.balance_after).toBe(currentUser.timebank_balance)
 
   // The user-facing Time Activity page should render the same reservation without divergence.
   await openTimeActivity(page)
-  await expect(page.getByRole('button', { name: 'Received' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Earned' })).toBeVisible()
 })

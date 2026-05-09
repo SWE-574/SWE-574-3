@@ -3,8 +3,9 @@ import { test, expect } from '@playwright/test'
 import {
   completeOfferExchange,
   createAcceptedOfferExchange,
+  expectBalanceToBe,
+  findLedgerTransaction,
   getCurrentBalance,
-  listTransactions,
   openTimeActivity,
   pickUsersWithBalanceAtLeast,
   switchUser,
@@ -34,15 +35,14 @@ test('FR-07d: completing a one-to-one exchange transfers reserved hours to the p
 
   // The provider should now see the transferred hour in both balance and transaction history.
   await switchUser(page, owner)
-  const providerCurrentBalance = await getCurrentBalance(page)
-  expect(providerCurrentBalance).toBe(providerStartingBalance + 1)
+  await expectBalanceToBe(page, providerStartingBalance + 1)
 
-  const transactions = await listTransactions(page, 'credit')
-  const relatedTransfer = transactions.results.find((transaction) => (
-    transaction.service_title === title && transaction.transaction_type === 'transfer'
-  ))
-  expect(relatedTransfer).toBeTruthy()
+  await findLedgerTransaction(
+    page,
+    (transaction) => transaction.service_title === title && transaction.transaction_type === 'transfer',
+    { direction: 'credit' },
+  )
 
   await openTimeActivity(page)
-  await expect(page.getByRole('button', { name: 'Received' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Earned' })).toBeVisible()
 })

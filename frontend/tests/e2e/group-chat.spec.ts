@@ -8,9 +8,9 @@
  *  3. A message can be sent to the group and appears in the thread
  *
  * Demo data:
- *  - "Traditional Manti Cooking Workshop" (elif@demo.com) has max_participants=3
- *    and accepted handshake for Zeynep, so Zeynep is eligible for group chat
- *    with the provider (Elif).
+ *  - "Neighborhood Manti Cooking Circle" (elif@demo.com) has
+ *    max_participants=3 and an accepted handshake for Zeynep, so Zeynep
+ *    is eligible for group chat with the provider (Elif).
  *  - Both Elif (provider) and Zeynep (participant) have access.
  *  - The sidebar groups conversations by service title in collapsible accordions.
  *    Eligible services show a "GROUP" badge on the accordion header.
@@ -20,7 +20,7 @@
 import { test, expect } from '@playwright/test'
 import { loginAs, USERS } from './helpers/auth'
 
-const GROUP_SERVICE_TITLE = 'Traditional Manti Cooking Workshop'
+const GROUP_SERVICE_TITLE = 'Neighborhood Manti Cooking Circle'
 
 /** Ensure the Manti accordion is open and click the group-chat row. */
 async function openGroupChat(page: import('@playwright/test').Page) {

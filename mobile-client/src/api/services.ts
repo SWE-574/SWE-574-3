@@ -39,6 +39,13 @@ export interface ServicesListParams {
   search?: string;
   tags?: string | string[];
   location_type?: string;
+  /** Multi-select location type. Web Browse sends this with one of
+   *  `["Online"]` / `["In-Person"]`; backend honours `location_type__in`. */
+  location_types?: ("Online" | "In-Person")[];
+  /** Schedule slice. "One-Time" or "Recurrent" -- matches web Browse. */
+  schedule_type?: "One-Time" | "Recurrent";
+  /** Weekend-friendly slice. */
+  weekend?: boolean;
   /** Owner filter; matches web `serviceAPI.list` (`?user=`). */
   user?: string;
   sort?: "latest" | "hot" | "for_you";
@@ -47,6 +54,11 @@ export interface ServicesListParams {
   distance?: number;
   /** Restrict to Phase 3 explore-eligible services for the "Try something new" carousel. */
   explore_only?: boolean;
+  /** Exclude services owned by the requester. Mirrors the web Browse contract. */
+  exclude_own?: boolean;
+  /** Bypass the implicit skill-based slice so the full active catalog
+   *  surfaces; the engine just reorders. Matches web Browse policy. */
+  skip_onboarding?: boolean;
 }
 
 function normalizeService(service: Service): Service {

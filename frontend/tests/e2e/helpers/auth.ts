@@ -1,7 +1,7 @@
 import { type Page, expect } from '@playwright/test'
 
 // ─── Demo user credentials (seeded by setup_demo.py) ─────────────────────────
-export const USERS = {
+const DEMO_USERS = {
   elif:   { email: 'elif@demo.com',   password: 'demo123', name: 'Elif Yılmaz' },
   cem:    { email: 'cem@demo.com',    password: 'demo123', name: 'Cem Demir'   },
   ayse:   { email: 'ayse@demo.com',   password: 'demo123', name: 'Ayşe Kaya'   },
@@ -13,24 +13,38 @@ export const USERS = {
   yasemin:{ email: 'yasemin@demo.com',password: 'demo123', name: 'Yasemin Ergin' },
 } as const
 
+// `regular` is the role-agnostic alias used by tests that just need any
+// signed-in non-admin (e.g. the a11y baseline). Aliased to `cem` (member
+// role, no admin flag) so the seed stays the source of truth.
+export const USERS = {
+  ...DEMO_USERS,
+  regular: DEMO_USERS.cem,
+} as const
+
 export type DemoUser = (typeof USERS)[keyof typeof USERS]
 
 /**
  * Authenticate via the REST API, then navigate to /dashboard.
  *
- * After the POST /auth/login/ call sets httponly cookies and returns user
- * data, we intercept the first /users/me/ request so React's checkAuth()
- * resolves instantly instead of waiting for the (potentially slow) backend.
- * This prevents the "Loading…" spinner from blocking the test when
- * multiple workers are hitting the backend simultaneously.
+ * Behaviour by design:
+ *  - With no `userOverrides`, the real backend serves /users/me/. Tests that
+ *    mutate user state (balance, bio, evaluations…) read live data.
+ *  - With `userOverrides`, /users/me/ is stubbed with a static payload so
+ *    auth states the seed cannot represent (`is_verified: false`, custom
+ *    onboarding flags, etc.) are simulatable. Mutation tests must not pass
+ *    overrides, or they will read the frozen payload back.
+ *
+ * Any previous /users/me/ route (from an earlier loginAs / switchUser /
+ * logout in the same Page) is cleared first so handlers don't stack.
  */
 export async function loginAs(
   page: Page,
   user: DemoUser,
   /**
-   * Optional overrides merged into the intercepted /users/me/ payload.
-   * Use this to simulate non-default auth states (e.g. `is_verified: false`)
-   * without needing a separate fixture user.
+   * Optional overrides merged into a stubbed /users/me/ payload.
+   * Use only when the seed cannot represent the auth state under test
+   * (e.g. `is_verified: false`). Pass nothing when the test mutates the
+   * user, so reads see live backend data.
    */
   userOverrides: Record<string, unknown> = {},
 ): Promise<void> {
@@ -52,42 +66,42 @@ export async function loginAs(
   )
   expect(loginResult.ok, `API login failed (${loginResult.status}): ${loginResult.body}`).toBeTruthy()
 
-  // 3. Extract the user payload returned by the login endpoint and add
-  //    fields that /users/me/ normally includes but the login response omits.
-  const loginData = JSON.parse(loginResult.body)
-  const userData = {
-    ...loginData.user,
-    is_onboarded: true,
-    is_admin: false,
-    is_active: true,
-    is_verified: true,
-    ...userOverrides,
-  }
-
-  // 4. Intercept ALL /users/me/ GET calls so checkAuth() always resolves
-  //    instantly.  Without this the CI Docker backend is too slow and React
-  //    loses auth state (shows "Loading…" or redirects to /login).
-  //    The interception stays active for the entire test; logout() removes
-  //    it before clicking "Log Out" so the app detects the session is gone.
-  await page.route('**/api/users/me/', async (route) => {
-    if (route.request().method() === 'GET') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(userData),
-      })
-    } else {
-      await route.continue()
-    }
+  // 3. Drop any /users/me/ handler left over from a prior loginAs /
+  //    switchUser / logout on this Page so the new state isn't shadowed.
+  await page.unroute('**/api/users/me/').catch(() => {
+    /* nothing to unroute */
   })
 
-  // 5. Navigate to dashboard — auth cookies are set, /users/me/ will resolve
-  //    instantly from the intercepted route, so the navbar renders fast.
+  // 4. Only stub /users/me/ when the test needs an auth state the seed
+  //    cannot represent. Otherwise leave the route alone so the live
+  //    backend serves mutated state correctly.
+  if (Object.keys(userOverrides).length > 0) {
+    const loginData = JSON.parse(loginResult.body)
+    const userData = {
+      ...loginData.user,
+      is_onboarded: true,
+      is_admin: false,
+      is_active: true,
+      is_verified: true,
+      ...userOverrides,
+    }
+    await page.route('**/api/users/me/', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(userData),
+        })
+      } else {
+        await route.continue()
+      }
+    })
+  }
+
+  // 5. Land on the dashboard so the navbar renders and tests can chain
+  //    interactions without an extra page.goto() in every spec.
   await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
   await expect(page.getByTestId('user-menu-trigger')).toBeVisible({ timeout: 15_000 })
-
-  // 6. Keep the interception active — it prevents React from losing auth
-  //    state when the CI backend is slow.  logout() unroutes it explicitly.
 }
 
 /**
@@ -109,8 +123,6 @@ export async function loginViaUI(page: Page, user: DemoUser): Promise<void> {
  * Works regardless of whether the user has an avatar image or initials.
  */
 export async function openUserMenu(page: Page): Promise<void> {
-  // The /users/me/ interception from loginAs() keeps React auth state
-  // stable, so the trigger won't be detached by re-renders.
   const trigger = page.getByTestId('user-menu-trigger')
   await expect(trigger).toBeVisible({ timeout: 15_000 })
   await trigger.click()
@@ -124,13 +136,14 @@ export async function openUserMenu(page: Page): Promise<void> {
  */
 export async function logout(page: Page): Promise<void> {
   await openUserMenu(page)
-  // Replace the loginAs() always-200 interception with an explicit 401
-  // stub. Just calling page.unroute() opens a race in CI: dashboard hooks
-  // re-fetch /users/me/ between POST /auth/logout and the React state
-  // flip, the slow real backend returns 200 with the user, and
-  // useAuthStore re-hydrates — defeating the route-guard redirect that
-  // this test waits on. A 401 stub closes the race deterministically.
-  await page.unroute('**/api/users/me/')
+  // After POST /auth/logout the dashboard's hooks can race to re-fetch
+  // /users/me/ before React's auth flip lands. Without a stub the real
+  // backend (which still has the cookie until the response settles)
+  // returns 200 with the user, useAuthStore re-hydrates, and the route
+  // guard never redirects. A 401 stub closes the race deterministically.
+  await page.unroute('**/api/users/me/').catch(() => {
+    /* nothing to unroute */
+  })
   await page.route('**/api/users/me/', (route) =>
     route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
   )

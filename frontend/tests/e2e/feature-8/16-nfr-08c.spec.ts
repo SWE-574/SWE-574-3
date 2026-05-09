@@ -2,9 +2,9 @@ import { test, expect } from '@playwright/test'
 
 import {
   createPendingOfferExchange,
+  expectBalanceToBe,
   fetchHandshake,
   findHandshakeId,
-  getCurrentBalance,
   initiateOnlineHandshakeViaApi,
   loginAs,
   pickUsersWithBalanceAtLeast,
@@ -71,12 +71,11 @@ test('NFR-08c: competing transition requests resolve to a single consistent fina
     expect(['accepted', 'cancelled']).toContain(finalHandshake.status)
 
     await switchUser(page, requester)
-    const requesterBalance = await getCurrentBalance(page)
 
     if (finalHandshake.status === 'accepted') {
-      expect(requesterBalance).toBe(startingBalance - 1)
+      await expectBalanceToBe(page, startingBalance - 1)
     } else {
-      expect(requesterBalance).toBe(startingBalance)
+      await expectBalanceToBe(page, startingBalance)
     }
   } finally {
     await ownerContext.close()

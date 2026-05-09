@@ -21,10 +21,8 @@ test('FR-06i: cancelling a valid request returns the reserved hours immediately'
 
   // Cancel the request and verify the hours return to the original balance.
   await page.goto(detailUrl)
-  page.once('dialog', async (dialog) => {
-    await dialog.accept()
-  })
   await page.getByRole('button', { name: 'Remove Listing' }).click()
+  await page.getByRole('button', { name: /^Remove$/ }).click()
 
   await page.goto('/notifications')
   await expectNavbarBalance(page, startingBalance)

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from .models import Service
 
 
-FORMULA_VERSION = "v2.1-2026-05"
+FORMULA_VERSION = "v2.2-2026-05"
 
 
 def sample_boost(target_multiplier: float, probability: float, rng=None):
@@ -130,6 +130,14 @@ def wilson_score_lower_bound(positives: int, total: int, z: float = 1.96) -> flo
 # outrank one with 95/100 on luck. Wilson at z=1.96 (95% confidence) gives
 # small samples a fair but honest score. See FR-17j / issue #317.
 #
+# Why a +1/+2 Laplace prior on the Wilson inputs: a brand-new provider has
+# pos=neg=0 and Wilson(0,0)=0, which multiplicatively zeroes the entire
+# Phase 2 score (final = quality * activity * ...). High-engagement listings
+# from new providers were ranking below low-engagement listings with one
+# stale rating. The +1/+2 prior (rule of succession) gives unrated providers
+# a small non-zero floor (~0.095) so velocity / activity can show through,
+# without changing the rank order of providers with real feedback.
+#
 # Why log on Activity: prevents the "rich get richer" runaway that ^1.5 caused
 # in the HiveMind-faithful draft. log2(2+100) ~ 6.7 vs log2(2+10) ~ 3.6 --
 # a 10x volume difference is a 2x score difference, not 30x.
@@ -162,7 +170,9 @@ def _compute_service_factors(service: Service) -> dict:
         service=service, status='completed',
     ).aggregate(total=Coalesce(Sum('provisioned_hours'), Decimal('0')))['total']
 
-    quality = wilson_score_lower_bound(pos, pos + neg)
+    # +1/+2 Laplace prior so brand-new providers (pos=neg=0) don't multiplicatively
+    # zero the whole formula -- see the rationale block above _compute_service_factors.
+    quality = wilson_score_lower_bound(pos + 1, pos + neg + 2)
     activity = math.log2(2 + float(hours)) + 0.5 * math.log2(2 + comments)
 
     # Capacity multiplier scope (FR-17e / #304):
@@ -256,11 +266,11 @@ def _compute_event_factors(event: Service) -> dict:
         + Coalesce(Count('id', filter=Q(is_rude=True)), 0),
     )['c']
 
-    # Pure Wilson, no Laplace prior -- consistent with the service formula.
-    # A brand-new organiser scores 0 here; rotation for cold-start providers is
-    # Phase 3's job (Thompson Sampling exploration bucket explicitly samples
-    # from organisers below the lifetime threshold).
-    organiser_quality = wilson_score_lower_bound(pos, pos + neg)
+    # +1/+2 Laplace prior matches the service formula. Phase 3 still rotates
+    # cold-start organisers via Thompson Sampling, but Phase 2 no longer hides
+    # a high-velocity event behind a multiplicative zero just because the
+    # organiser hasn't accumulated event-scoped feedback yet.
+    organiser_quality = wilson_score_lower_bound(pos + 1, pos + neg + 2)
     velocity = math.log2(2 + rsvps_last_7d)
 
     # Capacity multiplier scope (FR-17e / #304): same rule as the service
@@ -308,6 +318,20 @@ def calculate_event_hot_score(event: Service) -> float:
     return _compute_event_factors(event)['final_score']
 
 
+def calculate_score_for(service: Service) -> float:
+    """Single-service entrypoint that picks the right formula by service.type.
+
+    Why this exists: callers like Service.save() and the signal-driven
+    recompute were independently calling calculate_hot_score for everything,
+    which is the Offer/Need formula and stores incorrect values for events.
+    A central dispatch keeps the model layer and the signal layer in sync
+    with calculate_hot_scores_batch's per-type routing.
+    """
+    if service.type == 'Event':
+        return calculate_event_hot_score(service)
+    return calculate_hot_score(service)
+
+
 def calculate_hot_scores_batch(services) -> dict:
     """
     Batch version of calculate_hot_score. Returns {service_id: float}.
@@ -331,28 +355,68 @@ def calculate_hot_scores_batch(services) -> dict:
         .values_list('id', flat=True)
     )
 
-    # Per-owner positive rep count, owner-by-type (Offer/Need only).
-    pos_by_user: dict = {}
-    for row in ReputationRep.objects.filter(
-        receiver_id__in=user_ids,
-        handshake__service__type__in=['Offer', 'Need'],
-    ).values('receiver_id').annotate(
-        c=Coalesce(Count('id', filter=Q(is_punctual=True)), 0)
-        + Coalesce(Count('id', filter=Q(is_helpful=True)), 0)
-        + Coalesce(Count('id', filter=Q(is_kind=True)), 0),
-    ):
-        pos_by_user[row['receiver_id']] = row['c']
+    # Owner-by-type rep counts, sliced by service type so the same query
+    # covers both the Offer/Need formula and the Event formula in one pass.
+    # Without this slicing the events branch fell through to the per-service
+    # helper and fired 3 aggregates per event (issue: N+1 on /featured/public/).
+    has_offer_need = any(s.type in ('Offer', 'Need') for s in services)
+    has_event = any(s.type == 'Event' for s in services)
+    seven_days_ago = timezone.now() - timedelta(days=7)
 
-    neg_by_user: dict = {}
-    for row in NegativeRep.objects.filter(
-        receiver_id__in=user_ids,
-        handshake__service__type__in=['Offer', 'Need'],
-    ).values('receiver_id').annotate(
-        c=Coalesce(Count('id', filter=Q(is_late=True)), 0)
-        + Coalesce(Count('id', filter=Q(is_unhelpful=True)), 0)
-        + Coalesce(Count('id', filter=Q(is_rude=True)), 0),
-    ):
-        neg_by_user[row['receiver_id']] = row['c']
+    pos_by_user_offer_need: dict = {}
+    neg_by_user_offer_need: dict = {}
+    if has_offer_need:
+        for row in ReputationRep.objects.filter(
+            receiver_id__in=user_ids,
+            handshake__service__type__in=['Offer', 'Need'],
+        ).values('receiver_id').annotate(
+            c=Coalesce(Count('id', filter=Q(is_punctual=True)), 0)
+            + Coalesce(Count('id', filter=Q(is_helpful=True)), 0)
+            + Coalesce(Count('id', filter=Q(is_kind=True)), 0),
+        ):
+            pos_by_user_offer_need[row['receiver_id']] = row['c']
+        for row in NegativeRep.objects.filter(
+            receiver_id__in=user_ids,
+            handshake__service__type__in=['Offer', 'Need'],
+        ).values('receiver_id').annotate(
+            c=Coalesce(Count('id', filter=Q(is_late=True)), 0)
+            + Coalesce(Count('id', filter=Q(is_unhelpful=True)), 0)
+            + Coalesce(Count('id', filter=Q(is_rude=True)), 0),
+        ):
+            neg_by_user_offer_need[row['receiver_id']] = row['c']
+
+    pos_by_user_event: dict = {}
+    neg_by_user_event: dict = {}
+    rsvps_7d_by_service: dict = {}
+    if has_event:
+        event_user_ids = [s.user_id for s in services if s.type == 'Event']
+        event_service_ids = [s.id for s in services if s.type == 'Event']
+        for row in ReputationRep.objects.filter(
+            receiver_id__in=event_user_ids,
+            handshake__service__type='Event',
+        ).values('receiver_id').annotate(
+            c=Coalesce(Count('id', filter=Q(is_punctual=True)), 0)
+            + Coalesce(Count('id', filter=Q(is_helpful=True)), 0)
+            + Coalesce(Count('id', filter=Q(is_kind=True)), 0),
+        ):
+            pos_by_user_event[row['receiver_id']] = row['c']
+        for row in NegativeRep.objects.filter(
+            receiver_id__in=event_user_ids,
+            handshake__service__type='Event',
+        ).values('receiver_id').annotate(
+            c=Coalesce(Count('id', filter=Q(is_late=True)), 0)
+            + Coalesce(Count('id', filter=Q(is_unhelpful=True)), 0)
+            + Coalesce(Count('id', filter=Q(is_rude=True)), 0),
+        ):
+            neg_by_user_event[row['receiver_id']] = row['c']
+        rsvps_7d_by_service = {
+            row['service_id']: row['c']
+            for row in Handshake.objects.filter(
+                service_id__in=event_service_ids,
+                status__in=['accepted', 'checked_in', 'attended'],
+                created_at__gte=seven_days_ago,
+            ).values('service_id').annotate(c=Count('id'))
+        }
 
     comments_by_service = {
         row['service_id']: row['c']
@@ -386,39 +450,52 @@ def calculate_hot_scores_batch(services) -> dict:
             ).values('service_id').annotate(c=Count('id'))
         }
 
+    def _capacity_for(service):
+        if service.id not in accepted_by_service:
+            return 1.0
+        ratio = accepted_by_service[service.id] / service.max_participants
+        if 0.75 <= ratio < 1.0:
+            multiplier, _ = sample_boost(
+                1.5, getattr(settings, 'RANKING_CAPACITY_BOOST_PROBABILITY', 1.0),
+            )
+            return multiplier
+        return 1.0
+
+    def _newcomer_for(service):
+        if service.user_id not in newcomer_user_ids:
+            return 1.0
+        boost, _ = sample_boost(
+            settings.RANKING_NEWCOMER_BOOST,
+            getattr(settings, 'RANKING_NEWCOMER_BOOST_PROBABILITY', 1.0),
+        )
+        return boost
+
     scores: dict = {}
     for service in services:
         if service.type == 'Event':
-            scores[service.id] = calculate_event_hot_score(service)
+            pos = pos_by_user_event.get(service.user_id, 0)
+            neg = neg_by_user_event.get(service.user_id, 0)
+            rsvps = rsvps_7d_by_service.get(service.id, 0)
+            organiser_quality = wilson_score_lower_bound(pos + 1, pos + neg + 2)
+            velocity = math.log2(2 + rsvps)
+            scores[service.id] = round(
+                velocity * organiser_quality
+                * _capacity_for(service) * _newcomer_for(service),
+                6,
+            )
             continue
-        pos = pos_by_user.get(service.user_id, 0)
-        neg = neg_by_user.get(service.user_id, 0)
+        pos = pos_by_user_offer_need.get(service.user_id, 0)
+        neg = neg_by_user_offer_need.get(service.user_id, 0)
         comments = comments_by_service.get(service.id, 0)
         hours = hours_by_service.get(service.id, Decimal('0'))
 
-        quality = wilson_score_lower_bound(pos, pos + neg)
+        # +1/+2 Laplace prior, matching _compute_service_factors.
+        quality = wilson_score_lower_bound(pos + 1, pos + neg + 2)
         activity = math.log2(2 + float(hours)) + 0.5 * math.log2(2 + comments)
 
-        # accepted_by_service is already pre-filtered to capacitated services
-        # (see capacitated_ids above), so membership IS the capacity check.
-        capacity_multiplier = 1.0
-        if service.id in accepted_by_service:
-            ratio = accepted_by_service[service.id] / service.max_participants
-            if 0.75 <= ratio < 1.0:
-                capacity_multiplier, _ = sample_boost(
-                    1.5, getattr(settings, 'RANKING_CAPACITY_BOOST_PROBABILITY', 1.0),
-                )
-
-        if service.user_id in newcomer_user_ids:
-            newcomer_boost, _ = sample_boost(
-                settings.RANKING_NEWCOMER_BOOST,
-                getattr(settings, 'RANKING_NEWCOMER_BOOST_PROBABILITY', 1.0),
-            )
-        else:
-            newcomer_boost = 1.0
-
         scores[service.id] = round(
-            quality * activity * capacity_multiplier * newcomer_boost, 6
+            quality * activity * _capacity_for(service) * _newcomer_for(service),
+            6,
         )
 
     return scores

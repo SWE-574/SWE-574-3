@@ -10,6 +10,10 @@ import { getConnectivitySnapshot } from "../store/connectivityStore";
 
 const BASE_URL = getApiUrl();
 
+export function getApiBaseUrl(): string {
+  return BASE_URL;
+}
+
 /**
  * Thrown when `fetch` itself fails (no DNS, no route, request aborted).
  * Distinct from HTTP error responses (4xx/5xx) which still throw a plain

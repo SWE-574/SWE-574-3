@@ -28,10 +28,14 @@ test('FR-05j: group offers allow accepted exchanges up to the configured quota',
   await acceptPendingHandshakeViaApi(page, {
     serviceId,
     requesterName: USERS.mehmet.name,
+    owner: USERS.yasemin,
+    requester: USERS.mehmet,
   })
   await acceptPendingHandshakeViaApi(page, {
     serviceId,
     requesterName: USERS.zeynep.name,
+    owner: USERS.yasemin,
+    requester: USERS.zeynep,
   })
 
   await page.goto(detailUrl)

@@ -44,6 +44,13 @@ vi.mock('@/services/serviceAPI', () => ({
   },
 }))
 
+vi.mock('@/services/featuredAPI', () => ({
+  featuredAPI: {
+    get: vi.fn().mockResolvedValue({ trending: [], friends: [], top_providers: [] }),
+    getChips: vi.fn().mockResolvedValue({ chips: [] }),
+  },
+}))
+
 vi.mock('@/services/handshakeAPI', () => ({
   handshakeAPI: { list: handshakeListMock },
 }))
@@ -126,60 +133,36 @@ describe('DashboardPage (Browse)', () => {
     expect(call.exclude_own).toBe(true)
   })
 
-  it('defaults to All (no sort, skip_onboarding=true)', async () => {
+  it('always sorts by hot, sends skip_onboarding=true, no explore_only', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
     const call = listPagedMock.mock.calls[0][0]
-    expect(call.sort).toBeUndefined()
+    expect(call.sort).toBe('hot')
     expect(call.skip_onboarding).toBe(true)
+    expect(call.explore_only).toBeUndefined()
   })
 
-  it('Discovery sends explore_only=true with no sort param', async () => {
+  it('does not render the legacy ranking buttons or the Featured tab strip', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
-    fireEvent.click(screen.getByText('Discovery'))
-    await waitFor(() => {
-      const last = listPagedMock.mock.calls.at(-1)?.[0]
-      expect(last?.explore_only).toBe(true)
-      expect(last?.sort).toBeUndefined()
-    })
-  })
-
-  it('switches to sort=latest when Newest is clicked', async () => {
-    renderPage()
-    await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
-    fireEvent.click(screen.getByText('Newest'))
-    await waitFor(() => {
-      const last = listPagedMock.mock.calls.at(-1)?.[0]
-      expect(last?.sort).toBe('latest')
-    })
-  })
-
-  it('does not render the recurrent filter, For-you/Trending buttons, or a result count', async () => {
-    renderPage()
-    await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
+    expect(screen.queryByText('Discovery')).not.toBeInTheDocument()
+    expect(screen.queryByText('Newest')).not.toBeInTheDocument()
+    // FeaturedSection tabs are gone -- chips replaced them.
+    expect(screen.queryByText('Friends')).not.toBeInTheDocument()
+    expect(screen.queryByText('Nearly Full')).not.toBeInTheDocument()
     expect(screen.queryByText('Recurrent')).not.toBeInTheDocument()
     expect(screen.queryByText('Trending')).not.toBeInTheDocument()
     expect(screen.queryByText('For you')).not.toBeInTheDocument()
-    expect(screen.queryByText(/\d+ services?$/)).not.toBeInTheDocument()
   })
 
-  it('renders the four ranking buttons in order (Discovery, Newest, Nearby, All)', async () => {
-    renderPage()
-    await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
-    for (const label of ['Discovery', 'Newest', 'Nearby', 'All']) {
-      expect(screen.getByText(label)).toBeInTheDocument()
-    }
-  })
-
-  it('renders the ranking row below the map element', async () => {
+  it('renders the TagChipsRow "All" chip below the map', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByTestId('map-view')).toBeInTheDocument())
+    const allChip = screen.getByText('All')
+    expect(allChip).toBeInTheDocument()
     const map = screen.getByTestId('map-view')
-    const rankingButton = screen.getByText('Newest')
-    const order = map.compareDocumentPosition(rankingButton)
-    // The map should appear BEFORE the ranking button in the DOM.
-    // Node.DOCUMENT_POSITION_FOLLOWING === 4
+    const order = map.compareDocumentPosition(allChip)
+    // Map appears BEFORE the chips strip in DOM order.
     expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
