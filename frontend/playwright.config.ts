@@ -61,7 +61,14 @@ export default defineConfig({
     },
     {
       name: 'chromium-mobile',
-      testMatch: ['**/responsive/**', '**/a11y/**', '**/feature-11/**'],
+      // Restrict to actual spec files. The directory globs without an
+      // extension constraint also pick up README.md / coverage notes,
+      // which Playwright then tries to parse as TypeScript and crashes.
+      testMatch: [
+        '**/responsive/**/*.@(spec|test).?(c|m)[jt]s?(x)',
+        '**/a11y/**/*.@(spec|test).?(c|m)[jt]s?(x)',
+        '**/feature-11/**/*.@(spec|test).?(c|m)[jt]s?(x)',
+      ],
       use: { ...devices['Pixel 7'] },
     },
   ],
