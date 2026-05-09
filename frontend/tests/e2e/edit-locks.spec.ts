@@ -31,8 +31,12 @@ test.describe('Owner edit locks', () => {
 
     await page.getByRole('button', { name: 'Post Offer' }).click()
     await expect(page).toHaveURL(/\/service-detail\//, { timeout: 20_000 })
-
-    await page.getByRole('button', { name: 'Edit Listing' }).click()
+    // Wait for the detail page to finish hydrating its owner-actions before
+    // attempting the edit transition, otherwise Edit Listing can briefly
+    // resolve to a non-owner version of the layout.
+    const editButton = page.getByRole('button', { name: 'Edit Listing' })
+    await expect(editButton).toBeVisible({ timeout: 15_000 })
+    await editButton.click()
     await expect(page).toHaveURL(/\/edit-service\//, { timeout: 10_000 })
 
     await page.locator('input[name="title"]').fill(updatedTitle)
