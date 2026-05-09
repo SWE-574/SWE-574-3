@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
+import { InteractionManager, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
@@ -42,22 +42,26 @@ export function usePushNotifications(
 
       useNotificationStore.getState().fetchUnreadCount();
 
-      navigateToNotificationTarget(
-        {
-          id: data.notification_id as string,
-          type: data.type as any,
-          title: '',
-          message: '',
-          is_read: false,
-          related_handshake: (data.related_handshake as string) ?? null,
-          related_service: (data.related_service as string) ?? null,
-          related_service_type: (data.related_service_type as 'Offer' | 'Need' | 'Event') ?? null,
-          related_report: (data.related_report as string) ?? null,
-          related_user: (data.related_user as string) ?? null,
-          created_at: '',
-        },
-        navigationRef,
-      );
+      try {
+        navigateToNotificationTarget(
+          {
+            id: data.notification_id as string,
+            type: data.type as any,
+            title: '',
+            message: '',
+            is_read: false,
+            related_handshake: (data.related_handshake as string) ?? null,
+            related_service: (data.related_service as string) ?? null,
+            related_service_type: (data.related_service_type as 'Offer' | 'Need' | 'Event') ?? null,
+            related_report: (data.related_report as string) ?? null,
+            related_user: (data.related_user as string) ?? null,
+            created_at: '',
+          },
+          navigationRef,
+        );
+      } catch (e) {
+        console.warn('[usePushNotifications] navigate from notification failed', e);
+      }
     },
     [navigationRef],
   );
@@ -180,12 +184,27 @@ export function usePushNotifications(
   useEffect(() => {
     if (!isAuthenticated || !navigationRef) return;
 
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
     Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (!response) return;
-      handleNotificationResponse(response);
+      if (!response || cancelled) return;
+      // Defer until the tab navigator has mounted; immediate navigate on cold
+      // start can leave a blank white screen.
+      timeoutId = setTimeout(() => {
+        InteractionManager.runAfterInteractions(() => {
+          if (cancelled) return;
+          handleNotificationResponse(response);
+        });
+      }, 400);
       // Clear so navigating back to the app normally doesn't re-trigger this.
       Notifications.dismissAllNotificationsAsync().catch(() => {});
     });
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
     // Only run once per authenticated session
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
