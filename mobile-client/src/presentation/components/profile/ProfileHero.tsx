@@ -66,12 +66,6 @@ export interface ProfileHeroProps {
   /** Own profile: tap the Edit button */
   onEditPress?: () => void;
 
-  /** Public profile: tap Message */
-  onMessagePress?: () => void;
-
-  /** Public profile: tap Report */
-  onReportPress?: () => void;
-
   /** Tap the avatar (own profile: open image picker) */
   onAvatarPress?: () => void;
 
@@ -162,8 +156,6 @@ export default function ProfileHero({
   followers,
   following,
   onEditPress,
-  onMessagePress,
-  onReportPress,
   onAvatarPress,
   onFollowersPress,
   onFollowingPress,
@@ -286,8 +278,8 @@ export default function ProfileHero({
               ) : null}
 
               {/* Action buttons */}
-              <View style={styles.actionRow}>
-                {mode === "own" ? (
+              {mode === "own" ? (
+                <View style={styles.actionRow}>
                   <Pressable
                     onPress={onEditPress}
                     style={({ pressed }) => [
@@ -301,36 +293,8 @@ export default function ProfileHero({
                     <Ionicons name="pencil-outline" size={14} color={colors.GREEN} />
                     <Text style={styles.editButtonText}>Edit profile</Text>
                   </Pressable>
-                ) : (
-                  <>
-                    <Pressable
-                      onPress={onMessagePress}
-                      style={({ pressed }) => [
-                        styles.actionButton,
-                        styles.messageButton,
-                        pressed && { opacity: 0.85 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Message this user"
-                    >
-                      <Ionicons name="chatbubble-outline" size={14} color={colors.WHITE} />
-                      <Text style={styles.messageButtonText}>Message</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={onReportPress}
-                      style={({ pressed }) => [
-                        styles.actionButton,
-                        styles.reportButton,
-                        pressed && { opacity: 0.85 },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Report this user"
-                    >
-                      <Text style={styles.reportButtonText}>Report</Text>
-                    </Pressable>
-                  </>
-                )}
-              </View>
+                </View>
+              ) : null}
             </View>
 
             {/* Right column: stats glass card */}
@@ -604,26 +568,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: colors.GREEN,
-  },
-  messageButton: {
-    backgroundColor: "rgba(255,255,255,0.22)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.4)",
-  },
-  messageButtonText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: colors.WHITE,
-  },
-  reportButton: {
-    backgroundColor: "rgba(255,255,255,0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.25)",
-  },
-  reportButtonText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.82)",
   },
   statsCard: {
     paddingHorizontal: 2,

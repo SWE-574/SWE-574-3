@@ -510,12 +510,6 @@ export default function PublicProfileScreen() {
           }}
           completedExchanges={exchangesCount}
           reputationScore={reputationScore}
-          onMessagePress={() => {
-            // TODO: navigate to chat with this user when chat flow supports it
-          }}
-          onReportPress={() => {
-            // Existing report modal trigger
-          }}
           onFollowersPress={() => openFollowList("followers")}
           onFollowingPress={() => openFollowList("following")}
         />
