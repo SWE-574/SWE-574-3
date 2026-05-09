@@ -612,7 +612,7 @@ const PublicProfile = () => {
                 <Flex direction="column" align="center" py={4} gap={2}>
                   <FiUser size={24} color={GRAY300} />
                   <Text fontSize="12px" color={GRAY400} textAlign="center">
-                    Reputation and badges will appear here as this user completes exchanges.
+                    Badges will appear here as this user completes exchanges.
                   </Text>
                 </Flex>
               </SectionCard>
