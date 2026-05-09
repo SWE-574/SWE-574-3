@@ -160,22 +160,20 @@ def blend_for_you_score(
     cooccur: float,
     recency_penalty_value: float,
     engagement: float = 0.0,
-    dismissed_similarity_value: float = 0.0,
 ) -> tuple[float, dict]:
     """Additive blend on top of hot_score using the configured weights.
     Returns (score, signals_dict) so the caller can serialize per-card
-    signal breakdowns for the admin debug surface.
+    signal breakdowns for the smart-pill UI.
 
-    `engagement` and `dismissed_similarity_value` are optional and
-    default to 0.0 so callers that haven't been threaded through the
-    new pre-fetch (older tests, the cooccur builder) keep working.
+    The dismiss feature was removed in 2026-05; the dismissed_similarity
+    penalty went with it. Older callers that still pass it can drop the
+    arg without behaviour change.
     """
     w_tag = float(getattr(settings, 'RANKING_FOR_YOU_TAG_WEIGHT', 0.3))
     w_follow = float(getattr(settings, 'RANKING_FOR_YOU_FOLLOW_WEIGHT', 0.4))
     w_cooccur = float(getattr(settings, 'RANKING_FOR_YOU_COOCCUR_WEIGHT', 0.2))
     w_recency = float(getattr(settings, 'RANKING_FOR_YOU_RECENCY_WEIGHT', 0.1))
     w_engagement = float(getattr(settings, 'RANKING_FOR_YOU_ENGAGEMENT_WEIGHT', 0.25))
-    w_dismissed = float(getattr(settings, 'RANKING_FOR_YOU_DISMISSED_SIMILARITY_WEIGHT', 0.20))
     score = (
         float(hot_score)
         + w_tag * tag
@@ -183,7 +181,6 @@ def blend_for_you_score(
         + w_cooccur * cooccur
         - w_recency * recency_penalty_value
         + w_engagement * engagement
-        - w_dismissed * dismissed_similarity_value
     )
     return score, {
         'tag': tag,
@@ -191,7 +188,6 @@ def blend_for_you_score(
         'cooccur': cooccur,
         'recency_penalty': recency_penalty_value,
         'engagement': engagement,
-        'dismissed_similarity': dismissed_similarity_value,
     }
 
 
@@ -328,9 +324,7 @@ def score_for_you(services, viewer) -> list[tuple]:
     once and joined in Python so this stays O(N) per request in the size
     of the candidate set.
     """
-    from .models import (
-        Handshake, HandshakeCooccurrence, SavedService, ServiceDismissal,
-    )
+    from .models import Handshake, HandshakeCooccurrence, SavedService
     from .services import get_social_proximity_boosts
 
     services = list(services)
@@ -350,10 +344,8 @@ def score_for_you(services, viewer) -> list[tuple]:
             ).values_list('service_id', flat=True)
         )
 
-    # Pre-fetch saved + dismissed service tag aggregates for the new
-    # engagement / dismissed_similarity signals. Saves only.
+    # Pre-fetch saved service tag aggregate for the engagement signal.
     saved_tag_qids: set = set()
-    dismissed_tag_qids: set = set()
     if viewer_id:
         saved_ids = list(
             SavedService.objects.filter(user_id=viewer_id).values_list(
@@ -361,12 +353,6 @@ def score_for_you(services, viewer) -> list[tuple]:
             )
         )
         saved_tag_qids = _aggregate_tag_qids_for_services(saved_ids)
-        dismissed_ids = list(
-            ServiceDismissal.objects.filter(viewer_id=viewer_id).values_list(
-                'service_id', flat=True,
-            )
-        )
-        dismissed_tag_qids = _aggregate_tag_qids_for_services(dismissed_ids)
 
     # Cooccurrence lookup keyed both directions for O(1) access.
     candidate_ids = [s.id for s in services]
@@ -396,7 +382,6 @@ def score_for_you(services, viewer) -> list[tuple]:
         # tag-overlap-shaped signals.
         svc_tag_qids = _service_tag_qids(svc)
         engagement = engagement_signal(svc_tag_qids, saved_tag_qids)
-        dismissed = dismissed_similarity(svc_tag_qids, dismissed_tag_qids)
 
         last_seen = impressions.get(str(svc.id))
         seconds_since = (now - last_seen) if last_seen else None
@@ -409,7 +394,6 @@ def score_for_you(services, viewer) -> list[tuple]:
             cooccur=cooccur,
             recency_penalty_value=recency,
             engagement=engagement,
-            dismissed_similarity_value=dismissed,
         )
         scored.append((svc, score, signals))
 

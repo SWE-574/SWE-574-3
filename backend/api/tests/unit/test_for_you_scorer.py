@@ -249,7 +249,6 @@ class TestForYouBlend:
             'cooccur': 2.0,
             'recency_penalty': 0.25,
             'engagement': 0.0,
-            'dismissed_similarity': 0.0,
         }
 
     def test_neutral_signals_recover_hot_score(self):

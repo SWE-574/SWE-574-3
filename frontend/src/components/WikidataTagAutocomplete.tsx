@@ -5,6 +5,34 @@ import type { Tag } from '@/types'
 
 import { GRAY50, GRAY200, GRAY400, WHITE } from '@/theme/tokens'
 
+// Module-level cache shared across every WikidataTagAutocomplete instance
+// in the session. Backend already caches search responses for an hour, but
+// the network round-trip itself adds 100-300ms; a Map cache here makes
+// repeat queries (typing the same prefix on a re-opened form) feel instant.
+// Bounded LRU semantics: oldest entry evicted when over the cap.
+const _SEARCH_CACHE = new Map<string, Tag[]>()
+const _SEARCH_CACHE_MAX = 200
+
+function _cacheGet(key: string): Tag[] | undefined {
+  const value = _SEARCH_CACHE.get(key)
+  if (value !== undefined) {
+    // Promote to most-recently-used.
+    _SEARCH_CACHE.delete(key)
+    _SEARCH_CACHE.set(key, value)
+  }
+  return value
+}
+
+function _cacheSet(key: string, value: Tag[]): void {
+  if (_SEARCH_CACHE.has(key)) _SEARCH_CACHE.delete(key)
+  _SEARCH_CACHE.set(key, value)
+  while (_SEARCH_CACHE.size > _SEARCH_CACHE_MAX) {
+    const oldestKey = _SEARCH_CACHE.keys().next().value
+    if (oldestKey === undefined) break
+    _SEARCH_CACHE.delete(oldestKey)
+  }
+}
+
 interface WikidataTagAutocompleteProps {
   selectedTags: Tag[]
   onAddTag: (tag: Tag) => void
@@ -25,10 +53,6 @@ export default function WikidataTagAutocomplete({
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
 
   const abortRef = useRef<AbortController | null>(null)
-  // In-memory result cache keyed by lowercased query. Survives the lifetime
-  // of the component instance so closing/reopening the autocomplete reuses
-  // results, and re-typing the same prefix is instant.
-  const cacheRef = useRef<Map<string, Tag[]>>(new Map())
 
   const MIN_QUERY_LENGTH = 2
   const DEBOUNCE_MS = 400
@@ -45,7 +69,7 @@ export default function WikidataTagAutocomplete({
     }
 
     const cacheKey = trimmed.toLowerCase()
-    const cached = cacheRef.current.get(cacheKey)
+    const cached = _cacheGet(cacheKey)
     const existingIds = new Set(selectedTags.map((tag) => tag.id))
     if (cached) {
       const filtered = cached.filter((tag) => !existingIds.has(tag.id))
@@ -60,7 +84,7 @@ export default function WikidataTagAutocomplete({
 
     try {
       const results = await tagAPI.search(trimmed, abortRef.current.signal)
-      cacheRef.current.set(cacheKey, results)
+      _cacheSet(cacheKey, results)
       const filtered = results.filter((tag) => !existingIds.has(tag.id))
       setSuggestions(filtered)
       setHighlightedIndex(filtered.length > 0 ? 0 : -1)

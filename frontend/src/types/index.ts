@@ -229,7 +229,6 @@ export interface ForYouSignals {
   cooccur: number
   recency_penalty: number
   engagement?: number
-  dismissed_similarity?: number
 }
 
 export interface EventEvaluationSummary {
@@ -303,6 +302,16 @@ export interface FeaturedResponse {
   trending: FeaturedService[]
   friends: FeaturedService[]
   top_providers: FeaturedProvider[]
+}
+
+export interface FeaturedChip {
+  qid: string
+  label: string
+  count: number
+}
+
+export interface FeaturedChipsResponse {
+  chips: FeaturedChip[]
 }
 
 export interface RecommendationDebugBreakdown {

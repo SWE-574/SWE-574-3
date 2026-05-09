@@ -9,15 +9,17 @@ from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import ReputationRep, Service, UserFollow
+from api.models import ReputationRep, SavedService, Service, Tag, UserFollow
 from api.tests.helpers.factories import (
     HandshakeFactory,
     ReputationRepFactory,
     ServiceFactory,
+    TagFactory,
     UserFactory,
 )
 
 FEATURED_URL = "/api/featured/"
+CHIPS_URL = "/api/featured/chips/"
 
 
 def _auth_client(user):
@@ -340,3 +342,93 @@ class TestFeaturedEndpoint:
         top_providers = data["top_providers"]
         entry = next(p for p in top_providers if p["id"] == str(provider.id))
         assert entry["positive_rep_count"] == 1
+
+
+@pytest.fixture(autouse=True)
+def _clear_chips_cache():
+    """Chips response is cached per-user; reset between tests."""
+    django_cache.clear()
+    yield
+    django_cache.clear()
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestFeaturedChipsEndpoint:
+    """Tests for FeaturedChipsView (GET /api/featured/chips/).
+
+    Chips drive the YouTube-style filter strip above Browse: top tags from
+    the viewer's interaction history (declared skills + completed handshakes
+    + saved services), with a global-top fallback for anonymous viewers.
+    """
+
+    def test_authenticated_returns_skills_and_handshake_tags(self):
+        viewer = UserFactory()
+        cooking = TagFactory(id="Q_cooking", name="Cooking")
+        photography = TagFactory(id="Q_photo", name="Photography")
+        gardening = TagFactory(id="Q_garden", name="Gardening")
+        viewer.skills.add(cooking)
+
+        # A completed handshake on a service tagged Photography.
+        photo_service = ServiceFactory(status="Active", is_visible=True)
+        photo_service.tags.add(photography)
+        HandshakeFactory(service=photo_service, requester=viewer, status="completed")
+
+        # A saved service tagged Gardening.
+        garden_service = ServiceFactory(status="Active", is_visible=True)
+        garden_service.tags.add(gardening)
+        SavedService.objects.create(user=viewer, service=garden_service)
+
+        client = _auth_client(viewer)
+        response = client.get(CHIPS_URL)
+        assert response.status_code == status.HTTP_200_OK
+        chips = response.json()["chips"]
+        labels = [c["label"] for c in chips]
+        assert "Cooking" in labels
+        assert "Photography" in labels
+        assert "Gardening" in labels
+
+    def test_chips_capped_at_twelve(self):
+        viewer = UserFactory()
+        for i in range(20):
+            tag = TagFactory(id=f"Q_skill_{i}", name=f"Skill{i}")
+            viewer.skills.add(tag)
+
+        client = _auth_client(viewer)
+        response = client.get(CHIPS_URL)
+        assert response.status_code == status.HTTP_200_OK
+        chips = response.json()["chips"]
+        assert len(chips) <= 12
+
+    def test_anonymous_falls_back_to_top_global_tags(self):
+        common = TagFactory(id="Q_common", name="Cooking")
+        rare = TagFactory(id="Q_rare", name="Underwaterbasketweaving")
+        for _ in range(5):
+            svc = ServiceFactory(status="Active", is_visible=True)
+            svc.tags.add(common)
+        rare_svc = ServiceFactory(status="Active", is_visible=True)
+        rare_svc.tags.add(rare)
+
+        client = APIClient()
+        response = client.get(CHIPS_URL)
+        assert response.status_code == status.HTTP_200_OK
+        chips = response.json()["chips"]
+        # The much-used Cooking tag should outrank the single rare tag.
+        labels = [c["label"] for c in chips]
+        assert labels[0] == "Cooking"
+        assert chips[0]["count"] >= 5
+
+    def test_unrated_authenticated_user_falls_back_to_global(self):
+        # Onboarded user with no skills, handshakes, or saves still gets
+        # *some* chip strip (top global tags) so the strip never empties out.
+        viewer = UserFactory()
+        global_tag = TagFactory(id="Q_global", name="Photography")
+        for _ in range(3):
+            svc = ServiceFactory(status="Active", is_visible=True)
+            svc.tags.add(global_tag)
+
+        client = _auth_client(viewer)
+        response = client.get(CHIPS_URL)
+        assert response.status_code == status.HTTP_200_OK
+        labels = [c["label"] for c in response.json()["chips"]]
+        assert "Photography" in labels

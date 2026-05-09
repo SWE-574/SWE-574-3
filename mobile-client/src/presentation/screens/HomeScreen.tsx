@@ -23,7 +23,7 @@ import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { listServices, type ServicesListParams } from "../../api/services";
 import { Service } from "../../api/types";
 import ServiceCard from "../components/ServiceCard";
-import FeaturedSection from "../components/FeaturedSection";
+import TagChipsRow from "../components/TagChipsRow";
 import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -91,6 +91,7 @@ export default function HomeScreen() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [chipsVisible, setChipsVisible] = useState(false);
   const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_FILTERS);
+  const [activeTagQid, setActiveTagQid] = useState<string | null>(null);
   const [draftFilters, setDraftFilters] =
     useState<DiscoveryFilters>(DEFAULT_FILTERS);
   const [isLoading, setIsLoading] = useState(true);
@@ -213,6 +214,10 @@ export default function HomeScreen() {
         params.distance = filters.distanceKm;
       }
 
+      if (activeTagQid) {
+        params.tags = [activeTagQid];
+      }
+
       const { results } = await listServices(params);
       const next = results ?? [];
       setServices(next);
@@ -236,7 +241,7 @@ export default function HomeScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch, filters, userLocation, cache]);
+  }, [debouncedSearch, filters, userLocation, cache, activeTagQid]);
 
   useEffect(() => {
     if (
@@ -388,14 +393,7 @@ export default function HomeScreen() {
   );
 
   const listHeader = (
-    <FeaturedSection
-      services={filteredServices}
-      onServicePress={handleServicePress}
-      userLocation={userLocation}
-      locationStatus={locationStatus}
-      maxNearbyKm={filters.distanceKm}
-      isAuthenticated={isAuthenticated}
-    />
+    <TagChipsRow activeQid={activeTagQid} onSelect={setActiveTagQid} />
   );
 
   const showNearbyStatus =

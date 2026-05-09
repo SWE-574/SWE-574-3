@@ -70,3 +70,19 @@ export function getFeatured(): Promise<FeaturedResponse> {
     top_providers: (response.top_providers ?? []).map(normalizeFeaturedUser),
   }));
 }
+
+export interface FeaturedChip {
+  qid: string;
+  label: string;
+  count: number;
+}
+
+export interface FeaturedChipsResponse {
+  chips: FeaturedChip[];
+}
+
+export function getFeaturedChips(): Promise<FeaturedChipsResponse> {
+  return apiRequest<FeaturedChipsResponse>('/featured/chips/').then((response) => ({
+    chips: response.chips ?? [],
+  }));
+}

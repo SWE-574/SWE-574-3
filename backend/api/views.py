@@ -2127,6 +2127,15 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 phase3_injected_id = str(explore.id)
                 phase3_slot_index = slot
 
+        # Smart-pill plumbing: attach for_you_signals + source + explore_pool
+        # to each card on the regular browse path so the frontend can render
+        # a small "why" pill ("Matches your interests" / "From your network" /
+        # "Hidden gem"). The score itself is unused here -- we keep the hot
+        # ordering -- but the per-card signals come from the same scorer the
+        # /for_you path uses, so labels stay consistent across surfaces.
+        if page is not None and request.user.is_authenticated:
+            self._attach_smart_pill_signals(page, request.user, phase3_injected_id)
+
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = paginator.get_paginated_response(serializer.data)
@@ -2209,6 +2218,42 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'previous': None,
             'results': serializer.data,
         })
+
+    def _attach_smart_pill_signals(self, page, viewer, phase3_injected_id):
+        """Stamp `for_you_signals`, `source`, and `explore_pool` on each
+        service so the regular browse list carries the same per-card signal
+        breakdown the /for_you path emits. Used by the new YouTube-style
+        smart pill on the Browse feed (chips strip + pill on each card).
+        """
+        from .ranking import _eligible_exploration
+        from .ranking_personalized import score_for_you
+
+        if not page:
+            return
+        try:
+            scored = score_for_you(list(page), viewer)
+        except Exception:
+            scored = []
+        signal_map = {triple[0].id: triple[2] for triple in scored}
+        # Phase 3 pool eligibility per card -- for the "Hidden gem" /
+        # "Fresh provider" / "Rediscovered" pill flavours.
+        cold, undershown, stale = _eligible_exploration(list(page))
+        pool_map: dict = {}
+        for s in cold:
+            pool_map[s.id] = 'cold_start'
+        for s in undershown:
+            pool_map.setdefault(s.id, 'undershown_quality')
+        for s in stale:
+            pool_map.setdefault(s.id, 'stale_recurring')
+        for svc in page:
+            svc.for_you_signals = signal_map.get(svc.id)
+            svc.explore_pool = pool_map.get(svc.id)
+            if phase3_injected_id and str(svc.id) == phase3_injected_id:
+                svc.source = 'explore_topup'
+            elif svc.for_you_signals:
+                svc.source = 'for_you'
+            else:
+                svc.source = None
 
     def _list_for_you(self, request):
         """For You feed (#481). Re-rank top hot candidates with viewer-specific

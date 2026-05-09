@@ -1,5 +1,5 @@
 import apiClient from './api'
-import type { FeaturedResponse } from '@/types'
+import type { FeaturedChipsResponse, FeaturedResponse } from '@/types'
 
 export const featuredAPI = {
   get: async (signal?: AbortSignal): Promise<FeaturedResponse> => {
@@ -10,5 +10,10 @@ export const featuredAPI = {
       friends: data.friends ?? [],
       top_providers: data.top_providers ?? [],
     }
+  },
+
+  getChips: async (signal?: AbortSignal): Promise<FeaturedChipsResponse> => {
+    const res = await apiClient.get<FeaturedChipsResponse>('/featured/chips/', { signal })
+    return { chips: res.data.chips ?? [] }
   },
 }

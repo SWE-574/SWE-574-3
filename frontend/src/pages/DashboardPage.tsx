@@ -38,7 +38,8 @@ import { MainSidebar } from '@/components/MainSidebar'
 import { Avatar } from '@/components/Avatar'
 import { Pagination } from '@/components/Pagination'
 import RecommendationShowcaseBar from '@/components/RecommendationShowcaseBar'
-import FeaturedSection from '@/components/FeaturedSection'
+import TagChipsRow from '@/components/TagChipsRow'
+import SmartPill from '@/components/SmartPill'
 import type { Handshake } from '@/services/handshakeAPI'
 import DashboardTour from '@/components/dashboard-tour/DashboardTour'
 
@@ -336,6 +337,14 @@ function ServiceCardImpl({
           </Flex>
         </Flex>
 
+        {/* Smart pill: appears only on cards the recommendation engine
+            elevated by some signal (tag overlap, follow affinity, etc.)
+            or on cards from the explore pool. Stays out of the way for
+            plain hot-only cards. */}
+        {(service.for_you_signals || service.explore_pool) && (
+          <Box mb="6px"><SmartPill service={service} /></Box>
+        )}
+
         {/* Description — fixed 2-line clamp */}
         <Text
           fontSize="12px" color={GRAY500} mb="8px" flex={1}
@@ -433,12 +442,14 @@ const DashboardPage = () => {
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
   const [userLocation, setUserLocation]             = useState<{ lat: number; lng: number } | null>(null)
-  const [distanceKm, setDistanceKm]                 = useState(10)
-  const [debouncedDistance, setDebouncedDistance]   = useState(10)
-  const [locationEnabled, setLocationEnabled]       = useState(() => localStorage.getItem('locationEnabled') === 'true')
+  const [distanceKm, setDistanceKm]                 = useState(20)
+  const [debouncedDistance, setDebouncedDistance]   = useState(20)
+  const [locationEnabled, setLocationEnabled]       = useState(() => localStorage.getItem('locationEnabled') !== 'false')
   const [locationLoading, setLocationLoading]       = useState(false)
   const [locationError, setLocationError]           = useState<string | null>(null)
   const locationAutoRequested                       = useRef(false)
+  const [activeTagQid, setActiveTagQid]             = useState<string | null>(null)
+  const [radiusFilterEnabled, setRadiusFilterEnabled] = useState(false)
 
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
@@ -467,8 +478,10 @@ const DashboardPage = () => {
       types: Array.from(activeTypes).sort(),
       filters: Array.from(secondaryFilters).sort(),
       search: debouncedSearch,
+      tag: activeTagQid,
+      radius: radiusFilterEnabled ? debouncedDistance : null,
     }),
-    [activeTypes, secondaryFilters, debouncedSearch],
+    [activeTypes, secondaryFilters, debouncedSearch, activeTagQid, radiusFilterEnabled, debouncedDistance],
   )
   const previousFilterKey = useRef(filterKey)
   useEffect(() => {
@@ -515,6 +528,11 @@ const DashboardPage = () => {
   const fetchServices = useCallback(async (signal: AbortSignal) => {
     const baseParams: ServiceListParams = {
       exclude_own: true,
+      // Always show the full catalog; recommendation engine reorders.
+      // skip_onboarding bypasses the implicit skill filter so a fresh
+      // event by an account with mismatched tags still surfaces in
+      // every viewer's feed.
+      skip_onboarding: true,
       search: debouncedSearch || undefined,
       page,
       page_size: PAGE_SIZE,
@@ -523,19 +541,29 @@ const DashboardPage = () => {
 
     // Single sort path: ranking engine sorts the full catalog, viewer's
     // location boosts proximate cards through the composite_score's proximity
-    // factor (no hard radius cutoff -- the radius lives on the Featured /
-    // Nearby tab, where it scopes the carousel slice only). YouTube-style
-    // "always show everything, just reorder" policy.
+    // factor. YouTube-style "always show everything, just reorder" policy.
     baseParams.sort = 'hot'
     if (locationEnabled && userLocation) {
       baseParams.lat = userLocation.lat
       baseParams.lng = userLocation.lng
+      // Radius is opt-in via the More-filters popover -- otherwise the
+      // proximity factor's smooth decay handles location without a hard
+      // cutoff.
+      if (radiusFilterEnabled) {
+        baseParams.distance = debouncedDistance
+      }
     }
 
     // Multi-type chip selection rides on the new repeated `?type=` keys —
     // backend filters with `type__in=[...]` and pagination stays correct.
     if (activeTypes.size > 0) {
       baseParams.types = Array.from(activeTypes) as ('Offer' | 'Need' | 'Event')[]
+    }
+
+    // Tag chips at the top of the page narrow the feed to a single
+    // Wikidata tag (or its parent_qid) when active.
+    if (activeTagQid) {
+      baseParams.tags = [activeTagQid]
     }
 
     const resp = await serviceAPI.listPaged(baseParams, signal)
@@ -549,6 +577,9 @@ const DashboardPage = () => {
     secondaryFilters,
     locationEnabled,
     userLocation,
+    radiusFilterEnabled,
+    debouncedDistance,
+    activeTagQid,
   ])
 
   const { isLoading, error: fetchError } = usePolling(fetchServices, [fetchServices], { interval: POLL_INTERVAL })
@@ -804,6 +835,11 @@ const DashboardPage = () => {
                   onOpenChange={setFiltersOpen}
                   onToggle={toggleSecondaryFilter}
                   onClear={() => setSecondaryFilters(new Set())}
+                  locationGranted={Boolean(locationEnabled && userLocation)}
+                  radiusEnabled={radiusFilterEnabled}
+                  onRadiusToggle={setRadiusFilterEnabled}
+                  distanceKm={distanceKm}
+                  onDistanceChange={setDistanceKm}
                 />
               </Flex>
             </Flex>
@@ -841,6 +877,11 @@ const DashboardPage = () => {
                   onToggle={toggleSecondaryFilter}
                   onClear={() => setSecondaryFilters(new Set())}
                   compact
+                  locationGranted={Boolean(locationEnabled && userLocation)}
+                  radiusEnabled={radiusFilterEnabled}
+                  onRadiusToggle={setRadiusFilterEnabled}
+                  distanceKm={distanceKm}
+                  onDistanceChange={setDistanceKm}
                 />
               </Box>
             </Flex>
@@ -869,21 +910,11 @@ const DashboardPage = () => {
             </Suspense>
           </Box>
 
-          {/* Featured section — three tabs (Friends / Nearby / Nearly Full)
-              feed a horizontal carousel below the map. The main grid below
-              this row stays sorted by composite_score regardless of which tab
-              is active; the tabs are slice previews, not list filters. The
-              radius slider lives inside the Nearby tab so it scopes only the
-              carousel and never empties the main grid. */}
+          {/* YouTube-style filter chips. Click a chip to narrow the feed
+              to that Wikidata tag, "All" resets. Chips are derived from
+              the viewer's interaction history (skills + handshakes + saved). */}
           <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} px={{ base: 3, md: 5 }} py="10px">
-            <FeaturedSection
-              services={displayServices}
-              userLocation={locationEnabled && userLocation ? userLocation : null}
-              maxNearbyKm={distanceKm}
-              onMaxNearbyKmChange={setDistanceKm}
-              isAuthenticated={isAuthenticated}
-              onServicePress={(id) => navigate(`/service-detail/${id}`)}
-            />
+            <TagChipsRow activeQid={activeTagQid} onSelect={setActiveTagQid} />
           </Box>
 
           {/* Grid */}
@@ -985,9 +1016,17 @@ interface MoreFiltersButtonProps {
   onToggle: (f: SecondaryFilter) => void
   onClear: () => void
   compact?: boolean
+  // Radius slider lives here so the YouTube-style chip strip on the page
+  // body stays clean. Power users dial in a hard radius cutoff; default
+  // proximity ranking still applies whenever location is available.
+  locationGranted?: boolean
+  radiusEnabled?: boolean
+  onRadiusToggle?: (enabled: boolean) => void
+  distanceKm?: number
+  onDistanceChange?: (km: number) => void
 }
 
-function MoreFiltersButton({ active, open, onOpenChange, onToggle, onClear, compact }: MoreFiltersButtonProps) {
+function MoreFiltersButton({ active, open, onOpenChange, onToggle, onClear, compact, locationGranted, radiusEnabled, onRadiusToggle, distanceKm, onDistanceChange }: MoreFiltersButtonProps) {
   const count = active.size
 
   // Close on Escape so keyboard users aren't trapped.
@@ -1115,6 +1154,40 @@ function MoreFiltersButton({ active, open, onOpenChange, onToggle, onClear, comp
                 </Box>
               )
             })}
+            {locationGranted && onRadiusToggle && onDistanceChange && (
+              <Box mt="6px" pt="8px" borderTop={`1px solid ${GRAY100}`}>
+                <Flex align="center" justify="space-between" px="6px" mb="6px">
+                  <Text fontSize="10px" fontWeight={700} color={GRAY400}
+                    style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
+                  >
+                    Distance
+                  </Text>
+                  <Box
+                    as="button"
+                    onClick={() => onRadiusToggle(!radiusEnabled)}
+                    fontSize="11px"
+                    fontWeight={700}
+                    color={radiusEnabled ? GREEN : GRAY500}
+                  >
+                    {radiusEnabled ? 'On' : 'Off'}
+                  </Box>
+                </Flex>
+                <Box px="6px">
+                  <Flex justify="space-between" mb="6px">
+                    <Text fontSize="11px" color={GRAY600} fontWeight={500}>
+                      {distanceKm} km radius
+                    </Text>
+                  </Flex>
+                  <input
+                    type="range" min={1} max={50} step={1}
+                    value={distanceKm ?? 20}
+                    onChange={(e) => onDistanceChange(Number(e.target.value))}
+                    disabled={!radiusEnabled}
+                    style={{ width: '100%', accentColor: GREEN, cursor: radiusEnabled ? 'pointer' : 'not-allowed', opacity: radiusEnabled ? 1 : 0.5 }}
+                  />
+                </Box>
+              </Box>
+            )}
             <Flex justify="space-between" align="center" mt="6px" pt="8px"
               borderTop={`1px solid ${GRAY100}`}
             >

@@ -47,6 +47,7 @@ vi.mock('@/services/serviceAPI', () => ({
 vi.mock('@/services/featuredAPI', () => ({
   featuredAPI: {
     get: vi.fn().mockResolvedValue({ trending: [], friends: [], top_providers: [] }),
+    getChips: vi.fn().mockResolvedValue({ chips: [] }),
   },
 }))
 
@@ -132,38 +133,36 @@ describe('DashboardPage (Browse)', () => {
     expect(call.exclude_own).toBe(true)
   })
 
-  it('always sorts by hot and never sends explore_only or skip_onboarding', async () => {
+  it('always sorts by hot, sends skip_onboarding=true, no explore_only', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
     const call = listPagedMock.mock.calls[0][0]
     expect(call.sort).toBe('hot')
+    expect(call.skip_onboarding).toBe(true)
     expect(call.explore_only).toBeUndefined()
-    expect(call.skip_onboarding).toBeUndefined()
   })
 
-  it('does not render the legacy ranking buttons (Discovery / Newest / Nearby / All)', async () => {
+  it('does not render the legacy ranking buttons or the Featured tab strip', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
     expect(screen.queryByText('Discovery')).not.toBeInTheDocument()
     expect(screen.queryByText('Newest')).not.toBeInTheDocument()
-    // 'Nearby' now appears as a Featured tab; assert it's NOT a ranking button
-    // by confirming it doesn't appear with the older button siblings.
+    // FeaturedSection tabs are gone -- chips replaced them.
+    expect(screen.queryByText('Friends')).not.toBeInTheDocument()
+    expect(screen.queryByText('Nearly Full')).not.toBeInTheDocument()
     expect(screen.queryByText('Recurrent')).not.toBeInTheDocument()
     expect(screen.queryByText('Trending')).not.toBeInTheDocument()
     expect(screen.queryByText('For you')).not.toBeInTheDocument()
-    expect(screen.queryByText(/\d+ services?$/)).not.toBeInTheDocument()
   })
 
-  it('renders the FeaturedSection tabs (Friends / Nearby / Nearly Full) below the map', async () => {
+  it('renders the TagChipsRow "All" chip below the map', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByTestId('map-view')).toBeInTheDocument())
-    for (const label of ['Friends', 'Nearby', 'Nearly Full']) {
-      expect(screen.getByText(label)).toBeInTheDocument()
-    }
+    const allChip = screen.getByText('All')
+    expect(allChip).toBeInTheDocument()
     const map = screen.getByTestId('map-view')
-    const friendsTab = screen.getByText('Friends')
-    const order = map.compareDocumentPosition(friendsTab)
-    // Map appears BEFORE the Featured tab strip in DOM order.
+    const order = map.compareDocumentPosition(allChip)
+    // Map appears BEFORE the chips strip in DOM order.
     expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
