@@ -16,7 +16,6 @@ export default function TagChipsRow({ activeQid, onSelect }: TagChipsRowProps) {
 
   useEffect(() => {
     const controller = new AbortController()
-    setLoading(true)
     featuredAPI
       .getChips(controller.signal)
       .then(({ chips: rows }) => setChips(rows))
