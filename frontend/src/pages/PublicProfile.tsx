@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Box, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
 import {
-  FiArrowLeft, FiClock,
-  FiStar, FiCheckCircle, FiThumbsUp, FiUser, FiAlertCircle,
+  FiArrowLeft,
+  FiStar, FiCheckCircle, FiUser, FiAlertCircle,
   FiMessageSquare,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
@@ -111,18 +111,6 @@ function BadgeChip({ badge }: { badge: BadgeProgress }) {
       <Text fontSize="11px" fontWeight={600} color={badge.earned ? GREEN : GRAY600} flex={1}
         style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{badge.name}</Text>
       {badge.earned && <FiCheckCircle size={11} color={GREEN} />}
-    </Flex>
-  )
-}
-
-// ── Reputation row ────────────────────────────────────────────────────────────
-function RepRow({ icon, label, count, color, bg }: { icon: React.ReactNode; label: string; count: number; color: string; bg: string }) {
-  return (
-    <Flex align="center" gap={3} py="8px" borderBottom={`1px solid ${GRAY100}`}>
-      <Flex w="28px" h="28px" borderRadius="7px" align="center" justify="center" flexShrink={0}
-        style={{ background: bg, color }}>{icon}</Flex>
-      <Text fontSize="12px" color={GRAY600} flex={1}>{label}</Text>
-      <Text fontSize="14px" fontWeight={700} color={count > 0 ? color : GRAY400}>{count}</Text>
     </Flex>
   )
 }
@@ -424,10 +412,6 @@ const PublicProfile = () => {
   if (notFound || !profileUser) return <NotFoundState onBack={() => navigate(-1)} />
 
   const earnedBadges  = badges.filter(b => b.earned)
-  const punctual      = profileUser.punctual_count ?? 0
-  const helpful       = profileUser.helpful_count  ?? 0
-  const kind          = profileUser.kind_count     ?? 0
-  const hasRep        = punctual + helpful + kind > 0
 
   return (
     <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto" className="no-scrollbar"
@@ -602,16 +586,6 @@ const PublicProfile = () => {
 
           {/* Right column */}
           <Box w={{ base: '100%', lg: '260px' }} flexShrink={0}>
-            {hasRep && (
-              <SectionCard label="Community Reputation" mb={4}>
-                <Box>
-                  <RepRow icon={<FiClock size={13} />}      label="Punctual" count={punctual} color={GREEN} bg={GREEN_LT} />
-                  <RepRow icon={<FiThumbsUp size={13} />}   label="Helpful"  count={helpful}  color={BLUE}  bg={BLUE_LT} />
-                  <RepRow icon={<FiAlertCircle size={13} />} label="Kind"    count={kind}     color={AMBER} bg={AMBER_LT} />
-                </Box>
-              </SectionCard>
-            )}
-
             {earnedBadges.length > 0 && (
               <SectionCard label="Badges" mb={0}>
                 <Stack gap={2}>
@@ -620,7 +594,7 @@ const PublicProfile = () => {
               </SectionCard>
             )}
 
-            {!hasRep && earnedBadges.length === 0 && (
+            {earnedBadges.length === 0 && (
               <SectionCard mb={0}>
                 <Flex direction="column" align="center" py={4} gap={2}>
                   <FiUser size={24} color={GRAY300} />
