@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #fff; }
+    #map { position: absolute; inset: 0; }
+    .mapboxgl-ctrl-attrib { display: none; }
+    .mapboxgl-ctrl-bottom-right { bottom: 96px; right: 12px; }
+    .mapboxgl-ctrl-bottom-left { bottom: 96px; left: 12px; }
+    .mapboxgl-ctrl-group { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    (function () {
+      var map = null;
+      var loaded = false;
+      var pendingServices = null;
+      var userMarker = null;
+
+      function send(payload) {
+        try {
+          if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+          }
+        } catch (e) { /* swallow */ }
+      }
+
+      function colorFor(type) {
+        switch (type) {
+          case "Offer": return "#23B97A";
+          case "Need":  return "#3B82F6";
+          case "Event": return "#F59E0B";
+          default:      return "#6B7280";
+        }
+      }
+
+      function applyServices(services) {
+        if (!map || !loaded) {
+          pendingServices = services;
+          return;
+        }
+        var fc = {
+          type: "FeatureCollection",
+          features: (services || [])
+            .filter(function (s) {
+              var lat = Number(s.lat);
+              var lng = Number(s.lng);
+              return !Number.isNaN(lat) && !Number.isNaN(lng);
+            })
+            .map(function (s) {
+              return {
+                type: "Feature",
+                properties: {
+                  id: s.id,
+                  type: s.type,
+                  color: colorFor(s.type),
+                },
+                geometry: {
+                  type: "Point",
+                  coordinates: [Number(s.lng), Number(s.lat)],
+                },
+              };
+            }),
+        };
+
+        var src = map.getSource("services");
+        if (src) {
+          src.setData(fc);
+          return;
+        }
+
+        map.addSource("services", { type: "geojson", data: fc });
+        map.addLayer({
+          id: "services-area",
+          type: "circle",
+          source: "services",
+          paint: {
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              8, 8,
+              11, 18,
+              14, 32,
+              17, 60
+            ],
+            "circle-color": ["get", "color"],
+            "circle-opacity": 0.35,
+            "circle-stroke-color": ["get", "color"],
+            "circle-stroke-opacity": 0.7,
+            "circle-stroke-width": 1.5,
+          },
+        });
+
+        map.on("click", "services-area", function (e) {
+          if (!e.features || !e.features[0]) return;
+          send({ type: "markerPress", id: e.features[0].properties.id });
+        });
+        map.on("mouseenter", "services-area", function () {
+          map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", "services-area", function () {
+          map.getCanvas().style.cursor = "";
+        });
+      }
+
+      function setUserMarker(lat, lng) {
+        if (lat == null || lng == null) return;
+        if (!map) return;
+        if (userMarker) {
+          userMarker.setLngLat([lng, lat]);
+          return;
+        }
+        var el = document.createElement("div");
+        el.style.cssText =
+          "width:14px;height:14px;border-radius:50%;background:#1F8F66;border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.18);";
+        userMarker = new mapboxgl.Marker({ element: el })
+          .setLngLat([lng, lat])
+          .addTo(map);
+      }
+
+      function flyTo(lat, lng, zoom) {
+        if (!map) return;
+        map.flyTo({
+          center: [lng, lat],
+          zoom: zoom != null ? zoom : Math.max(map.getZoom(), 13),
+          essential: true,
+        });
+      }
+
+      function init(cfg) {
+        if (!cfg || !cfg.token) {
+          send({ type: "error", message: "missing token" });
+          return;
+        }
+        mapboxgl.accessToken = cfg.token;
+
+        var center = cfg.center ? [cfg.center.lng, cfg.center.lat] : [28.9784, 41.0082];
+        map = new mapboxgl.Map({
+          container: "map",
+          style: cfg.style || "mapbox://styles/mapbox/streets-v12",
+          center: center,
+          zoom: cfg.zoom != null ? cfg.zoom : 11,
+          attributionControl: false,
+          logoPosition: "bottom-left",
+        });
+        map.addControl(
+          new mapboxgl.NavigationControl({ showCompass: false, visualizePitch: false }),
+          "bottom-right"
+        );
+        map.on("load", function () {
+          loaded = true;
+          send({ type: "ready" });
+          if (cfg.user) setUserMarker(cfg.user.lat, cfg.user.lng);
+          if (cfg.services) applyServices(cfg.services);
+          else if (pendingServices) applyServices(pendingServices);
+        });
+        map.on("error", function (e) {
+          send({ type: "error", message: (e && e.error && e.error.message) || "map error" });
+        });
+      }
+
+      function handle(raw) {
+        if (typeof raw !== "string") return;
+        try {
+          var msg = JSON.parse(raw);
+          switch (msg.type) {
+            case "init": init(msg); break;
+            case "updateServices": applyServices(msg.services || []); break;
+            case "setUser": setUserMarker(msg.lat, msg.lng); break;
+            case "flyTo": flyTo(msg.lat, msg.lng, msg.zoom); break;
+          }
+        } catch (e) {
+          send({ type: "error", message: String(e) });
+        }
+      }
+
+      document.addEventListener("message", function (ev) { handle(ev.data); });
+      window.addEventListener("message", function (ev) { handle(ev.data); });
+      send({ type: "loaded" });
+    })();
+  </script>
+</body>
+</html>

@@ -14,12 +14,8 @@ import {
 import { Asset } from "expo-asset";
 import { File } from "expo-file-system";
 import * as Location from "expo-location";
-import { LeafletView, MapShapeType } from "react-native-leaflet-view";
-import type {
-  MapMarker,
-  MapShape,
-  WebviewLeafletMessage,
-} from "react-native-leaflet-view";
+import WebView from "react-native-webview";
+import type { WebViewMessageEvent } from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
@@ -27,63 +23,13 @@ import Slider from "@react-native-community/slider";
 import { colors } from "../../constants/colors";
 import { listServices } from "../../api/services";
 import type { Service, ServiceType } from "../../api/types";
+import { getMapboxToken } from "../../constants/env";
 
 type FilterType = "all" | ServiceType;
 
 // Istanbul city center — used when location permission is denied
 const DEFAULT_LOCATION = { latitude: 41.0082, longitude: 28.9784 };
-
-
-const MARKER_COLOR: Record<ServiceType, string> = {
-  Offer: colors.GREEN,
-  Need: colors.BLUE,
-  Event: colors.AMBER,
-};
-
-/**
- * Small solid dot marker used purely as a tap target inside the area circle.
- * Intentionally minimal — the large translucent shape carries the visual weight.
- */
-function buildMarkerSvg(type: ServiceType): string {
-  const fill = MARKER_COLOR[type] ?? colors.GRAY700;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22"></svg>`;
-}
-
-/**
- * Builds large translucent Leaflet Circle shapes — one per service — that
- * highlight the approximate area (~650 m radius) without revealing the exact
- * location. Extra Leaflet path options (fillOpacity, opacity, weight) are
- * spread directly onto the react-leaflet Circle by the library.
- */
-function buildAreaShapes(
-  services: Service[],
-): (MapShape & Record<string, unknown>)[] {
-  return services.map((s) => {
-    const color = MARKER_COLOR[s.type] ?? colors.GRAY700;
-    return {
-      shapeType: MapShapeType.CIRCLE,
-      id: `area-${s.id}`,
-      center: { lat: Number(s.location_lat), lng: Number(s.location_lng) },
-      radius: 500,
-      color,
-      fillColor: color,
-      fillOpacity: 0.4,
-      opacity: 0,
-      weight: 2,
-    };
-  });
-}
-
-/**
- * Tiny spiral jitter so co-located fuzzy markers don't perfectly overlap.
- * Same algorithm as the web MapView's stackJitter.
- */
-function stackJitter(rank: number): { dLat: number; dLng: number } {
-  if (rank === 0) return { dLat: 0, dLng: 0 };
-  const angle = (rank * 137.5 * Math.PI) / 180;
-  const r = 0.0005 * Math.sqrt(rank); // ~55 m max extra spread
-  return { dLat: r * Math.sin(angle), dLng: r * Math.cos(angle) };
-}
+const MAPBOX_STYLE = "mapbox://styles/sgunes16/cmmc96rwc00c701qz7v0g8h9k";
 
 const FILTER_CONFIG: {
   label: string;
@@ -96,10 +42,29 @@ const FILTER_CONFIG: {
   { label: "Events", value: "Event", activeColor: colors.AMBER },
 ];
 
+type MapPayload = {
+  id: string;
+  type: ServiceType;
+  lat: number;
+  lng: number;
+};
+
+function toPayload(services: Service[]): MapPayload[] {
+  return services
+    .map((s) => ({
+      id: s.id,
+      type: s.type,
+      lat: Number(s.location_lat),
+      lng: Number(s.location_lng),
+    }))
+    .filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng));
+}
+
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
 
+  const webViewRef = useRef<WebView>(null);
   const [webViewContent, setWebViewContent] = useState<string | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [userLocation, setUserLocation] = useState<{
@@ -113,19 +78,18 @@ export default function MapScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [distanceKm, setDistanceKm] = useState(15);
   const [showRangeSlider, setShowRangeSlider] = useState(false);
-  const [mapCenter, setMapCenter] = useState({
-    lat: DEFAULT_LOCATION.latitude,
-    lng: DEFAULT_LOCATION.longitude,
-  });
+  const [mapReady, setMapReady] = useState(false);
+  const [mapInited, setMapInited] = useState(false);
 
   const locationCheckedRef = useRef(false);
-  const drawerAnim = useRef(new Animated.Value(0)).current; // 0 hidden, 1 shown
+  const drawerAnim = useRef(new Animated.Value(0)).current;
 
+  // Load the HTML asset once.
   useEffect(() => {
     let isMounted = true;
     (async () => {
       try {
-        const path = require("../../../assets/leaflet.html");
+        const path = require("../../../assets/mapbox.html");
         const asset = Asset.fromModule(path);
         await asset.downloadAsync();
         const htmlContent = await new File(asset.localUri!).text();
@@ -140,8 +104,8 @@ export default function MapScreen() {
     };
   }, []);
 
-  // Resolve user location once; always mark resolved when done so the map
-  // renders with the correct center from the start rather than snapping later.
+  // Resolve user location once. When permission is denied or unavailable, fall
+  // back to Istanbul so the map is centered somewhere sensible from the start.
   useEffect(() => {
     if (locationCheckedRef.current) return;
     locationCheckedRef.current = true;
@@ -149,7 +113,6 @@ export default function MapScreen() {
     (async () => {
       try {
         let coords: { latitude: number; longitude: number } | null = null;
-
         const { granted } = await Location.getForegroundPermissionsAsync();
         if (granted) {
           const pos = await Location.getCurrentPositionAsync({
@@ -171,18 +134,46 @@ export default function MapScreen() {
             };
           }
         }
-
-        if (coords) {
-          setMapCenter({ lat: coords.latitude, lng: coords.longitude });
-          setUserLocation(coords);
-        }
+        if (coords) setUserLocation(coords);
       } catch {
-        // fall back to Istanbul default
+        // fall back to Istanbul
       } finally {
         setLocationResolved(true);
       }
     })();
   }, []);
+
+  const post = useCallback((payload: Record<string, unknown>) => {
+    if (!webViewRef.current) return;
+    const json = JSON.stringify(payload);
+    const escaped = JSON.stringify(json);
+    webViewRef.current.injectJavaScript(
+      `(function(){try{handle(${escaped});}catch(e){}})();true;`,
+    );
+  }, []);
+
+  // Send the init payload as soon as the WebView and the location resolution
+  // are both ready. Keep this firing only once.
+  useEffect(() => {
+    if (mapInited) return;
+    if (!mapReady || !locationResolved) return;
+    const token = getMapboxToken();
+    const center = userLocation
+      ? { lat: userLocation.latitude, lng: userLocation.longitude }
+      : { lat: DEFAULT_LOCATION.latitude, lng: DEFAULT_LOCATION.longitude };
+    post({
+      type: "init",
+      token,
+      style: MAPBOX_STYLE,
+      center,
+      zoom: 11,
+      services: toPayload(services),
+      user: userLocation
+        ? { lat: userLocation.latitude, lng: userLocation.longitude }
+        : null,
+    });
+    setMapInited(true);
+  }, [mapReady, locationResolved, userLocation, services, post, mapInited]);
 
   const recenterOnUser = useCallback(async () => {
     try {
@@ -207,13 +198,14 @@ export default function MapScreen() {
         longitude: pos.coords.longitude,
       };
       setUserLocation(next);
-      setMapCenter({ lat: next.latitude, lng: next.longitude });
+      post({ type: "setUser", lat: next.latitude, lng: next.longitude });
+      post({ type: "flyTo", lat: next.latitude, lng: next.longitude });
     } catch {
-      // swallow — best-effort
+      // best-effort
     }
-  }, []);
+  }, [post]);
 
-  // Fetch services whenever location or distance changes
+  // Fetch services whenever location or distance changes.
   const fetchServices = useCallback(async () => {
     try {
       setIsLoadingServices(true);
@@ -247,7 +239,6 @@ export default function MapScreen() {
     fetchServices();
   }, [fetchServices]);
 
-  // Build markers for the active filter + free-text search
   const trimmedSearch = searchQuery.trim().toLowerCase();
   const visibleServices = useMemo(() => {
     let list = services;
@@ -270,7 +261,12 @@ export default function MapScreen() {
     return list;
   }, [services, activeFilter, trimmedSearch]);
 
-  // Slide the bottom drawer up when a service is selected, down otherwise.
+  // Push the visible service set to the WebView whenever it changes (after init).
+  useEffect(() => {
+    if (!mapInited) return;
+    post({ type: "updateServices", services: toPayload(visibleServices) });
+  }, [visibleServices, mapInited, post]);
+
   useEffect(() => {
     Animated.spring(drawerAnim, {
       toValue: selectedService ? 1 : 0,
@@ -280,37 +276,31 @@ export default function MapScreen() {
     }).start();
   }, [selectedService, drawerAnim]);
 
-  // Large translucent circles that show the approximate area (privacy-safe).
-  const areaShapes = buildAreaShapes(visibleServices);
-
-  // Small dot markers — stack-jittered so co-located ones don't perfectly
-  // overlap. These serve as the tap target inside each area circle.
-  const markers: MapMarker[] = (() => {
-    const coordRank: Record<string, number> = {};
-    return visibleServices.map((s) => {
-      const lat = Number(s.location_lat);
-      const lng = Number(s.location_lng);
-      const key = `${(lat * 100).toFixed(0)}-${(lng * 100).toFixed(0)}`;
-      const rank = coordRank[key] ?? 0;
-      coordRank[key] = rank + 1;
-      const { dLat, dLng } = stackJitter(rank);
-      return {
-        id: s.id,
-        position: { lat: lat + dLat, lng: lng + dLng },
-        icon: buildMarkerSvg(s.type),
-        size: [22, 22] as [number, number],
-        title: s.title,
-      };
-    });
-  })();
-
-  // Open the summary sheet when a marker is tapped
   const handleMessage = useCallback(
-    (message: WebviewLeafletMessage) => {
-      const markerID = message?.payload?.mapMarkerID;
-      if (!markerID) return;
-      const service = services.find((s) => s.id === markerID);
-      if (service) setSelectedService(service);
+    (event: WebViewMessageEvent) => {
+      let parsed: { type?: string; id?: string; message?: string } | null = null;
+      try {
+        parsed = JSON.parse(event.nativeEvent.data);
+      } catch {
+        return;
+      }
+      if (!parsed) return;
+      switch (parsed.type) {
+        case "ready":
+          setMapReady(true);
+          break;
+        case "loaded":
+          // HTML is parsed but mapboxgl may still be loading — ignore.
+          break;
+        case "markerPress": {
+          const service = services.find((s) => s.id === parsed!.id);
+          if (service) setSelectedService(service);
+          break;
+        }
+        case "error":
+          if (parsed.message) console.warn("[MapScreen]", parsed.message);
+          break;
+      }
     },
     [services],
   );
@@ -337,13 +327,18 @@ export default function MapScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <LeafletView
-        source={{ html: webViewContent }}
-        mapCenterPosition={mapCenter}
-        zoom={11}
-        mapMarkers={markers}
-        mapShapes={areaShapes as MapShape[]}
-        onMessageReceived={handleMessage}
+      <WebView
+        ref={webViewRef}
+        originWhitelist={["*"]}
+        source={{ html: webViewContent, baseUrl: "https://localhost" }}
+        onMessage={handleMessage}
+        javaScriptEnabled
+        domStorageEnabled
+        allowsInlineMediaPlayback
+        style={styles.webview}
+        scalesPageToFit={false}
+        scrollEnabled={false}
+        bounces={false}
       />
 
       {/* Top overlay: search bar + filter pills */}
@@ -500,7 +495,6 @@ export default function MapScreen() {
 
 const DRAWER_HEIGHT = 360;
 
-
 const TYPE_COLOR: Record<string, string> = {
   Offer: colors.GREEN,
   Need: colors.BLUE,
@@ -646,6 +640,10 @@ function MarkerSheet({
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: colors.WHITE,
+  },
+  webview: {
     flex: 1,
     backgroundColor: colors.WHITE,
   },
