@@ -131,6 +131,30 @@ describe('useAuthStore.refreshUser', () => {
     expect(useAuthStore.getState().isAuthenticated).toBe(true)
   })
 
+  it('skips soft refreshes while the current profile snapshot is fresh', async () => {
+    vi.setSystemTime(1_000)
+    apiMocks.get.mockResolvedValueOnce({ data: { id: 'u-fresh' } })
+    await useAuthStore.getState().refreshUser()
+
+    apiMocks.get.mockClear()
+    vi.setSystemTime(5_000)
+    await useAuthStore.getState().refreshUser({ force: false })
+
+    expect(apiMocks.get).not.toHaveBeenCalled()
+  })
+
+  it('skips soft refresh after checkAuth already confirmed the user', async () => {
+    vi.setSystemTime(1_000)
+    apiMocks.get.mockResolvedValueOnce({ data: { id: 'u-fresh' } })
+    await useAuthStore.getState().checkAuth(true)
+
+    apiMocks.get.mockClear()
+    vi.setSystemTime(5_000)
+    await useAuthStore.getState().refreshUser({ force: false })
+
+    expect(apiMocks.get).not.toHaveBeenCalled()
+  })
+
   it('sets error on 429 but keeps existing state', async () => {
     useAuthStore.setState({ user: { id: 'cached' } as never, isAuthenticated: true })
     apiMocks.get.mockRejectedValue(Object.assign(new Error('429'), { response: { status: 429 } }))
@@ -167,6 +191,22 @@ describe('useAuthStore.updateUserOptimistically / setUser / setError', () => {
     useAuthStore.setState({ user: { id: 'u', bio: 'old' } as never })
     useAuthStore.getState().updateUserOptimistically({ bio: 'new' } as never)
     expect(useAuthStore.getState().user).toMatchObject({ id: 'u', bio: 'new' })
+  })
+
+  it('allows the next soft refresh after optimistic updates', async () => {
+    vi.setSystemTime(1_000)
+    apiMocks.get.mockResolvedValueOnce({ data: { id: 'u', bio: 'server' } })
+    await useAuthStore.getState().refreshUser()
+
+    useAuthStore.getState().updateUserOptimistically({ bio: 'optimistic' } as never)
+
+    apiMocks.get.mockClear()
+    apiMocks.get.mockResolvedValueOnce({ data: { id: 'u', bio: 'confirmed' } })
+    vi.setSystemTime(5_000)
+    await useAuthStore.getState().refreshUser({ force: false })
+
+    expect(apiMocks.get).toHaveBeenCalledTimes(1)
+    expect(useAuthStore.getState().user).toMatchObject({ id: 'u', bio: 'confirmed' })
   })
 
   it('is a no-op when no user is set', () => {

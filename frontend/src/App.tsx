@@ -212,10 +212,10 @@ function App() {
     // triggering the /users/me/ → 401 → refresh-fail cycle on every keystroke.
     if (PUBLIC_AUTH_PATHS.includes(location.pathname)) return
 
-    // On protected route changes, keep fast-changing profile fields such as
-    // time balance fresh while still bootstrapping anonymous sessions normally.
+    // Route changes are a soft auth/profile refresh so navigation does not
+    // flood /users/me/. Mutations that change balance call refreshUser() explicitly.
     if (user) {
-      refreshUser()
+      refreshUser({ force: false })
     } else {
       checkAuth()
     }

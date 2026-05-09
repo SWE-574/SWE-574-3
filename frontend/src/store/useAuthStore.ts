@@ -3,10 +3,12 @@ import type { User } from '@/types'
 import apiClient, { getErrorMessage } from '@/services/api'
 
 let inFlightUserRequest: Promise<User> | null = null
+let lastUserRefreshAt = 0
 
 const RATE_LIMIT_STATUS = 429
 const MAX_ME_RETRIES = 2
 const BACKOFF_BASE_MS = 300
+const SOFT_REFRESH_MIN_INTERVAL_MS = 30_000
 
 const sleep = (ms: number) => new Promise((resolve) => {
   window.setTimeout(resolve, ms)
@@ -82,7 +84,7 @@ interface AuthState {
     last_name: string
   }) => Promise<void>
   logout: () => Promise<void>
-  refreshUser: () => Promise<void>
+  refreshUser: (options?: { force?: boolean }) => Promise<void>
   checkAuth: (force?: boolean) => Promise<void>
   updateUserOptimistically: (updates: Partial<User>) => void
 }
@@ -94,7 +96,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   isLoading: false,
   error: null,
 
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
+  setUser: (user) => {
+    lastUserRefreshAt = user ? Date.now() : 0
+    set({ user, isAuthenticated: !!user })
+  },
 
   setError: (error) => set({ error }),
 
@@ -113,6 +118,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         user = await fetchCurrentUserSingleFlight()
       }
 
+      lastUserRefreshAt = Date.now()
       set({ user, isAuthenticated: true, isLoading: false })
     } catch (error) {
       set({ isLoading: false, error: getErrorMessage(error, 'Login failed') })
@@ -135,6 +141,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         user = await fetchCurrentUserSingleFlight()
       }
 
+      lastUserRefreshAt = Date.now()
       set({ user, isAuthenticated: true, isLoading: false })
     } catch (error) {
       set({
@@ -153,13 +160,21 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // Ignore errors — clear state regardless
     }
     inFlightUserRequest = null
+    lastUserRefreshAt = 0
     set({ user: null, isAuthenticated: false, error: null })
   },
 
-  refreshUser: async () => {
+  refreshUser: async (options = { force: true }) => {
+    const force = options.force ?? true
+    const now = Date.now()
+    if (!force && lastUserRefreshAt > 0 && now - lastUserRefreshAt < SOFT_REFRESH_MIN_INTERVAL_MS) {
+      return
+    }
+
     try {
       inFlightUserRequest = null
       const user = await fetchCurrentUserFresh()
+      lastUserRefreshAt = Date.now()
       set({ user, isAuthenticated: true })
     } catch (error) {
       if (isRateLimitError(error)) {
@@ -177,6 +192,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ isLoading: true })
     try {
       const user = await fetchCurrentUserSingleFlight()
+      lastUserRefreshAt = Date.now()
       set({ user, isAuthenticated: true, isLoading: false })
     } catch (error) {
       if (isRateLimitError(error)) {
@@ -192,6 +208,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   updateUserOptimistically: (updates) => {
     const { user } = get()
     if (!user) return
+    lastUserRefreshAt = 0
     set({ user: { ...user, ...updates } })
   },
 }))
