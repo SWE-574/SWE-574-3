@@ -338,17 +338,21 @@ const ProfileHero = ({
             )}
           </Box>
 
-          {/* Name (+ Follow / Unfollow on public when viewer is signed in) */}
+          {/* Name (+ Follow / Unfollow): inline — button starts right after name, single-line name + ellipsis when tight */}
           <Flex
-            align={{ base: 'flex-start', md: 'center' }}
-            justify="space-between"
-            gap={3}
-            flexWrap="wrap"
+            align="center"
+            justify="flex-start"
+            gap={2}
+            flexWrap="nowrap"
             mb={1.5}
+            minW={0}
+            maxW="100%"
           >
             <Text
-              flex="1"
-              minW="0"
+              minW={0}
+              flexShrink={1}
+              noOfLines={1}
+              title={displayName}
               fontSize={compact ? { base: '32px', md: '38px' } : { base: '34px', md: '40px' }}
               fontWeight={900}
               lineHeight={1.15}
