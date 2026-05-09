@@ -2316,6 +2316,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
         search_engine = SearchEngine()
         search_params = {
             'type': self.request.query_params.get('type'),
+            # Repeated `type=` (Browse multi-select) is honored when present.
+            'types': self.request.query_params.getlist('type'),
+            # Repeated `location_type=` for Online / In-Person multi-select.
+            'location_types': self.request.query_params.getlist('location_type'),
+            'schedule_type': self.request.query_params.get('schedule_type'),
+            'weekend': str(
+                self.request.query_params.get('weekend', '')
+            ).strip().lower() in {'1', 'true', 'yes'},
             'tag': self.request.query_params.get('tag'),
             'tags': self.request.query_params.getlist('tags'),
             'search': self.request.query_params.get('search'),
@@ -2347,7 +2355,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             self.request.query_params.get('tag')
             or self.request.query_params.getlist('tags')
         )
-        if not explicit_tag and not user_param:
+        # Browse's "All" mode opts out of the implicit skills filter so the
+        # viewer sees the full active catalog instead of a skill-aware slice.
+        skip_onboarding_raw = self.request.query_params.get('skip_onboarding', '')
+        skip_onboarding = (
+            str(skip_onboarding_raw).strip().lower() in {'1', 'true', 'yes'}
+        )
+        if not explicit_tag and not user_param and not skip_onboarding:
             from .ranking import apply_onboarding_fallback
             queryset, _ = apply_onboarding_fallback(
                 queryset,
@@ -2365,6 +2379,15 @@ class ServiceViewSet(viewsets.ModelViewSet):
             cold, under, stale = _eligible_exploration(sample)
             eligible_ids = [s.id for s in (*cold, *under, *stale)]
             queryset = queryset.filter(id__in=eligible_ids)
+
+        # Optional `exclude_own` toggle — Browse uses this so the viewer
+        # never sees their own services in the discovery feed.
+        exclude_own_raw = self.request.query_params.get('exclude_own', '')
+        if (
+            str(exclude_own_raw).strip().lower() in {'1', 'true', 'yes'}
+            and self.request.user.is_authenticated
+        ):
+            queryset = queryset.exclude(user=self.request.user)
 
         # Filter by owner user (for profile pages)
         if user_param:
@@ -3240,12 +3263,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['get'],
         url_path='debug-ranking-availability',
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[permissions.IsAuthenticated],
     )
     def debug_ranking_availability(self, request):
-        # Admin-only per #371. The PlatformSetting flag remains as a master
-        # on/off but is now redundant with the IsAdminUser gate; left for
-        # backwards compatibility with the existing admin UI toggle.
+        # Recommendation Showcase: gated solely by the PlatformSetting toggle
+        # so a moderator can flip it on for the whole community at once.
         platform_settings = PlatformSetting.get_solo()
         return Response({'enabled': platform_settings.ranking_debug_enabled})
 
@@ -3253,16 +3275,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['post'],
         url_path='debug-ranking',
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[permissions.IsAuthenticated],
     )
     def debug_ranking(self, request):
-        # Admin-only per #371. Optional simulated_user_id lets an admin compute
-        # the payload from another user's perspective (read-only -- no access to
-        # the simulated user's messages, settings, or other private state).
+        # Open to any authenticated user once the moderator turns the showcase
+        # on. simulated_user_id stays admin-only because it'd otherwise leak
+        # another user's tag overlap and follow signal.
         platform_settings = PlatformSetting.get_solo()
         if not platform_settings.ranking_debug_enabled:
             return create_error_response(
-                'Ranking debug is currently disabled by an administrator.',
+                'Ranking showcase is currently disabled by a moderator.',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN,
             )
@@ -3286,6 +3308,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 return None
 
         simulated_user_id = request.data.get('simulated_user_id')
+        # `simulated_user_id` would expose another user's tag overlap and
+        # follow graph, so keep it admin-only even when the showcase is open
+        # for everyone else.
+        if simulated_user_id and getattr(request.user, 'role', None) not in ADMIN_ROLES:
+            simulated_user_id = None
 
         payload = build_service_debug_payload(
             service_ids=service_ids,
