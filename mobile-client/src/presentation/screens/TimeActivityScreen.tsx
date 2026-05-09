@@ -30,9 +30,13 @@ import type { UserHistoryItem } from "../../api/types";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import {
   activeAgreementParticipantLabel,
+  completedGroupOfferParticipantCount,
   completedTransactionParticipantLabel,
   groupActiveAgreements,
   groupTransactionRows,
+  isTimeActivityParticipantStatus,
+  timeActivityAvatarStackWidth,
+  timeActivityVisibleParticipants,
   type GroupedTransactionRow,
   type TimeActivityAgreement as ExpectedAgreement,
 } from "../../utils/timeActivityGrouping";
@@ -402,6 +406,17 @@ export default function TimeActivityScreen() {
     for (const agreement of agreementParticipants) {
       if (!agreement.service_id || agreement.service_type !== "Offer") continue;
       if (agreement.schedule_type !== "One-Time" || (agreement.max_participants ?? 0) <= 1) continue;
+      if (!isTimeActivityParticipantStatus(agreement.status)) continue;
+      map.set(agreement.service_id, [...(map.get(agreement.service_id) ?? []), agreement]);
+    }
+    return map;
+  }, [agreementParticipants]);
+  const completedAgreementParticipantsByServiceId = useMemo(() => {
+    const map = new Map<string, ExpectedAgreement[]>();
+    for (const agreement of agreementParticipants) {
+      if (!agreement.service_id || agreement.service_type !== "Offer") continue;
+      if (agreement.schedule_type !== "One-Time" || (agreement.max_participants ?? 0) <= 1) continue;
+      if (agreement.status !== "completed") continue;
       map.set(agreement.service_id, [...(map.get(agreement.service_id) ?? []), agreement]);
     }
     return map;
@@ -443,15 +458,29 @@ export default function TimeActivityScreen() {
           const participants = transaction.service_id
             ? agreementParticipantsByServiceId.get(transaction.service_id)
             : undefined;
-          return participants?.length ?? null;
+          const completedParticipants = transaction.service_id
+            ? completedAgreementParticipantsByServiceId.get(transaction.service_id)
+            : undefined;
+          return completedGroupOfferParticipantCount({
+            participantCount: participants?.length,
+            completedCount: completedParticipants?.length,
+          });
         },
         participants: (transaction) => {
-          return transaction.service_id
-            ? agreementParticipantsByServiceId.get(transaction.service_id)
-            : undefined;
+          if (!transaction.service_id) return undefined;
+          const completedParticipants = completedAgreementParticipantsByServiceId.get(transaction.service_id);
+          return completedParticipants && completedParticipants.length > 0
+            ? completedParticipants
+            : agreementParticipantsByServiceId.get(transaction.service_id);
         },
       }),
-    [activeAgreementByServiceId, agreementParticipantsByServiceId, transactions, user?.id],
+    [
+      activeAgreementByServiceId,
+      agreementParticipantsByServiceId,
+      completedAgreementParticipantsByServiceId,
+      transactions,
+      user?.id,
+    ],
   );
   const insightStats = useMemo(() => {
     const now = new Date();
@@ -1237,6 +1266,9 @@ export default function TimeActivityScreen() {
                               : agreement.reserved_delta !== 0
                                 ? "Reserved now"
                                 : "No time change";
+                          const agreementParticipants = isGroupedAgreement
+                            ? timeActivityVisibleParticipants(agreement.participants)
+                            : [];
 
                           return (
                             <Pressable
@@ -1279,18 +1311,57 @@ export default function TimeActivityScreen() {
                                     </Text>
                                   </Pressable>
                                   <View style={styles.compactBadgeRow}>
-                                    <Pressable
-                                      onPress={() => openPublicProfile(agreement.counterpart_id)}
-                                      disabled={!agreement.counterpart_id || agreement.counterpart_id === user?.id}
-                                      style={({ pressed }) => [
-                                        styles.neutralPill,
-                                        pressed && styles.pressed,
-                                      ]}
-                                    >
-                                      <Text style={styles.neutralPillText}>
-                                        {agreement.counterpart_name}
-                                      </Text>
-                                    </Pressable>
+                                    {agreementParticipants.length > 0 ? (
+                                      <View style={styles.memberPill}>
+                                        <View
+                                          style={[
+                                            styles.avatarStack,
+                                            { width: timeActivityAvatarStackWidth(agreementParticipants.length) },
+                                          ]}
+                                        >
+                                          {agreementParticipants.map((participant, avatarIndex) => {
+                                            const initial = participant.counterpart_name.trim().charAt(0).toUpperCase() || "?";
+                                            return participant.counterpart_avatar_url ? (
+                                              <Image
+                                                key={participant.id}
+                                                source={{ uri: participant.counterpart_avatar_url }}
+                                                style={[
+                                                  styles.stackedAvatar,
+                                                  avatarIndex > 0 && styles.stackedAvatarOverlap,
+                                                ]}
+                                              />
+                                            ) : (
+                                              <View
+                                                key={participant.id}
+                                                style={[
+                                                  styles.stackedAvatar,
+                                                  styles.whoAvatarFallback,
+                                                  avatarIndex > 0 && styles.stackedAvatarOverlap,
+                                                ]}
+                                              >
+                                                <Text style={styles.whoAvatarInitial}>{initial}</Text>
+                                              </View>
+                                            );
+                                          })}
+                                        </View>
+                                        <Text style={styles.neutralPillText}>
+                                          {agreement.participant_count} members
+                                        </Text>
+                                      </View>
+                                    ) : (
+                                      <Pressable
+                                        onPress={() => openPublicProfile(agreement.counterpart_id)}
+                                        disabled={!agreement.counterpart_id || agreement.counterpart_id === user?.id}
+                                        style={({ pressed }) => [
+                                          styles.neutralPill,
+                                          pressed && styles.pressed,
+                                        ]}
+                                      >
+                                        <Text style={styles.neutralPillText}>
+                                          {agreement.counterpart_name}
+                                        </Text>
+                                      </Pressable>
+                                    )}
                                     <View
                                       style={[
                                         styles.statePill,
@@ -1492,7 +1563,7 @@ export default function TimeActivityScreen() {
         const counterpartAvatarUrl = item.counterpartAvatarUrl ?? null;
         const counterpartInitial = counterpart.trim().charAt(0).toUpperCase() || "?";
         const participantAvatars = item.isMultiUse
-          ? (item.participants ?? []).slice(0, 2)
+          ? timeActivityVisibleParticipants(item.participants)
           : [];
         const isRefund = transaction.transaction_type === "refund";
         const isPositive = item.amount >= 0;
@@ -1562,7 +1633,12 @@ export default function TimeActivityScreen() {
                 ]}
               >
                 {participantAvatars.length > 0 ? (
-                  <View style={styles.avatarStack}>
+                  <View
+                    style={[
+                      styles.avatarStack,
+                      { width: timeActivityAvatarStackWidth(participantAvatars.length) },
+                    ]}
+                  >
                     {participantAvatars.map((participant, avatarIndex) => {
                       const initial = participant.counterpart_name.trim().charAt(0).toUpperCase() || "?";
                       return participant.counterpart_avatar_url ? (
@@ -2561,7 +2637,15 @@ const styles = StyleSheet.create({
   avatarStack: {
     flexDirection: "row",
     alignItems: "center",
-    width: 34,
+  },
+  memberPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: colors.GRAY100,
   },
   stackedAvatar: {
     width: 22,

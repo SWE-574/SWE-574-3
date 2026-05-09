@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   groupActiveAgreements,
   groupTransactionRows,
+  completedGroupOfferParticipantCount,
+  isTimeActivityParticipantStatus,
+  timeActivityVisibleParticipants,
   transactionGroupDetailParticipants,
   type TimeActivityAgreement,
   type TimeActivityTransaction,
@@ -130,5 +133,31 @@ describe('timeActivityGrouping', () => {
     ]
 
     expect(transactionGroupDetailParticipants(completedParticipants, activeFallback)).toEqual(completedParticipants)
+  })
+
+  it('uses completed participant count over active session count for completed group transfer rows', () => {
+    expect(completedGroupOfferParticipantCount({ participantCount: 5, completedCount: 3 })).toBe(3)
+    expect(completedGroupOfferParticipantCount({ participantCount: 2, completedCount: 0 })).toBe(2)
+  })
+
+  it('excludes inactive handshake statuses from group offer participant displays', () => {
+    expect(isTimeActivityParticipantStatus('accepted')).toBe(true)
+    expect(isTimeActivityParticipantStatus('completed')).toBe(true)
+    expect(isTimeActivityParticipantStatus('declined')).toBe(false)
+    expect(isTimeActivityParticipantStatus('cancelled')).toBe(false)
+  })
+
+  it('keeps all participant avatars visible instead of capping at two', () => {
+    const participants = [
+      { ...baseAgreement, id: 'hs-1', counterpart_name: 'Can Sahin' },
+      { ...baseAgreement, id: 'hs-2', counterpart_name: 'Zeynep Arslan' },
+      { ...baseAgreement, id: 'hs-3', counterpart_name: 'Ayse Kaya' },
+    ]
+
+    expect(timeActivityVisibleParticipants(participants).map((item) => item.id)).toEqual([
+      'hs-1',
+      'hs-2',
+      'hs-3',
+    ])
   })
 })

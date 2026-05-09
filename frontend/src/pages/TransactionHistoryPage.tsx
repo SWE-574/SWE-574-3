@@ -12,8 +12,11 @@ import { useAuthStore } from '@/store/useAuthStore'
 import type { Transaction, TransactionSummary, User } from '@/types'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 import {
+  completedGroupOfferParticipantCount,
   groupActiveAgreements,
   groupTransactionRows,
+  isTimeActivityParticipantStatus,
+  timeActivityVisibleParticipants,
   transactionGroupDetailParticipants,
   type GroupedTransactionRow,
   type TimeActivityAgreement as ExpectedAgreement,
@@ -332,7 +335,7 @@ function ParticipantAvatarStack({ participants, fallbackName }: {
   participants?: ExpectedAgreement[]
   fallbackName: string
 }) {
-  const visibleParticipants = (participants ?? []).slice(0, 2)
+  const visibleParticipants = timeActivityVisibleParticipants(participants)
 
   if (visibleParticipants.length === 0) {
     return (
@@ -616,7 +619,7 @@ const TransactionHistoryPage = () => {
     const map = new Map<string, ExpectedAgreement[]>()
     for (const handshake of handshakes) {
       if (!isMultiUseHandshake(handshake) || handshake.service_type !== 'Offer') continue
-      if (!['accepted', 'checked_in', 'attended', 'completed'].includes(handshake.status)) continue
+      if (!isTimeActivityParticipantStatus(handshake.status)) continue
 
       const agreement = toExpectedAgreement(handshake, user)
       if (!agreement?.service_id) continue
@@ -662,7 +665,10 @@ const TransactionHistoryPage = () => {
         const completedCount = transaction.service_id
           ? (completedMultiUseByService.get(transaction.service_id)?.length ?? 0)
           : 0
-        return Math.max(participants?.length ?? 0, completedCount)
+        return completedGroupOfferParticipantCount({
+          participantCount: participants?.length,
+          completedCount,
+        })
       },
       participants: (transaction) => {
         return transaction.service_id
@@ -1456,6 +1462,9 @@ const TransactionHistoryPage = () => {
                           : agreement.reserved_delta !== 0
                             ? 'reserved now'
                             : 'no time change'
+                        const participantAvatars = isGroupedAgreement
+                          ? timeActivityVisibleParticipants(agreement.participants)
+                          : []
 
                         return (
                           <Grid
@@ -1527,7 +1536,9 @@ const TransactionHistoryPage = () => {
                               }}
                               style={{ cursor: agreement.counterpart_id ? 'pointer' : 'default' }}
                             >
-                              {agreement.counterpart_avatar_url ? (
+                              {participantAvatars.length > 0 ? (
+                                <ParticipantAvatarStack participants={participantAvatars} fallbackName={agreement.counterpart_name} />
+                              ) : agreement.counterpart_avatar_url ? (
                                 <Avatar.Root size="xs">
                                   <Avatar.Image src={agreement.counterpart_avatar_url} alt={agreement.counterpart_name} />
                                   <Avatar.Fallback name={agreement.counterpart_name} />

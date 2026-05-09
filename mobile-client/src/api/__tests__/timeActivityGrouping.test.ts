@@ -1,8 +1,12 @@
 import {
   activeAgreementParticipantLabel,
+  completedGroupOfferParticipantCount,
   completedTransactionParticipantLabel,
   groupActiveAgreements,
   groupTransactionRows,
+  isTimeActivityParticipantStatus,
+  timeActivityAvatarStackWidth,
+  timeActivityVisibleParticipants,
   type TimeActivityAgreement,
   type TimeActivityTransaction,
 } from "../../utils/timeActivityGrouping";
@@ -112,5 +116,36 @@ describe("timeActivityGrouping", () => {
 
   it("labels active agreement participants as session confirmed", () => {
     expect(activeAgreementParticipantLabel("accepted")).toBe("Session confirmed");
+  });
+
+  it("uses completed participant count over active session count for completed group transfer rows", () => {
+    expect(completedGroupOfferParticipantCount({ participantCount: 5, completedCount: 3 })).toBe(3);
+    expect(completedGroupOfferParticipantCount({ participantCount: 2, completedCount: 0 })).toBe(2);
+  });
+
+  it("excludes inactive handshake statuses from group offer participant displays", () => {
+    expect(isTimeActivityParticipantStatus("accepted")).toBe(true);
+    expect(isTimeActivityParticipantStatus("completed")).toBe(true);
+    expect(isTimeActivityParticipantStatus("declined")).toBe(false);
+    expect(isTimeActivityParticipantStatus("cancelled")).toBe(false);
+  });
+
+  it("keeps all participant avatars visible instead of capping at two", () => {
+    const participants = [
+      { ...groupOfferAgreement, id: "hs-1", counterpart_name: "Can Sahin" },
+      { ...groupOfferAgreement, id: "hs-2", counterpart_name: "Zeynep Arslan" },
+      { ...groupOfferAgreement, id: "hs-3", counterpart_name: "Ayse Kaya" },
+    ];
+
+    expect(timeActivityVisibleParticipants(participants).map((item) => item.id)).toEqual([
+      "hs-1",
+      "hs-2",
+      "hs-3",
+    ]);
+  });
+
+  it("sizes stacked avatars for every visible participant", () => {
+    expect(timeActivityAvatarStackWidth(1)).toBe(22);
+    expect(timeActivityAvatarStackWidth(3)).toBe(46);
   });
 });

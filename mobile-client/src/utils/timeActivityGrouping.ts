@@ -79,9 +79,34 @@ function sessionKey(item: { service_id?: string | null; scheduled_time?: string 
 function representativeDelta(values: number[]) {
   const nonZero = values.filter((value) => value !== 0);
   if (nonZero.length === 0) return 0;
+  // Group-offer rows represent one shared session, so we keep one representative
+  // participant delta instead of summing duplicate provider-side transfer rows.
   const positives = nonZero.filter((value) => value > 0);
   if (positives.length > 0) return Math.max(...positives);
   return Math.min(...nonZero);
+}
+
+export function isTimeActivityParticipantStatus(status?: string | null) {
+  return status === "accepted" || status === "checked_in" || status === "attended" || status === "completed";
+}
+
+export function completedGroupOfferParticipantCount({
+  participantCount,
+  completedCount,
+}: {
+  participantCount?: number | null;
+  completedCount?: number | null;
+}) {
+  return completedCount && completedCount > 0 ? completedCount : participantCount ?? null;
+}
+
+export function timeActivityVisibleParticipants<T>(participants?: T[] | null): T[] {
+  return participants ?? [];
+}
+
+export function timeActivityAvatarStackWidth(participantCount: number, avatarSize = 22, overlap = 10) {
+  if (participantCount <= 0) return 0;
+  return avatarSize + (participantCount - 1) * (avatarSize - overlap);
 }
 
 export function groupActiveAgreements<T extends TimeActivityAgreement>(agreements: T[]): TimeActivityAgreement[] {
