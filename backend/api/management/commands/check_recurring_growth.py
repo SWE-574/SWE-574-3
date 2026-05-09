@@ -27,8 +27,10 @@ class Command(BaseCommand):
         recent_window_start = now - timedelta(days=7)
         prior_window_start = now - timedelta(days=14)
 
-        # schedule_type literal verified against api.models.Service.SCHEDULE_CHOICES
+        # Recurrence is Event-only after the polish PR; Offer/Need are
+        # always One-Time so this command intentionally ignores them.
         candidates = Service.objects.filter(
+            type='Event',
             schedule_type='Recurrent',
             status='Active',
         ).filter(
@@ -60,7 +62,7 @@ class Command(BaseCommand):
             unflagged += int(not stale)
 
         total_recurring = Service.objects.filter(
-            schedule_type='Recurrent', status='Active'
+            type='Event', schedule_type='Recurrent', status='Active',
         ).count()
         skipped = total_recurring - flagged - unflagged
         self.stdout.write(self.style.SUCCESS(

@@ -145,20 +145,6 @@ export const serviceAPI = {
     return Array.isArray(data) ? data : (data.results ?? [])
   },
 
-  setEndorsed: async (
-    serviceId: string,
-    endorsed: boolean,
-  ): Promise<{ is_endorsed: boolean; endorsement_count: number }> => {
-    const res = endorsed
-      ? await apiClient.post<{ is_endorsed: boolean; endorsement_count: number }>(
-          `/services/${serviceId}/endorse/`,
-        )
-      : await apiClient.delete<{ is_endorsed: boolean; endorsement_count: number }>(
-          `/services/${serviceId}/endorse/`,
-        )
-    return res.data
-  },
-
   report: async (
     serviceId: string,
     issueType: 'inappropriate_content' | 'spam' | 'service_issue' | 'scam' | 'harassment' | 'other',

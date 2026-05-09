@@ -11,13 +11,11 @@ import {
 import {
   FiBookmark,
   FiCalendar,
-  FiCheckCircle,
   FiClock,
   FiInfo,
   FiMapPin,
   FiSlash,
   FiStar,
-  FiThumbsUp,
 } from 'react-icons/fi'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 
@@ -97,8 +95,6 @@ export default function RecommendationCard({
   const navigate = useNavigate()
   const [isSaved, setIsSaved] = useState(Boolean(service.is_saved))
   const [savePending, setSavePending] = useState(false)
-  const [isEndorsed, setIsEndorsed] = useState(Boolean(service.is_endorsed))
-  const [endorsePending, setEndorsePending] = useState(false)
   const [requestPending, setRequestPending] = useState(false)
   const [requested, setRequested] = useState(false)
   const [dismissPending, setDismissPending] = useState(false)
@@ -131,23 +127,6 @@ export default function RecommendationCard({
       console.error('RecommendationCard: save failed', err)
     } finally {
       setSavePending(false)
-    }
-  }
-
-  const handleEndorse = async (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (endorsePending) return
-    const next = !isEndorsed
-    setIsEndorsed(next)
-    setEndorsePending(true)
-    try {
-      await serviceAPI.setEndorsed(service.id, next)
-    } catch (err) {
-      setIsEndorsed(!next)
-      console.error('RecommendationCard: endorse failed', err)
-    } finally {
-      setEndorsePending(false)
     }
   }
 
@@ -409,36 +388,6 @@ export default function RecommendationCard({
           >
             {savePending ? <Spinner size="xs" /> : <FiBookmark size={iconBtnIconSize} />}
           </Box>
-          {service.is_endorsable ? (
-            <Box
-              as="button"
-              onClick={(e) => handleEndorse(e as unknown as React.MouseEvent)}
-              aria-label={isEndorsed ? 'Remove endorsement' : 'Endorse'}
-              aria-pressed={isEndorsed}
-              w={iconBtnSize}
-              h={iconBtnSize}
-              borderRadius="full"
-              bg={isEndorsed ? 'green.50' : 'gray.50'}
-              color={isEndorsed ? 'green.700' : 'gray.600'}
-              borderWidth="1px"
-              borderColor={isEndorsed ? 'green.200' : 'gray.200'}
-              display="inline-flex"
-              alignItems="center"
-              justifyContent="center"
-              cursor={endorsePending ? 'default' : 'pointer'}
-              transition="all 0.15s"
-              _hover={endorsePending ? undefined : { bg: isEndorsed ? 'green.100' : 'gray.100' }}
-              style={{ opacity: endorsePending ? 0.7 : 1 }}
-            >
-              {endorsePending ? (
-                <Spinner size="xs" />
-              ) : isEndorsed ? (
-                <FiCheckCircle size={iconBtnIconSize} />
-              ) : (
-                <FiThumbsUp size={iconBtnIconSize} />
-              )}
-            </Box>
-          ) : null}
           <Box
             as="button"
             onClick={(e) => handleDismiss(e as unknown as React.MouseEvent)}

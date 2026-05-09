@@ -1955,6 +1955,52 @@ class EventHandshakeService:
                     service=service,
                 )
 
+            # Auto-repost recurring events: when the organizer completes a
+            # Recurrent Event with a recurrence_interval_days cadence, spawn a
+            # fresh copy with scheduled_time shifted forward by that interval.
+            # The post_save signal in signals.py emits SERVICE_CREATED for it.
+            if (
+                service.schedule_type == 'Recurrent'
+                and service.recurrence_interval_days
+                and service.scheduled_time
+            ):
+                EventHandshakeService._repost_recurring_event(service)
+
+    @staticmethod
+    def _repost_recurring_event(original: Service) -> Service:
+        """Clone a completed recurring Event with scheduled_time shifted by
+        recurrence_interval_days. Tags are copied; participants and chat
+        history are not. The organizer doesn't need to do anything."""
+        next_time = original.scheduled_time + timedelta(
+            days=original.recurrence_interval_days
+        )
+        clone = Service.objects.create(
+            user=original.user,
+            title=original.title,
+            description=original.description,
+            type='Event',
+            duration=original.duration,
+            location_type=original.location_type,
+            location_area=original.location_area,
+            location_lat=original.location_lat,
+            location_lng=original.location_lng,
+            location=original.location,
+            session_exact_location=original.session_exact_location,
+            session_exact_location_lat=original.session_exact_location_lat,
+            session_exact_location_lng=original.session_exact_location_lng,
+            session_location_guide=original.session_location_guide,
+            status='Active',
+            max_participants=original.max_participants,
+            schedule_type='Recurrent',
+            recurrence_interval_days=original.recurrence_interval_days,
+            schedule_details=original.schedule_details,
+            scheduled_time=next_time,
+            requires_qr_checkin=original.requires_qr_checkin,
+        )
+        # Copy tags via the M2M after the row is created.
+        clone.tags.set(original.tags.all())
+        return clone
+
     @staticmethod
     def cancel_event(service: Service, organizer: User, reason: str = '') -> None:
         """

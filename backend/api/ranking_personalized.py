@@ -74,10 +74,8 @@ def engagement_signal(
     """Jaccard overlap between the candidate's tags and the aggregate tag
     set of services the viewer has saved (private bookmarks).
 
-    Endorsements are intentionally excluded — they're a public quality
-    signal handled elsewhere, not a personal-preference signal.
-    Completed handshakes are also out: they would anchor the user too
-    tightly to past collaborations.
+    Completed handshakes are deliberately excluded — they would anchor the
+    viewer too tightly to past collaborations.
 
     Returns a value in [0, 1].
     """
@@ -353,8 +351,7 @@ def score_for_you(services, viewer) -> list[tuple]:
         )
 
     # Pre-fetch saved + dismissed service tag aggregates for the new
-    # engagement / dismissed_similarity signals. Saves only — endorsements
-    # are a public quality signal, not a private preference signal.
+    # engagement / dismissed_similarity signals. Saves only.
     saved_tag_qids: set = set()
     dismissed_tag_qids: set = set()
     if viewer_id:

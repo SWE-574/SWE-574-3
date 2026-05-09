@@ -14,6 +14,7 @@ import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { canDirectlyAcceptHandshake } from '@/utils/handshakeActions'
+import { isEventRecurrent } from '@/utils/eventRecurrence'
 import { MapView } from '@/components/MapView'
 import SaveEndorseControls from '@/components/SaveEndorseControls'
 import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
@@ -576,7 +577,7 @@ export default function ServiceDetailPage() {
     : 'Unknown'
 
   const isOwn      = !!user?.id && provId === user.id
-  const isRecurr   = service?.schedule_type === 'Recurrent'
+  const isRecurr   = isEventRecurrent(service)
   const isFull     = service != null && service.max_participants > 0
     && (service.participant_count ?? 0) >= service.max_participants
   const isOffer    = service?.type === 'Offer'
@@ -1135,7 +1136,7 @@ export default function ServiceDetailPage() {
                     >
                       {isOffer ? 'Offer' : isEvent ? 'Event' : 'Need'}
                     </Box>
-                    {isRecurr && !isEvent && (
+                    {isRecurr && (
                       <Box px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
                         bg="rgba(255,255,255,0.15)" color={WHITE}
                         display="flex" alignItems="center" gap="4px"

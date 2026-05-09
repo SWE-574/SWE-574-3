@@ -161,13 +161,16 @@ export async function apiRequest<T>(
   }
   if (!response.ok) {
     const text = await response.text();
-    let message = text;
+    let message: string;
     try {
       const json = JSON.parse(text);
       message =
         json.detail || json.message || json.error || JSON.stringify(json);
     } catch {
-      message = message || response.statusText;
+      // Non-JSON body (HTML error page, plain text, empty). Do not surface
+      // the raw body as the user-facing message — callers render it directly.
+      message =
+        response.statusText || `Request failed with status ${response.status}`;
     }
     throw new ApiHttpError(response.status, message, text);
   }

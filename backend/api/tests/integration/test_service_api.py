@@ -826,7 +826,11 @@ class TestServiceRetrieveStatusVisibility:
             'location_lat': '41.042200',
             'location_lng': '29.008900',
             'max_participants': 5,
-            'schedule_type': 'Recurrent',
+            'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
+            'session_exact_location': 'Beşiktaş Culture Center, Beşiktaş, İstanbul',
+            'session_exact_location_lat': '41.042200',
+            'session_exact_location_lng': '29.008900',
         })
         assert_api_response(response, 201, schema={'max_participants': 5})
         service = Service.objects.get(id=response.data['id'])

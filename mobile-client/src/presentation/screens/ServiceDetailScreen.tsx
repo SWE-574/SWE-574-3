@@ -69,7 +69,7 @@ import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../constants/colors";
 import ImagePreviewModal from "../components/ImagePreviewModal";
-import SaveEndorseButtons from "../components/SaveEndorseButtons";
+import SaveButton from "../components/SaveButton";
 import { ChatEvaluationModal } from "../components/chat/ChatEvaluationModal";
 import { EventEvaluationSummaryCard } from "../components/service/EventEvaluationSummaryCard";
 import ServiceCommentsSection from "../components/service/ServiceCommentsSection";
@@ -1326,7 +1326,7 @@ export default function ServiceDetailScreen() {
             </View>
           </View>
 
-          <SaveEndorseButtons
+          <SaveButton
             service={service}
             isOwner={isOwner}
             onChange={(patch) =>

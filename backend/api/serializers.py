@@ -543,10 +543,7 @@ class ServiceSerializer(serializers.ModelSerializer):
     circle_lat = serializers.SerializerMethodField()
     circle_lng = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
-    is_endorsed = serializers.SerializerMethodField()
-    endorsement_count = serializers.SerializerMethodField()
     is_dismissed = serializers.SerializerMethodField()
-    is_endorsable = serializers.SerializerMethodField()
     # source / for_you_signals / explore_pool are transient: not stored on
     # the Service model. They are attached to the instance by _list_for_you()
     # and the explore-only list path in views.py before serialization.
@@ -566,17 +563,16 @@ class ServiceSerializer(serializers.ModelSerializer):
             'location_type', 'location_area', 'session_exact_location', 'session_exact_location_lat', 'session_exact_location_lng', 'session_location_guide', 'location_lat', 'location_lng',
             'circle_lat', 'circle_lng',
             'status', 'max_participants', 'schedule_type',
-            'schedule_details', 'scheduled_time', 'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
+            'schedule_details', 'scheduled_time', 'recurrence_interval_days',
+            'created_at', 'tags', 'tag_ids', 'tag_names', 'wikidata_labels_json', 'media_order', 'replace_media', 'comment_count', 'hot_score',
             'is_visible', 'is_pinned', 'requires_qr_checkin', 'media', 'participant_count', 'event_evaluation_summary',
-            'is_saved', 'is_endorsed', 'endorsement_count',
-            'is_dismissed', 'is_endorsable',
+            'is_saved', 'is_dismissed',
             'is_newcomer_owner', 'source', 'for_you_signals', 'explore_pool',
             'edit_locked', 'edit_lock_reason',
         ]
         read_only_fields = [
             'user', 'hot_score', 'is_visible', 'is_pinned',
-            'is_saved', 'is_endorsed', 'endorsement_count',
-            'is_dismissed', 'is_endorsable',
+            'is_saved', 'is_dismissed',
             'is_newcomer_owner',
             'source', 'for_you_signals', 'explore_pool',
             'edit_locked', 'edit_lock_reason',
@@ -598,30 +594,6 @@ class ServiceSerializer(serializers.ModelSerializer):
         from .models import SavedService
         return SavedService.objects.filter(user=viewer, service=obj).exists()
 
-    def get_is_endorsed(self, obj):
-        """True when the current viewer has endorsed this service (#483).
-        Annotation-aware; same fallback pattern as get_is_saved.
-        """
-        annotated = getattr(obj, 'is_endorsed_anno', None)
-        if annotated is not None:
-            return bool(annotated)
-        request = self.context.get('request') if hasattr(self, 'context') else None
-        viewer = getattr(request, 'user', None) if request else None
-        if viewer is None or not viewer.is_authenticated:
-            return False
-        from .models import Endorsement
-        return Endorsement.objects.filter(endorser=viewer, service=obj).exists()
-
-    def get_endorsement_count(self, obj):
-        """Public endorsement count for the service (#483).
-        Annotation-aware; falls back to a per-row count for detail views.
-        """
-        annotated = getattr(obj, 'endorsement_count_anno', None)
-        if annotated is not None:
-            return int(annotated)
-        from .models import Endorsement
-        return Endorsement.objects.filter(service=obj).count()
-
     def get_is_dismissed(self, obj):
         """True when the current viewer has dismissed this service via Pulse's
         Not-interested action. Annotation-aware; per-row fallback for detail.
@@ -635,23 +607,6 @@ class ServiceSerializer(serializers.ModelSerializer):
             return False
         from .models import ServiceDismissal
         return ServiceDismissal.objects.filter(viewer=viewer, service=obj).exists()
-
-    def get_is_endorsable(self, obj):
-        """True when the current viewer has at least one completed handshake on
-        this service — the eligibility gate for showing the Endorse button on
-        Pulse cards. Annotation-aware; per-row fallback for detail.
-        """
-        annotated = getattr(obj, 'is_endorsable_anno', None)
-        if annotated is not None:
-            return bool(annotated)
-        request = self.context.get('request') if hasattr(self, 'context') else None
-        viewer = getattr(request, 'user', None) if request else None
-        if viewer is None or not viewer.is_authenticated:
-            return False
-        from .models import Handshake
-        return Handshake.objects.filter(
-            requester=viewer, service=obj, status='completed',
-        ).exists()
 
     @extend_schema_field(serializers.BooleanField())
     def get_is_newcomer_owner(self, obj):
@@ -792,6 +747,24 @@ class ServiceSerializer(serializers.ModelSerializer):
         service_type = data.get('type', getattr(instance, 'type', None))
         schedule_type = data.get('schedule_type', getattr(instance, 'schedule_type', None))
         max_participants = data.get('max_participants', getattr(instance, 'max_participants', 1))
+
+        # Recurrence is Event-only. If the incoming patch tries to set
+        # schedule_type=Recurrent on an Offer/Need, force it to One-Time and
+        # strip any recurrence cadence. We deliberately only flip when the
+        # field is *in the incoming data* — partial updates that don't touch
+        # schedule_type should not silently mutate an existing instance's
+        # value, since the data migration in 0079 already coerced any legacy
+        # rows and that path would otherwise re-trigger fixed-group-offer
+        # validation on unrelated edits like lowering max_participants.
+        if service_type in ('Offer', 'Need'):
+            if data.get('schedule_type') == 'Recurrent':
+                data['schedule_type'] = 'One-Time'
+                schedule_type = 'One-Time'
+            if 'recurrence_interval_days' in data:
+                data['recurrence_interval_days'] = None
+        elif service_type == 'Event' and schedule_type != 'Recurrent':
+            # One-time Events never have a recurrence cadence.
+            data['recurrence_interval_days'] = None
         location_type = data.get('location_type', getattr(instance, 'location_type', None))
         location_area = data.get('location_area', getattr(instance, 'location_area', ''))
         session_exact_location = data.get('session_exact_location', getattr(instance, 'session_exact_location', ''))

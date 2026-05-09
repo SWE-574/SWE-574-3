@@ -12,7 +12,6 @@ export type ActivityVerb =
   | 'handshake_accepted'
   | 'handshake_completed'
   | 'user_followed'
-  | 'service_endorsed'
   | 'event_filling_up'
   | 'new_neighbor'
 

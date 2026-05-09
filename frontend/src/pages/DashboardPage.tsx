@@ -21,7 +21,7 @@ import {
   FiWifi,
   FiMenu,
   FiX,
-  FiLayers,
+  FiTrendingUp,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
 import { serviceAPI } from '@/services/serviceAPI'
@@ -44,6 +44,7 @@ import {
   WHITE,
 } from '@/theme/tokens'
 import { formatGroupOfferDateTime, isNearlyFull } from '@/utils/eventUtils'
+import { isEventRecurrent } from '@/utils/eventRecurrence'
 
 const TRANSPARENT = 'transparent'
 
@@ -56,10 +57,12 @@ const GEO_TIMEOUT       = 10_000
 
 const FILTERS = [
   { id: 'all',       label: 'All',       icon: <FiGrid size={12} /> },
+  { id: 'newest',    label: 'New',       icon: <FiTrendingUp size={12} /> },
   { id: 'online',    label: 'Online',    icon: <FiWifi size={12} /> },
   { id: 'in_person', label: 'In-person', icon: <FiMapPin size={12} /> },
   { id: 'recurrent', label: 'Recurrent', icon: <FiRefreshCw size={12} /> },
   { id: 'one_time',  label: 'One-time',  icon: <FiCalendar size={12} /> },
+  { id: 'weekend',   label: 'Weekend',   icon: <FiCalendar size={12} /> },
 ]
 
 const TYPE_FILTERS = [
@@ -235,7 +238,7 @@ function ServiceCard({
 }) {
   const owner     = service.user ?? service.provider
   const isOffer   = service.type === 'Offer'
-  const isRecurr  = service.schedule_type === 'Recurrent'
+  const isRecurr  = isEventRecurrent(service)
   const isFixedGroupOffer = isOffer && service.schedule_type === 'One-Time' && service.max_participants > 1
   const gradient  = pickGradient(service)
 
@@ -392,13 +395,11 @@ const DashboardPage = () => {
 
   const [handshakeMap, setHandshakeMap]             = useState<Map<string, Handshake>>(new Map())
   const [incomingMap, setIncomingMap]               = useState<Map<string, Handshake[]>>(new Map())
-  const [typeDropdownOpen, setTypeDropdownOpen]           = useState(false)
   const [hoveredServiceId, setHoveredServiceId]     = useState<string | null>(null)
   const [rankingDebugEnabled, setRankingDebugEnabled] = useState(false)
 
   const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const typeDropdownRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -453,7 +454,12 @@ const DashboardPage = () => {
     if (activeFilter === 'in_person') filtered = filtered.filter((s) => s.location_type === 'In-Person')
     if (activeFilter === 'recurrent') filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
     if (activeFilter === 'one_time')  filtered = filtered.filter((s) => s.schedule_type === 'One-Time')
-    filtered = [...filtered].sort(sortServicesByFeedPriority)
+    if (activeFilter === 'weekend')   filtered = filtered.filter((s) => /saturday|sunday|weekend/i.test(s.schedule_details ?? ''))
+    if (activeFilter === 'newest') {
+      filtered = [...filtered].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    } else {
+      filtered = [...filtered].sort(sortServicesByFeedPriority)
+    }
     setServices(filtered)
   }, [activeFilter, debouncedSearch, locationEnabled, userLocation, debouncedDistance])
 
@@ -525,17 +531,6 @@ const DashboardPage = () => {
       return next
     })
   }, [])
-
-  useEffect(() => {
-    if (!typeDropdownOpen) return
-    function handler(e: MouseEvent) {
-      if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target as Node)) {
-        setTypeDropdownOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [typeDropdownOpen])
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const ownServiceHandshakes = useMemo(() => Array.from(incomingMap.values()).flat(), [incomingMap])
@@ -683,52 +678,28 @@ const DashboardPage = () => {
                 </Flex>
                 {/* Divider */}
                 <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
-                {/* Type filter icon button + dropdown */}
-                <Box data-tour="type-filter" position="relative" ref={typeDropdownRef as never}>
-                  <Box
-                    as="button"
-                    onClick={() => setTypeDropdownOpen((v) => !v)}
-                    px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
-                    fontSize="12px" fontWeight={activeTypes.size > 0 ? 700 : 500}
-                    bg={activeTypes.size > 0 ? GREEN : 'transparent'}
-                    color={activeTypes.size > 0 ? WHITE : GRAY500}
-                    boxShadow={activeTypes.size > 0 ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
-                    cursor="pointer" transition="all 0.12s"
-                    display="flex" alignItems="center" gap="4px"
-                  >
-                    <FiLayers size={12} />
-                    {activeTypes.size > 0 && (
-                      <Box as="span" fontSize="10px" fontWeight={700}>{activeTypes.size}</Box>
-                    )}
-                  </Box>
-                  {typeDropdownOpen && (
-                    <Box
-                      position="absolute" top="calc(100% + 6px)" right={0}
-                      bg={WHITE} borderRadius="10px" border={`1px solid ${GRAY200}`}
-                      boxShadow="0 4px 16px rgba(0,0,0,0.10)"
-                      p="4px" zIndex={100} minW="120px"
-                    >
-                      {TYPE_FILTERS.map((tf) => {
-                        const isActive = activeTypes.has(tf.id)
-                        return (
-                          <Box
-                            key={tf.id} as="button"
-                            onClick={() => toggleType(tf.id)}
-                            px="10px" py="6px" borderRadius="7px" w="full"
-                            fontSize="12px" fontWeight={isActive ? 700 : 500}
-                            bg={isActive ? tf.activeBg : 'transparent'}
-                            color={isActive ? tf.activeColor : GRAY600}
-                            cursor="pointer" transition="all 0.12s"
-                            display="flex" alignItems="center" gap="6px"
-                          >
-                            <Box w="7px" h="7px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
-                            {tf.label}
-                          </Box>
-                        )
-                      })}
-                    </Box>
-                  )}
-                </Box>
+                {/* Type pills — Event/Offer/Need, always visible on the right */}
+                <Flex data-tour="type-filter" gap="3px" align="center">
+                  {TYPE_FILTERS.map((tf) => {
+                    const isActive = activeTypes.has(tf.id)
+                    return (
+                      <Box
+                        key={tf.id} as="button"
+                        onClick={() => toggleType(tf.id)}
+                        px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
+                        fontSize="12px" fontWeight={isActive ? 700 : 500}
+                        bg={isActive ? tf.activeBg : 'transparent'}
+                        color={isActive ? tf.activeColor : GRAY500}
+                        boxShadow={isActive ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                        cursor="pointer" transition="all 0.12s"
+                        display="flex" alignItems="center" gap="4px"
+                      >
+                        <Box w="7px" h="7px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                        <Box display={{ base: 'none', md: 'block' }}>{tf.label}</Box>
+                      </Box>
+                    )
+                  })}
+                </Flex>
               </Flex>
 
             </Flex>
@@ -757,23 +728,26 @@ const DashboardPage = () => {
               ))}
               {/* Divider */}
               <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
-              {/* Type filter icon button — shares the same dropdown ref as desktop */}
-              <Box
-                as="button" flexShrink={0}
-                onClick={() => setTypeDropdownOpen((v) => !v)}
-                px="10px" py="5px" borderRadius="20px"
-                fontSize="12px" fontWeight={activeTypes.size > 0 ? 700 : 500}
-                bg={activeTypes.size > 0 ? GREEN : WHITE}
-                color={activeTypes.size > 0 ? WHITE : GRAY600}
-                border={`1px solid ${activeTypes.size > 0 ? GREEN : GRAY200}`}
-                cursor="pointer" transition="all 0.12s"
-                display="flex" alignItems="center" gap="4px"
-              >
-                <FiLayers size={12} />
-                {activeTypes.size > 0 && (
-                  <Box as="span" fontSize="10px" fontWeight={700}>{activeTypes.size}</Box>
-                )}
-              </Box>
+              {/* Type pills — Event/Offer/Need, always visible */}
+              {TYPE_FILTERS.map((tf) => {
+                const isActive = activeTypes.has(tf.id)
+                return (
+                  <Box
+                    key={tf.id} as="button" flexShrink={0}
+                    onClick={() => toggleType(tf.id)}
+                    px="10px" py="5px" borderRadius="20px"
+                    fontSize="12px" fontWeight={isActive ? 700 : 500}
+                    bg={isActive ? tf.activeBg : WHITE}
+                    color={isActive ? tf.activeColor : GRAY600}
+                    border={`1px solid ${isActive ? tf.activeBg : GRAY200}`}
+                    cursor="pointer" transition="all 0.12s"
+                    display="flex" alignItems="center" gap="6px"
+                  >
+                    <Box w="7px" h="7px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                    {tf.label}
+                  </Box>
+                )
+              })}
             </Flex>
           </Box>
 
@@ -833,7 +807,7 @@ const DashboardPage = () => {
                   const owner    = service.user ?? service.provider
                   const isOwn    = !!user && owner?.id === user.id
                   const hs       = handshakeMap.get(service.id)
-                  const isRecurr = service.schedule_type === 'Recurrent'
+                  const isRecurr = isEventRecurrent(service)
                   const showBadge = hs && !(isRecurr && hs.status === 'completed')
                   const inList   = isOwn ? (incomingMap.get(service.id) ?? []) : []
                   const pCount   = inList.filter((h) => h.status === 'pending').length

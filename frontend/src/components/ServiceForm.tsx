@@ -17,6 +17,10 @@ import {
   maxParticipantsFloor,
   validateMaxParticipantsValue,
 } from '@/utils/serviceFormCapacity'
+import {
+  effectiveScheduleType,
+  recurrenceIntervalForSubmission,
+} from '@/utils/eventRecurrence'
 
 import {
   GREEN, GREEN_LT,
@@ -44,6 +48,7 @@ function getSchema(type: 'Offer' | 'Need' | 'Event') {
     max_participants: z.coerce.number().int().positive('Must be at least 1').max(100),
     schedule_type:    z.enum(['One-Time', 'Recurrent']),
     schedule_details: z.string().max(500).optional(),
+    recurrence_interval_days: z.coerce.number().int().min(1).max(365).optional(),
   })
 }
 
@@ -529,6 +534,7 @@ export default function ServiceForm({
       max_participants: initialService.max_participants,
       schedule_type: initialService.schedule_type,
       schedule_details: initialService.schedule_details ?? '',
+      recurrence_interval_days: initialService.recurrence_interval_days ?? undefined,
     })
 
     setSelectedTags(initialService.tags ?? [])
@@ -788,7 +794,13 @@ export default function ServiceForm({
           fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
         }
         if (scheduleTypeChanged || type === 'Event') {
-          fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
+          fd.append('schedule_type', effectiveScheduleType(type, values.schedule_type))
+        }
+        const recurrenceDays = recurrenceIntervalForSubmission(
+          type, values.schedule_type, values.recurrence_interval_days,
+        )
+        if (recurrenceDays !== null) {
+          fd.append('recurrence_interval_days', String(recurrenceDays))
         }
         if (dirtyFields.schedule_details || scheduleTypeChanged) {
           fd.append('schedule_details', values.schedule_details ?? '')
@@ -901,7 +913,15 @@ export default function ServiceForm({
           fd.append('session_location_guide', '')
         }
         fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
-        fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
+        fd.append('schedule_type', effectiveScheduleType(type, values.schedule_type))
+        {
+          const recurrenceDays = recurrenceIntervalForSubmission(
+            type, values.schedule_type, values.recurrence_interval_days,
+          )
+          if (recurrenceDays !== null) {
+            fd.append('recurrence_interval_days', String(recurrenceDays))
+          }
+        }
         if (type === 'Event') {
           fd.append('requires_qr_checkin', requiresQrCheckin ? 'true' : 'false')
         }
@@ -1220,86 +1240,86 @@ export default function ServiceForm({
               </Box>
 
               {type === 'Event' && (
-                <Box
-                  p="14px 16px" borderRadius="12px"
-                  border={`1px solid ${requiresQrCheckin ? GREEN : GRAY200}`}
-                  bg={requiresQrCheckin ? GREEN_LT : WHITE}
-                  cursor="pointer"
-                  onClick={() => setRequiresQrCheckin(!requiresQrCheckin)}
-                  transition="border-color 0.15s, background 0.15s"
-                >
-                  <Flex align="center" justify="space-between">
+                <>
+                  <Box>
+                    <Label>Repeats</Label>
+                    <Controller
+                      name="schedule_type"
+                      control={control}
+                      render={({ field }) => (
+                        <SegmentedControl
+                          value={field.value}
+                          onChange={field.onChange}
+                          options={[{ value: 'One-Time', label: 'One-time' }, { value: 'Recurrent', label: 'Recurring' }]}
+                          accent={accent}
+                        />
+                      )}
+                    />
+                  </Box>
+
+                  {schedType === 'Recurrent' && (
                     <Box>
-                      <Text fontSize="sm" fontWeight="600" color={GRAY800}>
-                        Require QR attendance
-                      </Text>
-                      <Text fontSize="11px" color={GRAY500} mt="2px">
-                        Participants must scan a QR code or enter an attendance code at the event
-                      </Text>
-                    </Box>
-                    <Box
-                      w="40px" h="22px" borderRadius="full" flexShrink={0} ml={3}
-                      bg={requiresQrCheckin ? GREEN : GRAY300}
-                      position="relative" transition="background 0.2s"
-                    >
-                      <Box
-                        position="absolute" top="2px"
-                        left={requiresQrCheckin ? '20px' : '2px'}
-                        w="18px" h="18px" borderRadius="full" bg={WHITE}
-                        boxShadow="0 1px 3px rgba(0,0,0,0.15)"
-                        transition="left 0.2s"
+                      <Label>Repeat every (days)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={365}
+                        placeholder="7"
+                        {...register('recurrence_interval_days')}
+                        style={inputStyle}
+                        _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
                       />
+                      <Text fontSize="11px" color={GRAY400} mt="5px">
+                        When this event is completed, a fresh copy is reposted with the date shifted forward by this many days.
+                      </Text>
                     </Box>
-                  </Flex>
-                </Box>
+                  )}
+
+                  <Box
+                    p="14px 16px" borderRadius="12px"
+                    border={`1px solid ${requiresQrCheckin ? GREEN : GRAY200}`}
+                    bg={requiresQrCheckin ? GREEN_LT : WHITE}
+                    cursor="pointer"
+                    onClick={() => setRequiresQrCheckin(!requiresQrCheckin)}
+                    transition="border-color 0.15s, background 0.15s"
+                  >
+                    <Flex align="center" justify="space-between">
+                      <Box>
+                        <Text fontSize="sm" fontWeight="600" color={GRAY800}>
+                          Require QR attendance
+                        </Text>
+                        <Text fontSize="11px" color={GRAY500} mt="2px">
+                          Participants must scan a QR code or enter an attendance code at the event
+                        </Text>
+                      </Box>
+                      <Box
+                        w="40px" h="22px" borderRadius="full" flexShrink={0} ml={3}
+                        bg={requiresQrCheckin ? GREEN : GRAY300}
+                        position="relative" transition="background 0.2s"
+                      >
+                        <Box
+                          position="absolute" top="2px"
+                          left={requiresQrCheckin ? '20px' : '2px'}
+                          w="18px" h="18px" borderRadius="full" bg={WHITE}
+                          boxShadow="0 1px 3px rgba(0,0,0,0.15)"
+                          transition="left 0.2s"
+                        />
+                      </Box>
+                    </Flex>
+                  </Box>
+                </>
               )}
               </>
             ) : (
-              <>
-                <Box>
-                  <Label required>
-                    <FiCalendar size={12} style={{ display: 'inline', marginRight: 5 }} />
-                    Schedule
-                  </Label>
-                  <Controller
-                    name="schedule_type"
-                    control={control}
-                    render={({ field }) => (
-                      <SegmentedControl
-                        value={field.value}
-                        onChange={field.onChange}
-                        options={[{ value: 'One-Time', label: 'One-Time' }, { value: 'Recurrent', label: 'Recurring' }]}
-                        accent={accent}
-                      />
-                    )}
-                  />
-                </Box>
-
-                {schedType === 'Recurrent' && (
-                  <Box>
-                    <Label>Schedule details</Label>
-                    <Input
-                      placeholder="e.g. Every Saturday 10–11 AM"
-                      {...register('schedule_details')}
-                      style={inputStyle}
-                      _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
-                    />
-                    <ErrTxt msg={errors.schedule_details?.message} />
-                  </Box>
-                )}
-
-                {schedType === 'One-Time' && (
-                  <Box>
-                    <Label>Schedule details <Text as="span" fontSize="11px" color={GRAY400} fontWeight={400}>(optional)</Text></Label>
-                    <Input
-                      placeholder="e.g. This weekend, flexible timing"
-                      {...register('schedule_details')}
-                      style={inputStyle}
-                      _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
-                    />
-                  </Box>
-                )}
-              </>
+              <Box>
+                <Label>Schedule details <Text as="span" fontSize="11px" color={GRAY400} fontWeight={400}>(optional)</Text></Label>
+                <Input
+                  placeholder="e.g. This weekend, flexible timing"
+                  {...register('schedule_details')}
+                  style={inputStyle}
+                  _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
+                />
+              </Box>
             )}
           </Stack>
         </Section>

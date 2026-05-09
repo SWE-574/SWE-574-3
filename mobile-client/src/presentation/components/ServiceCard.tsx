@@ -49,7 +49,8 @@ export default function ServiceCard({
     [service.user.first_name, service.user.last_name]
       .filter(Boolean)
       .join(" ") || "Unknown";
-  const isRecurring = service.schedule_type === "Recurrent";
+  const isRecurring =
+    service.type === "Event" && service.schedule_type === "Recurrent";
   const isFixedGroupOffer =
     service.type === "Offer" &&
     service.schedule_type === "One-Time" &&

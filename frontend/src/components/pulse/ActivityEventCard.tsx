@@ -125,25 +125,6 @@ function renderVerb(event: ActivityEvent): VerbRender | null {
       }
     }
 
-    case 'service_endorsed':
-      if (!svc) return null
-      return {
-        story: (
-          <>
-            <strong>{actorName}</strong> endorsed{' '}
-            <em>{svc.title}</em>
-          </>
-        ),
-        primaryAction: (
-          <RouterLink
-            to={`/service-detail/${svc.id}?from=pulse_following`}
-            style={{ textDecoration: 'none' }}
-          >
-            <Button size="sm" variant="ghost">View</Button>
-          </RouterLink>
-        ),
-      }
-
     case 'event_filling_up': {
       if (!svc) return null
       const pct = event.event_capacity_pct

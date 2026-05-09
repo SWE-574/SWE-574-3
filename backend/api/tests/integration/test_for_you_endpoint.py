@@ -6,7 +6,6 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from api.tests.helpers.factories import (
-    EndorsementFactory,
     HandshakeFactory,
     SavedServiceFactory,
     ServiceDismissalFactory,
@@ -224,7 +223,7 @@ class TestForYouMetricsEndpoint:
 @pytest.mark.integration
 class TestForYouEngagementSignals:
     """Round 3 — saves are a positive signal, dismissals are a soft negative
-    signal, endorsements are deliberately *not* an engagement input.
+    signal.
     """
     def _signals_for(self, results, service_id):
         for row in results:
@@ -258,34 +257,6 @@ class TestForYouEngagementSignals:
         assert neutral_signals is not None
         # Cooking candidate shares the saved tag set; neutral does not.
         assert cooking_signals['engagement'] > neutral_signals['engagement']
-
-    def test_endorsement_does_not_boost_for_engagement(self):
-        viewer, skill_tag = _onboarded_with_skill('Q_seed')
-        cooking = _make_tag('Q_cooking')
-
-        # The viewer endorsed a cooking-tagged service. Endorsements are a
-        # public quality signal, deliberately excluded from the personal
-        # engagement signal.
-        endorsed = ServiceFactory(type='Offer', status='Active')
-        endorsed.tags.add(cooking)
-        EndorsementFactory(endorser=viewer, service=endorsed)
-
-        # Two fresh candidates as before.
-        cooking_candidate = ServiceFactory(type='Offer', status='Active')
-        cooking_candidate.tags.add(skill_tag, cooking)
-        neutral_candidate = ServiceFactory(type='Offer', status='Active')
-        neutral_candidate.tags.add(skill_tag)
-
-        client = APIClient()
-        client.force_authenticate(user=viewer)
-        resp = client.get('/api/services/?sort=for_you')
-        assert_api_response(resp, 200)
-        results = resp.json()['results']
-        cooking_signals = self._signals_for(results, cooking_candidate.id)
-        neutral_signals = self._signals_for(results, neutral_candidate.id)
-        # Endorsement must NOT lift engagement — both should read 0.0.
-        assert cooking_signals['engagement'] == 0.0
-        assert neutral_signals['engagement'] == 0.0
 
     def test_dismissed_service_penalises_similar_candidates(self):
         viewer, skill_tag = _onboarded_with_skill('Q_seed')
