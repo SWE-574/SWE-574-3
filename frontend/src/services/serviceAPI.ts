@@ -18,9 +18,15 @@ export interface ServiceListParams {
   page_size?: number
   user_id?: string
   explore_only?: boolean
+  exclude_own?: boolean
   // FR-12c — only honored when type='Event'. ISO-8601 dates.
   date_from?: string
   date_to?: string
+}
+
+export interface ServiceListPagedResponse {
+  results: Service[]
+  count: number
 }
 
 export interface ServiceRankingDebugParams {
@@ -84,6 +90,7 @@ export const serviceAPI = {
     if (params?.page_size) queryParams.set('page_size', String(params.page_size))
     if (params?.user_id) queryParams.set('user', params.user_id)
     if (params?.explore_only) queryParams.set('explore_only', 'true')
+    if (params?.exclude_own) queryParams.set('exclude_own', 'true')
     if (params?.date_from) queryParams.set('date_from', params.date_from)
     if (params?.date_to) queryParams.set('date_to', params.date_to)
 
@@ -93,6 +100,43 @@ export const serviceAPI = {
     })
     const data = res.data
     return Array.isArray(data) ? data : (data.results ?? [])
+  },
+
+  // Paged variant — returns the DRF page envelope so callers (Browse) can
+  // render a numbered pager. Same query params as `list()`.
+  listPaged: async (
+    params?: ServiceListParams,
+    signal?: AbortSignal,
+  ): Promise<ServiceListPagedResponse> => {
+    const queryParams = new URLSearchParams()
+    if (params?.sort) queryParams.set('sort', params.sort)
+    if (params?.lat != null) queryParams.set('lat', String(params.lat))
+    if (params?.lng != null) queryParams.set('lng', String(params.lng))
+    if (params?.distance != null) queryParams.set('distance', String(params.distance))
+    if (params?.search) queryParams.set('search', params.search)
+    if (params?.type) queryParams.set('type', params.type)
+    if (params?.status) queryParams.set('status', params.status)
+    if (params?.tags?.length) params.tags.forEach((t) => queryParams.append('tags', t))
+    if (params?.page) queryParams.set('page', String(params.page))
+    if (params?.page_size) queryParams.set('page_size', String(params.page_size))
+    if (params?.user_id) queryParams.set('user', params.user_id)
+    if (params?.explore_only) queryParams.set('explore_only', 'true')
+    if (params?.exclude_own) queryParams.set('exclude_own', 'true')
+    if (params?.date_from) queryParams.set('date_from', params.date_from)
+    if (params?.date_to) queryParams.set('date_to', params.date_to)
+
+    const res = await apiClient.get<ServiceListResponse>('/services/', {
+      params: queryParams,
+      signal,
+    })
+    const data = res.data
+    if (Array.isArray(data)) {
+      return { results: data, count: data.length }
+    }
+    return {
+      results: data.results ?? [],
+      count: data.count ?? (data.results?.length ?? 0),
+    }
   },
 
   get: async (id: string, signal?: AbortSignal): Promise<Service> => {

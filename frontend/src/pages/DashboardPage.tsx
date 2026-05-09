@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { usePolling } from '@/hooks/usePolling'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
   Flex,
@@ -17,20 +17,25 @@ import {
   FiMonitor,
   FiCalendar,
   FiRefreshCw,
-  FiGrid,
-  FiWifi,
+  FiSliders,
   FiMenu,
   FiX,
+  FiZap,
+  FiCompass,
   FiTrendingUp,
+  FiNavigation,
+  FiStar,
+  FiCheck,
 } from 'react-icons/fi'
 import { MapView } from '@/components/MapView'
-import { serviceAPI } from '@/services/serviceAPI'
+import { serviceAPI, type ServiceListParams } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useGeoStore } from '@/store/useGeoStore'
 import type { Service } from '@/types'
 import { MainSidebar } from '@/components/MainSidebar'
 import { Avatar } from '@/components/Avatar'
+import { Pagination } from '@/components/Pagination'
 import RecommendationDebugBar from '@/components/RecommendationDebugBar'
 import type { Handshake } from '@/services/handshakeAPI'
 import DashboardTour from '@/components/dashboard-tour/DashboardTour'
@@ -40,29 +45,51 @@ import {
   AMBER, AMBER_LT,
   BLUE, BLUE_LT,
   RED, RED_LT,
-  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY800,
+  GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
 import { formatGroupOfferDateTime, isNearlyFull } from '@/utils/eventUtils'
 import { isEventRecurrent } from '@/utils/eventRecurrence'
 
-const TRANSPARENT = 'transparent'
-
 const DEBOUNCE_SEARCH   = 400
-const DEBOUNCE_DISTANCE = 600
+const DEBOUNCE_DISTANCE = 250
 const POLL_INTERVAL     = 60_000
 const GEO_TIMEOUT       = 10_000
+const PAGE_SIZE         = 15
 
-// ─── Filters ──────────────────────────────────────────────────────────────────
+// ─── Ranking modes ────────────────────────────────────────────────────────────
 
-const FILTERS = [
-  { id: 'all',       label: 'All',       icon: <FiGrid size={12} /> },
-  { id: 'newest',    label: 'New',       icon: <FiTrendingUp size={12} /> },
-  { id: 'online',    label: 'Online',    icon: <FiWifi size={12} /> },
+type RankingMode = 'for_you' | 'discovery' | 'trending' | 'newest' | 'nearby'
+
+interface RankingButtonDef {
+  id: RankingMode
+  label: string
+  icon: React.ReactNode
+}
+
+const RANKING_BUTTONS: RankingButtonDef[] = [
+  { id: 'for_you',   label: 'For you',   icon: <FiStar size={12} /> },
+  { id: 'discovery', label: 'Discovery', icon: <FiCompass size={12} /> },
+  { id: 'trending',  label: 'Trending',  icon: <FiTrendingUp size={12} /> },
+  { id: 'newest',    label: 'Newest',    icon: <FiZap size={12} /> },
+  { id: 'nearby',    label: 'Nearby',    icon: <FiNavigation size={12} /> },
+]
+
+// Secondary filters live in the [More filters ▾] popover. Multi-select; applied
+// client-side over the current page slice.
+type SecondaryFilter = 'online' | 'in_person' | 'one_time' | 'weekend'
+
+interface SecondaryFilterDef {
+  id: SecondaryFilter
+  label: string
+  icon: React.ReactNode
+}
+
+const SECONDARY_FILTERS: SecondaryFilterDef[] = [
+  { id: 'online',    label: 'Online',    icon: <FiMonitor size={12} /> },
   { id: 'in_person', label: 'In-person', icon: <FiMapPin size={12} /> },
-  { id: 'recurrent', label: 'Recurrent', icon: <FiRefreshCw size={12} /> },
   { id: 'one_time',  label: 'One-time',  icon: <FiCalendar size={12} /> },
-  { id: 'weekend',   label: 'Weekend',   icon: <FiCalendar size={12} /> },
+  { id: 'weekend',   label: 'Weekend',   icon: <FiRefreshCw size={12} /> },
 ]
 
 const TYPE_FILTERS = [
@@ -114,21 +141,6 @@ function timeAgo(d: string) {
     : new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function matchesDashboardSearch(service: Service, query: string) {
-  const q = query.trim().toLowerCase()
-  if (!q) return true
-
-  const haystacks = [
-    service.title,
-    service.description,
-    service.location_area,
-    service.location_type,
-    ...(service.tags?.map(tag => tag.name) ?? []),
-  ]
-
-  return haystacks.some(value => value?.toLowerCase().includes(q))
-}
-
 function sortServicesByFeedPriority(a: Service, b: Service) {
   const pinDiff = Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned))
   if (pinDiff !== 0) return pinDiff
@@ -137,6 +149,15 @@ function sortServicesByFeedPriority(a: Service, b: Service) {
   if (hotDiff !== 0) return hotDiff
 
   return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+}
+
+function matchesSecondaryFilter(service: Service, filter: SecondaryFilter): boolean {
+  switch (filter) {
+    case 'online':    return service.location_type === 'Online'
+    case 'in_person': return service.location_type === 'In-Person'
+    case 'one_time':  return service.schedule_type === 'One-Time'
+    case 'weekend':   return /saturday|sunday|weekend/i.test(service.schedule_details ?? '')
+  }
 }
 
 // ─── Tiny reusable bits ───────────────────────────────────────────────────────
@@ -377,17 +398,23 @@ const DashboardPage = () => {
   const navigate = useNavigate()
   const { isAuthenticated, user } = useAuthStore()
 
-  const [activeFilter, setActiveFilter]             = useState('all')
+  const [searchParams, setSearchParams]             = useSearchParams()
+  const page                                         = Math.max(1, Number(searchParams.get('page') ?? 1))
+
+  const [rankingMode, setRankingMode]               = useState<RankingMode>('trending')
   const [activeTypes, setActiveTypes]               = useState<Set<'Offer' | 'Need' | 'Event'>>(new Set())
+  const [secondaryFilters, setSecondaryFilters]     = useState<Set<SecondaryFilter>>(new Set())
   const [searchQuery, setSearchQuery]               = useState('')
   const [debouncedSearch, setDebouncedSearch]       = useState('')
+
   const [services, setServices]                     = useState<Service[]>([])
-  const [allActiveServices, setAllActiveServices]   = useState<Service[]>([])
+  const [totalCount, setTotalCount]                 = useState(0)
+  const [filtersOpen, setFiltersOpen]               = useState(false)
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
   const [userLocation, setUserLocation]             = useState<{ lat: number; lng: number } | null>(null)
-  const [distanceKm, setDistanceKm]                 = useState(50)
-  const [debouncedDistance, setDebouncedDistance]   = useState(50)
+  const [distanceKm, setDistanceKm]                 = useState(10)
+  const [debouncedDistance, setDebouncedDistance]   = useState(10)
   const [locationEnabled, setLocationEnabled]       = useState(() => localStorage.getItem('locationEnabled') === 'true')
   const [locationLoading, setLocationLoading]       = useState(false)
   const [locationError, setLocationError]           = useState<string | null>(null)
@@ -400,6 +427,39 @@ const DashboardPage = () => {
 
   const searchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const distanceTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const goToPage = useCallback((p: number) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (p <= 1) next.delete('page')
+        else next.set('page', String(p))
+        return next
+      },
+      { replace: false },
+    )
+  }, [setSearchParams])
+
+  // Reset to page 1 whenever a filter / search / mode changes — otherwise the
+  // viewer sees an empty page when the result set shrinks.
+  const filterKey = useMemo(
+    () => JSON.stringify({
+      mode: rankingMode,
+      types: Array.from(activeTypes).sort(),
+      filters: Array.from(secondaryFilters).sort(),
+      search: debouncedSearch,
+    }),
+    [rankingMode, activeTypes, secondaryFilters, debouncedSearch],
+  )
+  const previousFilterKey = useRef(filterKey)
+  useEffect(() => {
+    if (previousFilterKey.current !== filterKey && page !== 1) {
+      previousFilterKey.current = filterKey
+      goToPage(1)
+    } else {
+      previousFilterKey.current = filterKey
+    }
+  }, [filterKey, page, goToPage])
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -434,34 +494,82 @@ const DashboardPage = () => {
   }, [])
 
   const fetchServices = useCallback(async (signal: AbortSignal) => {
-    let raw: typeof services
-    if (locationEnabled && userLocation) {
-      // Distance filter only affects In-Person — fetch Online separately and merge
-      const [nearby, online] = await Promise.all([
-        serviceAPI.list({ lat: userLocation.lat, lng: userLocation.lng, distance: debouncedDistance }, signal),
-        serviceAPI.list({ search: debouncedSearch || undefined }, signal),
-      ])
-      const onlineOnly = online.filter((s) => s.location_type === 'Online')
-      raw = [...nearby, ...onlineOnly]
-    } else {
-      raw = await serviceAPI.list({ search: debouncedSearch || undefined }, signal)
+    const baseParams: ServiceListParams = {
+      exclude_own: true,
+      search: debouncedSearch || undefined,
+      page,
+      page_size: PAGE_SIZE,
     }
-    const active = raw.filter((s) => s.status === 'Active' && s.is_visible)
-    const unique = Array.from(new Map(active.map((s) => [s.id, s])).values())
-    setAllActiveServices(unique)
-    let filtered = unique.filter((service) => matchesDashboardSearch(service, debouncedSearch))
-    if (activeFilter === 'online')    filtered = filtered.filter((s) => s.location_type === 'Online')
-    if (activeFilter === 'in_person') filtered = filtered.filter((s) => s.location_type === 'In-Person')
-    if (activeFilter === 'recurrent') filtered = filtered.filter((s) => s.schedule_type === 'Recurrent')
-    if (activeFilter === 'one_time')  filtered = filtered.filter((s) => s.schedule_type === 'One-Time')
-    if (activeFilter === 'weekend')   filtered = filtered.filter((s) => /saturday|sunday|weekend/i.test(s.schedule_details ?? ''))
-    if (activeFilter === 'newest') {
-      filtered = [...filtered].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    } else {
-      filtered = [...filtered].sort(sortServicesByFeedPriority)
+
+    // Map ranking button → backend sort/explore/lat-lng knobs.
+    switch (rankingMode) {
+      case 'for_you':
+        baseParams.sort = 'for_you'
+        break
+      case 'discovery':
+        baseParams.sort = 'for_you'
+        baseParams.explore_only = true
+        break
+      case 'trending':
+        baseParams.sort = 'hot'
+        break
+      case 'newest':
+        baseParams.sort = 'latest'
+        break
+      case 'nearby':
+        baseParams.sort = 'hot'
+        if (locationEnabled && userLocation) {
+          baseParams.lat = userLocation.lat
+          baseParams.lng = userLocation.lng
+          baseParams.distance = debouncedDistance
+        }
+        break
     }
-    setServices(filtered)
-  }, [activeFilter, debouncedSearch, locationEnabled, userLocation, debouncedDistance])
+
+    // Backend `type=` filter is single-valued. When the viewer ticks more
+    // than one type chip we fan out one request per type and merge — bounded
+    // by the 3 service types so even at PAGE_SIZE=15 this is at most three
+    // small requests.
+    if (activeTypes.size > 1) {
+      const typeArr = Array.from(activeTypes)
+      const responses = await Promise.all(
+        typeArr.map((t) =>
+          serviceAPI.listPaged({ ...baseParams, type: t }, signal),
+        ),
+      )
+      const merged = new Map<string, Service>()
+      let combinedCount = 0
+      for (const r of responses) {
+        for (const s of r.results) merged.set(s.id, s)
+        combinedCount += r.count
+      }
+      const list = Array.from(merged.values())
+      list.sort((a, b) =>
+        rankingMode === 'newest'
+          ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          : sortServicesByFeedPriority(a, b),
+      )
+      setServices(list.slice(0, PAGE_SIZE))
+      setTotalCount(combinedCount)
+      return
+    }
+
+    if (activeTypes.size === 1) {
+      baseParams.type = Array.from(activeTypes)[0]
+    }
+
+    const resp = await serviceAPI.listPaged(baseParams, signal)
+    setServices(resp.results)
+    setTotalCount(resp.count)
+  }, [
+    debouncedSearch,
+    page,
+    rankingMode,
+    activeTypes,
+    locationEnabled,
+    userLocation,
+    debouncedDistance,
+  ])
 
   const { isLoading, error: fetchError } = usePolling(fetchServices, [fetchServices], { interval: POLL_INTERVAL })
 
@@ -532,33 +640,65 @@ const DashboardPage = () => {
     })
   }, [])
 
+  const toggleSecondaryFilter = useCallback((f: SecondaryFilter) => {
+    setSecondaryFilters((prev) => {
+      const next = new Set(prev)
+      if (next.has(f)) next.delete(f); else next.add(f)
+      return next
+    })
+  }, [])
+
+  // ── My listings: dedicated fetch for the sidebar widget. The main feed sets
+  // `exclude_own=true` so it never includes the viewer's own services, which
+  // means we can't derive "my listings" from it any more.
+  const [myServices, setMyServices] = useState<Service[]>([])
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) {
+      setMyServices([])
+      return
+    }
+    let cancelled = false
+    serviceAPI
+      .list({ user_id: user.id, page_size: 50 })
+      .then((list) => {
+        if (cancelled) return
+        setMyServices(list.filter((s) => s.status === 'Active' && s.is_visible))
+      })
+      .catch(() => { if (!cancelled) setMyServices([]) })
+    return () => { cancelled = true }
+  }, [isAuthenticated, user?.id])
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const ownServiceHandshakes = useMemo(() => Array.from(incomingMap.values()).flat(), [incomingMap])
-  const myServices = useMemo(
-    () => allActiveServices.filter((s) => { const o = s.user ?? s.provider; return !!user && o?.id === user.id }),
-    [allActiveServices, user],
-  )
 
   // Hide events from the browse feed where the logged-in user was removed
-  // (i.e. their handshake was cancelled by an admin after a report).
-  const displayServices = useMemo(() => (isAuthenticated
-    ? services.filter((s) => {
-        if (s.type !== 'Event') return true
-        const hs = handshakeMap.get(s.id)
-        return hs?.status !== 'cancelled'
+  // (i.e. their handshake was cancelled by an admin after a report). Past
+  // events drop out, and the secondary-filter popover (Online / In-person /
+  // One-time / Weekend) is applied client-side over the page slice.
+  const displayServices = useMemo(() => {
+    const filters = Array.from(secondaryFilters)
+    return (isAuthenticated
+      ? services.filter((s) => {
+          if (s.type !== 'Event') return true
+          const hs = handshakeMap.get(s.id)
+          return hs?.status !== 'cancelled'
+        })
+      : services
+    )
+      .filter((s) => {
+        if (s.type === 'Event' && s.scheduled_time && new Date(s.scheduled_time).getTime() <= Date.now()) return false
+        if (filters.length && !filters.every((f) => matchesSecondaryFilter(s, f))) return false
+        return true
       })
-    : services
-  )
-    .filter((s) => {
-      if (s.type === 'Event' && s.scheduled_time && new Date(s.scheduled_time).getTime() <= Date.now()) return false
-      return activeTypes.size === 0 || activeTypes.has(s.type)
-    })
-    .sort((a, b) => {
-      const aInactive = ['denied', 'cancelled'].includes(handshakeMap.get(a.id)?.status ?? '')
-      const bInactive = ['denied', 'cancelled'].includes(handshakeMap.get(b.id)?.status ?? '')
-      if (aInactive === bInactive) return 0
-      return aInactive ? 1 : -1
-    }), [services, isAuthenticated, handshakeMap, activeTypes])
+      .sort((a, b) => {
+        const aInactive = ['denied', 'cancelled'].includes(handshakeMap.get(a.id)?.status ?? '')
+        const bInactive = ['denied', 'cancelled'].includes(handshakeMap.get(b.id)?.status ?? '')
+        if (aInactive === bInactive) return 0
+        return aInactive ? 1 : -1
+      })
+  }, [services, isAuthenticated, handshakeMap, secondaryFilters])
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
   const pendingHs          = myServices.filter((service) => {
     const incoming = incomingMap.get(service.id) ?? []
     return incoming.some((h) => h.status === 'pending')
@@ -652,90 +792,57 @@ const DashboardPage = () => {
                 )}
               </Flex>
 
-              {/* Filter pills — hidden on very small screens */}
+              {/* Type chips + More filters popover — hidden on the smallest screens */}
               <Flex
-                gap="3px" bg={GRAY100} p="3px" borderRadius="10px"
+                gap="6px" align="center" flexShrink={0}
                 display={{ base: 'none', sm: 'flex' }}
-                flexShrink={0} align="center"
               >
-                <Flex data-tour="filters" gap="3px" align="center">
-                  {FILTERS.map((f) => (
-                    <Box
-                      key={f.id} as="button"
-                      onClick={() => setActiveFilter(f.id)}
-                      px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
-                      fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
-                      bg={activeFilter === f.id ? WHITE : 'transparent'}
-                      color={activeFilter === f.id ? GRAY800 : GRAY500}
-                      boxShadow={activeFilter === f.id ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
-                      cursor="pointer" transition="all 0.12s"
-                      display="flex" alignItems="center" gap="4px"
-                    >
-                      <Box color={activeFilter === f.id ? GREEN : GRAY400}>{f.icon}</Box>
-                      <Box display={{ base: 'none', md: 'block' }}>{f.label}</Box>
-                    </Box>
-                  ))}
-                </Flex>
-                {/* Divider */}
-                <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
-                {/* Type pills — Event/Offer/Need, always visible on the right */}
-                <Flex data-tour="type-filter" gap="3px" align="center">
+                <Flex data-tour="type-filter" gap="4px" align="center">
                   {TYPE_FILTERS.map((tf) => {
                     const isActive = activeTypes.has(tf.id)
                     return (
                       <Box
                         key={tf.id} as="button"
                         onClick={() => toggleType(tf.id)}
-                        px={{ base: '8px', md: '10px' }} py="5px" borderRadius="7px"
+                        px="11px" py="6px" borderRadius="9999px"
                         fontSize="12px" fontWeight={isActive ? 700 : 500}
-                        bg={isActive ? tf.activeBg : 'transparent'}
-                        color={isActive ? tf.activeColor : GRAY500}
-                        boxShadow={isActive ? '0 1px 3px rgba(0,0,0,0.09)' : 'none'}
+                        bg={isActive ? tf.activeBg : WHITE}
+                        color={isActive ? tf.activeColor : GRAY600}
+                        border={`1px solid ${isActive ? tf.activeBg : GRAY200}`}
                         cursor="pointer" transition="all 0.12s"
-                        display="flex" alignItems="center" gap="4px"
+                        display="flex" alignItems="center" gap="6px"
+                        _hover={isActive ? {} : { borderColor: GRAY400 }}
                       >
-                        <Box w="7px" h="7px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
-                        <Box display={{ base: 'none', md: 'block' }}>{tf.label}</Box>
+                        <Box w="6px" h="6px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                        {tf.label}
                       </Box>
                     )
                   })}
                 </Flex>
-              </Flex>
 
+                <MoreFiltersButton
+                  active={secondaryFilters}
+                  open={filtersOpen}
+                  onOpenChange={setFiltersOpen}
+                  onToggle={toggleSecondaryFilter}
+                  onClear={() => setSecondaryFilters(new Set())}
+                />
+              </Flex>
             </Flex>
 
-            {/* Filter + type chips row — mobile only */}
+            {/* Mobile: type chips + More filters in a horizontal scroll row */}
             <Flex
               display={{ base: 'flex', sm: 'none' }}
-              gap="5px" mt="8px" overflowX="auto" align="center"
+              gap="6px" mt="8px" overflowX="auto" align="center"
               style={{ scrollbarWidth: 'none' }}
             >
-              {FILTERS.map((f) => (
-                <Box
-                  key={f.id} as="button" flexShrink={0}
-                  onClick={() => setActiveFilter(f.id)}
-                  px="10px" py="5px" borderRadius="20px"
-                  fontSize="12px" fontWeight={activeFilter === f.id ? 700 : 500}
-                  bg={activeFilter === f.id ? GREEN : WHITE}
-                  color={activeFilter === f.id ? WHITE : GRAY600}
-                  border={`1px solid ${activeFilter === f.id ? GREEN : GRAY200}`}
-                  cursor="pointer" transition="all 0.12s"
-                  display="flex" alignItems="center" gap="4px"
-                >
-                  <Box color={activeFilter === f.id ? WHITE : GRAY400}>{f.icon}</Box>
-                  {f.label}
-                </Box>
-              ))}
-              {/* Divider */}
-              <Box w="1px" h="14px" bg={GRAY300} mx="2px" borderRadius="1px" flexShrink={0} />
-              {/* Type pills — Event/Offer/Need, always visible */}
               {TYPE_FILTERS.map((tf) => {
                 const isActive = activeTypes.has(tf.id)
                 return (
                   <Box
                     key={tf.id} as="button" flexShrink={0}
                     onClick={() => toggleType(tf.id)}
-                    px="10px" py="5px" borderRadius="20px"
+                    px="11px" py="6px" borderRadius="9999px"
                     fontSize="12px" fontWeight={isActive ? 700 : 500}
                     bg={isActive ? tf.activeBg : WHITE}
                     color={isActive ? tf.activeColor : GRAY600}
@@ -743,8 +850,74 @@ const DashboardPage = () => {
                     cursor="pointer" transition="all 0.12s"
                     display="flex" alignItems="center" gap="6px"
                   >
-                    <Box w="7px" h="7px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
+                    <Box w="6px" h="6px" borderRadius="full" bg={isActive ? tf.activeColor : tf.dotColor} flexShrink={0} />
                     {tf.label}
+                  </Box>
+                )
+              })}
+              <Box flexShrink={0}>
+                <MoreFiltersButton
+                  active={secondaryFilters}
+                  open={filtersOpen}
+                  onOpenChange={setFiltersOpen}
+                  onToggle={toggleSecondaryFilter}
+                  onClear={() => setSecondaryFilters(new Set())}
+                  compact
+                />
+              </Box>
+            </Flex>
+
+            {/* Ranking-mode buttons — single-select, default Trending */}
+            <Flex
+              data-tour="ranking-modes"
+              gap="6px"
+              mt="10px"
+              overflowX="auto"
+              align="center"
+              style={{ scrollbarWidth: 'none' }}
+            >
+              {RANKING_BUTTONS.map((btn) => {
+                const isActive = rankingMode === btn.id
+                const disabled = isRankingButtonDisabled(btn.id, {
+                  isAuthenticated,
+                  isOnboarded: Boolean(user?.is_onboarded && user?.skills?.length),
+                  hasGeo: Boolean(locationEnabled && userLocation),
+                })
+                return (
+                  <Box
+                    key={btn.id}
+                    as="button"
+                    flexShrink={0}
+                    title={
+                      disabled
+                        ? btn.id === 'for_you'
+                          ? 'Add your skills to unlock For you'
+                          : btn.id === 'nearby'
+                            ? 'Enable location to see nearby services'
+                            : ''
+                        : ''
+                    }
+                    onClick={() => !disabled && setRankingMode(btn.id)}
+                    px="14px"
+                    py="7px"
+                    borderRadius="9999px"
+                    fontSize="12px"
+                    fontWeight={isActive ? 700 : 500}
+                    bg={isActive ? GREEN : WHITE}
+                    color={isActive ? WHITE : disabled ? GRAY400 : GRAY700}
+                    border={`1px solid ${isActive ? GREEN : GRAY200}`}
+                    transition="all 0.12s"
+                    display="flex"
+                    alignItems="center"
+                    gap="6px"
+                    style={{
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      opacity: disabled ? 0.55 : 1,
+                    }}
+                    _hover={isActive || disabled ? {} : { borderColor: GRAY400 }}
+                  >
+                    <Box color={isActive ? WHITE : disabled ? GRAY400 : GRAY500}>{btn.icon}</Box>
+                    {btn.label}
                   </Box>
                 )
               })}
@@ -762,19 +935,12 @@ const DashboardPage = () => {
             />
           </Box>
 
-          {/* Results count */}
-          <Box px={{ base: 4, md: 6 }} pt={4} pb={2} flexShrink={0} bgColor={TRANSPARENT}>
-            <Text fontSize="12px" color={GRAY400}>
-              {isLoading && displayServices.length === 0 ? 'Loading…' : `${displayServices.length} service${displayServices.length !== 1 ? 's' : ''}`}
-            </Text>
-          </Box>
-
           {/* Grid */}
           <Box
             flex={1}
             overflowY="auto"
             px={{ base: 3, md: 6 }}
-            pt={2}
+            pt={4}
             pb={8}
           >
             {isLoading && displayServices.length === 0 ? (
@@ -833,6 +999,13 @@ const DashboardPage = () => {
                 })}
               </Grid>
             )}
+            {!isLoading && !fetchError && totalPages > 1 && (
+              <Pagination
+                currentPage={page}
+                totalPages={totalPages}
+                onChange={goToPage}
+              />
+            )}
           </Box>
         </Flex>
       </Box>
@@ -841,12 +1014,171 @@ const DashboardPage = () => {
         <RecommendationDebugBar
           services={displayServices}
           hoveredServiceId={hoveredServiceId}
-          activeFilter={activeFilter}
+          activeFilter={rankingMode}
           search={debouncedSearch}
           lat={userLocation?.lat}
           lng={userLocation?.lng}
           distance={debouncedDistance}
         />
+      )}
+    </Box>
+  )
+}
+
+// ─── Helpers used by the topbar ───────────────────────────────────────────────
+
+interface RankingDisabledContext {
+  isAuthenticated: boolean
+  isOnboarded: boolean
+  hasGeo: boolean
+}
+
+function isRankingButtonDisabled(id: RankingMode, ctx: RankingDisabledContext): boolean {
+  if (id === 'for_you') return !ctx.isAuthenticated || !ctx.isOnboarded
+  if (id === 'discovery') return !ctx.isAuthenticated || !ctx.isOnboarded
+  if (id === 'nearby') return !ctx.hasGeo
+  return false
+}
+
+interface MoreFiltersButtonProps {
+  active: Set<SecondaryFilter>
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onToggle: (f: SecondaryFilter) => void
+  onClear: () => void
+  compact?: boolean
+}
+
+function MoreFiltersButton({ active, open, onOpenChange, onToggle, onClear, compact }: MoreFiltersButtonProps) {
+  const count = active.size
+  return (
+    <Box position="relative">
+      <Box
+        as="button"
+        onClick={() => onOpenChange(!open)}
+        px={compact ? '11px' : '12px'}
+        py="6px"
+        borderRadius="9999px"
+        border={`1px solid ${count > 0 ? GREEN : GRAY200}`}
+        bg={count > 0 ? GREEN_LT : WHITE}
+        color={count > 0 ? GREEN : GRAY700}
+        fontSize="12px"
+        fontWeight={count > 0 ? 700 : 500}
+        display="flex"
+        alignItems="center"
+        gap="6px"
+        cursor="pointer"
+        transition="all 0.12s"
+        _hover={{ borderColor: count > 0 ? GREEN : GRAY400 }}
+      >
+        <FiSliders size={12} />
+        Filters
+        {count > 0 && (
+          <Box
+            as="span"
+            display="inline-flex"
+            alignItems="center"
+            justifyContent="center"
+            minW="18px"
+            h="18px"
+            px="5px"
+            borderRadius="9999px"
+            bg={GREEN}
+            color={WHITE}
+            fontSize="10px"
+            fontWeight={800}
+          >
+            {count}
+          </Box>
+        )}
+      </Box>
+      {open && (
+        <>
+          <Box
+            position="fixed"
+            inset={0}
+            zIndex={30}
+            onClick={() => onOpenChange(false)}
+          />
+          <Box
+            position="absolute"
+            top="calc(100% + 6px)"
+            right={0}
+            w="240px"
+            bg={WHITE}
+            border={`1px solid ${GRAY200}`}
+            borderRadius="12px"
+            boxShadow="0 4px 18px rgba(0,0,0,0.10)"
+            p="10px"
+            zIndex={40}
+          >
+            <Text fontSize="10px" fontWeight={700} color={GRAY400} px="6px" mb="6px"
+              style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
+            >
+              Refine
+            </Text>
+            {SECONDARY_FILTERS.map((f) => {
+              const isActive = active.has(f.id)
+              return (
+                <Box
+                  key={f.id}
+                  as="button"
+                  onClick={() => onToggle(f.id)}
+                  w="full"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  px="8px"
+                  py="8px"
+                  borderRadius="8px"
+                  bg={isActive ? GREEN_LT : 'transparent'}
+                  color={isActive ? GREEN : GRAY700}
+                  fontSize="13px"
+                  fontWeight={isActive ? 600 : 500}
+                  cursor="pointer"
+                  _hover={{ bg: isActive ? GREEN_LT : GRAY100 }}
+                  transition="background 0.12s"
+                >
+                  <Flex align="center" gap="8px">
+                    <Box color={isActive ? GREEN : GRAY400}>{f.icon}</Box>
+                    {f.label}
+                  </Flex>
+                  {isActive && <FiCheck size={14} />}
+                </Box>
+              )
+            })}
+            <Flex justify="space-between" align="center" mt="6px" pt="8px"
+              borderTop={`1px solid ${GRAY100}`}
+            >
+              <Box
+                as="button"
+                aria-disabled={count === 0 || undefined}
+                onClick={count > 0 ? onClear : undefined}
+                fontSize="12px"
+                color={GRAY500}
+                _hover={{ color: GRAY700 }}
+                style={{ cursor: count > 0 ? 'pointer' : 'default', opacity: count > 0 ? 1 : 0.5 }}
+              >
+                Clear
+              </Box>
+              <Box
+                as="button"
+                onClick={() => onOpenChange(false)}
+                px="12px"
+                py="5px"
+                borderRadius="7px"
+                bg={GREEN}
+                color={WHITE}
+                fontSize="12px"
+                fontWeight={700}
+                cursor="pointer"
+                _hover={{ opacity: 0.9 }}
+              >
+                Done
+              </Box>
+            </Flex>
+          </Box>
+        </>
       )}
     </Box>
   )
