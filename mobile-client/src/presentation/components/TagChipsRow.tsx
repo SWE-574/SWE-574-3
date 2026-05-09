@@ -17,7 +17,11 @@ export default function TagChipsRow({ activeQid, onSelect }: TagChipsRowProps) {
       .then(({ chips: rows }) => {
         if (!cancelled) setChips(rows);
       })
-      .catch(() => {
+      .catch((err) => {
+        // Log so silent failures (stale auth, network, etc.) are visible
+        // in the dev console next time the chip strip empties out.
+        // eslint-disable-next-line no-console
+        console.warn("[TagChipsRow] getFeaturedChips failed:", err);
         if (!cancelled) setChips([]);
       });
     return () => {

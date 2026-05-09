@@ -346,23 +346,10 @@ export default function HomeScreen() {
 
   const quickChips: ChipDef[] = useMemo(
     () => [
-      {
-        id: "nearby",
-        label:
-          filters.locationMode === "nearby" && userLocation
-            ? `Nearby ${Math.round(filters.distanceKm)} km`
-            : "Nearby",
-        icon: "navigate-outline",
-        selected: filters.locationMode === "nearby",
-        onPress: async () => {
-          if (filters.locationMode === "nearby") {
-            setFilters((c) => ({ ...c, locationMode: "all" }));
-            return;
-          }
-          const coords = await ensureDeviceLocation();
-          if (coords) setFilters((c) => ({ ...c, locationMode: "nearby" }));
-        },
-      },
+      // "Nearby" used to live here as a hard-radius toggle. Location is now
+      // an always-on ranking signal whenever permission is granted, so the
+      // dedicated chip is gone. The radius slider in the full-filters modal
+      // is still available for viewers who want a hard cutoff.
       {
         id: "events",
         label: "Events",
