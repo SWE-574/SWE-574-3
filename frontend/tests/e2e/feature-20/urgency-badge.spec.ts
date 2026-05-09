@@ -70,7 +70,10 @@ test('FR-RANK-03c: "Nearly Full" badge does NOT appear for a low-capacity event 
 test('FR-RANK-03d: "Nearly Full" badge appears for a Group Offer at 75% capacity', async ({ page }) => {
   const title = uniqueTitle('FR-RANK-03d Group Offer')
 
-  // Create a Group Offer with max_participants=4
+  // Create a Group Offer with max_participants=4. The backend's fixed-group-offer
+  // validator (Offer + One-Time + max_participants > 1) now requires a future
+  // scheduled_time, so supply one — the badge logic only depends on
+  // participant_count vs max_participants, not on the schedule.
   await loginAs(page, USERS.elif)
   const created = await createServiceViaApi(page, {
     type: 'Offer',
@@ -80,6 +83,7 @@ test('FR-RANK-03d: "Nearly Full" badge appears for a Group Offer at 75% capacity
     locationType: 'Online',
     maxParticipants: 4,
     scheduleType: 'One-Time',
+    scheduledTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
   })
 
   // Express interest as 3 users to reach 75% (pending → accepted requires the full flow;
