@@ -27,6 +27,7 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
+          <string>thehive</string>
           <string>com.apiary.thehive</string>
         </array>
       </dict>
@@ -34,7 +35,6 @@
         <key>CFBundleURLSchemes</key>
         <array>
           <string>exp+the-hive</string>
-          <string>thehive</string>
         </array>
       </dict>
     </array>
