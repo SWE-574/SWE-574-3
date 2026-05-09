@@ -143,6 +143,15 @@ describe('ProfileHero — public mode', () => {
     expect(screen.queryByText('Edit profile')).toBeNull()
   })
 
+  it('does NOT render View Time Activity link', () => {
+    render(
+      <Wrapper>
+        <ProfileHero user={baseUser} mode="public" />
+      </Wrapper>,
+    )
+    expect(screen.queryByText('View Time Activity →')).toBeNull()
+  })
+
   it('hides time balance tile and shows reputation instead', () => {
     render(
       <Wrapper>
