@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { createOffer, expectToast, loginAs, requestOfferFromDetail, switchUser, uniqueTitle, USERS } from '../helpers'
+import { createOffer, loginAs, requestOfferFromDetail, switchUser, uniqueTitle, USERS } from '../helpers'
 
 test('FR-05f: affected applicants receive an in-app notification with changed fields after offer edit', async ({ page }) => {
   const title = uniqueTitle('FR-05f Offer')
@@ -26,7 +26,10 @@ test('FR-05f: affected applicants receive an in-app notification with changed fi
   await page.locator('textarea[name="description"]').fill(updatedDescription)
   await page.getByRole('button', { name: 'Save Changes' }).click()
 
-  await expectToast(page, /updated successfully/i)
+  // Save navigates back to /service-detail/<id>; wait for that landing instead
+  // of racing the success toast that may unmount on navigation.
+  await expect(page).toHaveURL(/\/service-detail\//, { timeout: 15_000 })
+  await expect(page.getByRole('heading', { name: updatedTitle })).toBeVisible({ timeout: 15_000 })
 
   // Applicant should see an in-app notification mentioning the updated fields.
   await switchUser(page, USERS.mehmet)

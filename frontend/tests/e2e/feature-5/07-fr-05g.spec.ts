@@ -38,10 +38,9 @@ test('FR-05g: owner cannot remove an offer while a pending exchange exists', asy
   // Owner tries to remove the listing but should be blocked by the existing handshake.
   await switchUser(page, USERS.elif)
   await page.goto(detailUrl)
-  page.once('dialog', async (dialog) => {
-    await dialog.accept()
-  })
   await page.getByRole('button', { name: 'Remove Listing' }).click()
+  // The Remove action opens a confirmation modal; click its Remove button to actually issue the delete.
+  await page.getByRole('button', { name: /^Remove$/ }).click()
 
   // Current behavior keeps the owner on the detail page and surfaces a toast
   // explaining that listings with existing handshakes cannot be removed yet.

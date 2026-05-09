@@ -22,6 +22,8 @@ test('FR-05i: one-to-one offers allow at most one accepted exchange at a time', 
   await acceptPendingHandshakeViaApi(page, {
     serviceId,
     requesterName: USERS.deniz.name,
+    owner: USERS.ayse,
+    requester: USERS.deniz,
   })
 
   // A second requester should now see the listing as no longer open for new requests.

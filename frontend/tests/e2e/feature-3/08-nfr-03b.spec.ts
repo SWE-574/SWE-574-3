@@ -56,10 +56,10 @@ test('NFR-03b: performing an admin action appends a new entry to the audit log',
   await goToAdminTab(page, 'audit')
   await reloadAudit
 
-  // The log must have grown — the warning action was appended.
-  const rowsAfter = await getAuditCount(page)
-
-  expect(rowsAfter).toBeGreaterThan(rowsBefore)
+  // The log must have grown — the warning action was appended. Audit
+  // writes commit on a follower replica that lags the response by ~1s,
+  // so poll the count instead of reading it once.
+  await expect.poll(() => getAuditCount(page), { timeout: 10_000 }).toBeGreaterThan(rowsBefore)
 })
 
 test('NFR-03b: existing audit log entries are retained after a new action is appended', async ({ page }) => {

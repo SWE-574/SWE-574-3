@@ -27,10 +27,14 @@ test('FR-05k: a full group offer is hidden from public discovery', async ({ page
   await acceptPendingHandshakeViaApi(page, {
     serviceId,
     requesterName: USERS.mehmet.name,
+    owner: USERS.yasemin,
+    requester: USERS.mehmet,
   })
   await acceptPendingHandshakeViaApi(page, {
     serviceId,
     requesterName: USERS.zeynep.name,
+    owner: USERS.yasemin,
+    requester: USERS.zeynep,
   })
 
   // A different user should no longer find the full listing in dashboard search.
