@@ -2300,6 +2300,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     @track_performance
     def get_queryset(self):
+        # Owner edits/deletes must work for services in any status
+        # (Agreed/Completed/Cancelled/hidden). The list-time visibility filter
+        # below would otherwise hide them and produce a misleading 404.
+        # Authorization is enforced in perform_update / destroy.
+        if self.action in ('update', 'partial_update', 'destroy'):
+            return (
+                Service.objects
+                .select_related('user', 'event_evaluation_summary')
+                .prefetch_related('tags')
+            )
         user_param = self.request.query_params.get('user')
         # Use Prefetch object to optimize nested user badges query
         user_badges_prefetch = Prefetch(
@@ -2760,6 +2770,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
             raise PermissionDenied('Attempting to modify another user\'s service')
 
         is_admin = getattr(self.request.user, 'role', None) == 'admin'
+
+        # Only Active services are editable. Once a service is Agreed, Completed,
+        # Cancelled or otherwise locked, surface a clear 403 instead of the
+        # misleading 404 that the list-time visibility filter used to produce.
+        if service.status != 'Active' and not is_admin:
+            raise PermissionDenied(
+                f'This service can no longer be edited (status: {service.status}).'
+            )
 
         if service.type == 'Event' and not is_admin:
             if service.is_in_lockdown_window:

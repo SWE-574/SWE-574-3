@@ -315,6 +315,41 @@ class TestServiceViewSet:
         service.refresh_from_db()
         assert service.title == 'Updated Title'
 
+    def test_update_non_active_service_is_rejected_with_clear_403(self):
+        """Editing must be limited to Active services. Non-Active statuses must
+        return 403 with a status-aware message, not a misleading 404."""
+        owner = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+
+        for status_value in ('Agreed', 'Completed', 'Cancelled'):
+            service = ServiceFactory(user=owner, status=status_value, title='Original')
+            response = client.patch(
+                f'/api/services/{service.id}/', {'title': f'Renamed {status_value}'},
+            )
+            assert response.status_code == 403, (
+                f'PATCH on {status_value} service expected 403, got {response.status_code}.'
+            )
+            detail = str(response.data.get('detail') or response.data)
+            assert 'no longer be edited' in detail.lower() or status_value.lower() in detail.lower(), (
+                f'Expected status-aware error message for {status_value}, got: {detail}'
+            )
+            service.refresh_from_db()
+            assert service.title == 'Original', (
+                f'{status_value} service title was mutated despite 403 response.'
+            )
+
+    def test_update_active_hidden_service_is_allowed_for_owner(self):
+        """Owners must still be able to edit their own hidden (is_visible=False)
+        Active listings; the list visibility filter must not leak into writes."""
+        owner = UserFactory()
+        service = ServiceFactory(user=owner, status='Active', is_visible=False, title='Original')
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Renamed hidden'})
+        assert response.status_code == 200, response.data
+        service.refresh_from_db()
+        assert service.title == 'Renamed hidden'
+
     def test_update_offer_allowed_when_application_exists_and_notifies_applicant(self):
         """Offer owner can edit and pending applicants get notified."""
         owner = UserFactory()
