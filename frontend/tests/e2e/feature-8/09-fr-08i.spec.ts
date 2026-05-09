@@ -3,8 +3,9 @@ import { test, expect } from '@playwright/test'
 import {
   completeOfferExchange,
   createAcceptedOfferExchange,
+  expectBalanceToBe,
+  findLedgerTransaction,
   getCurrentBalance,
-  listTransactions,
   pickUsersWithBalanceAtLeast,
   switchUser,
   USERS,
@@ -37,19 +38,16 @@ test('FR-08i: completing a one-to-one exchange transfers the reserved hours from
 
   // The provider should receive the released hour.
   await switchUser(page, owner)
-  const providerAfterCompletion = await getCurrentBalance(page)
-  expect(providerAfterCompletion).toBe(providerBeforeCompletion + 1)
+  await expectBalanceToBe(page, providerBeforeCompletion + 1)
 
   // The requester should keep the already-reserved post-accept balance.
   await switchUser(page, requester)
-  const requesterAfterCompletion = await getCurrentBalance(page)
-  expect(requesterAfterCompletion).toBe(requesterBeforeCompletion)
+  await expectBalanceToBe(page, requesterBeforeCompletion)
 
   // The transfer row is recorded for the provider, not the requester.
   await switchUser(page, owner)
-  const transactions = await listTransactions(page)
-  const transferRow = transactions.results.find((transaction) => (
-    transaction.service_title === title && transaction.transaction_type === 'transfer'
-  ))
-  expect(transferRow).toBeTruthy()
+  await findLedgerTransaction(
+    page,
+    (transaction) => transaction.service_title === title && transaction.transaction_type === 'transfer',
+  )
 })

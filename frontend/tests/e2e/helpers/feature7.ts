@@ -177,6 +177,55 @@ export async function openTimeActivity(page: Page): Promise<void> {
   await expect(page.getByText(/^Time Activity$/).first()).toBeVisible({ timeout: 15_000 })
 }
 
+/**
+ * Poll {@link getCurrentBalance} until it equals {@link expected}.
+ *
+ * Backend balance updates are atomic per-request, but the test may have
+ * already read a stale value the moment the API responded (e.g. before
+ * post-commit signals fire). This helper retries the read for up to
+ * `timeout` ms before failing.
+ */
+export async function expectBalanceToBe(
+  page: Page,
+  expected: number,
+  timeout = 10_000,
+): Promise<void> {
+  await expect
+    .poll(async () => getCurrentBalance(page), { timeout })
+    .toBe(expected)
+}
+
+/**
+ * Poll the ledger until a transaction matching {@link predicate} is found.
+ *
+ * Returns the matching ledger row. Useful right after a flow that emits a
+ * ledger entry (transfer / refund / earn) where the entry may lag the
+ * action by a tick.
+ */
+export async function findLedgerTransaction(
+  page: Page,
+  predicate: (transaction: LedgerTransaction) => boolean,
+  options: { direction?: 'all' | 'credit' | 'debit'; timeout?: number } = {},
+): Promise<LedgerTransaction> {
+  const direction = options.direction ?? 'all'
+  const timeout = options.timeout ?? 10_000
+  let lastSeen: LedgerTransaction[] = []
+
+  await expect
+    .poll(async () => {
+      const page1 = await listTransactions(page, direction)
+      lastSeen = page1.results
+      return page1.results.some(predicate)
+    }, { timeout })
+    .toBeTruthy()
+
+  const match = lastSeen.find(predicate)
+  if (!match) {
+    throw new Error('findLedgerTransaction: predicate matched once but match disappeared')
+  }
+  return match
+}
+
 export async function pickUsersWithBalanceAtLeast(
   page: Page,
   minInclusive: number,

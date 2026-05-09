@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test'
 import {
   completeOfferExchange,
   createAcceptedGroupOfferExchanges,
+  expectBalanceToBe,
   getCurrentBalance,
   listTransactions,
   pickUsersWithBalanceAtLeast,
@@ -40,8 +41,16 @@ test('FR-08j: only the first completed group-offer exchange transfers hours to t
   })
 
   await switchUser(page, owner)
-  const providerAfterCompletions = await getCurrentBalance(page)
-  expect(providerAfterCompletions).toBe(providerBeforeCompletions + 1)
+  await expectBalanceToBe(page, providerBeforeCompletions + 1)
+
+  // Wait for at least one transfer entry to land, then assert there's no
+  // double-credit (group offer rule).
+  await expect.poll(async () => {
+    const txs = await listTransactions(page, 'credit')
+    return txs.results.filter((transaction) => (
+      transaction.service_title === title && transaction.transaction_type === 'transfer'
+    )).length
+  }, { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
 
   const transactions = await listTransactions(page, 'credit')
   const relatedTransfers = transactions.results.filter((transaction) => (
