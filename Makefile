@@ -186,8 +186,10 @@ setup-demo: setup ## One-time local setup + seed demo data
 
 dev: _check_env ## Start local dev: infra + backend (8000) + frontend (5173)
 	$(_AUTO_SWITCH)
+	@# Scope to LISTEN sockets so we kill the actual server processes only,
+	@# not the browser tab that has an outbound connection open to 5173.
 	@for port in 8000 5173; do \
-	  pid=$$(lsof -ti tcp:$$port 2>/dev/null); \
+	  pid=$$(lsof -ti tcp:$$port -sTCP:LISTEN 2>/dev/null); \
 	  if [ -n "$$pid" ]; then \
 	    echo "  Killing process on port $$port (PID $$pid)..."; \
 	    kill -9 $$pid 2>/dev/null || true; \
@@ -212,7 +214,7 @@ dev: _check_env ## Start local dev: infra + backend (8000) + frontend (5173)
 dev-all: _check_env ## Start local dev: backend + frontend + mobile Expo server
 	$(_AUTO_SWITCH)
 	@for port in 8000 5173 8081; do \
-	  pid=$$(lsof -ti tcp:$$port 2>/dev/null); \
+	  pid=$$(lsof -ti tcp:$$port -sTCP:LISTEN 2>/dev/null); \
 	  if [ -n "$$pid" ]; then \
 	    echo "  Killing process on port $$port (PID $$pid)..."; \
 	    kill -9 $$pid 2>/dev/null || true; \

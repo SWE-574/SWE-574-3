@@ -2169,16 +2169,41 @@ class ServiceViewSet(viewsets.ModelViewSet):
         # Phase 3 (FR-17i / #316): mix in an exploration candidate at the
         # configured slot for hot-sorted requests. The candidate is drawn from
         # cold-start, under-shown-quality, and stale-recurring sub-buckets.
+        phase3_injected_id: str | None = None
+        phase3_slot_index: int | None = None
         if page is not None and explore_enabled and should_explore(request):
             explore_pool = list(queryset[:200])  # cap pool size for the eligibility query
             explore = select_exploration_candidate(explore_pool, request.user if request.user.is_authenticated else None)
             if explore is not None and explore not in page:
                 slot = getattr(_ranking_settings, 'RANKING_EXPLORATION_SLOT_INDEX', 5)
                 page = inject_exploration_slot(page, explore, slot_index=slot)
+                phase3_injected_id = str(explore.id)
+                phase3_slot_index = slot
+
+        # Smart-pill plumbing: attach for_you_signals + source + explore_pool
+        # to each card on the regular browse path so the frontend can render
+        # a small "why" pill ("Matches your interests" / "From your network" /
+        # "Hidden gem"). The score itself is unused here -- we keep the hot
+        # ordering -- but the per-card signals come from the same scorer the
+        # /for_you path uses, so labels stay consistent across surfaces.
+        if page is not None and request.user.is_authenticated:
+            self._attach_smart_pill_signals(page, request.user, phase3_injected_id)
 
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = paginator.get_paginated_response(serializer.data)
+            # Surface Phase 3 injection state so the recommendation showcase
+            # bar can mark the injected card and so callers can pass the same
+            # id back to the debug-ranking endpoint for the diagnosis line.
+            if isinstance(response.data, dict):
+                response.data['ranking_meta'] = {
+                    'phase3_injected_id': phase3_injected_id,
+                    'phase3_slot_index': phase3_slot_index,
+                    'exploration_rate': float(
+                        getattr(_ranking_settings, 'RANKING_EXPLORATION_RATE', 0.20)
+                    ) if explore_enabled else 0.0,
+                    'exploration_fired': phase3_injected_id is not None,
+                }
             if use_cache:
                 cache_service_list(cache_key_params, response.data, ttl=CACHE_TTL_SHORT)
             return response
@@ -2246,6 +2271,42 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'previous': None,
             'results': serializer.data,
         })
+
+    def _attach_smart_pill_signals(self, page, viewer, phase3_injected_id):
+        """Stamp `for_you_signals`, `source`, and `explore_pool` on each
+        service so the regular browse list carries the same per-card signal
+        breakdown the /for_you path emits. Used by the new YouTube-style
+        smart pill on the Browse feed (chips strip + pill on each card).
+        """
+        from .ranking import _eligible_exploration
+        from .ranking_personalized import score_for_you
+
+        if not page:
+            return
+        try:
+            scored = score_for_you(list(page), viewer)
+        except Exception:
+            scored = []
+        signal_map = {triple[0].id: triple[2] for triple in scored}
+        # Phase 3 pool eligibility per card -- for the "Hidden gem" /
+        # "Fresh provider" / "Rediscovered" pill flavours.
+        cold, undershown, stale = _eligible_exploration(list(page))
+        pool_map: dict = {}
+        for s in cold:
+            pool_map[s.id] = 'cold_start'
+        for s in undershown:
+            pool_map.setdefault(s.id, 'undershown_quality')
+        for s in stale:
+            pool_map.setdefault(s.id, 'stale_recurring')
+        for svc in page:
+            svc.for_you_signals = signal_map.get(svc.id)
+            svc.explore_pool = pool_map.get(svc.id)
+            if phase3_injected_id and str(svc.id) == phase3_injected_id:
+                svc.source = 'explore_topup'
+            elif svc.for_you_signals:
+                svc.source = 'for_you'
+            else:
+                svc.source = None
 
     def _list_for_you(self, request):
         """For You feed (#481). Re-rank top hot candidates with viewer-specific
@@ -2385,7 +2446,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'entity_type': self.request.query_params.get('entity_type'),
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
-            'distance': self.request.query_params.get('distance', 10),
+            # No default radius -- LocationStrategy treats missing distance as
+            # signal-only (annotate + order, no hard cutoff). The previous
+            # default of 10 silently filtered out any service beyond 10 km
+            # whenever location was enabled. Distance is now opt-in via the
+            # More-filters slider; the frontend sends it explicitly when on.
+            'distance': self.request.query_params.get('distance'),
             # FR-12c — event date-range filter (only fires when type=Event).
             'date_from': self.request.query_params.get('date_from'),
             'date_to': self.request.query_params.get('date_to'),
@@ -3367,6 +3433,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if simulated_user_id and getattr(request.user, 'role', None) not in ADMIN_ROLES:
             simulated_user_id = None
 
+        injected_id_raw = request.data.get('phase3_injected_id')
+        slot_index_raw = request.data.get('phase3_slot_index')
+        try:
+            slot_index = int(slot_index_raw) if slot_index_raw not in (None, '') else None
+        except (TypeError, ValueError):
+            slot_index = None
+
         payload = build_service_debug_payload(
             service_ids=service_ids,
             selected_service_id=request.data.get('selected_service_id'),
@@ -3378,6 +3451,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
             lng=_to_float(request.data.get('lng')),
             distance=_to_float(request.data.get('distance')),
             active_filter=(request.data.get('active_filter') or 'all').strip() or 'all',
+            phase3_injected_id=str(injected_id_raw) if injected_id_raw else None,
+            phase3_slot_index=slot_index,
         )
         response = Response(payload)
         response['X-Ranking-Debug-Debounce'] = '300'

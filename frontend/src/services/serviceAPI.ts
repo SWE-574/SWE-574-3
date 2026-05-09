@@ -33,9 +33,17 @@ export interface ServiceListParams {
   date_to?: string
 }
 
+export interface RankingMeta {
+  phase3_injected_id: string | null
+  phase3_slot_index: number | null
+  exploration_rate: number
+  exploration_fired: boolean
+}
+
 export interface ServiceListPagedResponse {
   results: Service[]
   count: number
+  ranking_meta?: RankingMeta | null
 }
 
 export interface ServiceRankingDebugParams {
@@ -47,6 +55,8 @@ export interface ServiceRankingDebugParams {
   lng?: number
   distance?: number
   active_filter?: string
+  phase3_injected_id?: string | null
+  phase3_slot_index?: number | null
 }
 
 type ServiceListResponse = Service[] | { results: Service[]; count?: number }
@@ -154,11 +164,13 @@ export const serviceAPI = {
     })
     const data = res.data
     if (Array.isArray(data)) {
-      return { results: data, count: data.length }
+      return { results: data, count: data.length, ranking_meta: null }
     }
+    const rankingMeta = (data as { ranking_meta?: RankingMeta | null }).ranking_meta
     return {
       results: data.results ?? [],
       count: data.count ?? (data.results?.length ?? 0),
+      ranking_meta: rankingMeta ?? null,
     }
   },
 

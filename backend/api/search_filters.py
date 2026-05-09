@@ -62,54 +62,110 @@ class SearchStrategy(ABC):
 
 class LocationStrategy(SearchStrategy):
     """
-    Filter services by distance from user location using PostGIS.
+    Apply user location to the queryset.
+
+    Two modes:
+
+    1. Signal-only (lat + lng, no `distance` param). Annotate every row with
+       its distance from the viewer for downstream sorting / proximity_factor
+       weighting in composite_score. NO rows are filtered out -- the smooth
+       proximity decay does the ranking work.
+    2. Hard radius cutoff (lat + lng + `distance`). In-person rows beyond the
+       radius are excluded; online services (location IS NULL) stay visible
+       regardless of slider position.
+
+    The signal-only mode is the default for the YouTube-style Browse layout:
+    enabling location should rank-by-closeness without hiding far cards.
+    The radius cutoff is opt-in via the More-filters slider.
 
     Parameters:
         - lat: User's latitude
         - lng: User's longitude
-        - distance: Maximum distance in kilometers (default: 10)
+        - distance: Optional. Maximum distance in kilometers; when omitted,
+          the queryset is annotated only.
     """
 
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         lat = params.get('lat')
         lng = params.get('lng')
-        distance_km = params.get('distance', 10)
 
-        # Only apply if both lat and lng are provided
         if lat is None or lng is None:
             return queryset
 
         try:
             lat = float(lat)
             lng = float(lng)
-            distance_km = float(distance_km)
         except (ValueError, TypeError):
             return queryset
 
         # Create user location point (lng, lat order for PostGIS)
         user_location = Point(lng, lat, srid=4326)
 
-        # In-Person services must fall within `distance_km`. Online services
-        # (location IS NULL) are NOT subject to the distance filter and remain
-        # visible regardless of slider position — otherwise a viewer with
-        # location enabled would lose every Online service the moment they
-        # narrow the radius.
-        queryset = queryset.filter(
-            Q(location__isnull=True)
-            | Q(location__distance_lte=(user_location, D(km=distance_km)))
-        ).annotate(
+        distance_param = params.get('distance')
+        distance_km: float | None = None
+        if distance_param is not None and distance_param != '':
+            try:
+                distance_km = float(distance_param)
+            except (ValueError, TypeError):
+                distance_km = None
+
+        if distance_km is not None:
+            # Hard radius cutoff. In-person rows beyond `distance_km` drop;
+            # Online services (location IS NULL) stay visible -- otherwise a
+            # viewer with location enabled would lose every Online service the
+            # moment they narrowed the radius.
+            queryset = queryset.filter(
+                Q(location__isnull=True)
+                | Q(location__distance_lte=(user_location, D(km=distance_km)))
+            )
+
+        return queryset.annotate(
             distance=Distance('location', user_location)
         ).order_by('distance')
 
-        return queryset
+
+def expand_tag_qids(tag_ids):
+    """Expand a set of Wikidata QIDs into the union of self + parents +
+    siblings, walking the local Tag table only (no Wikidata round-trips).
+
+    The expansion mirrors how viewers think about chip filters: picking
+    "Painting" surfaces Painting plus its peers under "Art" (Sculpture,
+    Drawing, ...) and the parent itself. Children are reached via the
+    `tags__parent_qid__in` clause at the call site, so this helper does
+    not enumerate descendants explicitly.
+
+    Returns a set of QID strings. Empty set if input is empty.
+    """
+    from .models import Tag
+
+    qids = {qid for qid in tag_ids if qid}
+    if not qids:
+        return set()
+
+    parents = set(
+        Tag.objects.filter(id__in=qids)
+        .exclude(parent_qid__isnull=True)
+        .values_list('parent_qid', flat=True)
+    )
+    if parents:
+        siblings = set(
+            Tag.objects.filter(parent_qid__in=parents).values_list('id', flat=True)
+        )
+    else:
+        siblings = set()
+    return qids | parents | siblings
 
 
 class TagStrategy(SearchStrategy):
     """
     Filter services by semantic tags (Wikidata IDs).
 
-    Supports hierarchical matching: a search for a parent tag QID will also
-    find services tagged with child tags (via parent_qid).
+    Hierarchical matching has two directions:
+      - parent -> children: services tagged with anything whose parent_qid
+        equals the requested qid.
+      - sibling expansion: when the requested qid has a parent in the local
+        Tag table, services tagged with peers under the same parent are
+        included too. Picking "Painting" surfaces Sculpture / Drawing.
 
     Parameters:
         - tags: List of tag IDs to filter by
@@ -126,9 +182,13 @@ class TagStrategy(SearchStrategy):
             tag_ids = list(tag_ids) + [single_tag]
 
         if tag_ids:
-            # Direct match OR parent_qid match (hierarchical traversal)
+            # Sibling expansion happens at filter time so the chip strip's
+            # "Painting" pick widens out to "Sculpture" / "Drawing" without
+            # any client-side change. Children are still reached via the
+            # parent_qid clause below.
+            expanded = expand_tag_qids(tag_ids)
             queryset = queryset.filter(
-                Q(tags__id__in=tag_ids) | Q(tags__parent_qid__in=tag_ids)
+                Q(tags__id__in=expanded) | Q(tags__parent_qid__in=expanded)
             ).distinct()
 
         # Entity type filtering

@@ -226,16 +226,73 @@ class TestLocationStrategy:
         """Test LocationStrategy handles partial location params."""
         queryset = Service.objects.filter(status='Active')
         original_count = queryset.count()
-        
+
         # Only lat provided
         params = {'lat': 41.0422}
         result = self.strategy.apply(queryset, params)
         assert result.count() == original_count
-        
+
         # Only lng provided
         params = {'lng': 29.0089}
         result = self.strategy.apply(queryset, params)
         assert result.count() == original_count
+
+    def test_search_engine_signal_only_when_distance_omitted(self):
+        """End-to-end via SearchEngine: a request with lat/lng but no
+        distance must pass through every strategy without losing rows. This
+        guards against the views.py default that previously injected
+        `distance=10` even when the client didn't send it.
+        """
+        engine = SearchEngine()
+        queryset = Service.objects.filter(status='Active')
+        original_count = queryset.count()
+
+        # `distance` deliberately absent. Mirrors the params dict views.py
+        # constructs after the fix (distance is None when missing).
+        params = {
+            'lat': 41.0422,
+            'lng': 29.0089,
+            'distance': None,
+            'tags': [],
+            'type': None,
+            'types': [],
+            'location_types': [],
+            'schedule_type': None,
+            'weekend': False,
+            'tag': None,
+            'search': None,
+            'entity_type': None,
+            'date_from': None,
+            'date_to': None,
+        }
+        result = engine.search(queryset, params)
+        result_titles = [s.title for s in result]
+        # All services -- including Ankara, far outside any reasonable radius
+        # -- still surface. LocationStrategy only annotates when distance
+        # is missing.
+        assert len(result_titles) == original_count
+        assert 'Ankara Service' in result_titles
+
+    def test_location_strategy_signal_only_when_no_distance(self):
+        """When lat/lng are present without `distance`, the queryset must
+        keep every row (no hard radius cutoff). The viewer asked for the
+        location SIGNAL only -- ranking should weight by closeness via the
+        composite_score's smooth proximity_factor, not exclude far rows.
+        """
+        queryset = Service.objects.filter(status='Active')
+        original_count = queryset.count()
+
+        params = {'lat': 41.0422, 'lng': 29.0089}
+        result = self.strategy.apply(queryset, params)
+        result_list = list(result)
+
+        # Every active row must still be present, including Ankara which is
+        # ~350km away. The annotate() and order_by('distance') still fire.
+        assert len(result_list) == original_count
+        titles = [s.title for s in result_list]
+        assert 'Ankara Service' in titles
+        assert 'Besiktas Service' in titles
+        assert 'Online Service' in titles
 
 
 @pytest.mark.unit
@@ -359,6 +416,42 @@ class TestTagStrategy:
         
         assert result.count() == original_count
     
+    def test_tag_strategy_sibling_expansion(self):
+        """Picking a child tag surfaces sibling-tagged services via the
+        expand_tag_qids helper. Painting and Sculpture both share Art as a
+        parent_qid; picking Painting should bring Sculpture-tagged services
+        along, in addition to the children of Painting (none here).
+        """
+        art = Tag.objects.create(id='Q735', name='Art')
+        painting = Tag.objects.create(id='Q11629', name='Painting', parent_qid='Q735')
+        sculpture = Tag.objects.create(id='Q11634', name='Sculpture', parent_qid='Q735')
+
+        painting_service = Service.objects.create(
+            user=self.user,
+            title='Watercolour intro',
+            description='', type='Offer', duration=Decimal('1.00'),
+            location_type='Online', max_participants=1, schedule_type='One-Time',
+        )
+        painting_service.tags.add(painting)
+
+        sculpture_service = Service.objects.create(
+            user=self.user,
+            title='Clay basics',
+            description='', type='Offer', duration=Decimal('1.00'),
+            location_type='Online', max_participants=1, schedule_type='One-Time',
+        )
+        sculpture_service.tags.add(sculpture)
+
+        params = {'tag': 'Q11629'}  # Painting alone
+        result = self.strategy.apply(Service.objects.filter(status='Active'), params)
+        titles = [s.title for s in result]
+
+        assert 'Watercolour intro' in titles
+        assert 'Clay basics' in titles, (
+            'sibling expansion failed: picking Painting should also surface '
+            'Sculpture-tagged services'
+        )
+
     def test_tag_strategy_nonexistent_tag(self):
         """Test TagStrategy with non-existent tag returns empty."""
         queryset = Service.objects.filter(status='Active')

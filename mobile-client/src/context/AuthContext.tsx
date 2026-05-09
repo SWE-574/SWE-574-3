@@ -169,10 +169,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     const prevId = user?.id ?? null;
-    sessionGenerationRef.current = nextAuthSessionGeneration(sessionGenerationRef.current);
-    await authApi.logout();
-    useNotificationStore.getState().reset();
+    // Clear React state first so the navigator immediately drops back to the
+    // logged-out tree even if downstream cleanup hits an exception (e.g. a
+    // SecureStore error or a notification-store reset that throws). The
+    // earlier order awaited token storage and the notification reset before
+    // touching `user`; if either threw the screen stayed on the cached
+    // profile and the viewer appeared to be still signed in.
+    // clearSessionLocal also bumps sessionGenerationRef synchronously, so any
+    // in-flight refreshUser race becomes a no-op the same as origin/dev's
+    // explicit pre-bump did.
     await clearSessionLocal(prevId);
+    try {
+      await authApi.logout();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('logout token clear failed', err);
+    }
+    try {
+      useNotificationStore.getState().reset();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('notification store reset failed', err);
+    }
   }, [user, clearSessionLocal]);
 
   useEffect(() => {

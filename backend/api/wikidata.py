@@ -5,9 +5,47 @@ import requests
 import logging
 from typing import Optional, Dict, List
 
+from django.core.cache import cache
+
 
 logger = logging.getLogger(__name__)
 WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
+
+# Per-query cache window. Tag autocomplete results are stable enough that a
+# 1-hour window is a strict win for typical browsing patterns -- the same
+# query repeats many times across one session of editing services.
+_SEARCH_CACHE_TTL_SECONDS = 60 * 60
+# When the local Tag table already contains this many matches for the prefix,
+# skip Wikidata entirely. The autocomplete is most useful for discovering
+# brand-new tags; for repeat searches the local catalog already covers it.
+_LOCAL_HIT_THRESHOLD = 5
+
+
+def _local_tag_search(query: str, limit: int) -> List[Dict]:
+    """Search the local Tag table by name prefix/substring.
+
+    Returns up to ``limit`` matches in the same shape as the Wikidata
+    response so callers can short-circuit the live API. Results are sorted
+    by service-count desc so the most-used tags surface first.
+    """
+    from .models import Tag
+    from django.db.models import Count
+
+    rows = (
+        Tag.objects.filter(name__icontains=query.strip())
+        .annotate(c=Count('service'))
+        .order_by('-c', 'name')
+        .values('id', 'name')[:limit]
+    )
+    return [
+        {'id': row['id'], 'label': row['name'], 'description': None}
+        for row in rows
+        if row['id'] and row['name']
+    ]
+
+
+def _search_cache_key(query: str, limit: int) -> str:
+    return f'wikidata:search:{limit}:{query.strip().lower()}'
 
 
 def fetch_wikidata_item(wikidata_id: str) -> Optional[Dict]:
@@ -64,13 +102,34 @@ def fetch_wikidata_item(wikidata_id: str) -> Optional[Dict]:
 def search_wikidata_items(query: str, limit: int = 10) -> List[Dict]:
     """
     Search for Wikidata items by name.
-    
+
     Returns:
         List of dictionaries with id, label, and description
+
+    Latency: typing one character used to fire a fresh ~5s round-trip to
+    wikidata.org on every keystroke. Two short-circuits land before the
+    network call now:
+
+      1. Per-query Django cache (1h TTL). The same prefix typed twice
+         returns instantly the second time.
+      2. Local Tag DB lookup. If the platform already has >= 5 matches
+         for this prefix, return them and skip Wikidata altogether --
+         the autocomplete only needs the live API for *new* topics, not
+         the long tail of established platform tags.
     """
     if not query or not query.strip():
         return []
-    
+
+    cache_key = _search_cache_key(query, limit)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    local_matches = _local_tag_search(query, limit)
+    if len(local_matches) >= _LOCAL_HIT_THRESHOLD:
+        cache.set(cache_key, local_matches, _SEARCH_CACHE_TTL_SECONDS)
+        return local_matches
+
     try:
         params = {
             'action': 'wbsearchentities',
@@ -122,20 +181,30 @@ def search_wikidata_items(query: str, limit: int = 10) -> List[Dict]:
                 })
         
         logger.info(f"Found {len(formatted_results)} Wikidata results for query '{query}' (from {len(results)} raw results)")
+        # Merge any local matches that didn't make the wikidata results so the
+        # final list isn't strictly smaller after our DB-first attempt.
+        if local_matches:
+            seen = {item['id'] for item in formatted_results}
+            for item in local_matches:
+                if item['id'] not in seen:
+                    formatted_results.append(item)
+                    if len(formatted_results) >= limit:
+                        break
+        cache.set(cache_key, formatted_results, _SEARCH_CACHE_TTL_SECONDS)
         return formatted_results
-        
+
     except requests.Timeout:
         logger.error(f"Wikidata API timeout for query '{query}'")
-        return []
+        return local_matches
     except requests.RequestException as e:
         logger.error(f"Wikidata API request error for query '{query}': {str(e)}")
-        return []
+        return local_matches
     except KeyError as e:
         logger.error(f"Wikidata API response parsing error for query '{query}': {str(e)}")
-        return []
+        return local_matches
     except Exception as e:
         logger.error(f"Unexpected error searching Wikidata for query '{query}': {str(e)}", exc_info=True)
-        return []
+        return local_matches
 
 
 def enrich_tag_with_wikidata(tag_id: str) -> Optional[Dict]:
@@ -197,12 +266,19 @@ def _wikidata_get(params: dict) -> Optional[dict]:
         return None
 
 
+_CLAIMS_CACHE_TTL_SECONDS = 24 * 60 * 60
+
+
 def fetch_wikidata_claims(qid: str) -> Optional[Dict]:
     """
     Fetch P31 (instance of) and P279 (subclass of) claims for a WikiData entity.
 
     Returns:
         Dict with 'instance_of' and 'subclass_of' lists of QIDs, or None on failure.
+
+    Per-QID cache (24h) -- claims rarely change. Without it, every search
+    result triggered a fresh 5s-timeout round-trip; a typical 10-result
+    search added up to 50s on top of the wbsearchentities call.
     """
     if not qid:
         return None
@@ -210,6 +286,11 @@ def fetch_wikidata_claims(qid: str) -> Optional[Dict]:
     normalized = str(qid).strip().upper()
     if not normalized.startswith('Q'):
         return None
+
+    cache_key = f'wikidata:claims:{normalized}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     data = _wikidata_get({
         'action': 'wbgetentities',
@@ -238,6 +319,7 @@ def fetch_wikidata_claims(qid: str) -> Optional[Dict]:
             except (KeyError, TypeError):
                 continue
 
+    cache.set(cache_key, result, _CLAIMS_CACHE_TTL_SECONDS)
     return result
 
 

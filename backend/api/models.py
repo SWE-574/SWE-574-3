@@ -434,8 +434,13 @@ class Service(models.Model):
             if self._state.adding or self.created_at is None:
                 defer_hot_score_calculation = True
             else:
-                from .ranking import calculate_hot_score
-                self.hot_score = calculate_hot_score(self)
+                # Dispatch by type so events use the velocity/organiser_quality
+                # formula instead of the Offer/Need formula. Without this,
+                # newly-created events stored an inflated score derived from
+                # the organiser's Offer/Need rep history (issue: events with
+                # zero event-feedback were ranking like seasoned offers).
+                from .ranking import calculate_score_for
+                self.hot_score = calculate_score_for(self)
                 if update_fields is not None:
                     update_fields_set = set(update_fields)
                     update_fields_set.add('hot_score')
@@ -444,8 +449,8 @@ class Service(models.Model):
         super().save(*args, **kwargs)
 
         if defer_hot_score_calculation:
-            from .ranking import calculate_hot_score
-            self.hot_score = calculate_hot_score(self)
+            from .ranking import calculate_score_for
+            self.hot_score = calculate_score_for(self)
             super().save(update_fields=['hot_score'])
 
     def __str__(self):

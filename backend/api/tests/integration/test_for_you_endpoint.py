@@ -49,8 +49,7 @@ class TestForYouFeedEndpoint:
         assert 'for_you_signals' in results[0]
         signals = results[0]['for_you_signals']
         assert set(signals.keys()) == {
-            'tag', 'follow', 'cooccur', 'recency_penalty',
-            'engagement', 'dismissed_similarity',
+            'tag', 'follow', 'cooccur', 'recency_penalty', 'engagement',
         }
 
     def test_anonymous_viewer_gets_empty_for_you(self):
@@ -257,33 +256,6 @@ class TestForYouEngagementSignals:
         assert neutral_signals is not None
         # Cooking candidate shares the saved tag set; neutral does not.
         assert cooking_signals['engagement'] > neutral_signals['engagement']
-
-    def test_dismissed_service_penalises_similar_candidates(self):
-        viewer, skill_tag = _onboarded_with_skill('Q_seed')
-        cooking = _make_tag('Q_cooking')
-
-        # The viewer dismissed a cooking-tagged service.
-        dismissed = ServiceFactory(type='Offer', status='Active')
-        dismissed.tags.add(cooking)
-        ServiceDismissalFactory(viewer=viewer, service=dismissed)
-
-        cooking_candidate = ServiceFactory(type='Offer', status='Active')
-        cooking_candidate.tags.add(skill_tag, cooking)
-        neutral_candidate = ServiceFactory(type='Offer', status='Active')
-        neutral_candidate.tags.add(skill_tag)
-
-        client = APIClient()
-        client.force_authenticate(user=viewer)
-        resp = client.get('/api/services/?sort=for_you')
-        assert_api_response(resp, 200)
-        results = resp.json()['results']
-        cooking_signals = self._signals_for(results, cooking_candidate.id)
-        neutral_signals = self._signals_for(results, neutral_candidate.id)
-        assert cooking_signals is not None
-        assert neutral_signals is not None
-        # Cooking candidate shares the dismissed tag set; the dismissed
-        # similarity score reflects that. Neutral candidate is unaffected.
-        assert cooking_signals['dismissed_similarity'] > neutral_signals['dismissed_similarity']
 
     def test_mmr_top_results_are_diverse(self):
         from django.test import override_settings
