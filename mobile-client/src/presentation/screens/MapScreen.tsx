@@ -144,15 +144,10 @@ export default function MapScreen() {
   }, []);
 
   const post = useCallback((payload: Record<string, unknown>) => {
-    if (!webViewRef.current) return;
-    // Percent-encode the JSON so the injected snippet only ever embeds
-    // [A-Za-z0-9-_.!~*'()%], leaving no quote, backslash or angle bracket
-    // that could close the string literal and inject code. handle() in
-    // mapbox.html runs JSON.parse on the decoded value.
-    const encoded = encodeURIComponent(JSON.stringify(payload));
-    webViewRef.current.injectJavaScript(
-      `(function(){try{handle(decodeURIComponent("${encoded}"));}catch(e){}})();true;`,
-    );
+    // postMessage hands the JSON across the bridge as data, so nothing is
+    // ever spliced into a JS string for injectJavaScript to evaluate.
+    // mapbox.html's window/document message listeners forward to handle().
+    webViewRef.current?.postMessage(JSON.stringify(payload));
   }, []);
 
   // Send the init payload as soon as the WebView and the location resolution
