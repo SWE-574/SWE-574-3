@@ -56,10 +56,7 @@ function BadgeTooltip({
   }, [placement])
 
   useLayoutEffect(() => {
-    if (!visible) {
-      setFixedStyle(null)
-      return
-    }
+    if (!visible) return
     updatePosition()
     const onMove = () => updatePosition()
     window.addEventListener('resize', onMove)
