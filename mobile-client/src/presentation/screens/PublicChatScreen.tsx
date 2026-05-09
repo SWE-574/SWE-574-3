@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useNavigation, useRoute, StackActions } from "@react-navigation/native";
 import type { NativeStackNavigationProp, NativeStackScreenProps } from "@react-navigation/native-stack";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
@@ -50,9 +50,7 @@ export default function PublicChatScreen() {
   const { params } = useRoute<NavProps["route"]>();
   const navigation = useNavigation<NativeStackNavigationProp<MessagesStackParamList>>();
   const { user } = useAuth();
-  const { roomId: serviceId, roomTitle = "Event chat" } = params ?? {
-    roomId: "",
-  };
+  const { roomId: serviceId, roomTitle } = params ?? { roomId: "" };
 
   const [messages, setMessages] = useState<ChatMessageWithMeta[]>([]);
   const [inputText, setInputText] = useState("");
@@ -62,6 +60,8 @@ export default function PublicChatScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [wsRoomId, setWsRoomId] = useState<string | null>(null);
   const [memberCount, setMemberCount] = useState<number | null>(null);
+  // Title from params when available; falls back to service title fetched in loadHistory.
+  const [effectiveTitle, setEffectiveTitle] = useState(roomTitle ?? "Event chat");
   const [participants, setParticipants] = useState<ChatParticipantItem[]>([]);
   const [showParticipantsSheet, setShowParticipantsSheet] = useState(false);
 
@@ -168,6 +168,10 @@ export default function PublicChatScreen() {
           setMemberCount(null);
         }
 
+        if (!roomTitle && typeof service.title === "string" && service.title) {
+          setEffectiveTitle(service.title);
+        }
+
         const activeParticipants = handshakesResponse.results.filter((handshake) => {
           const handshakeService =
             typeof handshake.service === "string"
@@ -259,8 +263,20 @@ export default function PublicChatScreen() {
   }, [loadHistory]);
 
   useEffect(() => {
-    navigation.setOptions({ headerTitle: roomTitle });
-  }, [navigation, roomTitle]);
+    const isRootScreen = navigation.getState().index === 0;
+    navigation.setOptions({
+      headerTitle: effectiveTitle,
+      headerLeft: isRootScreen ? () => (
+        <TouchableOpacity
+          onPress={() => navigation.dispatch(StackActions.replace("MessagesList"))}
+          hitSlop={8}
+          style={{ paddingRight: 8 }}
+        >
+          <Ionicons name="chevron-back" size={28} color="#007AFF" />
+        </TouchableOpacity>
+      ) : undefined,
+    });
+  }, [navigation, effectiveTitle]);
 
   useEffect(() => {
     if (!wsRoomId) return;
@@ -444,7 +460,7 @@ export default function PublicChatScreen() {
               style={styles.serviceLinkWrap}
             >
               <Text style={styles.headerTitleLink} numberOfLines={1}>
-                {roomTitle}
+                {effectiveTitle}
               </Text>
               <Text style={styles.headerSubtitle}>
                 {memberCount !== null

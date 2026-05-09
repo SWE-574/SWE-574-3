@@ -53,8 +53,7 @@ export function EventRosterPanel({ service, handshakes, onComplete, onMarkAttend
   const active = handshakes.filter((handshake) => ['accepted', 'checked_in', 'attended', 'no_show'].includes(handshake.status))
   const checkedIn = active.filter((handshake) => handshake.status === 'checked_in').length
   const attended = active.filter((handshake) => handshake.status === 'attended').length
-  const registered = active.filter((handshake) => handshake.status === 'accepted').length
-  const willBeNoShow = registered + checkedIn
+  const willBeNoShow = checkedIn
 
   // ── QR token state ──
   const [qrData, setQrData] = useState<{ qr_payload: string; attendance_code: string; expires_at: string } | null>(null)

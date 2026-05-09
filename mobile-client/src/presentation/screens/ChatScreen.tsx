@@ -20,6 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   useRoute,
   useNavigation,
+  StackActions,
   type CompositeNavigationProp,
 } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
@@ -149,9 +150,22 @@ export default function ChatScreen() {
     handshake,
   });
 
+  // When arriving from a notification, serviceTitle/serviceType aren't passed as params.
+  // Fall back to the loaded handshake's service fields once they're available.
+  const effectiveServiceTitle =
+    serviceTitle ||
+    (typeof handshakeRecord?.service_title === "string"
+      ? handshakeRecord.service_title
+      : undefined);
+  const effectiveServiceType =
+    serviceType ||
+    (typeof handshakeRecord?.service_type === "string"
+      ? handshakeRecord.service_type
+      : undefined);
+
   const title = useMemo(
-    () => serviceTitle || chatParticipant.name || "Messages",
-    [chatParticipant.name, serviceTitle],
+    () => effectiveServiceTitle || chatParticipant.name || "Messages",
+    [chatParticipant.name, effectiveServiceTitle],
   );
   const isCurrentUserServiceOwner = useMemo(() => {
     const liveServiceType =
@@ -348,22 +362,35 @@ export default function ChatScreen() {
   }, [handshakeId, notificationId]);
 
   useEffect(() => {
+    const isRootScreen = navigation.getState().index === 0;
     navigation.setOptions({
       headerTitle: () => (
         <View style={styles.headerTitleWrap}>
           <Text style={styles.headerTitleText} numberOfLines={1}>
             {title}
           </Text>
-          {!!serviceType ? (
+          {!!effectiveServiceType ? (
             <View style={styles.headerTypeBadge}>
-              <Text style={styles.headerTypeBadgeText}>{serviceType}</Text>
+              <Text style={styles.headerTypeBadgeText}>{effectiveServiceType}</Text>
             </View>
           ) : null}
         </View>
       ),
       headerBackTitle: "Back",
+      // When opened directly from a notification the screen may be the stack
+      // root (no MessagesList below it). Render an explicit back button so the
+      // user can always return to the messages list.
+      headerLeft: isRootScreen ? () => (
+        <TouchableOpacity
+          onPress={() => navigation.dispatch(StackActions.replace("MessagesList"))}
+          hitSlop={8}
+          style={{ paddingRight: 8 }}
+        >
+          <Ionicons name="chevron-back" size={28} color="#007AFF" />
+        </TouchableOpacity>
+      ) : undefined,
     });
-  }, [navigation, serviceType, title]);
+  }, [navigation, effectiveServiceType, title]);
 
   const sessionDetails = useMemo<SessionDetails | null>(() => {
     if (!handshake) return null;

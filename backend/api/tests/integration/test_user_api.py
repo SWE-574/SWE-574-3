@@ -17,6 +17,7 @@ from api.models import (
     Badge,
     UserBadge,
     Comment,
+    ServiceMedia,
     ReputationRep,
     UserFollow,
     UserFollowEvent,
@@ -131,6 +132,42 @@ class TestUserProfileView:
         response = client.get('/api/users/me/')
         assert_api_response(response, 200, schema={'followers_count': 1, 'following_count': 1})
         assert response.data['is_following'] is False
+
+    def test_me_profile_service_query_count_does_not_scale_per_service(self):
+        """Nested service cards in /users/me/ should not re-query counts/media per row."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        user = UserFactory()
+        requester = UserFactory()
+
+        for idx in range(3):
+            service = ServiceFactory(user=user, type='Offer', status='Active', title=f'Profile Offer {idx}')
+            Comment.objects.create(service=service, user=requester, body='Helpful context')
+            ServiceMedia.objects.create(service=service, media_type='image', file_url=f'https://example.com/{idx}.jpg')
+            HandshakeFactory(service=service, requester=requester, status='accepted')
+
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        with CaptureQueriesContext(connection) as ctx_3:
+            response = client.get('/api/users/me/')
+            assert_api_response(response, 200)
+        small = len(ctx_3)
+
+        for idx in range(3, 12):
+            service = ServiceFactory(user=user, type='Offer', status='Active', title=f'Profile Offer {idx}')
+            Comment.objects.create(service=service, user=requester, body='Helpful context')
+            ServiceMedia.objects.create(service=service, media_type='image', file_url=f'https://example.com/{idx}.jpg')
+            HandshakeFactory(service=service, requester=requester, status='accepted')
+
+        with CaptureQueriesContext(connection) as ctx_12:
+            response = client.get('/api/users/me/')
+            assert_api_response(response, 200)
+        large = len(ctx_12)
+
+        assert large - small < 15, (
+            f'/users/me/ query count grew from {small} to {large} for 3 -> 12 '
+            'services; nested service N+1 likely regressed'
+        )
 
     def test_other_user_profile_is_following_and_counts(self):
         viewer = UserFactory()
@@ -266,6 +303,29 @@ class TestUserHistoryView:
         assert len(response.data) == 1
         assert response.data[0]['service_type'] == 'Event'
         assert response.data[0]['was_provider'] is True
+
+    def test_evaluation_pending_false_for_organizer(self):
+        organizer = UserFactory()
+        participant = UserFactory()
+        event = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Completed',
+            event_completed_at=timezone.now() - timedelta(hours=1),
+        )
+        HandshakeFactory(
+            service=event,
+            requester=participant,
+            status='attended',
+            provisioned_hours=Decimal('0.00'),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+        response = client.get(f'/api/users/{organizer.id}/history/')
+
+        assert_api_response(response, 200)
+        event_entries = [e for e in response.data if e['service_type'] == 'Event']
+        assert all(not e['evaluation_pending'] for e in event_entries)
 
 
 @pytest.mark.django_db

@@ -31,7 +31,6 @@ const PublicProfile          = lazy(() => import('@/pages/PublicProfile'))
 const TransactionHistoryPage = lazy(() => import('@/pages/TransactionHistoryPage'))
 const NotificationsPage      = lazy(() => import('@/pages/NotificationsPage'))
 const SavedServicesPage      = lazy(() => import('@/pages/SavedServicesPage'))
-const PulsePage              = lazy(() => import('@/pages/PulsePage'))
 const SuggestedUsersPage     = lazy(() => import('@/pages/SuggestedUsersPage'))
 const AdminDashboard         = lazy(() => import('@/pages/AdminDashboard'))
 const AdminUserDetailPage    = lazy(() => import('@/pages/AdminUserDetailPage'))
@@ -213,10 +212,10 @@ function App() {
     // triggering the /users/me/ → 401 → refresh-fail cycle on every keystroke.
     if (PUBLIC_AUTH_PATHS.includes(location.pathname)) return
 
-    // On protected route changes, keep fast-changing profile fields such as
-    // time balance fresh while still bootstrapping anonymous sessions normally.
+    // Route changes are a soft auth/profile refresh so navigation does not
+    // flood /users/me/. Mutations that change balance call refreshUser() explicitly.
     if (user) {
-      refreshUser()
+      refreshUser({ force: false })
     } else {
       checkAuth()
     }
@@ -263,20 +262,11 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/pulse"
-            element={
-              <ProtectedRoute>
-                <PulsePage />
-              </ProtectedRoute>
-            }
-          />
-          {/* Old /activity URL redirects to the rebranded Pulse page so any
-              external links keep working. */}
-          <Route
-            path="/activity"
-            element={<Navigate to="/pulse" replace />}
-          />
+          {/* Pulse and the old /activity URL now redirect to Browse —
+              ranking lanes (For you, Discovery, Trending, Newest, Nearby)
+              live there as buttons. */}
+          <Route path="/pulse" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/activity" element={<Navigate to="/dashboard" replace />} />
           <Route
             path="/users/suggested"
             element={

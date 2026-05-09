@@ -933,7 +933,7 @@ class TestCheckRecurringGrowth:
 
     def test_stale_recurring_service_gets_flagged(self):
         owner = UserFactory()
-        svc = ServiceFactory(user=owner, type='Offer', status='Active', schedule_type='Recurrent')
+        svc = ServiceFactory(user=owner, type='Event', status='Active', schedule_type='Recurrent')
         # No completed handshakes -> stale
         self._run()
         svc.refresh_from_db()
@@ -944,7 +944,7 @@ class TestCheckRecurringGrowth:
         from datetime import timedelta as td
         from api.models import Handshake
         owner = UserFactory()
-        svc = ServiceFactory(user=owner, type='Offer', status='Active', schedule_type='Recurrent')
+        svc = ServiceFactory(user=owner, type='Event', status='Active', schedule_type='Recurrent')
         # 2 completed handshakes in the last 7 days, 1 in the prior 7 days -> growth
         for _ in range(2):
             HandshakeFactory(service=svc, status='completed', provisioned_hours=Decimal('1'))
@@ -964,7 +964,7 @@ class TestCheckRecurringGrowth:
 
     def test_throttle_re_check_within_7_days(self):
         owner = UserFactory()
-        svc = ServiceFactory(user=owner, type='Offer', status='Active', schedule_type='Recurrent')
+        svc = ServiceFactory(user=owner, type='Event', status='Active', schedule_type='Recurrent')
         self._run()  # first run -- sets last_growth_check_at
         svc.refresh_from_db()
         first_check = svc.last_growth_check_at

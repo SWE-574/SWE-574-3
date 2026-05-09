@@ -300,6 +300,15 @@ class Service(models.Model):
     schedule_type = models.CharField(max_length=10, choices=SCHEDULE_CHOICES)
     schedule_details = models.TextField(blank=True, null=True)
     scheduled_time = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Event start time (required for Events)')
+    recurrence_interval_days = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            'For recurring Events only. When the organizer marks a recurring '
+            'Event as completed, a fresh copy is auto-created with '
+            'scheduled_time shifted forward by this many days.'
+        ),
+    )
     event_completed_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Timestamp when organizer marked an event as completed')
     tags = models.ManyToManyField(Tag, blank=True)
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
@@ -1378,38 +1387,6 @@ class SavedService(models.Model):
         return f'SavedService({self.user_id}, {self.service_id})'
 
 
-class Endorsement(models.Model):
-    """Public endorsement of a service's provider (#483 Endorse).
-
-    A viewer can endorse a service to publicly say 'I vouch for this provider'.
-    Counts are visible on the service card; integration into ranking
-    (Wilson quality / Phase 2 factor) is a planned follow-up so this PR keeps
-    the ranking math untouched.
-    """
-    endorser = models.ForeignKey(
-        'User', on_delete=models.CASCADE, related_name='endorsements_given',
-    )
-    service = models.ForeignKey(
-        Service, on_delete=models.CASCADE, related_name='endorsements',
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=['endorser', 'service'], name='endorsement_unique',
-            ),
-        ]
-        indexes = [
-            models.Index(fields=['service', '-created_at']),
-            models.Index(fields=['endorser', '-created_at']),
-        ]
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f'Endorsement({self.endorser_id}, {self.service_id})'
-
-
 class ServiceDismissal(models.Model):
     """Per-viewer dismissal of a service surfaced in Pulse / For You.
 
@@ -1441,6 +1418,7 @@ class ServiceDismissal(models.Model):
         return f'ServiceDismissal({self.viewer_id}, {self.service_id})'
 
 
+
 class ActivityEvent(models.Model):
     """Append-only timeline of platform activity that powers the activity feed.
 
@@ -1454,7 +1432,6 @@ class ActivityEvent(models.Model):
     HANDSHAKE_ACCEPTED = 'handshake_accepted'
     HANDSHAKE_COMPLETED = 'handshake_completed'
     USER_FOLLOWED = 'user_followed'
-    SERVICE_ENDORSED = 'service_endorsed'
     EVENT_FILLING_UP = 'event_filling_up'
     NEW_NEIGHBOR = 'new_neighbor'
     VERB_CHOICES = [
@@ -1462,7 +1439,6 @@ class ActivityEvent(models.Model):
         (HANDSHAKE_ACCEPTED, 'handshake_accepted'),
         (HANDSHAKE_COMPLETED, 'handshake_completed'),
         (USER_FOLLOWED, 'user_followed'),
-        (SERVICE_ENDORSED, 'service_endorsed'),
         (EVENT_FILLING_UP, 'event_filling_up'),
         (NEW_NEIGHBOR, 'new_neighbor'),
     ]

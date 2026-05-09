@@ -328,7 +328,7 @@ def test_service_creation_with_mixed_existing_and_new_qids(mock_fetch, auth_env)
         'description': 'Learn Python and JavaScript',
         'type': 'Offer', 'duration': 3,
         'location_type': 'Online',
-        'max_participants': 2, 'schedule_type': 'Recurrent',
+        'max_participants': 1, 'schedule_type': 'One-Time',
         'tag_ids': ['Q28865', 'Q2005'],
     })
 

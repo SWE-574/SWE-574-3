@@ -39,6 +39,41 @@ class TestServiceViewSet:
         response = client.get('/api/services/?type=Offer')
         assert_api_response(response, 200)
         assert all(s['type'] == 'Offer' for s in response.data['results'])
+
+    def test_user_profile_service_list_includes_agreed_services(self):
+        """Profile service lists should include services with active agreements."""
+        owner = UserFactory()
+        active_offer = ServiceFactory(user=owner, type='Offer', status='Active', title='Visible Active Offer')
+        agreed_offer = ServiceFactory(user=owner, type='Offer', status='Agreed', title='Visible Agreed Offer')
+        ServiceFactory(user=owner, type='Offer', status='Completed', title='Hidden Completed Offer')
+        ServiceFactory(type='Offer', status='Agreed', title='Other Owner Agreed Offer')
+
+        client = APIClient()
+        response = client.get(f'/api/services/?user={owner.id}&type=Offer')
+
+        assert_api_response(response, 200)
+        returned_ids = {item['id'] for item in response.data['results']}
+        assert str(active_offer.id) in returned_ids
+        assert str(agreed_offer.id) in returned_ids
+        assert all(item['status'] in {'Active', 'Agreed'} for item in response.data['results'])
+
+    def test_user_profile_service_list_is_not_served_from_stale_cache(self):
+        """Profile lists need live service state when agreements change status."""
+        owner = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', status='Active', title='Agreement Status Offer')
+
+        client = APIClient()
+        first = client.get(f'/api/services/?user={owner.id}&type=Offer')
+        assert_api_response(first, 200)
+        first_item = next(item for item in first.data['results'] if item['id'] == str(service.id))
+        assert first_item['status'] == 'Active'
+
+        Service.objects.filter(id=service.id).update(status='Agreed')
+
+        second = client.get(f'/api/services/?user={owner.id}&type=Offer')
+        assert_api_response(second, 200)
+        second_item = next(item for item in second.data['results'] if item['id'] == str(service.id))
+        assert second_item['status'] == 'Agreed'
     
     def test_list_services_pagination(self):
         """Test service pagination"""
@@ -826,7 +861,11 @@ class TestServiceRetrieveStatusVisibility:
             'location_lat': '41.042200',
             'location_lng': '29.008900',
             'max_participants': 5,
-            'schedule_type': 'Recurrent',
+            'schedule_type': 'One-Time',
+            'scheduled_time': (timezone.now() + timedelta(days=3)).isoformat(),
+            'session_exact_location': 'Beşiktaş Culture Center, Beşiktaş, İstanbul',
+            'session_exact_location_lat': '41.042200',
+            'session_exact_location_lng': '29.008900',
         })
         assert_api_response(response, 201, schema={'max_participants': 5})
         service = Service.objects.get(id=response.data['id'])

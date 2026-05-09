@@ -1596,7 +1596,8 @@ class EventHandshakeService:
                 )
 
             locked_handshake.status = 'cancelled'
-            locked_handshake.save(update_fields=['status', 'updated_at'])
+            locked_handshake.cancellation_reason = 'user_left'
+            locked_handshake.save(update_fields=['status', 'cancellation_reason', 'updated_at'])
 
             create_notification(
                 user=locked_handshake.service.user,
@@ -1884,10 +1885,10 @@ class EventHandshakeService:
             service = Service.objects.select_for_update().get(pk=service.pk)
             organizer = User.objects.select_for_update().get(pk=organizer.pk)
 
-            # Bulk-mark non-attended participants as no-shows (single SQL UPDATE)
+            # Only checked_in participants become no-shows; accepted (never showed up) stay as-is.
             no_show_qs = Handshake.objects.filter(
                 service=service,
-                status__in=['accepted', 'checked_in'],
+                status='checked_in',
             )
             no_show_requester_ids = list(no_show_qs.values_list('requester_id', flat=True).distinct())
             no_show_qs.update(status='no_show', updated_at=timezone.now())
@@ -1925,6 +1926,17 @@ class EventHandshakeService:
                     service=service,
                 )
 
+            # Notify accepted (registered but never checked-in) participants that the event is over.
+            for accepted_hs in Handshake.objects.filter(service=service, status='accepted').select_related('requester'):
+                create_notification(
+                    user=accepted_hs.requester,
+                    notification_type='service_updated',
+                    title='Event Completed',
+                    message=f"The event '{service.title}' has ended.",
+                    handshake=accepted_hs,
+                    service=service,
+                )
+
             service.status = 'Completed'
             service.event_completed_at = timezone.now()
             service.save(update_fields=['status', 'event_completed_at', 'updated_at'])
@@ -1954,6 +1966,52 @@ class EventHandshakeService:
                     handshake=attended_handshake,
                     service=service,
                 )
+
+            # Auto-repost recurring events: when the organizer completes a
+            # Recurrent Event with a recurrence_interval_days cadence, spawn a
+            # fresh copy with scheduled_time shifted forward by that interval.
+            # The post_save signal in signals.py emits SERVICE_CREATED for it.
+            if (
+                service.schedule_type == 'Recurrent'
+                and service.recurrence_interval_days
+                and service.scheduled_time
+            ):
+                EventHandshakeService._repost_recurring_event(service)
+
+    @staticmethod
+    def _repost_recurring_event(original: Service) -> Service:
+        """Clone a completed recurring Event with scheduled_time shifted by
+        recurrence_interval_days. Tags are copied; participants and chat
+        history are not. The organizer doesn't need to do anything."""
+        next_time = original.scheduled_time + timedelta(
+            days=original.recurrence_interval_days
+        )
+        clone = Service.objects.create(
+            user=original.user,
+            title=original.title,
+            description=original.description,
+            type='Event',
+            duration=original.duration,
+            location_type=original.location_type,
+            location_area=original.location_area,
+            location_lat=original.location_lat,
+            location_lng=original.location_lng,
+            location=original.location,
+            session_exact_location=original.session_exact_location,
+            session_exact_location_lat=original.session_exact_location_lat,
+            session_exact_location_lng=original.session_exact_location_lng,
+            session_location_guide=original.session_location_guide,
+            status='Active',
+            max_participants=original.max_participants,
+            schedule_type='Recurrent',
+            recurrence_interval_days=original.recurrence_interval_days,
+            schedule_details=original.schedule_details,
+            scheduled_time=next_time,
+            requires_qr_checkin=original.requires_qr_checkin,
+        )
+        # Copy tags via the M2M after the row is created.
+        clone.tags.set(original.tags.all())
+        return clone
 
     @staticmethod
     def cancel_event(service: Service, organizer: User, reason: str = '') -> None:

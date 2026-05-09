@@ -12,7 +12,7 @@ from api.models import (
     Comment, NegativeRep, TransactionHistory, Badge, UserBadge,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia, ServiceGroupChatMessage,
     ChatRoom, PublicChatMessage, Notification,
-    SavedService, ServiceDismissal, Endorsement,
+    SavedService, ServiceDismissal,
 )
 
 User = get_user_model()
@@ -296,10 +296,3 @@ class ServiceDismissalFactory(factory.django.DjangoModelFactory):
     service = factory.SubFactory(ServiceFactory)
 
 
-class EndorsementFactory(factory.django.DjangoModelFactory):
-    """Factory for creating Endorsement (public quality vouch) instances"""
-    class Meta:
-        model = Endorsement
-
-    endorser = factory.SubFactory(UserFactory)
-    service = factory.SubFactory(ServiceFactory)

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { listServices } from "../../api/services";
 import type { Service } from "../../api/types";
 import { colors } from "../../constants/colors";
+import FeaturedServiceCard from "./FeaturedServiceCard";
 
 interface ForYouSectionProps {
   onServicePress: (id: string) => void;
@@ -51,12 +51,12 @@ export default function ForYouSection({
   return (
     <View style={styles.section}>
       <View style={styles.header}>
-        <Ionicons name="heart-outline" size={16} color={colors.PURPLE} />
+        <Ionicons name="heart-outline" size={16} color={colors.GRAY700} />
         <Text style={styles.heading}>For you</Text>
       </View>
       {loading ? (
         <View style={styles.loadingRow}>
-          <ActivityIndicator size="small" color={colors.PURPLE} />
+          <ActivityIndicator size="small" color={colors.GRAY500} />
         </View>
       ) : (
         <ScrollView
@@ -65,19 +65,11 @@ export default function ForYouSection({
           contentContainerStyle={styles.scrollContent}
         >
           {services.map((service) => (
-            <Pressable
+            <FeaturedServiceCard
               key={service.id}
+              service={service}
               onPress={() => onServicePress(String(service.id))}
-              style={styles.card}
-            >
-              <Text style={styles.cardType}>{service.type}</Text>
-              <Text style={styles.cardTitle} numberOfLines={2}>
-                {service.title}
-              </Text>
-              <Text style={styles.cardOwner} numberOfLines={1}>
-                {service.user.first_name} {service.user.last_name}
-              </Text>
-            </Pressable>
+            />
           ))}
         </ScrollView>
       )}
@@ -107,32 +99,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   scrollContent: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingBottom: 4,
-  },
-  card: {
-    width: 200,
-    marginHorizontal: 4,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: colors.PURPLE_LT,
-    borderWidth: 1,
-    borderColor: colors.GRAY200,
-  },
-  cardType: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.PURPLE,
-    marginBottom: 4,
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.GRAY900,
-    marginBottom: 4,
-  },
-  cardOwner: {
-    fontSize: 12,
-    color: colors.GRAY500,
   },
 });

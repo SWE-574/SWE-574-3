@@ -42,6 +42,7 @@ import {
   formatShortDate,
   getInitials,
 } from "../../utils/profileFormatters";
+import { isOngoingProfileService } from "../../utils/profileServices";
 import AchievementsSection from "../components/AchievementsSection";
 import ProfileSkillsSection from "../components/ProfileSkillsSection";
 import NotificationBadge from "../components/NotificationBadge";
@@ -116,7 +117,7 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!profileUserId) return;
-      void refreshUser();
+      void refreshUser({ force: false });
     }, [profileUserId, refreshUser]),
   );
 
@@ -240,9 +241,7 @@ export default function ProfileScreen() {
   };
 
   const fullName = `${form.first_name} ${form.last_name}`.trim();
-  const activeListingServices = activeServices.filter(
-    (service) => service.status === "Active",
-  );
+  const activeListingServices = activeServices.filter(isOngoingProfileService);
   const offerServices = activeListingServices.filter(
     (service) => service.type === "Offer",
   );

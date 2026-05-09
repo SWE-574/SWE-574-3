@@ -1051,11 +1051,9 @@ const styles = StyleSheet.create({
     color: colors.GRAY600,
   },
   listToolbarTitle: {
-    flex: 0.5,
-    paddingRight: 12,
+    flex: 1,
   },
   listToolbar: {
-    flex: 1,
     paddingHorizontal: 16,
     marginBottom: 12,
     flexDirection: "row",
@@ -1071,7 +1069,6 @@ const styles = StyleSheet.create({
     borderColor: colors.GRAY200,
     padding: 4,
     gap: 4,
-    flex: 0.5,
   },
   sortSegmentButton: {
     flexDirection: "row",

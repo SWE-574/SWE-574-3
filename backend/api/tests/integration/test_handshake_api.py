@@ -1413,7 +1413,7 @@ class TestMarkAttendedAndCompleteEvent:
     # complete-event
     # ------------------------------------------------------------------ #
 
-    def test_complete_event_moves_accepted_and_checked_in_to_no_show(self):
+    def test_complete_event_no_show_only_for_checked_in(self):
         organizer = UserFactory()
         p_accepted = UserFactory()
         p_checked_in = UserFactory()
@@ -1454,8 +1454,8 @@ class TestMarkAttendedAndCompleteEvent:
         h_checked_in.refresh_from_db()
         h_attended.refresh_from_db()
 
-        assert h_accepted.status == 'no_show'
-        assert h_checked_in.status == 'no_show'
+        assert h_accepted.status == 'accepted', 'accepted (never checked in) participants stay accepted — no penalty'
+        assert h_checked_in.status == 'no_show', 'checked_in participants who were not marked attended become no_show'
         assert h_attended.status == 'attended', 'attended participants must not be downgraded'
 
     def test_attended_participants_not_downgraded_during_completion(self):

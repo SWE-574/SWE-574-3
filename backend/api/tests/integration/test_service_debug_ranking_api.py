@@ -10,8 +10,6 @@ from api.tests.helpers.assertions import assert_api_response, assert_problem_det
 @pytest.mark.integration
 class TestServiceDebugRankingApi:
     def test_admin_can_update_global_debug_setting_and_availability_endpoint_reflects_it(self):
-        # Per #371 the availability endpoint is admin-only too -- a member can no
-        # longer query it. The admin sets the flag and the same admin reads it back.
         admin = AdminUserFactory()
 
         client = APIClient()
@@ -82,21 +80,45 @@ class TestServiceDebugRankingApi:
 
 @pytest.mark.django_db
 @pytest.mark.integration
-class TestDebugPanelAdminOnly:
-    """#371 -- debug endpoints must reject non-admin users before any business logic."""
+class TestRecommendationShowcaseAccess:
+    """The Recommendation Showcase is gated by the PlatformSetting toggle —
+    when on, every authenticated viewer can see the breakdown."""
 
-    def test_non_admin_get_availability_is_forbidden(self):
+    def test_member_can_query_availability(self):
         member = UserFactory()
+        PlatformSetting.objects.update_or_create(pk=1, defaults={'ranking_debug_enabled': True})
         client = APIClient()
         client.force_authenticate(user=member)
         resp = client.get('/api/services/debug-ranking-availability/')
-        assert_problem_detail(resp, 403)
+        assert_api_response(resp, 200)
+        assert resp.json() == {'enabled': True}
 
-    def test_non_admin_post_debug_ranking_is_forbidden(self):
+    def test_member_can_get_breakdown_when_toggle_on(self):
         member = UserFactory()
+        owner = UserFactory()
+        PlatformSetting.objects.update_or_create(pk=1, defaults={'ranking_debug_enabled': True})
+        service = ServiceFactory(user=owner, status='Active', title='Mentoring')
         client = APIClient()
         client.force_authenticate(user=member)
-        resp = client.post('/api/services/debug-ranking/', {'service_ids': []}, format='json')
+        resp = client.post('/api/services/debug-ranking/', {
+            'service_ids': [str(service.id)],
+            'selected_service_id': str(service.id),
+            'active_filter': 'all',
+        }, format='json')
+        assert_api_response(resp, 200)
+        assert resp.json()['selected_service']['id'] == str(service.id)
+
+    def test_member_post_is_blocked_when_toggle_off(self):
+        member = UserFactory()
+        owner = UserFactory()
+        PlatformSetting.objects.update_or_create(pk=1, defaults={'ranking_debug_enabled': False})
+        service = ServiceFactory(user=owner, status='Active')
+        client = APIClient()
+        client.force_authenticate(user=member)
+        resp = client.post('/api/services/debug-ranking/', {
+            'service_ids': [str(service.id)],
+            'selected_service_id': str(service.id),
+        }, format='json')
         assert_problem_detail(resp, 403)
 
     def test_admin_can_simulate_as_other_user(self):
@@ -116,6 +138,26 @@ class TestDebugPanelAdminOnly:
         }, format='json')
 
         assert_api_response(resp, 200)
-        # Payload should still describe the same service, just from `target`'s
+        # Payload still describes the same service, just from `target`'s
         # perspective (different social_boost / proximity numbers).
         assert resp.json()['selected_service']['id'] == str(service.id)
+
+    def test_member_simulated_user_id_is_silently_stripped(self):
+        member = UserFactory()
+        target = UserFactory()
+        owner = UserFactory()
+        PlatformSetting.objects.update_or_create(pk=1, defaults={'ranking_debug_enabled': True})
+        service = ServiceFactory(user=owner, status='Active', title='Mentoring')
+
+        client = APIClient()
+        client.force_authenticate(user=member)
+
+        # `simulated_user_id` would leak target's tag/follow state — the
+        # endpoint must accept the request but ignore the simulation flag.
+        resp = client.post('/api/services/debug-ranking/', {
+            'service_ids': [str(service.id)],
+            'selected_service_id': str(service.id),
+            'simulated_user_id': str(target.id),
+        }, format='json')
+
+        assert_api_response(resp, 200)

@@ -133,16 +133,6 @@ export function listSavedServices(): Promise<PaginatedResponse<Service>> {
   return apiRequest<PaginatedResponse<Service>>('/services/saved/');
 }
 
-export function setServiceEndorsed(
-  serviceId: string,
-  endorsed: boolean,
-): Promise<{ is_endorsed: boolean; endorsement_count: number }> {
-  return apiRequest<{ is_endorsed: boolean; endorsement_count: number }>(
-    `/services/${serviceId}/endorse/`,
-    { method: endorsed ? 'POST' : 'DELETE' },
-  );
-}
-
 export function toggleServiceVisibility(id: string): Promise<Service> {
   return apiRequest<Service>(`/services/${id}/toggle-visibility/`, { method: 'POST' });
 }

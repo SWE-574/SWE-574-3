@@ -98,6 +98,7 @@ class TestLeaveEvent:
         hs = EventHandshakeService.join_event(service, user)
         result = EventHandshakeService.leave_event(hs, user)
         assert result.status == 'cancelled'
+        assert result.cancellation_reason == 'user_left'
 
     def test_leave_during_lockdown_raises(self):
         service = _event_service(hours_until_start=12)  # within 24h
@@ -198,11 +199,22 @@ class TestCompleteEvent:
         service.refresh_from_db()
         assert service.status == 'Completed'
 
-    def test_unchecked_participants_become_no_show(self):
+    def test_accepted_participants_remain_accepted_on_completion(self):
         organizer = UserFactory()
         service = _event_service(organizer=organizer)
         user = UserFactory()
         hs = EventHandshakeService.join_event(service, user)
+
+        EventHandshakeService.complete_event(service, organizer)
+        hs.refresh_from_db()
+        assert hs.status == 'accepted'
+
+    def test_checked_in_without_mark_attended_becomes_no_show(self):
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        user = UserFactory()
+        hs = EventHandshakeService.join_event(service, user)
+        EventHandshakeService.checkin(hs, user)
 
         EventHandshakeService.complete_event(service, organizer)
         hs.refresh_from_db()
@@ -265,8 +277,9 @@ class TestCompleteEvent:
         user = UserFactory()
 
         for _ in range(3):
-            svc = _event_service(organizer=organizer)
-            EventHandshakeService.join_event(svc, user)
+            svc = _event_service(organizer=organizer, hours_until_start=12)
+            hs = EventHandshakeService.join_event(svc, user)
+            EventHandshakeService.checkin(hs, user)
             EventHandshakeService.complete_event(svc, organizer)
 
         user.refresh_from_db()
@@ -277,8 +290,9 @@ class TestCompleteEvent:
     def test_no_show_count_increments(self):
         organizer = UserFactory()
         user = UserFactory()
-        service = _event_service(organizer=organizer)
-        EventHandshakeService.join_event(service, user)
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        hs = EventHandshakeService.join_event(service, user)
+        EventHandshakeService.checkin(hs, user)
 
         EventHandshakeService.complete_event(service, organizer)
         user.refresh_from_db()
@@ -287,9 +301,10 @@ class TestCompleteEvent:
     def test_no_show_updated_at_is_set(self):
         """Bulk update of handshakes must update the updated_at timestamp."""
         organizer = UserFactory()
-        service = _event_service(organizer=organizer)
+        service = _event_service(organizer=organizer, hours_until_start=12)
         user = UserFactory()
         hs = EventHandshakeService.join_event(service, user)
+        EventHandshakeService.checkin(hs, user)
         old_ts = hs.updated_at
 
         EventHandshakeService.complete_event(service, organizer)
