@@ -193,6 +193,22 @@ describe('useAuthStore.updateUserOptimistically / setUser / setError', () => {
     expect(useAuthStore.getState().user).toMatchObject({ id: 'u', bio: 'new' })
   })
 
+  it('allows the next soft refresh after optimistic updates', async () => {
+    vi.setSystemTime(1_000)
+    apiMocks.get.mockResolvedValueOnce({ data: { id: 'u', bio: 'server' } })
+    await useAuthStore.getState().refreshUser()
+
+    useAuthStore.getState().updateUserOptimistically({ bio: 'optimistic' } as never)
+
+    apiMocks.get.mockClear()
+    apiMocks.get.mockResolvedValueOnce({ data: { id: 'u', bio: 'confirmed' } })
+    vi.setSystemTime(5_000)
+    await useAuthStore.getState().refreshUser({ force: false })
+
+    expect(apiMocks.get).toHaveBeenCalledTimes(1)
+    expect(useAuthStore.getState().user).toMatchObject({ id: 'u', bio: 'confirmed' })
+  })
+
   it('is a no-op when no user is set', () => {
     useAuthStore.getState().updateUserOptimistically({ bio: 'x' } as never)
     expect(useAuthStore.getState().user).toBeNull()

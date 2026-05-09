@@ -208,6 +208,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   updateUserOptimistically: (updates) => {
     const { user } = get()
     if (!user) return
+    lastUserRefreshAt = 0
     set({ user: { ...user, ...updates } })
   },
 }))
