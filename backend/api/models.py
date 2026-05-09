@@ -137,7 +137,8 @@ class User(AbstractUser):
         for entry in ids:
             if not isinstance(entry, str):
                 raise ValidationError({'featured_badges': ['All entries must be strings.']})
-        # Drop blank entries (e.g. multipart sends '' as a list item)
+        # Normalize multipart noise: FormData may submit '' as a list item; strip empties
+        # before max-count / uniqueness checks (matches serializer validate_featured_badges).
         ids = [e.strip() for e in ids if e.strip()]
         self.featured_badges = ids
         if len(ids) > 2:

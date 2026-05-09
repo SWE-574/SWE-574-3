@@ -263,11 +263,21 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
       } else {
         const fd = new FormData()
         appendScalarDiff(fd)
-        if (skillsChanged && resolvedSkills.length > 0) {
-          resolvedSkills.forEach((t) => fd.append('skill_ids', t.id))
+        if (skillsChanged) {
+          if (resolvedSkills.length > 0) {
+            resolvedSkills.forEach((t) => fd.append('skill_ids', t.id))
+          } else {
+            // Same semantics as JSON [] — serializer skips blanks and clears skills
+            fd.append('skill_ids', '')
+          }
         }
-        if (badgesChanged && form.featured_badges.length > 0) {
-          form.featured_badges.forEach((id) => fd.append('featured_badges', id))
+        if (badgesChanged) {
+          if (form.featured_badges.length > 0) {
+            form.featured_badges.forEach((id) => fd.append('featured_badges', id))
+          } else {
+            // Matches web FormData clear — '' normalizes to [] in validate_featured_badges
+            fd.append('featured_badges', '')
+          }
         }
         if (avatarPreview) {
           const blob = dataURLtoBlob(avatarPreview)
@@ -278,13 +288,6 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
           fd.append('banner', blob, 'banner.jpg')
         }
         updated = await userAPI.updateMe(fd)
-        // Multipart cannot express an empty list reliably; follow up with JSON for clears.
-        const followUp: UserUpdateData = {}
-        if (badgesChanged && form.featured_badges.length === 0) followUp.featured_badges = []
-        if (skillsChanged && resolvedSkills.length === 0) followUp.skill_ids = []
-        if (Object.keys(followUp).length > 0) {
-          updated = await userAPI.updateMe(followUp)
-        }
       }
 
       onSaved(updated)

@@ -212,7 +212,7 @@ export default function FollowListScreen() {
             users: prev.users.filter((u) => String(u.id) !== id),
           };
         });
-        void refreshUser();
+        void refreshUser({ force: true });
       })
       .catch((err: unknown) => {
         const message =
@@ -220,7 +220,7 @@ export default function FollowListScreen() {
         Alert.alert("Error", message);
       })
       .finally(() => setUnfollowingId(null));
-  }, [unfollowingId]);
+  }, [refreshUser, unfollowingId]);
 
   const styles = useMemo(
     () => getStyles(insets.bottom),
@@ -269,29 +269,56 @@ export default function FollowListScreen() {
             item.avatar_url != null && String(item.avatar_url).trim()
               ? String(item.avatar_url).trim()
               : null;
+          const targetId = String(item.id);
+          const unfollowing = unfollowingId === targetId;
           return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Open profile for ${name}`}
-              onPress={() => onPressUser(item)}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-            >
-              {uri ? (
-                <Image source={{ uri }} style={styles.avatar} />
+            <View style={styles.row}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Open profile for ${name}`}
+                onPress={() => onPressUser(item)}
+                style={({ pressed }) => [
+                  styles.rowMain,
+                  pressed && styles.rowPressed,
+                ]}
+              >
+                {uri ? (
+                  <Image source={{ uri }} style={styles.avatar} />
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <Text style={styles.avatarInitials}>{initials(item)}</Text>
+                  </View>
+                )}
+                <Text style={styles.name} numberOfLines={1}>
+                  {name}
+                </Text>
+              </Pressable>
+              {isOwnFollowingList ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Unfollow ${name}`}
+                  disabled={unfollowingId != null}
+                  onPress={() => handleUnfollow(item)}
+                  style={({ pressed }) => [
+                    styles.unfollowBtn,
+                    pressed && styles.unfollowBtnPressed,
+                    unfollowingId != null && styles.unfollowBtnDisabled,
+                  ]}
+                >
+                  {unfollowing ? (
+                    <ActivityIndicator color={colors.WHITE} size="small" />
+                  ) : (
+                    <Text style={styles.unfollowBtnText}>Unfollow</Text>
+                  )}
+                </Pressable>
               ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarInitials}>{initials(item)}</Text>
-                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={colors.GRAY400}
+                />
               )}
-              <Text style={styles.name} numberOfLines={1}>
-                {name}
-              </Text>
-              <Ionicons
-                name="chevron-forward"
-                size={20}
-                color={colors.GRAY400}
-              />
-            </Pressable>
+            </View>
           );
         }}
       />

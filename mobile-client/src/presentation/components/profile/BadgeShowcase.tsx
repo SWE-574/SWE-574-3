@@ -94,14 +94,6 @@ function CompactBadge({
           </View>
         )}
       </View>
-      <Text style={compactStyles.badgeName} numberOfLines={2}>
-        {badge.name}
-      </Text>
-      {badge.earned_at ? (
-        <Text style={compactStyles.earnedDate}>
-          {formatBadgeEarnedDate(badge.earned_at)}
-        </Text>
-      ) : null}
     </Pressable>
   );
 }
@@ -373,12 +365,6 @@ const compactStyles = StyleSheet.create({
     justifyContent: "center",
     width: 34,
     height: 34,
-  },
-  badgeName: {
-    display: "none",
-  },
-  earnedDate: {
-    display: "none",
   },
   tooltip: {
     maxWidth: 220,

@@ -286,7 +286,7 @@ export default function PublicProfileScreen() {
           };
         });
 
-        void refreshUser();
+        void refreshUser({ force: true });
       })
       .catch((err: unknown) => {
         const message =

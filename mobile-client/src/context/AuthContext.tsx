@@ -110,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshUser = useCallback(async (options?: { force?: boolean }) => {
-    const force = options?.force ?? true;
+    const force = options?.force ?? false;
     const startedSessionGeneration = sessionGenerationRef.current;
     if (
       shouldSkipSoftUserRefresh({
@@ -160,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(
     async (body: LoginRequest) => {
       await authApi.login(body);
-      await refreshUser();
+      await refreshUser({ force: true });
     },
     [refreshUser],
   );
@@ -168,7 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(
     async (body: RegisterRequest) => {
       await authApi.register(body);
-      await refreshUser();
+      await refreshUser({ force: true });
     },
     [refreshUser],
   );
@@ -178,6 +178,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     sessionGenerationRef.current = nextAuthSessionGeneration(sessionGenerationRef.current);
     try {
       await authApi.logout();
+    } catch (err) {
+      console.warn("[AuthContext] logout API call failed (session cleared locally anyway)", err);
     } finally {
       useNotificationStore.getState().reset();
       await clearSessionLocal(prevId);

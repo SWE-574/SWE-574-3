@@ -1142,12 +1142,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 8,
   },
-  skillChipRemove: {
-    width: 16,
-    height: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   linkRow: {
     flexDirection: "row",
     alignItems: "center",

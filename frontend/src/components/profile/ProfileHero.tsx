@@ -188,7 +188,7 @@ function HeroBtn({
         opacity: busy ? 0.88 : 1,
       }}
     >
-      {busy ? <Spinner size="xs" color={primary ? GREEN : WHITE} /> : icon}
+      {busy ? <Spinner size="sm" color={primary ? GREEN : WHITE} /> : icon}
       {children}
     </button>
   )

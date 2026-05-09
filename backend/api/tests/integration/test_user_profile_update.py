@@ -107,6 +107,18 @@ class TestFeaturedBadgesPatch:
         assert_api_response(resp, 200)
         assert resp.json()['featured_badges'] == []
 
+    def test_multipart_empty_featured_badges_field_clears(self):
+        """Web multipart PATCH sends featured_badges='' — must clear without a JSON follow-up."""
+        user = UserFactory()
+        b1 = _create_badge('b1', 'Badge One')
+        _earn_badge(user, b1)
+        user.featured_badges = ['b1']
+        user.save(update_fields=['featured_badges'])
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        resp = client.patch(ME_URL, {'featured_badges': ''}, format='multipart')
+        assert_api_response(resp, 200)
+        assert resp.json()['featured_badges'] == []
+
 
 @pytest.mark.django_db
 @pytest.mark.integration

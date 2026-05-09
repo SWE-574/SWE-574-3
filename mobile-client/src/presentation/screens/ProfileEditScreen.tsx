@@ -106,7 +106,7 @@ export default function ProfileEditScreen() {
 
     try {
       await patchMe(formData as Parameters<typeof patchMe>[0]);
-      await refreshUser();
+      await refreshUser({ force: true });
     } catch (err) {
       Alert.alert(
         "Upload failed",
@@ -130,7 +130,7 @@ export default function ProfileEditScreen() {
       initialTab={route.params?.initialTab ?? "identity"}
       onClose={() => navigation.goBack()}
       onSaveSuccess={() => {
-        void refreshUser();
+        void refreshUser({ force: true });
         navigation.goBack();
       }}
       user={user}

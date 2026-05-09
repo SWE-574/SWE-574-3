@@ -12,6 +12,7 @@ export type FollowListKind = 'followers' | 'following'
 export default function FollowListModal({
   isOpen,
   listKind,
+  /** Profile whose followers/following list is shown (not necessarily the signed-in user). */
   userId,
   onClose,
 }: {
@@ -28,6 +29,7 @@ export default function FollowListModal({
   const [pendingUnfollowId, setPendingUnfollowId] = useState<string | null>(null)
   const loading = users === null
 
+  // Unfollow only when viewing *your own* following list (viewer === list owner).
   const showUnfollowInList =
     Boolean(viewerId && userId && viewerId === userId && listKind === 'following')
 
