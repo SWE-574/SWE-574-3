@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react'
 import { Box, Flex, Text, Spinner } from '@chakra-ui/react'
 import { FiX } from 'react-icons/fi'
 import {
@@ -12,6 +13,10 @@ export interface MultiUseDetailItem {
   value?: string
   avatarUrl?: string | null
   onClick?: () => void
+  /** Optional trailing action (e.g. Unfollow); clicks do not trigger row `onClick`. */
+  actionLabel?: string
+  onActionClick?: () => void
+  actionLoading?: boolean
 }
 
 function initials(name: string) {
@@ -148,6 +153,29 @@ export default function MultiUseDetailsModal({
                       </Text>
                     )}
                   </Box>
+
+                  {item.actionLabel && item.onActionClick && (
+                    <Box
+                      as="button"
+                      type="button"
+                      flexShrink={0}
+                      px="10px"
+                      py="6px"
+                      borderRadius="8px"
+                      fontSize="12px"
+                      fontWeight={700}
+                      border={`1px solid ${GRAY200}`}
+                      bg={WHITE}
+                      color={GRAY700}
+                      style={{ cursor: item.actionLoading ? 'wait' : 'pointer', opacity: item.actionLoading ? 0.75 : 1 }}
+                      onClick={(e: MouseEvent<HTMLButtonElement>) => {
+                        e.stopPropagation()
+                        if (!item.actionLoading) item.onActionClick?.()
+                      }}
+                    >
+                      {item.actionLoading ? <Spinner size="sm" color={GREEN} /> : item.actionLabel}
+                    </Box>
+                  )}
 
                   {item.value && (
                     <Text fontSize="12px" fontWeight={800} color={GRAY700} flexShrink={0}>

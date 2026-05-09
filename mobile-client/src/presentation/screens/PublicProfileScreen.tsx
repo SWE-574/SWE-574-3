@@ -512,6 +512,9 @@ export default function PublicProfileScreen() {
           reputationScore={reputationScore}
           onFollowersPress={() => openFollowList("followers")}
           onFollowingPress={() => openFollowList("following")}
+          isFollowing={Boolean(user.is_following)}
+          followActionLoading={followActionLoading}
+          onFollowPress={showFollowButton ? handleFollowToggle : undefined}
         />
 
         <View style={styles.sectionCard}>

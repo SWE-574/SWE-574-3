@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Box, Button, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
+import { Box, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
 import {
   FiArrowLeft, FiClock,
   FiStar, FiCheckCircle, FiThumbsUp, FiUser, FiAlertCircle,
-  FiUserPlus, FiMessageSquare,
+  FiMessageSquare,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -267,45 +267,10 @@ const PublicProfile = () => {
           }}
           completedExchanges={groupedOwnHistory.length}
           reputationScore={hasRep ? Math.round(((punctual + helpful + kind) / 3) * 10) / 10 : undefined}
+          onFollowPress={showFollowButton ? handleFollowToggle : undefined}
+          isFollowing={Boolean(profileUser.is_following)}
+          followActionLoading={followActionLoading}
         />
-
-        {/* Follow button (separate from hero action row) */}
-        {showFollowButton && (
-          <Flex mb={4}>
-            {profileUser.is_following ? (
-              <Button
-                size="sm"
-                variant="outline"
-                borderRadius="10px"
-                borderColor={GRAY300}
-                color={GRAY700}
-                loading={followActionLoading}
-                disabled={followActionLoading}
-                onClick={handleFollowToggle}
-              >
-                <Flex as="span" align="center" gap={2}>
-                  <FiCheckCircle size={14} />
-                  Unfollow
-                </Flex>
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                bg={GREEN}
-                color={WHITE}
-                borderRadius="10px"
-                loading={followActionLoading}
-                disabled={followActionLoading}
-                onClick={handleFollowToggle}
-              >
-                <Flex as="span" align="center" gap={2}>
-                  <FiUserPlus size={14} />
-                  Follow
-                </Flex>
-              </Button>
-            )}
-          </Flex>
-        )}
 
         {/* ── About (identity-level, above tabs) ───────────────────────────── */}
         {profileUser.bio && (

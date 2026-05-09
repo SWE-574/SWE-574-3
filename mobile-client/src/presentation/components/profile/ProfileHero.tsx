@@ -14,6 +14,7 @@
 
 import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Image,
   Pressable,
   StyleSheet,
@@ -77,6 +78,11 @@ export interface ProfileHeroProps {
 
   /** Own profile empty showcase: request opening the picker in the edit sheet */
   onBadgePickerOpenRequest?: () => void;
+
+  /** Public profile: Follow / Unfollow (shown next to the name when set) */
+  isFollowing?: boolean;
+  followActionLoading?: boolean;
+  onFollowPress?: () => void;
 }
 
 
@@ -160,6 +166,9 @@ export default function ProfileHero({
   onFollowersPress,
   onFollowingPress,
   onBadgePickerOpenRequest,
+  isFollowing = false,
+  followActionLoading = false,
+  onFollowPress,
 }: ProfileHeroProps) {
   const fullName = [user.first_name, user.last_name]
     .filter(Boolean)
@@ -251,10 +260,36 @@ export default function ProfileHero({
                 )}
               </Pressable>
 
-              {/* Name */}
-              <Text style={styles.name} numberOfLines={2}>
-                {fullName || "User"}
-              </Text>
+              {/* Name + follow (public) */}
+              <View style={styles.nameRow}>
+                <Text style={styles.name} numberOfLines={2}>
+                  {fullName || "User"}
+                </Text>
+                {mode === "public" && onFollowPress ? (
+                  <Pressable
+                    onPress={onFollowPress}
+                    disabled={followActionLoading}
+                    style={({ pressed }) => [
+                      styles.followToggle,
+                      isFollowing ? styles.followToggleOutline : styles.followToggleFilled,
+                      pressed && !followActionLoading && styles.followTogglePressed,
+                      followActionLoading && styles.followToggleDisabled,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={isFollowing ? "Unfollow" : "Follow"}
+                  >
+                    {followActionLoading ? (
+                      <ActivityIndicator size="small" color={isFollowing ? colors.WHITE : colors.GREEN} />
+                    ) : (
+                      <Text
+                        style={isFollowing ? styles.followToggleOutlineText : styles.followToggleFilledText}
+                      >
+                        {isFollowing ? "Unfollow" : "Follow"}
+                      </Text>
+                    )}
+                  </Pressable>
+                ) : null}
+              </View>
 
               {/* Location meta strip */}
               {heroLocation ? (
@@ -521,12 +556,57 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 5,
   },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+    width: "100%",
+    paddingRight: 4,
+  },
   // Text
   name: {
+    flex: 1,
+    minWidth: 0,
     fontSize: 22,
     fontWeight: "900",
     color: colors.WHITE,
     lineHeight: 26,
+  },
+  followToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    minWidth: 100,
+    minHeight: 36,
+  },
+  followToggleFilled: {
+    backgroundColor: colors.WHITE,
+  },
+  followToggleOutline: {
+    backgroundColor: "transparent",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.95)",
+  },
+  followTogglePressed: {
+    opacity: 0.88,
+  },
+  followToggleDisabled: {
+    opacity: 0.65,
+  },
+  followToggleFilledText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.GREEN,
+  },
+  followToggleOutlineText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.WHITE,
   },
   metaStrip: {
     fontSize: 11,

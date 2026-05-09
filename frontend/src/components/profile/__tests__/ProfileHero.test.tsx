@@ -162,4 +162,35 @@ describe('ProfileHero — public mode', () => {
     expect(screen.getByText('Reputation')).toBeInTheDocument()
   })
 
+  it('renders Follow beside the name when onFollowPress is set', () => {
+    const onFollow = vi.fn()
+    render(
+      <Wrapper>
+        <ProfileHero
+          user={baseUser}
+          mode="public"
+          onFollowPress={onFollow}
+          isFollowing={false}
+        />
+      </Wrapper>,
+    )
+    expect(screen.getByRole('button', { name: /follow/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /follow/i }))
+    expect(onFollow).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders Unfollow beside the name when following', () => {
+    render(
+      <Wrapper>
+        <ProfileHero
+          user={baseUser}
+          mode="public"
+          onFollowPress={vi.fn()}
+          isFollowing
+        />
+      </Wrapper>,
+    )
+    expect(screen.getByRole('button', { name: /unfollow/i })).toBeInTheDocument()
+  })
+
 })

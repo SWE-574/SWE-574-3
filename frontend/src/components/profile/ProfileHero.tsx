@@ -1,6 +1,6 @@
 import React from 'react'
-import { Box, Flex, Grid, Text } from '@chakra-ui/react'
-import { FiCamera, FiClock, FiEdit2, FiMapPin, FiStar } from 'react-icons/fi'
+import { Box, Flex, Grid, Spinner, Text } from '@chakra-ui/react'
+import { FiCamera, FiCheckCircle, FiClock, FiEdit2, FiMapPin, FiStar, FiUserPlus } from 'react-icons/fi'
 import { Link } from 'react-router-dom'
 import type { User, BadgeDetail } from '@/types'
 import HeroSurface from '@/components/ui/HeroSurface'
@@ -63,6 +63,10 @@ type Props = {
   /** @deprecated Time balance is no longer shown in the hero — shown in sidebar instead */
   timeBalance?: number
   activeServicesCount?: number
+  /** Public profile: Follow / Unfollow beside the name */
+  onFollowPress?: () => void
+  isFollowing?: boolean
+  followActionLoading?: boolean
 }
 
 // ── Stat tile ────────────────────────────────────────────────────────────────────
@@ -148,16 +152,22 @@ function HeroBtn({
   icon,
   children,
   primary = false,
+  loading = false,
+  'aria-label': ariaLabel,
 }: {
   onClick?: () => void
   icon: React.ReactNode
   children: React.ReactNode
   primary?: boolean
+  loading?: boolean
+  'aria-label'?: string
 }) {
+  const busy = Boolean(loading)
   return (
     <Box
       as="button"
-      onClick={onClick}
+      type="button"
+      onClick={busy ? undefined : onClick}
       display="inline-flex"
       alignItems="center"
       gap="5px"
@@ -166,16 +176,21 @@ function HeroBtn({
       borderRadius="999px"
       fontSize="11px"
       fontWeight={700}
+      flexShrink={0}
+      aria-busy={busy}
+      disabled={busy}
+      aria-label={ariaLabel}
       style={{
         background: primary ? WHITE : 'rgba(255,255,255,0.2)',
         border: primary ? 'none' : '1px solid rgba(255,255,255,0.35)',
         color: primary ? GREEN : WHITE,
-        cursor: 'pointer',
+        cursor: busy ? 'wait' : 'pointer',
         backdropFilter: 'blur(4px)',
         transition: 'background 0.12s',
+        opacity: busy ? 0.88 : 1,
       }}
     >
-      {icon}
+      {busy ? <Spinner size="xs" color={primary ? GREEN : WHITE} /> : icon}
       {children}
     </Box>
   )
@@ -196,6 +211,9 @@ const ProfileHero = ({
   reputationScore,
   completedExchanges,
   activeServicesCount,
+  onFollowPress,
+  isFollowing = false,
+  followActionLoading = false,
 }: Props) => {
   const displayName = `${user.first_name} ${user.last_name}`.trim() || user.email
   const initials = getInitials(user.first_name, user.last_name, user.email)
@@ -321,16 +339,42 @@ const ProfileHero = ({
             )}
           </Box>
 
-          {/* Name */}
-          <Text
-            fontSize={compact ? { base: '32px', md: '38px' } : { base: '34px', md: '40px' }}
-            fontWeight={900}
-            lineHeight={1}
+          {/* Name (+ Follow / Unfollow on public when viewer is signed in) */}
+          <Flex
+            align={{ base: 'flex-start', md: 'center' }}
+            justify="space-between"
+            gap={3}
+            flexWrap="wrap"
             mb={1.5}
-            style={{ color: WHITE }}
           >
-            {displayName}
-          </Text>
+            <Text
+              flex="1"
+              minW="0"
+              fontSize={compact ? { base: '32px', md: '38px' } : { base: '34px', md: '40px' }}
+              fontWeight={900}
+              lineHeight={1.15}
+              style={{ color: WHITE }}
+            >
+              {displayName}
+            </Text>
+            {mode === 'public' && onFollowPress && (
+              <HeroBtn
+                primary={!isFollowing}
+                loading={followActionLoading}
+                aria-label={isFollowing ? 'Unfollow' : 'Follow'}
+                icon={
+                  isFollowing ? (
+                    <FiCheckCircle size={13} />
+                  ) : (
+                    <FiUserPlus size={13} />
+                  )
+                }
+                onClick={onFollowPress}
+              >
+                {isFollowing ? 'Unfollow' : 'Follow'}
+              </HeroBtn>
+            )}
+          </Flex>
 
           {/* Location meta strip */}
           {heroLocation && (

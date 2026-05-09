@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   BackHandler,
   FlatList,
   Image,
@@ -18,7 +19,12 @@ import {
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { getFollowers, getFollowing, getUser } from "../../api/users";
+import {
+  getFollowers,
+  getFollowing,
+  getUser,
+  unfollowUser,
+} from "../../api/users";
 import type { UserSummary } from "../../api/types";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import { colors } from "../../constants/colors";
@@ -82,7 +88,7 @@ export default function FollowListScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<FollowRoute>();
   const { userId, kind } = route.params;
-  const { user: authUser } = useAuth();
+  const { user: authUser, refreshUser } = useAuth();
   const insets = useSafeAreaInsets();
 
   const [ownerLabel, setOwnerLabel] = useState("");
@@ -91,6 +97,7 @@ export default function FollowListScreen() {
     | { status: "error"; message: string }
     | { status: "success"; users: UserSummary[] }
   >({ status: "loading" });
+  const [unfollowingId, setUnfollowingId] = useState<string | null>(null);
 
   const title = kind === "followers" ? "Followers" : "Following";
 
@@ -186,6 +193,34 @@ export default function FollowListScreen() {
   const onPressUser = useCallback((target: UserSummary) => {
     navigation.navigate("PublicProfile", { userId: String(target.id) });
   }, [navigation]);
+
+  const isOwnFollowingList =
+    authUser?.id != null &&
+    String(userId) === String(authUser.id) &&
+    kind === "following";
+
+  const handleUnfollow = useCallback((target: UserSummary) => {
+    if (unfollowingId != null) return;
+    const id = String(target.id);
+    setUnfollowingId(id);
+    unfollowUser(id)
+      .then(() => {
+        setState((prev) => {
+          if (prev.status !== "success") return prev;
+          return {
+            status: "success",
+            users: prev.users.filter((u) => String(u.id) !== id),
+          };
+        });
+        void refreshUser();
+      })
+      .catch((err: unknown) => {
+        const message =
+          err instanceof Error ? err.message : "Could not unfollow this user.";
+        Alert.alert("Error", message);
+      })
+      .finally(() => setUnfollowingId(null));
+  }, [unfollowingId]);
 
   const styles = useMemo(
     () => getStyles(insets.bottom),
@@ -297,10 +332,38 @@ function getStyles(bottomInset: number) {
       backgroundColor: colors.WHITE,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.GRAY200,
+      gap: 10,
+    },
+    rowMain: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
       gap: 12,
+      minWidth: 0,
     },
     rowPressed: {
       backgroundColor: colors.GRAY50,
+    },
+    unfollowBtn: {
+      flexShrink: 0,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      backgroundColor: colors.GREEN,
+      minWidth: 96,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    unfollowBtnPressed: {
+      opacity: 0.88,
+    },
+    unfollowBtnDisabled: {
+      opacity: 0.65,
+    },
+    unfollowBtnText: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: colors.WHITE,
     },
     avatar: {
       width: 44,

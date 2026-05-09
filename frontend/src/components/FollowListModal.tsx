@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 import { userAPI } from '@/services/userAPI'
 import { getErrorMessage } from '@/services/api'
+import { useAuthStore } from '@/store/useAuthStore'
 import type { UserSummary } from '@/types'
 
 export type FollowListKind = 'followers' | 'following'
@@ -20,9 +21,15 @@ export default function FollowListModal({
   onClose: () => void
 }) {
   const navigate = useNavigate()
+  const viewerId = useAuthStore((s) => s.user?.id ?? null)
+  const refreshUser = useAuthStore((s) => s.refreshUser)
   // null = loading/not-yet-fetched, [] = done (possibly empty)
   const [users, setUsers] = useState<UserSummary[] | null>(null)
+  const [pendingUnfollowId, setPendingUnfollowId] = useState<string | null>(null)
   const loading = users === null
+
+  const showUnfollowInList =
+    Boolean(viewerId && userId && viewerId === userId && listKind === 'following')
 
   useEffect(() => {
     if (!isOpen || !listKind || !userId) return
@@ -49,6 +56,7 @@ export default function FollowListModal({
   const title = listKind === 'followers' ? 'Followers' : 'Following'
   const items = (users ?? []).map((u) => {
     const name = `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email || 'User'
+    const canUnfollow = showUnfollowInList && u.id !== viewerId
     return {
       id: u.id,
       title: name,
@@ -57,6 +65,26 @@ export default function FollowListModal({
         onClose()
         navigate(`/public-profile/${u.id}`)
       },
+      ...(canUnfollow
+        ? {
+            actionLabel: 'Unfollow',
+            actionLoading: pendingUnfollowId === u.id,
+            onActionClick: () => {
+              setPendingUnfollowId(u.id)
+              userAPI
+                .unfollowUser(u.id)
+                .then(() => {
+                  setUsers((prev) => (prev ? prev.filter((row) => row.id !== u.id) : prev))
+                  toast.success('You unfollowed this user.')
+                  void refreshUser()
+                })
+                .catch((err) => {
+                  toast.error(getErrorMessage(err, 'Could not unfollow.'))
+                })
+                .finally(() => setPendingUnfollowId(null))
+            },
+          }
+        : {}),
     }
   })
 
