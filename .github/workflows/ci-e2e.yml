@@ -282,14 +282,32 @@ jobs:
         id: feature
         if: steps.select.outputs.feature_tests != ''
         working-directory: frontend
-        continue-on-error: true  # soft-fail until suite is fully stable
+        continue-on-error: true  # soft-fail individual test failures until suite is fully stable
         env:
           PLAYWRIGHT_BASE_URL: http://localhost
           CI: "true"
+          FEATURE_TESTS: ${{ steps.select.outputs.feature_tests }}
         run: |
-          echo "Running feature tests: ${{ steps.select.outputs.feature_tests }}"
+          echo "Running feature tests: $FEATURE_TESTS"
           npx playwright test \
-            ${{ steps.select.outputs.feature_tests }}
+            $FEATURE_TESTS \
+            2>&1 | tee /tmp/playwright-feature.log
+
+      # ── 17b. Hard-fail on test-runner config errors ──────────────────────
+      # `continue-on-error` above swallows test failures, which we want
+      # while the suite stabilises. It also swallows config / parse errors
+      # that prevent the runner from starting at all — which we *don't*
+      # want, because that means zero tests ran. This step makes that
+      # specific failure mode block the job.
+      - name: Verify feature test runner actually executed
+        if: steps.feature.outcome != 'skipped'
+        run: |
+          if ! grep -qE "^Running [0-9]+ tests using" /tmp/playwright-feature.log; then
+            echo "::error::Playwright never started the feature suite (likely a config or parse error). Inspect the 'Run feature tests' step output."
+            tail -n 60 /tmp/playwright-feature.log || true
+            exit 1
+          fi
+          echo "Feature runner executed normally; per-test failures are soft-failed by design."
 
       # ── 18. Upload HTML report (always, so failures are inspectable) ──────
       - name: Upload Playwright HTML report
