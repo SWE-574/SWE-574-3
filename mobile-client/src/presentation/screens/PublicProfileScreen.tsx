@@ -43,6 +43,7 @@ import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import AchievementsSection from "../components/AchievementsSection";
 import ProfileSkillsSection from "../components/ProfileSkillsSection";
+import ProfileAccordionSection from "../components/profile/ProfileAccordionSection";
 import ProfileHero from "../components/profile/ProfileHero";
 
 type PublicProfileHostStackParamList = {
@@ -74,7 +75,7 @@ export default function PublicProfileScreen() {
   const route = useRoute<RouteProp<PublicProfileHostStackParamList, "PublicProfile">>();
   const navigation = useNavigation<PublicProfileNavigation>();
   const { user: authUser, refreshUser } = useAuth();
-  const { userId } = route.params;
+  const userId = route.params?.userId;
   const insets = useSafeAreaInsets();
   const styles = useMemo(
     () => getStyles(insets.top, insets.bottom),
@@ -90,9 +91,22 @@ export default function PublicProfileScreen() {
     ReturnType<typeof groupHistoryItems>[number] | null
   >(null);
   const [followActionLoading, setFollowActionLoading] = useState(false);
+  const [servicesExpanded, setServicesExpanded] = useState(false);
+  const [timeActivityExpanded, setTimeActivityExpanded] = useState(false);
+  const [reviewsExpanded, setReviewsExpanded] = useState(false);
+  const [skillsExpanded, setSkillsExpanded] = useState(false);
+  const [achievementsExpanded, setAchievementsExpanded] = useState(false);
+  const [portfolioExpanded, setPortfolioExpanded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    if (!userId) {
+      setState({
+        status: "error",
+        message: "Could not open this profile (missing user id).",
+      });
+      return;
+    }
     setState({ status: "loading" });
 
     getUser(userId)
@@ -115,6 +129,7 @@ export default function PublicProfileScreen() {
   useEffect(() => {
     let cancelled = false;
     setActiveServices([]);
+    if (!userId) return;
 
     listServices({ user: userId, page_size: 50 })
       .then((res) => {
@@ -517,69 +532,85 @@ export default function PublicProfileScreen() {
           onFollowPress={showFollowButton ? handleFollowToggle : undefined}
         />
 
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
-              Active services
-            </Text>
-            <View style={styles.activeServicesCountPill}>
-              <Text style={styles.activeServicesCountText}>
-                {activeServices.length}
-              </Text>
-            </View>
-          </View>
+        <ProfileAccordionSection
+          title="Active services"
+          subtitle="Offers, needs & events listed now"
+          icon="briefcase-outline"
+          badge={activeServices.length}
+          expanded={servicesExpanded}
+          onToggle={() => setServicesExpanded((v) => !v)}
+        >
           <View style={styles.tabPanel}>{renderServicesSection()}</View>
-        </View>
+        </ProfileAccordionSection>
 
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
-              Time activity
-            </Text>
-            <View style={styles.activeServicesCountPill}>
-              <Text style={styles.activeServicesCountText}>
-                {ownHistoryEntries.length}
-              </Text>
-            </View>
-          </View>
+        <ProfileAccordionSection
+          title="Time activity"
+          subtitle="Completed exchanges on their services"
+          icon="time-outline"
+          badge={user.show_history === false ? 0 : ownHistoryEntries.length}
+          expanded={timeActivityExpanded}
+          onToggle={() => setTimeActivityExpanded((v) => !v)}
+        >
           <View style={styles.tabPanel}>{renderTimeActivitySection()}</View>
-        </View>
+        </ProfileAccordionSection>
 
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
-              Reviews
-            </Text>
-            <View style={styles.activeServicesCountPill}>
-              <Text style={styles.activeServicesCountText}>
-                {reviews.length}
-              </Text>
-            </View>
-          </View>
+        <ProfileAccordionSection
+          title="Reviews"
+          subtitle="Verified feedback from exchanges"
+          icon="chatbox-ellipses-outline"
+          badge={reviews.length}
+          expanded={reviewsExpanded}
+          onToggle={() => setReviewsExpanded((v) => !v)}
+        >
           <View style={styles.tabPanel}>{renderReviewsSection()}</View>
-        </View>
+        </ProfileAccordionSection>
 
         {skills.length > 0 ? (
-          <ProfileSkillsSection skills={skills} />
+          <ProfileAccordionSection
+            title="Skills"
+            subtitle="Topics this member often shares"
+            icon="sparkles-outline"
+            badge={skills.length}
+            expanded={skillsExpanded}
+            onToggle={() => setSkillsExpanded((v) => !v)}
+          >
+            <ProfileSkillsSection skills={skills} embedded />
+          </ProfileAccordionSection>
         ) : null}
 
         {achievementIds.length > 0 ? (
-          <AchievementsSection
-            completedIds={achievementIds}
-            onViewAll={
-              canOpenAchievementsList
-                ? () =>
-                    navigation.navigate("AchievementsList", {
-                      userId: user.id,
-                    })
-                : undefined
-            }
-          />
+          <ProfileAccordionSection
+            title="Achievements"
+            subtitle="Milestones unlocked in the community"
+            icon="ribbon-outline"
+            badge={achievementIds.length}
+            expanded={achievementsExpanded}
+            onToggle={() => setAchievementsExpanded((v) => !v)}
+          >
+            <AchievementsSection
+              completedIds={achievementIds}
+              onViewAll={
+                canOpenAchievementsList
+                  ? () =>
+                      navigation.navigate("AchievementsList", {
+                        userId: user.id,
+                      })
+                  : undefined
+              }
+              embedded
+            />
+          </ProfileAccordionSection>
         ) : null}
 
         {portfolioUrls.length > 0 ? (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Portfolio</Text>
+          <ProfileAccordionSection
+            title="Portfolio"
+            subtitle="Photos shared on their profile"
+            icon="images-outline"
+            badge={portfolioUrls.length}
+            expanded={portfolioExpanded}
+            onToggle={() => setPortfolioExpanded((v) => !v)}
+          >
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -593,7 +624,7 @@ export default function PublicProfileScreen() {
                 />
               ))}
             </ScrollView>
-          </View>
+          </ProfileAccordionSection>
         ) : null}
       </ScrollView>
       <Modal

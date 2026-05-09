@@ -10,50 +10,40 @@ type SkillItem = {
 
 export default function ProfileSkillsSection({
   skills,
+  embedded = false,
 }: {
   skills: SkillItem[];
+  /** Inside ProfileAccordionSection — hide duplicate header / outer card chrome */
+  embedded?: boolean;
 }) {
   return (
-    <View style={styles.card}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="sparkles-outline" size={18} color={colors.GREEN} />
+    <View style={[styles.card, embedded && styles.cardEmbedded]}>
+      {!embedded ? (
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <View style={styles.iconWrap}>
+              <Ionicons name="sparkles-outline" size={18} color={colors.GREEN} />
+            </View>
+            <View>
+              <Text style={styles.title}>Skills</Text>
+              <Text style={styles.subtitle}>What this member often shares</Text>
+            </View>
           </View>
-          <View>
-            <Text style={styles.title}>Skills</Text>
-            <Text style={styles.subtitle}>What this member often shares</Text>
+          <View style={styles.countPill}>
+            <Text style={styles.countText}>{skills.length}</Text>
           </View>
         </View>
-        <View style={styles.countPill}>
-          <Text style={styles.countText}>{skills.length}</Text>
-        </View>
-      </View>
+      ) : null}
 
       <View style={styles.chipsWrap}>
-        {skills.map((skill, index) => {
-          const emphasized = index < 3;
-          return (
-            <View
-              key={skill.id}
-              style={[styles.chip, emphasized && styles.chipEmphasized]}
-            >
-              <Ionicons
-                name={emphasized ? "flash-outline" : "ellipse-outline"}
-                size={12}
-                color={emphasized ? colors.GREEN : colors.GRAY500}
-              />
-              <Text
-                style={[
-                  styles.chipText,
-                  emphasized && styles.chipTextEmphasized,
-                ]}
-              >
-                {skill.name}
-              </Text>
-            </View>
-          );
-        })}
+        {skills.map((skill) => (
+          <View key={skill.id} style={[styles.chip, styles.chipEmphasized]}>
+            <Ionicons name="flash-outline" size={12} color={colors.GREEN} />
+            <Text style={[styles.chipText, styles.chipTextEmphasized]}>
+              {skill.name}
+            </Text>
+          </View>
+        ))}
       </View>
     </View>
   );
@@ -73,6 +63,20 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 2,
+  },
+  cardEmbedded: {
+    marginHorizontal: 0,
+    marginTop: 0,
+    marginBottom: 0,
+    padding: 12,
+    borderRadius: 12,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+    backgroundColor: colors.WHITE,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
   },
   header: {
     flexDirection: "row",

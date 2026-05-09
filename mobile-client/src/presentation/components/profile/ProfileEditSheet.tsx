@@ -39,10 +39,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../../../constants/colors";
 import { patchMe } from "../../../api/users";
+import type { UserProfileRequest } from "../../../api/users";
 import type { UserSummary } from "../../../api/types";
 import BadgeShowcase from "./BadgeShowcase";
 import type { BadgeProgress } from "./BadgeShowcase";
+import SkillTagAutocomplete from "./SkillTagAutocomplete";
 import type { BadgeDetail } from "../../../api/calendar";
+import { ensureTagInDb } from "../../../api/tags";
+import type { Tag as SkillTag } from "../../../api/types";
 import {
   getMapboxToken,
   searchMapboxLocations,
@@ -66,8 +70,13 @@ export interface ProfileEditSheetProps {
     /** User's skill tags from the API (read-only list). */
     skills?: Array<{ id: string; name: string }>;
   };
-  /** Full badge progress list – loaded lazily when the sheet opens */
+  /** Full badge progress list – from GET /users/{id}/badge-progress/ (web parity) */
   badgeProgress?: BadgeProgress[];
+  /** When true, Showcase tab shows a loading state instead of the empty grid */
+  badgeProgressLoading?: boolean;
+  /** Set when badge progress failed to load (Showcase tab shows retry) */
+  badgeProgressError?: string | null;
+  onBadgeProgressRetry?: () => void;
   /** Called when the user taps "Change avatar" */
   onAvatarChangePress?: () => void;
   /** Called when the user taps "Change cover photo" */
@@ -88,6 +97,8 @@ type EditableFields = {
   profession: string;
   featured_badges: string[];
   banner_url: string;
+  /** Profile skills — persisted via PATCH `skill_ids` (web parity) */
+  skills: SkillTag[];
 };
 
 type EditTabKey = "identity" | "photos" | "skills" | "showcase" | "privacy";
@@ -135,8 +146,16 @@ function diffFields(
   return diff;
 }
 
+function skillIdsSignature(skills: SkillTag[]): string {
+  return [...skills]
+    .map((s) => s.id)
+    .sort()
+    .join("|");
+}
+
 function isDirty(original: EditableFields, current: EditableFields): boolean {
-  return Object.keys(diffFields(original, current)).length > 0;
+  if (Object.keys(diffFields(original, current)).length > 0) return true;
+  return skillIdsSignature(original.skills) !== skillIdsSignature(current.skills);
 }
 
 
@@ -221,6 +240,9 @@ export default function ProfileEditSheet({
   onSaveSuccess,
   user,
   badgeProgress = [],
+  badgeProgressLoading = false,
+  badgeProgressError = null,
+  onBadgeProgressRetry,
   onAvatarChangePress,
   onCoverPhotoChangePress,
   onChangeEmailPress,
@@ -238,16 +260,11 @@ export default function ProfileEditSheet({
     profession: user.profession ?? "",
     featured_badges: user.featured_badges ?? [],
     banner_url: user.banner_url ?? "",
+    skills: (user.skills ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+    })),
   });
-
-  // Skills: local removal only (read-only list from API).
-  // Decision: no PATCH endpoint exists for skills in mobile-client (only web has
-  // WikidataTagAutocomplete). We render existing chips with X-to-remove for UX,
-  // but removal is UI-only until a backend skill endpoint is exposed to mobile.
-  // TODO: wire removals to a PATCH /users/me/ with selected_tags when supported.
-  const [localSkills, setLocalSkills] = useState<Array<{ id: string; name: string }>>(
-    user.skills ?? [],
-  );
 
   const [form, setForm] = useState<EditableFields>(buildInitial);
   const [saving, setSaving] = useState(false);
@@ -267,7 +284,6 @@ export default function ProfileEditSheet({
       setForm(initial);
       originalRef.current = initial;
       setSaveError(null);
-      setLocalSkills(user.skills ?? []);
       setActiveTab(initialTab);
       setLocationSuggestions([]);
     }
@@ -332,15 +348,41 @@ export default function ProfileEditSheet({
     if (!dirty) return;
 
     const diff = diffFields(originalRef.current, form);
+    const skillsChanged =
+      skillIdsSignature(originalRef.current.skills) !==
+      skillIdsSignature(form.skills);
+
     setSaving(true);
     setSaveError(null);
 
     try {
-      const updated = await patchMe(
-        diff as Parameters<typeof patchMe>[0],
-      );
+      const isUuid = (id: string) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          id,
+        );
+
+      let skill_ids: string[] | undefined;
+      if (skillsChanged) {
+        const resolved = await Promise.all(
+          form.skills.map((tag) =>
+            isUuid(tag.id) ? tag : ensureTagInDb(tag),
+          ),
+        );
+        skill_ids = resolved.map((t) => t.id);
+      }
+
+      const body: Partial<UserProfileRequest> = {
+        ...(diff as Partial<UserProfileRequest>),
+      };
+      if (skillsChanged) {
+        body.skill_ids = skill_ids ?? [];
+      }
+
+      const updated = await patchMe(body);
       onSaveSuccess(updated);
-      onClose();
+      // Parent dismisses the editor (e.g. navigation.goBack once). Do not call
+      // onClose() here — that would double-pop and leave the previous screen
+      // (e.g. a visited PublicProfile) instead of own ProfileHome.
     } catch (err) {
       setSaveError(
         err instanceof Error ? err.message : "Could not save your profile.",
@@ -554,41 +596,87 @@ export default function ProfileEditSheet({
           {activeTab === "skills" ? (
             <>
               <SectionHeader title="Skills & interests" />
-              {localSkills.length > 0 ? (
+              {form.skills.length > 0 ? (
                 <View style={styles.skillsWrap}>
-                  {localSkills.map((skill) => (
-                    <View key={skill.id} style={styles.skillChip}>
+                  {form.skills.map((skill) => (
+                    <Pressable
+                      key={skill.id}
+                      onPress={() =>
+                        setForm((prev) => ({
+                          ...prev,
+                          skills: prev.skills.filter((t) => t.id !== skill.id),
+                        }))
+                      }
+                      style={({ pressed }) => [
+                        styles.skillChip,
+                        pressed && { opacity: 0.85 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${skill.name}`}
+                    >
                       <Text style={styles.skillChipText}>{skill.name}</Text>
-                    </View>
+                      <Ionicons name="close-circle" size={16} color={colors.GREEN} />
+                    </Pressable>
                   ))}
                 </View>
               ) : (
                 <View style={styles.todoSection}>
                   <Ionicons name="sparkles-outline" size={16} color={colors.GRAY500} />
-                  <Text style={styles.todoText}>No skills yet.</Text>
+                  <Text style={styles.todoText}>No skills yet. Search below to add.</Text>
                 </View>
               )}
-              <View style={styles.todoSection}>
-                <Ionicons name="information-circle-outline" size={16} color={colors.GRAY500} />
-                <Text style={styles.todoText}>
-                  Skill editing is read-only on mobile for now. Use the web profile to add or remove skills.
-                </Text>
-              </View>
+              <SkillTagAutocomplete
+                selected={form.skills}
+                disabled={form.skills.length >= 15}
+                onSelect={(tag) => {
+                  setForm((prev) => ({
+                    ...prev,
+                    skills: prev.skills.some((t) => t.id === tag.id)
+                      ? prev.skills
+                      : [...prev.skills, tag],
+                  }));
+                }}
+              />
+              <Text style={styles.skillsCounter}>{form.skills.length}/15 tags</Text>
             </>
           ) : null}
 
           {activeTab === "showcase" ? (
             <>
               <SectionHeader title="Showcase badges" />
-              <BadgeShowcase
-                variant="picker"
-                mode="own"
-                badgeProgress={badgeProgress}
-                selectedIds={form.featured_badges}
-                onSelectionChange={(ids) =>
-                  setForm((prev) => ({ ...prev, featured_badges: ids }))
-                }
-              />
+              {badgeProgressLoading ? (
+                <View style={styles.showcaseLoading}>
+                  <ActivityIndicator color={colors.GREEN} />
+                  <Text style={styles.showcaseLoadingText}>Loading badges…</Text>
+                </View>
+              ) : badgeProgressError ? (
+                <View style={styles.showcaseError}>
+                  <Ionicons name="alert-circle-outline" size={18} color={colors.RED} />
+                  <Text style={styles.showcaseErrorText}>{badgeProgressError}</Text>
+                  {onBadgeProgressRetry ? (
+                    <Pressable
+                      onPress={onBadgeProgressRetry}
+                      style={({ pressed }) => [
+                        styles.showcaseRetryBtn,
+                        pressed && { opacity: 0.85 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Retry loading badges"
+                    >
+                      <Text style={styles.showcaseRetryBtnText}>Try again</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : (
+                <BadgeShowcase
+                  variant="picker"
+                  badgeProgress={badgeProgress}
+                  selectedIds={form.featured_badges}
+                  onSelectionChange={(ids) =>
+                    setForm((prev) => ({ ...prev, featured_badges: ids }))
+                  }
+                />
+              )}
             </>
           ) : null}
 
@@ -1034,7 +1122,7 @@ const styles = StyleSheet.create({
   skillChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 6,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -1046,6 +1134,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: colors.GREEN,
+    flexShrink: 1,
+  },
+  skillsCounter: {
+    fontSize: 11,
+    color: colors.GRAY400,
+    marginTop: 4,
+    marginBottom: 8,
   },
   skillChipRemove: {
     width: 16,
@@ -1131,5 +1226,44 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: colors.WHITE,
+  },
+  showcaseLoading: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 36,
+    gap: 10,
+  },
+  showcaseLoadingText: {
+    fontSize: 13,
+    color: colors.GRAY500,
+    fontWeight: "600",
+  },
+  showcaseError: {
+    alignItems: "center",
+    paddingVertical: 24,
+    paddingHorizontal: 12,
+    gap: 10,
+    backgroundColor: colors.RED_LT,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  showcaseErrorText: {
+    fontSize: 13,
+    color: colors.RED,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  showcaseRetryBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.GREEN,
+    backgroundColor: colors.WHITE,
+  },
+  showcaseRetryBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.GREEN,
   },
 });

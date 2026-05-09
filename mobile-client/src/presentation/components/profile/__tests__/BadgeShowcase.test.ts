@@ -29,22 +29,12 @@ describe("BadgeShowcase compact logic", () => {
     expect(compactBadgeCount([])).toBe(0);
   });
 
-  it("own-empty mode should show placeholder (not null)", () => {
-    // In own mode with empty badges, compact returns the dashed placeholder.
-    // We verify the logic: compact empty + own -> show placeholder.
-    function shouldShowPlaceholder(mode: "own" | "public", count: number): boolean {
-      return count === 0 && mode === "own";
+  it("compact empty renders nothing (showcase is edited under Profile → Edit)", () => {
+    function compactEmptyShowsNothing(count: number): boolean {
+      return count === 0;
     }
-    expect(shouldShowPlaceholder("own", 0)).toBe(true);
-    expect(shouldShowPlaceholder("public", 0)).toBe(false);
-  });
-
-  it("public-empty mode renders nothing (null)", () => {
-    function shouldRenderNull(mode: "own" | "public", count: number): boolean {
-      return count === 0 && mode === "public";
-    }
-    expect(shouldRenderNull("public", 0)).toBe(true);
-    expect(shouldRenderNull("own", 0)).toBe(false);
+    expect(compactEmptyShowsNothing(0)).toBe(true);
+    expect(compactEmptyShowsNothing(1)).toBe(false);
   });
 
   it("builds a compact tooltip from badge name, description, and earned date", () => {

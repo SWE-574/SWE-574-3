@@ -47,6 +47,7 @@ import ProfileSkillsSection from "../components/ProfileSkillsSection";
 import NotificationBadge from "../components/NotificationBadge";
 import { useNotificationStore } from "../../store/useNotificationStore";
 import ProfileHero from "../components/profile/ProfileHero";
+import ProfileAccordionSection from "../components/profile/ProfileAccordionSection";
 import UpcomingScheduleCard from "../components/profile/UpcomingScheduleCard";
 
 type ProfileHomeNavigation = CompositeNavigationProp<
@@ -82,6 +83,10 @@ export default function ProfileScreen() {
   const [reviews, setReviews] = useState<ProfileReview[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [scheduleExpanded, setScheduleExpanded] = useState(false);
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const [skillsExpanded, setSkillsExpanded] = useState(false);
+  const [achievementsExpanded, setAchievementsExpanded] = useState(false);
   const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<
     ReturnType<typeof groupHistoryItems>[number] | null
   >(null);
@@ -266,6 +271,15 @@ export default function ProfileScreen() {
     { key: "events", label: "Events", count: eventServices.length },
     { key: "history", label: "History", count: ownHistoryEntries.length },
     { key: "reviews", label: "Reviews", count: reviews.length },
+  ];
+
+  const activityTotalBadge = tabItems.reduce((sum, t) => sum + t.count, 0);
+
+  const mergedAchievementIds = [
+    ...new Set([
+      ...(typedUser.achievements ?? []),
+      ...(typedUser.badges ?? []),
+    ]),
   ];
 
   const renderServiceTab = (services: Service[], emptyText: string) => {
@@ -589,23 +603,26 @@ export default function ProfileScreen() {
               kind: "following",
             });
           }}
-          onBadgePickerOpenRequest={() => navigation.navigate("ProfileEdit", { initialTab: "showcase" })}
         />
 
-        {/* Upcoming schedule card – own profile only */}
-        <UpcomingScheduleCard />
+        <ProfileAccordionSection
+          title="Schedule"
+          subtitle="Calendar and upcoming sessions"
+          icon="calendar-outline"
+          expanded={scheduleExpanded}
+          onToggle={() => setScheduleExpanded((v) => !v)}
+        >
+          <UpcomingScheduleCard embedded />
+        </ProfileAccordionSection>
 
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
-              Activity
-            </Text>
-            <View style={styles.activeServicesCountPill}>
-              <Text style={styles.activeServicesCountText}>
-                {tabItems.find((item) => item.key === activeTab)?.count ?? 0}
-              </Text>
-            </View>
-          </View>
+        <ProfileAccordionSection
+          title="Activity"
+          subtitle="Your listings, history & reviews"
+          icon="layers-outline"
+          badge={activityTotalBadge}
+          expanded={activityExpanded}
+          onToggle={() => setActivityExpanded((v) => !v)}
+        >
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -651,28 +668,42 @@ export default function ProfileScreen() {
             })}
           </ScrollView>
           <View style={styles.tabPanel}>{renderActiveTab()}</View>
-        </View>
+        </ProfileAccordionSection>
 
         {!!typedUser.skills?.length && (
-          <ProfileSkillsSection skills={typedUser.skills} />
+          <ProfileAccordionSection
+            title="Skills"
+            subtitle="Topics you often share"
+            icon="sparkles-outline"
+            badge={typedUser.skills.length}
+            expanded={skillsExpanded}
+            onToggle={() => setSkillsExpanded((v) => !v)}
+          >
+            <ProfileSkillsSection skills={typedUser.skills} embedded />
+          </ProfileAccordionSection>
         )}
 
-        <AchievementsSection
-          completedIds={[
-            ...new Set([
-              ...(typedUser.achievements ?? []),
-              ...(typedUser.badges ?? []),
-            ]),
-          ]}
-          onViewAll={
-            user?.id
-              ? () =>
-                  navigation.navigate("AchievementsList", {
-                    userId: user.id,
-                  })
-              : undefined
-          }
-        />
+        <ProfileAccordionSection
+          title="Achievements"
+          subtitle="Milestones unlocked in the community"
+          icon="ribbon-outline"
+          badge={mergedAchievementIds.length}
+          expanded={achievementsExpanded}
+          onToggle={() => setAchievementsExpanded((v) => !v)}
+        >
+          <AchievementsSection
+            completedIds={mergedAchievementIds}
+            onViewAll={
+              user?.id
+                ? () =>
+                    navigation.navigate("AchievementsList", {
+                      userId: user.id,
+                    })
+                : undefined
+            }
+            embedded
+          />
+        </ProfileAccordionSection>
 
         {!!typedUser.portfolio_images?.length && (
           <View style={styles.sectionCard}>

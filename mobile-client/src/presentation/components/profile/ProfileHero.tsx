@@ -76,9 +76,6 @@ export interface ProfileHeroProps {
   /** Tap following count */
   onFollowingPress?: () => void;
 
-  /** Own profile empty showcase: request opening the picker in the edit sheet */
-  onBadgePickerOpenRequest?: () => void;
-
   /** Public profile: Follow / Unfollow (shown next to the name when set) */
   isFollowing?: boolean;
   followActionLoading?: boolean;
@@ -165,7 +162,6 @@ export default function ProfileHero({
   onAvatarPress,
   onFollowersPress,
   onFollowingPress,
-  onBadgePickerOpenRequest,
   isFollowing = false,
   followActionLoading = false,
   onFollowPress,
@@ -219,76 +215,76 @@ export default function ProfileHero({
           <View style={[styles.gradientBase, bannerUrl ? styles.gradientWithCover : null]} />
           <View style={[styles.gradientOverlayTop, bannerUrl ? styles.gradientWithCover : null]} />
           <View style={styles.badgeOverlay}>
-            <BadgeShowcase
-              variant="compact"
-              mode={mode}
-              badges={badgesDetail}
-              onPickerOpenRequest={onBadgePickerOpenRequest}
-            />
+            <BadgeShowcase variant="compact" badges={badgesDetail} />
           </View>
 
           <View style={styles.content}>
             {/* Left column */}
             <View style={styles.leftCol}>
-              {/* Avatar */}
-              <Pressable
-                onPress={mode === "own" ? onAvatarPress : undefined}
-                accessibilityRole={mode === "own" ? "button" : "image"}
-                accessibilityLabel={
-                  mode === "own" ? "Change avatar" : `${fullName} avatar`
-                }
-                style={styles.avatarWrapper}
-              >
-                <View style={styles.avatarClip}>
-                  {avatarUrl && !avatarFailed ? (
-                    <Image
-                      source={{ uri: avatarUrl }}
-                      style={styles.avatar}
-                      accessibilityIgnoresInvertColors
-                      onError={() => setAvatarFailed(true)}
-                    />
-                  ) : (
-                    <View style={styles.avatarFallback}>
-                      <Text style={styles.avatarInitials}>{initials}</Text>
-                    </View>
-                  )}
-                </View>
-                {mode === "own" && (
-                  <View style={styles.cameraOverlay}>
-                    <Ionicons name="camera" size={14} color={colors.WHITE} />
-                  </View>
-                )}
-              </Pressable>
-
-              {/* Name + follow (public) */}
-              <View style={styles.nameRow}>
-                <Text style={styles.name} numberOfLines={2}>
-                  {fullName || "User"}
-                </Text>
-                {mode === "public" && onFollowPress ? (
-                  <Pressable
-                    onPress={onFollowPress}
-                    disabled={followActionLoading}
-                    style={({ pressed }) => [
-                      styles.followToggle,
-                      isFollowing ? styles.followToggleOutline : styles.followToggleFilled,
-                      pressed && !followActionLoading && styles.followTogglePressed,
-                      followActionLoading && styles.followToggleDisabled,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel={isFollowing ? "Unfollow" : "Follow"}
-                  >
-                    {followActionLoading ? (
-                      <ActivityIndicator size="small" color={isFollowing ? colors.WHITE : colors.GREEN} />
+              {/* Avatar + name (+ follow) on one row — compact on mobile */}
+              <View style={styles.identityRow}>
+                <Pressable
+                  onPress={mode === "own" ? onAvatarPress : undefined}
+                  accessibilityRole={mode === "own" ? "button" : "image"}
+                  accessibilityLabel={
+                    mode === "own" ? "Change avatar" : `${fullName} avatar`
+                  }
+                  style={styles.avatarWrapper}
+                >
+                  <View style={styles.avatarClip}>
+                    {avatarUrl && !avatarFailed ? (
+                      <Image
+                        source={{ uri: avatarUrl }}
+                        style={styles.avatar}
+                        accessibilityIgnoresInvertColors
+                        onError={() => setAvatarFailed(true)}
+                      />
                     ) : (
-                      <Text
-                        style={isFollowing ? styles.followToggleOutlineText : styles.followToggleFilledText}
-                      >
-                        {isFollowing ? "Unfollow" : "Follow"}
-                      </Text>
+                      <View style={styles.avatarFallback}>
+                        <Text style={styles.avatarInitials}>{initials}</Text>
+                      </View>
                     )}
-                  </Pressable>
-                ) : null}
+                  </View>
+                </Pressable>
+
+                <View style={styles.identityMain}>
+                  <View style={styles.identityTitleRow}>
+                    <Text
+                      style={[
+                        styles.name,
+                        mode === "public" && onFollowPress ? styles.nameBesideFollow : null,
+                      ]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {fullName || "User"}
+                    </Text>
+                    {mode === "public" && onFollowPress ? (
+                      <Pressable
+                        onPress={onFollowPress}
+                        disabled={followActionLoading}
+                        style={({ pressed }) => [
+                          styles.followToggle,
+                          isFollowing ? styles.followToggleOutline : styles.followToggleFilled,
+                          pressed && !followActionLoading && styles.followTogglePressed,
+                          followActionLoading && styles.followToggleDisabled,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={isFollowing ? "Unfollow" : "Follow"}
+                      >
+                        {followActionLoading ? (
+                          <ActivityIndicator size="small" color={isFollowing ? colors.WHITE : colors.GREEN} />
+                        ) : (
+                          <Text
+                            style={isFollowing ? styles.followToggleOutlineText : styles.followToggleFilledText}
+                          >
+                            {isFollowing ? "Unfollow" : "Follow"}
+                          </Text>
+                        )}
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
               </View>
 
               {/* Location meta strip */}
@@ -495,7 +491,26 @@ const styles = StyleSheet.create({
   },
   leftCol: {
     gap: 6,
-    paddingRight: 74,
+    paddingRight: 52,
+  },
+  identityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    width: "100%",
+  },
+  identityMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  /** Name + Follow/Unfollow: single line, pill flush right of text */
+  identityTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "nowrap",
+    width: "100%",
+    minWidth: 0,
   },
   rightCol: {
     width: "100%",
@@ -511,19 +526,19 @@ const styles = StyleSheet.create({
   },
   // Avatar
   avatarWrapper: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     borderWidth: 3,
     borderColor: colors.WHITE,
     overflow: "visible",
-    marginBottom: 4,
+    flexShrink: 0,
     alignSelf: "flex-start",
   },
   avatarClip: {
     width: "100%",
     height: "100%",
-    borderRadius: 40,
+    borderRadius: 36,
     overflow: "hidden",
   },
   avatar: {
@@ -538,51 +553,34 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarInitials: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: "800",
     color: colors.GREEN,
   },
-  cameraOverlay: {
-    position: "absolute",
-    bottom: -1,
-    right: -1,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    borderWidth: 1.5,
-    borderColor: colors.WHITE,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 5,
-  },
-  nameRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 10,
-    flexWrap: "wrap",
-    width: "100%",
-    paddingRight: 4,
-  },
-  // Text
   name: {
     flex: 1,
     minWidth: 0,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "900",
     color: colors.WHITE,
     lineHeight: 26,
+    letterSpacing: -0.2,
+  },
+  /** Slightly smaller type so first + last name + pill fit one line on narrow phones */
+  nameBesideFollow: {
+    fontSize: 17,
+    lineHeight: 22,
+    letterSpacing: -0.25,
   },
   followToggle: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     borderRadius: 999,
-    minWidth: 100,
-    minHeight: 36,
+    flexShrink: 0,
+    minHeight: 30,
   },
   followToggleFilled: {
     backgroundColor: colors.WHITE,
@@ -599,12 +597,12 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   followToggleFilledText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
     color: colors.GREEN,
   },
   followToggleOutlineText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     color: colors.WHITE,
   },

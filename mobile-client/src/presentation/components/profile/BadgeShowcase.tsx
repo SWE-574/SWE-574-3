@@ -3,8 +3,7 @@
  *
  * variant="compact":
  *   - Horizontal row of up to 2 badges (40px circles with name caption).
- *   - Own mode + empty: shows "+ Showcase a badge" dashed placeholder.
- *   - Public mode + empty: renders nothing.
+ *   - Empty (own or public): renders nothing — showcase is edited under Profile → Edit.
  *
  * variant="picker":
  *   - Scrollable grid of ALL badges from badgeProgress.
@@ -45,14 +44,10 @@ export interface BadgeProgress {
 
 export interface BadgeShowcaseProps {
   variant: "compact" | "picker";
-  /** "own" = the authenticated user's profile; "public" = read-only view */
-  mode?: "own" | "public";
 
   // compact variant props
   /** Resolved badge details for the currently featured badges */
   badges?: BadgeDetail[];
-  /** Called when the empty-state placeholder is pressed (own compact) */
-  onPickerOpenRequest?: () => void;
 
   // picker variant props
   /** Full badge progress list for the picker grid */
@@ -111,43 +106,13 @@ function CompactBadge({
   );
 }
 
-function CompactShowcase({
-  badges,
-  mode,
-  onPickerOpenRequest,
-}: {
-  badges: BadgeDetail[];
-  mode?: "own" | "public";
-  onPickerOpenRequest?: () => void;
-}) {
+function CompactShowcase({ badges }: { badges: BadgeDetail[] }) {
   const [activeBadgeId, setActiveBadgeId] = useState<string | null>(null);
   const featured = badges.slice(0, 2);
   const activeBadge = featured.find((badge) => badge.id === activeBadgeId);
 
   if (featured.length === 0) {
-    if (mode === "public") return null;
-
-    // Own mode empty placeholder
-    return (
-      <Pressable
-        onPress={onPickerOpenRequest}
-        style={({ pressed }) => [
-          compactStyles.emptyPlaceholder,
-          pressed && { opacity: 0.75 },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="Showcase a badge"
-      >
-        <Ionicons
-          name="ribbon-outline"
-          size={20}
-          color="rgba(255,255,255,0.72)"
-        />
-        <View style={compactStyles.emptyPlusBadge}>
-          <Ionicons name="add" size={11} color={colors.GREEN} />
-        </View>
-      </Pressable>
-    );
+    return null;
   }
 
   return (
@@ -339,20 +304,14 @@ function PickerGrid({
 
 export default function BadgeShowcase({
   variant,
-  mode = "own",
   badges = [],
-  onPickerOpenRequest,
   badgeProgress = [],
   selectedIds = [],
   onSelectionChange,
 }: BadgeShowcaseProps) {
   if (variant === "compact") {
     return (
-      <CompactShowcase
-        badges={badges}
-        mode={mode}
-        onPickerOpenRequest={onPickerOpenRequest}
-      />
+      <CompactShowcase badges={badges} />
     );
   }
 
@@ -419,33 +378,6 @@ const compactStyles = StyleSheet.create({
     display: "none",
   },
   earnedDate: {
-    display: "none",
-  },
-  emptyPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignSelf: "flex-start",
-  },
-  emptyPlusBadge: {
-    position: "absolute",
-    right: 5,
-    bottom: 5,
-    width: 17,
-    height: 17,
-    borderRadius: 8.5,
-    backgroundColor: colors.WHITE,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-  },
-  emptyPlaceholderText: {
     display: "none",
   },
   tooltip: {
