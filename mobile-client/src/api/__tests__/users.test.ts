@@ -16,6 +16,7 @@ import {
   unfollowUser,
   getFollowers,
   getFollowing,
+  reportUser,
 } from "../users";
 import { mockFetchResolve, getLastFetchCall, getLastFetchBody } from "./helpers";
 
@@ -58,6 +59,21 @@ describe("users", () => {
     await patchMe({ avatar_url: "https://x.com/a.png" });
     expect(getLastFetchCall().init?.method).toBe("PATCH");
     expect(getLastFetchBody()).toEqual({ avatar_url: "https://x.com/a.png" });
+  });
+
+  it("reportUser POSTs to /users/:id/report/", async () => {
+    mockFetchResolve({ status: "success", report_id: "r1" });
+    const out = await reportUser("u9", {
+      issue_type: "spam",
+      description: "Abusive behavior",
+    });
+    expect(out.report_id).toBe("r1");
+    expect(getLastFetchCall().url).toContain("/users/u9/report/");
+    expect(getLastFetchCall().init?.method).toBe("POST");
+    expect(getLastFetchBody()).toEqual({
+      issue_type: "spam",
+      description: "Abusive behavior",
+    });
   });
 
   it("getUser GETs /users/:id/", async () => {

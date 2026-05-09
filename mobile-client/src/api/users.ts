@@ -144,6 +144,25 @@ export function unfollowUser(userId: string): Promise<void> {
   return apiRequest<void>(`/users/${userId}/follow/`, { method: "DELETE" });
 }
 
+export function reportUser(
+  userId: string,
+  body?: {
+    issue_type?:
+      | "inappropriate_content"
+      | "spam"
+      | "service_issue"
+      | "scam"
+      | "harassment"
+      | "other";
+    description?: string;
+  },
+): Promise<{ status: string; report_id: string }> {
+  return apiRequest<{ status: string; report_id: string }>(
+    `/users/${userId}/report/`,
+    { method: "POST", body: body ?? {} },
+  );
+}
+
 function normalizeUserSummaryList(
   data: UserSummary[] | PaginatedResponse<UserSummary>,
 ): UserSummary[] {

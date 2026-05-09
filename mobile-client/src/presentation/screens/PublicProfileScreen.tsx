@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,7 @@ import {
   getUserHistory,
   getVerifiedReviews,
   type ProfileReview,
+  reportUser,
   unfollowUser,
 } from "../../api/users";
 import { listServices } from "../../api/services";
@@ -44,6 +45,19 @@ import { useAuth } from "../../context/AuthContext";
 import AchievementsSection from "../components/AchievementsSection";
 import ProfileSkillsSection from "../components/ProfileSkillsSection";
 import ProfileHero from "../components/profile/ProfileHero";
+import ReportModal, {
+  type ReportModalRequest,
+  type ReportOption,
+} from "../components/ReportModal";
+
+const PUBLIC_PROFILE_REPORT_OPTIONS: ReportOption[] = [
+  { value: "inappropriate_content", label: "Inappropriate Content" },
+  { value: "spam", label: "Spam" },
+  { value: "harassment", label: "Harassment" },
+  { value: "scam", label: "Scam or Fraud" },
+  { value: "service_issue", label: "Conduct or profile issue" },
+  { value: "other", label: "Other" },
+];
 
 type PublicProfileHostStackParamList = {
   PublicProfile: { userId: string };
@@ -90,6 +104,7 @@ export default function PublicProfileScreen() {
     ReturnType<typeof groupHistoryItems>[number] | null
   >(null);
   const [followActionLoading, setFollowActionLoading] = useState(false);
+  const [profileReportVisible, setProfileReportVisible] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,6 +197,26 @@ export default function PublicProfileScreen() {
       cancelled = true;
     };
   }, [state.status, userId]);
+
+  const submitProfileReport = useCallback(
+    async (request: ReportModalRequest) => {
+      const normalized =
+        request.type === "no_show" ? "service_issue" : request.type;
+      try {
+        await reportUser(userId, {
+          issue_type: normalized,
+          description: request.description,
+        });
+        Alert.alert("Thanks", "Your report was submitted.");
+      } catch (e) {
+        const message =
+          e instanceof Error ? e.message : "Could not submit report.";
+        Alert.alert("Error", message);
+        throw e;
+      }
+    },
+    [userId],
+  );
 
   if (state.status === "loading") {
     return (
@@ -514,7 +549,14 @@ export default function PublicProfileScreen() {
             // TODO: navigate to chat with this user when chat flow supports it
           }}
           onReportPress={() => {
-            // Existing report modal trigger
+            if (!authUser) {
+              Alert.alert(
+                "Sign in required",
+                "Please sign in to report this profile.",
+              );
+              return;
+            }
+            setProfileReportVisible(true);
           }}
           onFollowersPress={() => openFollowList("followers")}
           onFollowingPress={() => openFollowList("following")}
@@ -648,6 +690,16 @@ export default function PublicProfileScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ReportModal
+        visible={profileReportVisible}
+        onClose={() => setProfileReportVisible(false)}
+        onSubmit={submitProfileReport}
+        targetLabel="profile"
+        title="Report this profile"
+        subtitle="Select a reason so moderators can review your report."
+        options={PUBLIC_PROFILE_REPORT_OPTIONS}
+      />
     </View>
   );
 }
