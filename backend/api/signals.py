@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 
 from django.contrib.auth.signals import user_logged_in, user_login_failed
@@ -236,6 +237,63 @@ def invalidate_user_cache(sender, instance, **kwargs):
 @receiver([post_save, post_delete], sender=Tag)
 def invalidate_tag_cache(sender, instance, **kwargs):
     invalidate_on_tag_change()
+
+
+_QID_PATTERN = re.compile(r'^Q\d+$')
+
+
+@receiver(post_save, sender=Tag)
+def enrich_tag_with_wikidata_metadata(sender, instance, created, raw=False, **kwargs):
+    """Backfill Tag.parent_qid + depth + entity_type via Wikidata.
+
+    Skips when parent_qid is already populated (idempotent), when raw=True
+    (loaddata / fixtures), and swallows any Wikidata failure so a
+    Service.save can never block on a flaky Wikidata response. The 1h
+    search cache and 24h claims cache make repeat calls cheap.
+
+    Two paths:
+      * QID-shaped tag id (Q12345) -> straight to claims fetch.
+      * Free-text name -> resolve to a likely QID via wbsearchentities,
+        then claims fetch. New non-QID tags now self-heal so the sibling
+        expansion in TagStrategy reaches them.
+    """
+    if raw:
+        return
+    if instance.parent_qid:
+        return
+    try:
+        from .wikidata import (
+            fetch_wikidata_claims, resolve_entity_type, search_wikidata_items,
+        )
+
+        qid = instance.id if _QID_PATTERN.match(str(instance.id or '')) else None
+        if qid is None and instance.name:
+            results = search_wikidata_items(instance.name, limit=1)
+            if results:
+                candidate = results[0].get('id') or ''
+                if _QID_PATTERN.match(candidate):
+                    qid = candidate
+        if qid is None:
+            return
+
+        claims = fetch_wikidata_claims(qid)
+        if not claims:
+            return
+        ancestry = (claims.get('instance_of') or []) + (claims.get('subclass_of') or [])
+        parent_qid = ancestry[0] if ancestry else None
+        entity_type = resolve_entity_type(qid)
+
+        update_fields = {}
+        if parent_qid and not instance.parent_qid:
+            update_fields['parent_qid'] = parent_qid
+            update_fields['depth'] = 1
+        if entity_type and not instance.entity_type:
+            update_fields['entity_type'] = entity_type
+        if update_fields:
+            # update() avoids re-firing the post_save signal we're inside.
+            Tag.objects.filter(pk=instance.pk).update(**update_fields)
+    except Exception:
+        logger.exception("Tag enrichment failed for tag %s", instance.pk)
 
 
 @receiver([post_save, post_delete], sender=Handshake)

@@ -10,14 +10,20 @@ interface PillFlavour {
   label: string;
   bg: string;
   fg: string;
+  border?: string;
   icon: keyof typeof Ionicons.glyphMap;
 }
 
+// cold_start uses an outline style (transparent fill, coloured border) so it
+// never dominates over a saturated for_you pill. Demo data flags every card
+// as cold_start, which would otherwise drown out the real recommendation
+// signals.
 const POOL_FLAVOUR: Record<NonNullable<Service["explore_pool"]>, PillFlavour> = {
   cold_start: {
     label: "Fresh provider",
-    bg: "rgba(20, 184, 166, 0.92)",
-    fg: colors.WHITE,
+    bg: "rgba(255,255,255,0.6)",
+    fg: "#0F766E",
+    border: "#5EEAD4",
     icon: "compass-outline",
   },
   undershown_quality: {
@@ -75,11 +81,25 @@ interface SmartPillProps {
 }
 
 export default function SmartPill({ service }: SmartPillProps) {
-  const poolFlavour = service.explore_pool ? POOL_FLAVOUR[service.explore_pool] : null;
-  const flavour = poolFlavour ?? chipForSignals(service.for_you_signals);
+  // for_you signals win over explore_pool. On demo data every card qualifies
+  // as cold_start; without this priority the cold_start pill would drown out
+  // cards that have a real recommendation signal (tag overlap, follow,
+  // cooccurrence).
+  const flavour =
+    chipForSignals(service.for_you_signals) ??
+    (service.explore_pool ? POOL_FLAVOUR[service.explore_pool] : null);
   if (!flavour) return null;
   return (
-    <View style={[styles.pill, { backgroundColor: flavour.bg }]}>
+    <View
+      style={[
+        styles.pill,
+        {
+          backgroundColor: flavour.bg,
+          borderColor: flavour.border ?? "transparent",
+          borderWidth: flavour.border ? 1 : 0,
+        },
+      ]}
+    >
       <Ionicons name={flavour.icon} size={10} color={flavour.fg} />
       <Text style={[styles.pillText, { color: flavour.fg }]}>{flavour.label}</Text>
     </View>

@@ -253,16 +253,15 @@ export function MainSidebar({
               onClick={() => !locationLoading && toggleLocation()}
               style={{ cursor: locationLoading ? 'not-allowed' : 'pointer', opacity: locationLoading ? 0.65 : 1 }}>
               {locationLoading
-                ? <><FiLoader size={12} /> Getting location…</>
+                ? <><FiLoader size={12} /> Getting location</>
                 : locationEnabled
-                  ? <><FiMapPin size={12} /> Use my location — ON</>
+                  ? <><FiMapPin size={12} /> Location on</>
                   : <><FiNavigation size={12} /> Enable location</>}
             </Box>
             {locationError && <Text fontSize="11px" color="red.500" mb={2}>{locationError}</Text>}
             {userLocation && locationEnabled && (
               <Text fontSize="10px" color={GRAY500} lineHeight="1.4">
-                Proximity boosts ranked results in Browse. Use the radius
-                slider on the Nearby tab to tune the carousel cutoff.
+                Closer cards rank higher when this is on.
               </Text>
             )}
           </Box>

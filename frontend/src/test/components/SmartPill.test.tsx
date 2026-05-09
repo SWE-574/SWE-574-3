@@ -41,23 +41,38 @@ describe('SmartPill', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders the cold_start flavour for explore-pool members', () => {
+  it('renders the cold_start flavour for explore-pool members with no for_you signals', () => {
     renderPill(makeService({ explore_pool: 'cold_start' }))
     expect(screen.getByText('Fresh provider')).toBeInTheDocument()
   })
 
-  it('renders the undershown_quality flavour as Hidden gem', () => {
+  it('renders the undershown_quality flavour as Hidden gem when no for_you signals', () => {
     renderPill(makeService({ explore_pool: 'undershown_quality' }))
     expect(screen.getByText('Hidden gem')).toBeInTheDocument()
   })
 
-  it('falls back to the strongest for_you signal when no explore pool', () => {
+  it('renders the strongest for_you signal when no explore pool', () => {
     renderPill(
       makeService({
         for_you_signals: { tag: 0.6, follow: 0.0, cooccur: 0.0, recency_penalty: 0 },
       }),
     )
     expect(screen.getByText('Matches your interests')).toBeInTheDocument()
+  })
+
+  it('for_you signal wins over a cold_start explore pool flag', () => {
+    // The earlier order put explore_pool first; on demo data every card
+    // qualifies as cold_start, which drowned out cards that DID have a
+    // real for_you signal. Reordering makes for_you signals the primary
+    // pill so cold_start only appears when nothing else explains the card.
+    renderPill(
+      makeService({
+        explore_pool: 'cold_start',
+        for_you_signals: { tag: 0.6, follow: 0.0, cooccur: 0.0, recency_penalty: 0 },
+      }),
+    )
+    expect(screen.getByText('Matches your interests')).toBeInTheDocument()
+    expect(screen.queryByText('Fresh provider')).not.toBeInTheDocument()
   })
 
   it('picks follow over weaker tag overlap (weighted)', () => {

@@ -100,3 +100,70 @@ class TestServiceDeleteCascade:
         Service.objects.filter(pk__in=[s1.pk, s2.pk]).delete()
 
         assert not Service.objects.filter(pk__in=[s1.pk, s2.pk]).exists()
+
+
+@pytest.mark.django_db
+class TestTagEnrichmentSignal:
+    """post_save on Tag should backfill parent_qid + depth + entity_type via
+    Wikidata. Idempotent (a second save with parent_qid set is a no-op).
+    Defensive (Wikidata failures swallow without breaking the parent save).
+    """
+
+    def test_qid_tag_gets_enriched_with_claims(self):
+        from api.models import Tag
+
+        with (
+            patch(
+                'api.wikidata.fetch_wikidata_claims',
+                return_value={'instance_of': ['Q735'], 'subclass_of': []},
+            ),
+            patch('api.wikidata.resolve_entity_type', return_value='art'),
+        ):
+            tag = Tag.objects.create(id='Q11629', name='Painting')
+
+        tag.refresh_from_db()
+        assert tag.parent_qid == 'Q735'
+        assert tag.depth == 1
+        assert tag.entity_type == 'art'
+
+    def test_idempotent_when_parent_already_set(self):
+        from api.models import Tag
+
+        # Pre-populated tag -- signal should not call Wikidata.
+        Tag.objects.create(id='Q11629', name='Painting', parent_qid='Q735', depth=1)
+        with patch('api.wikidata.fetch_wikidata_claims') as claims_mock:
+            tag = Tag.objects.get(id='Q11629')
+            tag.name = 'Painting (renamed)'
+            tag.save()
+            claims_mock.assert_not_called()
+
+    def test_non_qid_name_resolves_via_search(self):
+        from api.models import Tag
+
+        with (
+            patch(
+                'api.wikidata.search_wikidata_items',
+                return_value=[{'id': 'Q1071', 'label': 'Hiking'}],
+            ),
+            patch(
+                'api.wikidata.fetch_wikidata_claims',
+                return_value={'instance_of': ['Q56297'], 'subclass_of': []},
+            ),
+            patch('api.wikidata.resolve_entity_type', return_value='sports'),
+        ):
+            tag = Tag.objects.create(id='hiking', name='hiking')
+
+        tag.refresh_from_db()
+        assert tag.parent_qid == 'Q56297'
+        assert tag.entity_type == 'sports'
+
+    def test_wikidata_failure_does_not_break_save(self):
+        from api.models import Tag
+
+        with (
+            patch('api.wikidata.search_wikidata_items', side_effect=Exception('boom')),
+            patch('api.wikidata.fetch_wikidata_claims', side_effect=Exception('boom')),
+        ):
+            tag = Tag.objects.create(id='free-text', name='free-text')
+
+        assert Tag.objects.filter(pk=tag.pk).exists()

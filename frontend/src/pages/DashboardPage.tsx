@@ -929,19 +929,17 @@ const DashboardPage = () => {
               <Flex justify="center" py={16}><Spinner size="lg" color="green.600" /></Flex>
             ) : fetchError && displayServices.length === 0 ? (
               <Flex direction="column" align="center" py={16} gap={3}>
-                <Text fontSize="2xl">⚡</Text>
                 <Text color="red.500" fontSize="13px">{fetchError}</Text>
               </Flex>
             ) : displayServices.length === 0 ? (
               <Flex direction="column" align="center" py={16} gap={3}>
-                <Text fontSize="3xl">🔍</Text>
-                <Text color={GRAY500} fontSize="13px">No services found. Be the first to post one!</Text>
+                <Text color={GRAY500} fontSize="13px">No services match the current filters.</Text>
                 {isAuthenticated && (
                   <Box as="button" px={5} py="9px" borderRadius="9999px" bg={GREEN} color={WHITE}
                     fontSize="13px" fontWeight={700} onClick={() => navigate('/post-offer')}
                     _hover={{ opacity: 0.9 }} transition="opacity 0.15s"
                   >
-                    Post a Service
+                    Post a service
                   </Box>
                 )}
               </Flex>
