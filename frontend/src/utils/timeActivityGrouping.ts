@@ -71,6 +71,15 @@ function isOneTimeGroupOffer(item: {
   )
 }
 
+function isGroupableActiveSession(item: {
+  service_id?: string | null
+  service_type?: string | null
+  schedule_type?: string | null
+  max_participants?: number | null
+}) {
+  return isOneTimeGroupOffer(item) || (item.service_type === 'Event' && Boolean(item.service_id))
+}
+
 function sessionKey(item: { service_id?: string | null; scheduled_time?: string | null }) {
   return `${item.service_id ?? 'unknown'}:${item.scheduled_time ?? 'fixed-session'}`
 }
@@ -115,12 +124,21 @@ export function timeActivityVisibleParticipants<T>(participants?: T[] | null): T
   return participants ?? []
 }
 
+export function timeActivityAvatarPreview<T>(participants?: T[] | null, maxVisible = 5) {
+  const allParticipants = timeActivityVisibleParticipants(participants)
+  const visibleParticipants = allParticipants.slice(0, maxVisible)
+  return {
+    visibleParticipants,
+    overflowCount: Math.max(0, allParticipants.length - visibleParticipants.length),
+  }
+}
+
 export function groupActiveAgreements<T extends TimeActivityAgreement>(agreements: T[]): TimeActivityAgreement[] {
   const groups = new Map<string, T[]>()
   const output: T[] = []
 
   for (const agreement of agreements) {
-    if (!isOneTimeGroupOffer(agreement)) {
+    if (!isGroupableActiveSession(agreement)) {
       output.push({
         ...agreement,
         participant_count: agreement.participant_count ?? 1,
@@ -137,6 +155,25 @@ export function groupActiveAgreements<T extends TimeActivityAgreement>(agreement
   for (const [key, participants] of groups.entries()) {
     if (participants.length === 1) {
       const [single] = participants
+      const loadedParticipants = single.participants?.length ? single.participants : [single]
+      if (single.service_type === 'Event' && loadedParticipants.length > 1) {
+        output.push({
+          ...single,
+          id: `group:${key}`,
+          counterpart_id: null,
+          counterpart_name: `${loadedParticipants.length} members`,
+          counterpart_email: '',
+          counterpart_avatar_url: null,
+          expected_delta: representativeDelta(loadedParticipants.map((item) => item.expected_delta)),
+          reserved_delta: representativeDelta(loadedParticipants.map((item) => item.reserved_delta)),
+          note: `${loadedParticipants.length} members in this event`,
+          participant_count: loadedParticipants.length,
+          participants: loadedParticipants,
+          is_grouped_multi_use: true,
+        })
+        continue
+      }
+
       output.push({
         ...single,
         participant_count: 1,

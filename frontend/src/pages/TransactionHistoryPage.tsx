@@ -7,6 +7,7 @@ import {
 } from 'react-icons/fi'
 import { transactionAPI, type TransactionDirection } from '@/services/transactionAPI'
 import { handshakeAPI, type Handshake } from '@/services/handshakeAPI'
+import { groupChatAPI, type GroupChatParticipant } from '@/services/conversationAPI'
 import { userAPI, type UserHistoryItem } from '@/services/userAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Transaction, TransactionSummary, User } from '@/types'
@@ -17,6 +18,7 @@ import {
   groupActiveAgreements,
   groupTransactionRows,
   isTimeActivityParticipantStatus,
+  timeActivityAvatarPreview,
   timeActivityVisibleParticipants,
   transactionGroupDetailParticipants,
   type GroupedTransactionRow,
@@ -240,6 +242,62 @@ function toExpectedAgreement(handshake: Handshake, currentUser?: User | null): E
   }
 }
 
+function eventGroupParticipantToAgreement(
+  participant: GroupChatParticipant,
+  sourceAgreement: ExpectedAgreement,
+  index: number,
+): ExpectedAgreement {
+  return {
+    ...sourceAgreement,
+    id: `event-participant:${sourceAgreement.service_id}:${participant.id}`,
+    counterpart_id: participant.id,
+    counterpart_name: participant.name || 'Unknown user',
+    counterpart_email: '',
+    counterpart_avatar_url: participant.avatar_url ?? null,
+    is_current_user_provider: index === 0,
+    provisioned_hours: 0,
+    reserved_delta: 0,
+    expected_delta: 0,
+    note: index === 0 ? 'Organizer' : 'Attendee',
+    participants: undefined,
+    is_grouped_multi_use: false,
+  }
+}
+
+async function enrichEventAgreementParticipants(
+  agreements: ExpectedAgreement[],
+  signal?: AbortSignal,
+): Promise<ExpectedAgreement[]> {
+  const eventServices = new Map<string, ExpectedAgreement>()
+  for (const agreement of agreements) {
+    if (agreement.service_type === 'Event' && agreement.service_id && !eventServices.has(agreement.service_id)) {
+      eventServices.set(agreement.service_id, agreement)
+    }
+  }
+  if (eventServices.size === 0) return agreements
+
+  const participantEntries = await Promise.all(
+    Array.from(eventServices.entries()).map(async ([serviceId, sourceAgreement]) => {
+      try {
+        const thread = await groupChatAPI.getMessages(serviceId, signal)
+        const participants = (thread.participants ?? []).map((participant, index) =>
+          eventGroupParticipantToAgreement(participant, sourceAgreement, index),
+        )
+        return [serviceId, participants] as const
+      } catch {
+        return [serviceId, [] as ExpectedAgreement[]] as const
+      }
+    }),
+  )
+
+  const participantsByServiceId = new Map(participantEntries)
+  return agreements.map((agreement) => {
+    if (agreement.service_type !== 'Event' || !agreement.service_id) return agreement
+    const participants = participantsByServiceId.get(agreement.service_id)
+    return participants?.length ? { ...agreement, participants } : agreement
+  })
+}
+
 function amountTone(value: number) {
   return value >= 0
     ? { color: GREEN, bg: GREEN_LT }
@@ -336,7 +394,7 @@ function ParticipantAvatarStack({ participants, fallbackName }: {
   participants?: ExpectedAgreement[]
   fallbackName: string
 }) {
-  const visibleParticipants = timeActivityVisibleParticipants(participants)
+  const { visibleParticipants, overflowCount } = timeActivityAvatarPreview(participants)
 
   if (visibleParticipants.length === 0) {
     return (
@@ -361,6 +419,25 @@ function ParticipantAvatarStack({ participants, fallbackName }: {
           <Avatar.Fallback name={participant.counterpart_name || fallbackName} />
         </Avatar.Root>
       ))}
+      {overflowCount > 0 && (
+        <Flex
+          align="center"
+          justify="center"
+          w="24px"
+          h="24px"
+          ml="-10px"
+          border={`2px solid ${WHITE}`}
+          borderRadius="full"
+          bg={GRAY800}
+          color={WHITE}
+          fontSize="9px"
+          fontWeight={900}
+          zIndex={0}
+          boxShadow="0 2px 6px rgba(15,23,42,0.12)"
+        >
+          +{overflowCount}
+        </Flex>
+      )}
     </Flex>
   )
 }
@@ -761,8 +838,10 @@ const TransactionHistoryPage = () => {
         .filter((handshake) => ACTIVE_HANDSHAKE_STATUSES.has(handshake.status))
         .map((handshake) => toExpectedAgreement(handshake, user))
         .filter((item): item is ExpectedAgreement => item !== null)
+      const enrichedAgreements = await enrichEventAgreementParticipants(nextAgreements, signal)
+      if (requestId !== agreementRequestIdRef.current) return
 
-      setActiveAgreements(groupActiveAgreements(nextAgreements))
+      setActiveAgreements(groupActiveAgreements(enrichedAgreements))
     } catch (error) {
       const isAbort =
         signal?.aborted ||
@@ -1440,6 +1519,9 @@ const TransactionHistoryPage = () => {
                     (sum, agreement) => sum + (agreement.expected_delta !== 0 ? agreement.expected_delta : agreement.reserved_delta),
                     0,
                   )
+                  const sectionSummary = section.type === 'Event'
+                    ? `${section.items.length} active`
+                    : `${section.items.length} active · ${formatAmount(sectionTotal)}`
 
                   return (
                     <Box key={section.type} borderTop={sectionIndex === 0 ? 'none' : `1px solid ${GRAY100}`}>
@@ -1463,7 +1545,7 @@ const TransactionHistoryPage = () => {
                         </Flex>
                         <Flex align="center" gap={2}>
                           <Text fontSize="11px" color={sectionTone.color} fontWeight={800}>
-                            {section.items.length} active · {formatAmount(sectionTotal)}
+                            {sectionSummary}
                           </Text>
                           <Text fontSize="13px" color={sectionTone.color} fontWeight={900}>
                             {sectionOpen ? '−' : '+'}
@@ -1478,6 +1560,7 @@ const TransactionHistoryPage = () => {
                         const ownListing = isOwnService(agreement.service_type, agreement.is_current_user_provider)
                         const isGroupedAgreement = agreement.is_grouped_multi_use === true
                         const displayDelta = agreement.expected_delta !== 0 ? agreement.expected_delta : agreement.reserved_delta
+                        const showTimeValue = agreement.service_type !== 'Event' || displayDelta !== 0
                         const timeColor = displayDelta > 0 ? GREEN : displayDelta < 0 ? AMBER : GRAY700
                         const timeBg = displayDelta > 0 ? GREEN_LT : displayDelta < 0 ? AMBER_LT : GRAY100
                         const timeLabel = agreement.expected_delta !== 0
@@ -1554,10 +1637,15 @@ const TransactionHistoryPage = () => {
                               minW={0}
                               textAlign="left"
                               onClick={(event) => {
+                                if (isGroupedAgreement) {
+                                  event.stopPropagation()
+                                  setSelectedActiveAgreementGroup(agreement)
+                                  return
+                                }
                                 event.stopPropagation()
                                 openPublicProfile(agreement.counterpart_id)
                               }}
-                              style={{ cursor: agreement.counterpart_id ? 'pointer' : 'default' }}
+                              style={{ cursor: isGroupedAgreement || agreement.counterpart_id ? 'pointer' : 'default' }}
                             >
                               {participantAvatars.length > 0 ? (
                                 <ParticipantAvatarStack participants={participantAvatars} fallbackName={agreement.counterpart_name} />
@@ -1574,14 +1662,16 @@ const TransactionHistoryPage = () => {
                               </Text>
                             </Flex>
 
-                            <Flex align={{ base: 'center', md: 'flex-end' }} justify="space-between" direction={{ base: 'row', md: 'column' }} gap={1}>
-                              <Box px="10px" py="5px" borderRadius="999px" bg={timeBg} color={timeColor} fontSize="13px" fontWeight={900}>
-                                {displayDelta !== 0 ? formatAmount(displayDelta) : 'No hours'}
-                              </Box>
-                              <Text fontSize="11px" color={GRAY500}>
-                                {timeLabel}
-                              </Text>
-                            </Flex>
+                            {showTimeValue ? (
+                              <Flex align={{ base: 'center', md: 'flex-end' }} justify="space-between" direction={{ base: 'row', md: 'column' }} gap={1}>
+                                <Box px="10px" py="5px" borderRadius="999px" bg={timeBg} color={timeColor} fontSize="13px" fontWeight={900}>
+                                  {displayDelta !== 0 ? formatAmount(displayDelta) : 'No hours'}
+                                </Box>
+                                <Text fontSize="11px" color={GRAY500}>
+                                  {timeLabel}
+                                </Text>
+                              </Flex>
+                            ) : <Box />}
                           </Grid>
                         )
                       })}
@@ -1610,7 +1700,7 @@ const TransactionHistoryPage = () => {
               {eventHistory.slice(0, 5).map((event, index) => (
                 <Grid
                   key={`${event.service_id}-${event.completed_date}-${index}`}
-                  templateColumns={{ base: '1fr', md: 'minmax(260px, 1fr) 220px 140px' }}
+                  templateColumns={{ base: '1fr', md: 'minmax(260px, 1fr) 220px' }}
                   gap={{ base: 3, md: 4 }}
                   alignItems="center"
                   px={{ base: 4, md: 5 }}
@@ -1672,14 +1762,6 @@ const TransactionHistoryPage = () => {
                     </Text>
                   </Flex>
 
-                  <Box textAlign={{ base: 'left', md: 'right' }}>
-                    <Text fontSize="13px" fontWeight={800} color={GRAY800}>
-                      {formatHours(Number(event.duration))}
-                    </Text>
-                    <Text fontSize="11px" color={GRAY500}>
-                      {formatDate(event.completed_date)}
-                    </Text>
-                  </Box>
                 </Grid>
               ))}
             </Box>
@@ -2056,20 +2138,27 @@ const TransactionHistoryPage = () => {
         isOpen={!!selectedActiveAgreementGroup}
         title={selectedActiveAgreementGroup?.service_title ?? 'Group session'}
         subtitle={selectedActiveAgreementGroup
-          ? `${selectedActiveAgreementGroup.participant_count ?? 0} active participants in this group offer.`
+          ? selectedActiveAgreementGroup.service_type === 'Event'
+            ? `${selectedActiveAgreementGroup.participant_count ?? 0} organizers and attendees in this event.`
+            : `${selectedActiveAgreementGroup.participant_count ?? 0} active participants in this group offer.`
           : undefined}
         onClose={() => setSelectedActiveAgreementGroup(null)}
-        items={(selectedActiveAgreementGroup?.participants ?? []).map((agreement) => ({
-          id: agreement.id,
-          title: agreement.counterpart_name,
-          subtitle: activeHandshakeLabel(agreement.status),
-          meta: agreement.note,
-          value: formatAmount(agreement.expected_delta !== 0 ? agreement.expected_delta : agreement.reserved_delta),
-          avatarUrl: agreement.counterpart_avatar_url ?? null,
-          onClick: agreement.counterpart_id
-            ? () => openPublicProfile(agreement.counterpart_id)
-            : undefined,
-        }))}
+        items={(selectedActiveAgreementGroup?.participants ?? []).map((agreement) => {
+          const isEventParticipant = selectedActiveAgreementGroup?.service_type === 'Event' || agreement.service_type === 'Event'
+          return {
+            id: agreement.id,
+            title: agreement.counterpart_name,
+            subtitle: isEventParticipant ? agreement.note : activeHandshakeLabel(agreement.status),
+            meta: isEventParticipant ? undefined : agreement.note,
+            value: isEventParticipant
+              ? undefined
+              : formatAmount(agreement.expected_delta !== 0 ? agreement.expected_delta : agreement.reserved_delta),
+            avatarUrl: agreement.counterpart_avatar_url ?? null,
+            onClick: agreement.counterpart_id
+              ? () => openPublicProfile(agreement.counterpart_id)
+              : undefined,
+          }
+        })}
         emptyMessage="No participants to show yet."
       />
     </Box>

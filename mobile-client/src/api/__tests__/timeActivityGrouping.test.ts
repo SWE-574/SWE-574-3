@@ -5,6 +5,7 @@ import {
   groupActiveAgreements,
   groupTransactionRows,
   isTimeActivityParticipantStatus,
+  timeActivityAvatarPreview,
   timeActivityAvatarStackWidth,
   timeActivityVisibleParticipants,
   type TimeActivityAgreement,
@@ -51,6 +52,79 @@ describe("timeActivityGrouping", () => {
     expect((grouped[0].participants ?? []).map((item) => item.counterpart_name)).toEqual([
       "Can Sahin",
       "Zeynep Arslan",
+    ]);
+  });
+
+  it("groups active event agreements into one visible row", () => {
+    const grouped = groupActiveAgreements([
+      {
+        ...groupOfferAgreement,
+        id: "event-hs-1",
+        service_id: "event-1",
+        service_title: "Community Mending and Repair Cafe",
+        service_type: "Event",
+        expected_delta: 0,
+        counterpart_name: "Zeynep Arslan",
+      },
+      {
+        ...groupOfferAgreement,
+        id: "event-hs-2",
+        service_id: "event-1",
+        service_title: "Community Mending and Repair Cafe",
+        service_type: "Event",
+        expected_delta: 0,
+        counterpart_name: "Selin Aksoy",
+      },
+    ]);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].counterpart_name).toBe("2 members");
+    expect(grouped[0].participant_count).toBe(2);
+    expect(grouped[0].is_grouped_multi_use).toBe(true);
+    expect((grouped[0].participants ?? []).map((item) => item.counterpart_name)).toEqual([
+      "Zeynep Arslan",
+      "Selin Aksoy",
+    ]);
+  });
+
+  it("treats a single event agreement with loaded participants as grouped", () => {
+    const grouped = groupActiveAgreements([
+      {
+        ...groupOfferAgreement,
+        id: "event-hs-1",
+        service_id: "event-1",
+        service_title: "Community Mending and Repair Cafe",
+        service_type: "Event",
+        expected_delta: 0,
+        counterpart_name: "Current Attendee",
+        participants: [
+          {
+            ...groupOfferAgreement,
+            id: "organizer",
+            service_type: "Event",
+            counterpart_name: "Organizer User",
+            is_current_user_provider: true,
+          },
+          {
+            ...groupOfferAgreement,
+            id: "attendee",
+            service_type: "Event",
+            counterpart_name: "Current Attendee",
+            is_current_user_provider: false,
+          },
+        ],
+      },
+    ]);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]).toMatchObject({
+      counterpart_name: "2 members",
+      participant_count: 2,
+      is_grouped_multi_use: true,
+    });
+    expect((grouped[0].participants ?? []).map((item) => item.counterpart_name)).toEqual([
+      "Organizer User",
+      "Current Attendee",
     ]);
   });
 
@@ -147,5 +221,22 @@ describe("timeActivityGrouping", () => {
   it("sizes stacked avatars for every visible participant", () => {
     expect(timeActivityAvatarStackWidth(1)).toBe(22);
     expect(timeActivityAvatarStackWidth(3)).toBe(46);
+  });
+
+  it("previews the first five avatars and reports overflow", () => {
+    const participants = Array.from({ length: 7 }, (_, index) => ({
+      ...groupOfferAgreement,
+      id: `hs-${index + 1}`,
+      counterpart_name: `Member ${index + 1}`,
+    }));
+
+    expect(timeActivityAvatarPreview(participants).overflowCount).toBe(2);
+    expect(timeActivityAvatarPreview(participants).visibleParticipants.map((item) => item.id)).toEqual([
+      "hs-1",
+      "hs-2",
+      "hs-3",
+      "hs-4",
+      "hs-5",
+    ]);
   });
 });

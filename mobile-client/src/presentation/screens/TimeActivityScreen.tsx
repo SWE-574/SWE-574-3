@@ -25,6 +25,7 @@ import {
   type TransactionSummary,
 } from "../../api/transactions";
 import { listHandshakes, type Handshake } from "../../api/handshakes";
+import { getGroupChat, type GroupChatParticipant } from "../../api/chats";
 import { getUserHistory } from "../../api/users";
 import type { UserHistoryItem } from "../../api/types";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
@@ -35,6 +36,7 @@ import {
   groupActiveAgreements,
   groupTransactionRows,
   isTimeActivityParticipantStatus,
+  timeActivityAvatarPreview,
   timeActivityAvatarStackWidth,
   timeActivityVisibleParticipants,
   type GroupedTransactionRow,
@@ -256,6 +258,59 @@ function toExpectedAgreement(
       ? "Time expected after completion"
       : "Already reserved at acceptance",
   };
+}
+
+function eventGroupParticipantToAgreement(
+  participant: GroupChatParticipant,
+  sourceAgreement: ExpectedAgreement,
+  index: number,
+): ExpectedAgreement {
+  return {
+    ...sourceAgreement,
+    id: `event-participant:${sourceAgreement.service_id}:${participant.id}`,
+    counterpart_id: participant.id,
+    counterpart_name: participant.name || "Unknown user",
+    counterpart_avatar_url: participant.avatar_url ?? null,
+    is_current_user_provider: index === 0,
+    reserved_delta: 0,
+    expected_delta: 0,
+    note: index === 0 ? "Organizer" : "Attendee",
+    participants: undefined,
+    is_grouped_multi_use: false,
+  };
+}
+
+async function enrichEventAgreementParticipants(
+  agreements: ExpectedAgreement[],
+): Promise<ExpectedAgreement[]> {
+  const eventServices = new Map<string, ExpectedAgreement>();
+  for (const agreement of agreements) {
+    if (agreement.service_type === "Event" && agreement.service_id && !eventServices.has(agreement.service_id)) {
+      eventServices.set(agreement.service_id, agreement);
+    }
+  }
+  if (eventServices.size === 0) return agreements;
+
+  const participantEntries = await Promise.all(
+    Array.from(eventServices.entries()).map(async ([serviceId, sourceAgreement]) => {
+      try {
+        const thread = await getGroupChat(serviceId);
+        const participants = (thread.participants ?? []).map((participant, index) =>
+          eventGroupParticipantToAgreement(participant, sourceAgreement, index),
+        );
+        return [serviceId, participants] as const;
+      } catch {
+        return [serviceId, [] as ExpectedAgreement[]] as const;
+      }
+    }),
+  );
+
+  const participantsByServiceId = new Map(participantEntries);
+  return agreements.map((agreement) => {
+    if (agreement.service_type !== "Event" || !agreement.service_id) return agreement;
+    const participants = participantsByServiceId.get(agreement.service_id);
+    return participants?.length ? { ...agreement, participants } : agreement;
+  });
 }
 
 function typeTone(type: "Offer" | "Need" | "Event") {
@@ -634,9 +689,10 @@ export default function TimeActivityScreen() {
         .filter((item): item is ExpectedAgreement => item !== null);
       const nextAgreements = allAgreements
         .filter((agreement) => ACTIVE_HANDSHAKE_STATUSES.has(agreement.status as Handshake["status"]));
+      const enrichedAgreements = await enrichEventAgreementParticipants(nextAgreements);
 
       setAgreementParticipants(allAgreements);
-      setActiveAgreements(groupActiveAgreements(nextAgreements));
+      setActiveAgreements(groupActiveAgreements(enrichedAgreements));
     } catch {
       setAgreementParticipants([]);
       setActiveAgreements([]);
@@ -1203,6 +1259,9 @@ export default function TimeActivityScreen() {
                           : agreement.reserved_delta),
                       0,
                     );
+                    const sectionSummary = section.type === "Event"
+                      ? `${section.items.length} active`
+                      : `${section.items.length} active · ${formatAmount(sectionTotal)}`;
 
                     return (
                       <View key={section.type}>
@@ -1237,7 +1296,7 @@ export default function TimeActivityScreen() {
                                 { color: sectionTone.color },
                               ]}
                             >
-                              {section.items.length} active · {formatAmount(sectionTotal)}
+                              {sectionSummary}
                             </Text>
                             <Ionicons
                               name={sectionOpen ? "chevron-up" : "chevron-down"}
@@ -1254,6 +1313,7 @@ export default function TimeActivityScreen() {
                             agreement.expected_delta !== 0
                               ? agreement.expected_delta
                               : agreement.reserved_delta;
+                          const showTimeValue = agreement.service_type !== "Event" || displayDelta !== 0;
                           const valueColor =
                             displayDelta > 0
                               ? colors.GREEN
@@ -1269,6 +1329,7 @@ export default function TimeActivityScreen() {
                           const agreementParticipants = isGroupedAgreement
                             ? timeActivityVisibleParticipants(agreement.participants)
                             : [];
+                          const agreementAvatarPreview = timeActivityAvatarPreview(agreementParticipants);
 
                           return (
                             <Pressable
@@ -1316,10 +1377,14 @@ export default function TimeActivityScreen() {
                                         <View
                                           style={[
                                             styles.avatarStack,
-                                            { width: timeActivityAvatarStackWidth(agreementParticipants.length) },
+                                            {
+                                              width: timeActivityAvatarStackWidth(
+                                                agreementAvatarPreview.visibleParticipants.length + (agreementAvatarPreview.overflowCount > 0 ? 1 : 0),
+                                              ),
+                                            },
                                           ]}
                                         >
-                                          {agreementParticipants.map((participant, avatarIndex) => {
+                                          {agreementAvatarPreview.visibleParticipants.map((participant, avatarIndex) => {
                                             const initial = participant.counterpart_name.trim().charAt(0).toUpperCase() || "?";
                                             return participant.counterpart_avatar_url ? (
                                               <Image
@@ -1343,6 +1408,13 @@ export default function TimeActivityScreen() {
                                               </View>
                                             );
                                           })}
+                                          {agreementAvatarPreview.overflowCount > 0 ? (
+                                            <View style={[styles.stackedAvatar, styles.avatarOverflowBadge, styles.stackedAvatarOverlap]}>
+                                              <Text style={styles.avatarOverflowText}>
+                                                +{agreementAvatarPreview.overflowCount}
+                                              </Text>
+                                            </View>
+                                          ) : null}
                                         </View>
                                         <Text style={styles.neutralPillText}>
                                           {agreement.participant_count} members
@@ -1393,12 +1465,14 @@ export default function TimeActivityScreen() {
                                 </View>
                               </View>
 
-                              <View style={styles.agreementRight}>
-                                <Text style={[styles.agreementValue, { color: valueColor }]}>
-                                  {displayDelta !== 0 ? formatAmount(displayDelta) : "No hours"}
-                                </Text>
-                                <Text style={styles.agreementNote}>{valueNote}</Text>
-                              </View>
+                              {showTimeValue ? (
+                                <View style={styles.agreementRight}>
+                                  <Text style={[styles.agreementValue, { color: valueColor }]}>
+                                    {displayDelta !== 0 ? formatAmount(displayDelta) : "No hours"}
+                                  </Text>
+                                  <Text style={styles.agreementNote}>{valueNote}</Text>
+                                </View>
+                              ) : null}
                             </Pressable>
                           );
                         }) : null}
@@ -1427,11 +1501,6 @@ export default function TimeActivityScreen() {
                   </Text>
                 </View>
                 <View style={styles.sectionHeaderMeta}>
-                  <View style={[styles.upcomingChip, { backgroundColor: colors.WHITE }]}>
-                    <Text style={[styles.upcomingChipText, { color: colors.AMBER }]}>
-                      {formatHours(eventHistory.reduce((sum, event) => sum + Number(event.duration || 0), 0))}
-                    </Text>
-                  </View>
                   <Ionicons
                     name={isEventActivityOpen ? "chevron-up" : "chevron-down"}
                     size={20}
@@ -1499,14 +1568,6 @@ export default function TimeActivityScreen() {
                       </View>
                     </View>
 
-                    <View style={styles.agreementRight}>
-                      <Text style={[styles.agreementValue, { color: colors.AMBER }]}>
-                        {formatHours(Number(event.duration))}
-                      </Text>
-                      <Text style={styles.agreementNote}>
-                        {formatDate(event.completed_date)}
-                      </Text>
-                    </View>
                   </View>
                 ))}
               </View>
@@ -1565,6 +1626,7 @@ export default function TimeActivityScreen() {
         const participantAvatars = item.isMultiUse
           ? timeActivityVisibleParticipants(item.participants)
           : [];
+        const participantAvatarPreview = timeActivityAvatarPreview(participantAvatars);
         const isRefund = transaction.transaction_type === "refund";
         const isPositive = item.amount >= 0;
         const amountColor = isRefund ? colors.PURPLE : isPositive ? colors.GREEN : colors.AMBER;
@@ -1636,10 +1698,14 @@ export default function TimeActivityScreen() {
                   <View
                     style={[
                       styles.avatarStack,
-                      { width: timeActivityAvatarStackWidth(participantAvatars.length) },
+                      {
+                        width: timeActivityAvatarStackWidth(
+                          participantAvatarPreview.visibleParticipants.length + (participantAvatarPreview.overflowCount > 0 ? 1 : 0),
+                        ),
+                      },
                     ]}
                   >
-                    {participantAvatars.map((participant, avatarIndex) => {
+                    {participantAvatarPreview.visibleParticipants.map((participant, avatarIndex) => {
                       const initial = participant.counterpart_name.trim().charAt(0).toUpperCase() || "?";
                       return participant.counterpart_avatar_url ? (
                         <Image
@@ -1663,6 +1729,13 @@ export default function TimeActivityScreen() {
                         </View>
                       );
                     })}
+                    {participantAvatarPreview.overflowCount > 0 ? (
+                      <View style={[styles.stackedAvatar, styles.avatarOverflowBadge, styles.stackedAvatarOverlap]}>
+                        <Text style={styles.avatarOverflowText}>
+                          +{participantAvatarPreview.overflowCount}
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
                 ) : counterpartAvatarUrl ? (
                   <Image
@@ -1734,8 +1807,11 @@ export default function TimeActivityScreen() {
               {selectedAgreementGroup?.service_title ?? "Group session"}
             </Text>
             <Text style={styles.participantSheetSubtitle}>
-              {(selectedAgreementGroup?.participant_count ?? 0)} active member
-              {(selectedAgreementGroup?.participant_count ?? 0) === 1 ? "" : "s"}
+              {selectedAgreementGroup?.service_type === "Event"
+                ? `${selectedAgreementGroup?.participant_count ?? 0} organizers and attendees`
+                : `${selectedAgreementGroup?.participant_count ?? 0} active member${
+                    (selectedAgreementGroup?.participant_count ?? 0) === 1 ? "" : "s"
+                  }`}
             </Text>
           </View>
           <Pressable
@@ -1751,6 +1827,8 @@ export default function TimeActivityScreen() {
 
         <ScrollView style={styles.participantList} contentContainerStyle={styles.participantListContent}>
           {(selectedAgreementGroup?.participants ?? []).map((participant) => {
+            const isEventParticipant =
+              selectedAgreementGroup?.service_type === "Event" || participant.service_type === "Event";
             const delta = participant.expected_delta !== 0
               ? participant.expected_delta
               : participant.reserved_delta;
@@ -1785,12 +1863,14 @@ export default function TimeActivityScreen() {
                     {participant.counterpart_name}
                   </Text>
                   <Text style={styles.participantMeta} numberOfLines={1}>
-                    {activeHandshakeLabel(participant.status)}
+                    {isEventParticipant ? participant.note : activeHandshakeLabel(participant.status)}
                   </Text>
                 </View>
-                <Text style={styles.participantValue}>
-                  {delta !== 0 ? formatAmount(delta) : "0h"}
-                </Text>
+                {!isEventParticipant ? (
+                  <Text style={styles.participantValue}>
+                    {delta !== 0 ? formatAmount(delta) : "0h"}
+                  </Text>
+                ) : null}
               </Pressable>
             );
           })}
@@ -2657,6 +2737,16 @@ const styles = StyleSheet.create({
   },
   stackedAvatarOverlap: {
     marginLeft: -10,
+  },
+  avatarOverflowBadge: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.GRAY800,
+  },
+  avatarOverflowText: {
+    color: colors.WHITE,
+    fontSize: 8,
+    fontWeight: "900",
   },
   whoName: {
     fontSize: 13,
