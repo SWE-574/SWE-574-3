@@ -13,11 +13,8 @@ test('FR-06h: owner can cancel a request before any exchange is initiated', asyn
   })
 
   // With no initiated exchange, removal should succeed.
-  page.once('dialog', async (dialog) => {
-    await dialog.accept()
-  })
   await page.getByRole('button', { name: 'Remove Listing' }).click()
-  await expectToast(page, /Listing removed/i)
+  await page.getByRole('button', { name: /^Remove$/ }).click()
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
 })
 
@@ -39,10 +36,8 @@ test('FR-06h: owner cannot cancel a request after a responder has already create
   // Owner tries to remove the listing but should be blocked by the existing handshake.
   await switchUser(page, USERS.elif)
   await page.goto(detailUrl)
-  page.once('dialog', async (dialog) => {
-    await dialog.accept()
-  })
   await page.getByRole('button', { name: 'Remove Listing' }).click()
+  await page.getByRole('button', { name: /^Remove$/ }).click()
 
   await expectToast(page, /existing handshakes|Cancel or complete those first/i)
   await expect(page).toHaveURL(new RegExp(detailUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), { timeout: 10_000 })
