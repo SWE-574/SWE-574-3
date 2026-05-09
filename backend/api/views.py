@@ -2116,16 +2116,32 @@ class ServiceViewSet(viewsets.ModelViewSet):
         # Phase 3 (FR-17i / #316): mix in an exploration candidate at the
         # configured slot for hot-sorted requests. The candidate is drawn from
         # cold-start, under-shown-quality, and stale-recurring sub-buckets.
+        phase3_injected_id: str | None = None
+        phase3_slot_index: int | None = None
         if page is not None and explore_enabled and should_explore(request):
             explore_pool = list(queryset[:200])  # cap pool size for the eligibility query
             explore = select_exploration_candidate(explore_pool, request.user if request.user.is_authenticated else None)
             if explore is not None and explore not in page:
                 slot = getattr(_ranking_settings, 'RANKING_EXPLORATION_SLOT_INDEX', 5)
                 page = inject_exploration_slot(page, explore, slot_index=slot)
+                phase3_injected_id = str(explore.id)
+                phase3_slot_index = slot
 
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = paginator.get_paginated_response(serializer.data)
+            # Surface Phase 3 injection state so the recommendation showcase
+            # bar can mark the injected card and so callers can pass the same
+            # id back to the debug-ranking endpoint for the diagnosis line.
+            if isinstance(response.data, dict):
+                response.data['ranking_meta'] = {
+                    'phase3_injected_id': phase3_injected_id,
+                    'phase3_slot_index': phase3_slot_index,
+                    'exploration_rate': float(
+                        getattr(_ranking_settings, 'RANKING_EXPLORATION_RATE', 0.20)
+                    ) if explore_enabled else 0.0,
+                    'exploration_fired': phase3_injected_id is not None,
+                }
             if use_cache:
                 cache_service_list(cache_key_params, response.data, ttl=CACHE_TTL_SHORT)
             return response
@@ -3314,6 +3330,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if simulated_user_id and getattr(request.user, 'role', None) not in ADMIN_ROLES:
             simulated_user_id = None
 
+        injected_id_raw = request.data.get('phase3_injected_id')
+        slot_index_raw = request.data.get('phase3_slot_index')
+        try:
+            slot_index = int(slot_index_raw) if slot_index_raw not in (None, '') else None
+        except (TypeError, ValueError):
+            slot_index = None
+
         payload = build_service_debug_payload(
             service_ids=service_ids,
             selected_service_id=request.data.get('selected_service_id'),
@@ -3325,6 +3348,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
             lng=_to_float(request.data.get('lng')),
             distance=_to_float(request.data.get('distance')),
             active_filter=(request.data.get('active_filter') or 'all').strip() or 'all',
+            phase3_injected_id=str(injected_id_raw) if injected_id_raw else None,
+            phase3_slot_index=slot_index,
         )
         response = Response(payload)
         response['X-Ranking-Debug-Debounce'] = '300'

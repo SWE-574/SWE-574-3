@@ -17,6 +17,8 @@ export default function RecommendationShowcaseBar({
   lat,
   lng,
   distance,
+  phase3InjectedId = null,
+  phase3SlotIndex = null,
 }: {
   services: Service[]
   hoveredServiceId: string | null
@@ -25,6 +27,8 @@ export default function RecommendationShowcaseBar({
   lat?: number
   lng?: number
   distance?: number
+  phase3InjectedId?: string | null
+  phase3SlotIndex?: number | null
 }) {
   const [isOpen, setIsOpen] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -76,6 +80,8 @@ export default function RecommendationShowcaseBar({
               lat={lat}
               lng={lng}
               distance={distance}
+              phase3InjectedId={phase3InjectedId}
+              phase3SlotIndex={phase3SlotIndex}
             />
           </Suspense>
         ) : null}

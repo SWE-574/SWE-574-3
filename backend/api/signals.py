@@ -245,6 +245,35 @@ def invalidate_handshake_cache(sender, instance, **kwargs):
     invalidate_on_handshake_change(instance)
 
 
+# Statuses that move the Phase 2 inputs: 'completed' feeds hours_exchanged on
+# Offer/Need (via _compute_service_factors); 'accepted'/'checked_in'/'attended'
+# feed rsvps_last_7d on Events (via _compute_event_factors). 'no_show' flips
+# the capacity_multiplier ratio for both formulas.
+_HOT_SCORE_RELEVANT_STATUSES = {
+    'completed', 'accepted', 'checked_in', 'attended', 'no_show',
+}
+
+
+@receiver([post_save, post_delete], sender=Handshake)
+def update_hot_score_on_handshake_change(sender, instance, **kwargs):
+    """Recompute the parent service's hot_score on RSVP / completion changes.
+
+    Without this, an event's velocity (rsvps_last_7d) and an offer's activity
+    (hours_exchanged) drifted between rep changes -- the only other path that
+    triggered a recompute. Demo data showed events ranking on stale stored
+    scores derived from the wrong formula; this closes the feedback loop so
+    every Phase 2 input feeds the persisted score in real time.
+    """
+    if instance.status not in _HOT_SCORE_RELEVANT_STATUSES:
+        return
+    service = getattr(instance, 'service', None)
+    if service is None:
+        return
+    if service.pk in _services_being_deleted():
+        return
+    _update_service_hot_score(service)
+
+
 _service_deletes_in_flight = threading.local()
 
 

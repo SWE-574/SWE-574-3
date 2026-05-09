@@ -1,6 +1,4 @@
 import {
-  Suspense,
-  lazy,
   useEffect,
   useMemo,
   useRef,
@@ -8,133 +6,50 @@ import {
   type ReactNode,
 } from 'react'
 import { Box, Flex, Spinner, Stack, Text } from '@chakra-ui/react'
-import { FiMapPin, FiRefreshCw, FiSearch } from 'react-icons/fi'
+import { FiChevronDown, FiChevronRight, FiMapPin, FiRefreshCw, FiSearch } from 'react-icons/fi'
 
 import { serviceAPI } from '@/services/serviceAPI'
 import type {
-  RecommendationDebugLink,
-  RecommendationDebugNode,
+  RecommendationDebugDiagnosisClass,
+  RecommendationDebugFactors,
+  RecommendationDebugFactorsEvent,
+  RecommendationDebugFactorsService,
+  RecommendationDebugPhase1,
+  RecommendationDebugPhase2B,
+  RecommendationDebugPhase3,
   RecommendationDebugResponse,
+  RecommendationDebugSelectedService,
+  RecommendationDebugSort,
   Service,
 } from '@/types'
 
-const Plot = lazy(() => import('react-plotly.js'))
+const DIAGNOSIS_PALETTE: Record<RecommendationDebugDiagnosisClass, { bg: string; fg: string; border: string }> = {
+  explore:       { bg: 'blue.50',   fg: 'blue.800',   border: 'blue.200'   },
+  trust:         { bg: 'red.50',    fg: 'red.800',    border: 'red.200'    },
+  proximity:     { bg: 'orange.50', fg: 'orange.800', border: 'orange.200' },
+  pin:           { bg: 'purple.50', fg: 'purple.800', border: 'purple.200' },
+  tie:           { bg: 'gray.100',  fg: 'gray.800',   border: 'gray.300'   },
+  chronological: { bg: 'teal.50',   fg: 'teal.800',   border: 'teal.200'   },
+  neutral:       { bg: 'gray.50',   fg: 'gray.700',   border: 'gray.200'   },
+}
 
-const toneColor = {
-  positive: '#10B981',
-  negative: '#F97316',
-  neutral: '#94A3B8',
+const PANEL_PROPS = {
+  services: [] as Service[],
+  hoveredServiceId: null as string | null,
+  activeFilter: 'all',
+  search: '',
 } as const
 
-function CompactSankey({
-  nodes,
-  links,
-}: {
-  nodes: RecommendationDebugNode[]
-  links: RecommendationDebugLink[]
-}) {
-  const plotData = useMemo(() => {
-    const nodeIndexMap = new Map(nodes.map((node, index) => [node.id, index]))
-    const positions = {
-      positive: { x: 0.02, y: 0.04 },
-      comments: { x: 0.02, y: 0.17 },
-      negative: { x: 0.02, y: 0.30 },
-      age: { x: 0.02, y: 0.43 },
-      capacity: { x: 0.02, y: 0.56 },
-      hot: { x: 0.44, y: 0.28 },
-      search: { x: 0.66, y: 0.10 },
-      social: { x: 0.66, y: 0.26 },
-      distance: { x: 0.66, y: 0.42 },
-      pin: { x: 0.66, y: 0.58 },
-      card: { x: 0.93, y: 0.30 },
-    } as const
-
-    return {
-      node: {
-        pad: 14,
-        thickness: 14,
-        line: { color: 'rgba(255,255,255,0)', width: 0 },
-        label: nodes.map(node => node.label),
-        color: nodes.map(node => toneColor[node.tone]),
-        x: nodes.map(node => positions[node.id as keyof typeof positions]?.x ?? 0.1),
-        y: nodes.map(node => positions[node.id as keyof typeof positions]?.y ?? 0.5),
-        hovertemplate: '%{label}<extra></extra>',
-      },
-      link: {
-        source: links.map(link => nodeIndexMap.get(link.source) ?? 0),
-        target: links.map(link => nodeIndexMap.get(link.target) ?? 0),
-        value: links.map(link => link.value),
-        color: links.map(link => {
-          if (link.tone === 'positive') return 'rgba(16, 185, 129, 0.28)'
-          if (link.tone === 'negative') return 'rgba(249, 115, 22, 0.24)'
-          return 'rgba(148, 163, 184, 0.22)'
-        }),
-        hovertemplate: '%{source.label} -> %{target.label}<br>Weight: %{value:.2f}<extra></extra>',
-      },
-    }
-  }, [links, nodes])
-
-  return (
-    <Box
-      borderRadius="20px"
-      p={3}
-      bg="linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)"
-      border="1px solid"
-      borderColor="gray.100"
-      boxShadow="inset 0 1px 0 rgba(255,255,255,0.9), 0 12px 28px rgba(15, 23, 42, 0.06)"
-    >
-      <Flex align="center" justify="space-between" mb={2}>
-        <Text fontSize="11px" fontWeight="900" color="gray.700">
-          Score Flow
-        </Text>
-        <Flex gap={2} align="center">
-          <LegendDot color={toneColor.positive} label="Boost" />
-          <LegendDot color={toneColor.negative} label="Drag" />
-          <LegendDot color={toneColor.neutral} label="Context" />
-        </Flex>
-      </Flex>
-
-      <Box h="212px" overflow="hidden" borderRadius="14px">
-        <Suspense
-          fallback={(
-            <Flex h="212px" align="center" justify="center">
-              <Spinner size="sm" color="orange.500" />
-            </Flex>
-          )}
-        >
-          <Plot
-            data={[{
-              type: 'sankey',
-              arrangement: 'fixed',
-              orientation: 'h',
-              node: plotData.node,
-              link: plotData.link,
-            }]}
-            layout={{
-              autosize: true,
-              width: 384,
-              height: 212,
-              margin: { l: 8, r: 8, t: 8, b: 8 },
-              paper_bgcolor: 'rgba(0,0,0,0)',
-              plot_bgcolor: 'rgba(0,0,0,0)',
-              font: {
-                family: 'Inter, system-ui, sans-serif',
-                size: 10,
-                color: '#334155',
-              },
-            }}
-            config={{
-              displayModeBar: false,
-              responsive: true,
-              staticPlot: false,
-            }}
-            style={{ width: '100%', height: '212px' }}
-            useResizeHandler
-          />
-        </Suspense>
-      </Box>
-    </Box>
-  )
+type PanelProps = {
+  services: Service[]
+  hoveredServiceId: string | null
+  activeFilter: string
+  search: string
+  lat?: number
+  lng?: number
+  distance?: number
+  phase3InjectedId?: string | null
+  phase3SlotIndex?: number | null
 }
 
 export default function RecommendationDebugPanel({
@@ -145,15 +60,9 @@ export default function RecommendationDebugPanel({
   lat,
   lng,
   distance,
-}: {
-  services: Service[]
-  hoveredServiceId: string | null
-  activeFilter: string
-  search: string
-  lat?: number
-  lng?: number
-  distance?: number
-}) {
+  phase3InjectedId = null,
+  phase3SlotIndex = null,
+}: PanelProps = PANEL_PROPS) {
   const [data, setData] = useState<RecommendationDebugResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -186,6 +95,8 @@ export default function RecommendationDebugPanel({
           lng,
           distance,
           active_filter: activeFilter,
+          phase3_injected_id: phase3InjectedId,
+          phase3_slot_index: phase3SlotIndex,
         }, controller.signal)
         setData(response)
         hasLoadedData.current = true
@@ -201,17 +112,18 @@ export default function RecommendationDebugPanel({
 
     load()
     return () => controller.abort()
-  }, [activeFilter, distance, lat, lng, search, selectedServiceId, serviceIds, serviceKey])
+  }, [activeFilter, distance, lat, lng, phase3InjectedId, phase3SlotIndex, search, selectedServiceId, serviceIds, serviceKey])
 
   const selected = data?.selected_service
   const visiblePosition = selectedServiceId ? serviceIds.indexOf(selectedServiceId) + 1 : 0
+  const defaultOpenPhase = selected ? phaseFromDiagnosis(selected.diagnosis.class) : null
 
   return (
     <Box
       mb={3}
-      w={{ base: 'calc(100vw - 32px)', md: '420px' }}
-      maxW="420px"
-      maxH="72vh"
+      w={{ base: 'calc(100vw - 32px)', md: '440px' }}
+      maxW="440px"
+      maxH="78vh"
       overflowY="auto"
       p={4}
       borderRadius="26px"
@@ -223,9 +135,7 @@ export default function RecommendationDebugPanel({
       css={{
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
-        '&::-webkit-scrollbar': {
-          display: 'none',
-        },
+        '&::-webkit-scrollbar': { display: 'none' },
       }}
     >
       <Flex align="start" justify="space-between" mb={4}>
@@ -234,7 +144,7 @@ export default function RecommendationDebugPanel({
             Recommendation Showcase
           </Text>
           <Text fontSize="xs" color="gray.500">
-            Hover a card to see how each ranking phase scored it.
+            Hover a card to trace the full ranking pipeline.
           </Text>
         </Box>
         {isRefreshing ? <StatusChip label="Syncing" icon={<FiRefreshCw size={11} />} /> : null}
@@ -268,89 +178,36 @@ export default function RecommendationDebugPanel({
               </Text>
             </SectionCard>
 
-            <Flex gap={2} wrap="wrap">
-              <MetricPill label="Feed pos" value={visiblePosition > 0 ? `#${visiblePosition}/${serviceIds.length}` : 'n/a'} />
-              <MetricPill label="Hot" value={selected.recomputed_hot_score.toFixed(3)} />
-              <MetricPill label="Search" value={selected.search_score.toFixed(3)} />
-              <MetricPill label="Social" value={selected.social_boost.toFixed(3)} />
-              <MetricPill label="Pinned" value={selected.is_pinned ? 'Yes' : 'No'} />
-              <MetricPill label="Network" value={selected.breakdown.social_reason} />
-            </Flex>
+            <DiagnosisCard
+              positionLabel={visiblePosition > 0 ? `#${visiblePosition} of ${serviceIds.length}` : 'n/a'}
+              diagnosis={selected.diagnosis}
+            />
 
-            <CompactSankey nodes={selected.sankey.nodes} links={selected.sankey.links} />
+            <PipelineAccordion title="Phase 1 — Filter" defaultOpen={defaultOpenPhase === 'phase1'}>
+              <Phase1Body phase1={selected.phase1} />
+            </PipelineAccordion>
 
-            <Flex gap={2} wrap="wrap">
-              <MiniStat label="P" value={String(selected.breakdown.positive_count)} />
-              <MiniStat label="N" value={String(selected.breakdown.negative_count)} />
-              <MiniStat label="C" value={String(selected.breakdown.comment_count)} />
-              <MiniStat label="Age" value={`${selected.breakdown.age_hours.toFixed(1)}h`} />
-              <MiniStat
-                label="Capacity"
-                value={selected.breakdown.capacity_ratio == null ? 'n/a' : `${Math.round(selected.breakdown.capacity_ratio * 100)}%`}
-              />
-              <MiniStat
-                label="Mode"
-                value={selected.breakdown.capacity_boost_applied ? 'Boosted' : 'Normal'}
-              />
-            </Flex>
+            <PipelineAccordion title="Phase 2a — Hot score" defaultOpen={defaultOpenPhase === 'phase2a'}>
+              <Phase2ABody factors={selected.factors} formulaLines={selected.formula_lines} selected={selected} />
+            </PipelineAccordion>
 
-            <SectionCard bg="gray.50">
-              <Text fontSize="xs" fontWeight="800" color="gray.700" mb={2}>
-                Formula snapshot
-              </Text>
-              <Stack gap={1}>
-                {selected.formula_lines.map(line => (
-                  <Text key={line} fontSize="xs" color="gray.600" fontFamily="mono">
-                    {line}
-                  </Text>
-                ))}
-              </Stack>
-            </SectionCard>
+            <PipelineAccordion title="Phase 2b — Composite" defaultOpen={defaultOpenPhase === 'phase2b'}>
+              <Phase2BBody phase2b={selected.phase2b} />
+            </PipelineAccordion>
 
-            <SectionCard bg="purple.50">
-              <Text fontSize="xs" fontWeight="800" color="purple.800" mb={2}>
-                Phase 3 trace
-              </Text>
-              <Flex gap={2} wrap="wrap" mb={2}>
-                <MiniStat
-                  label="Pool"
-                  value={selected.phase3.pool ?? 'none'}
-                />
-                <MiniStat
-                  label="Explore rate"
-                  value={`${Math.round(selected.phase3.exploration_rate * 100)}%`}
-                />
-                <MiniStat
-                  label="Owner h.shakes"
-                  value={String(selected.phase3.lifetime_completed_handshakes)}
-                />
-                <MiniStat
-                  label="Days idle"
-                  value={
-                    selected.phase3.days_since_last_completed_handshake == null
-                      ? 'never'
-                      : `${selected.phase3.days_since_last_completed_handshake}d`
-                  }
-                />
-              </Flex>
-              <Text fontSize="xs" color="purple.700">
-                {selected.phase3.pool === 'cold_start'
-                  ? `Eligible because owner has < ${selected.phase3.cold_start_threshold} completed handshakes.`
-                  : selected.phase3.pool === 'undershown_quality'
-                  ? `Eligible because quality is high but the service has had no completed handshake in the last ${selected.phase3.undershown_stale_days} days.`
-                  : selected.phase3.pool === 'stale_recurring'
-                  ? 'Eligible because the recurring growth check flagged this listing as stale.'
-                  : 'Not eligible for the explore bucket. Served from the regular hot list.'}
-              </Text>
-            </SectionCard>
+            <PipelineAccordion title="Phase 3 — Rerank" defaultOpen={defaultOpenPhase === 'phase3'}>
+              <Phase3Body phase3={selected.phase3} />
+            </PipelineAccordion>
+
+            <PipelineAccordion title="Sort & position" defaultOpen={defaultOpenPhase === 'sort'}>
+              <SortBody sort={selected.sort} />
+            </PipelineAccordion>
 
             {selected.notes.length > 0 ? (
               <SectionCard bg="orange.50">
                 <Stack gap={1}>
                   {selected.notes.map(note => (
-                    <Text key={note} fontSize="xs" color="orange.700">
-                      {note}
-                    </Text>
+                    <Text key={note} fontSize="xs" color="orange.700">{note}</Text>
                   ))}
                 </Stack>
               </SectionCard>
@@ -363,137 +220,294 @@ export default function RecommendationDebugPanel({
             </Text>
           </SectionCard>
         )}
-
-        <PhaseGuide />
       </Stack>
     </Box>
   )
 }
 
-function PhaseGuide() {
+function phaseFromDiagnosis(klass: RecommendationDebugDiagnosisClass): string {
+  switch (klass) {
+    case 'explore':       return 'phase3'
+    case 'trust':         return 'phase2a'
+    case 'proximity':     return 'phase2b'
+    case 'pin':           return 'sort'
+    case 'tie':           return 'sort'
+    case 'chronological': return 'sort'
+    default:              return 'phase2a'
+  }
+}
+
+function DiagnosisCard({
+  positionLabel,
+  diagnosis,
+}: {
+  positionLabel: string
+  diagnosis: RecommendationDebugSelectedService['diagnosis']
+}) {
+  const palette = DIAGNOSIS_PALETTE[diagnosis.class]
   return (
-    <Box>
-      <Text fontSize="11px" fontWeight="900" color="gray.700" mb={2} mt={1}
-        style={{ letterSpacing: '0.06em', textTransform: 'uppercase' }}
-      >
-        How the feed is built
+    <Box bg={palette.bg} border="1px solid" borderColor={palette.border} borderRadius="18px" p={3}>
+      <Text fontSize="11px" color={palette.fg} fontWeight="900" letterSpacing="0.06em" textTransform="uppercase">
+        Position {positionLabel}
       </Text>
-      <Stack gap={2}>
-        <PhaseCard
-          phase="Phase 1"
-          title="Base eligibility"
-          color="gray.50"
-          tone="gray.700"
-        >
-          Active, visible services owned by someone other than you. Past
-          events and completed group offers drop out before any ranking runs.
-        </PhaseCard>
-        <PhaseCard
-          phase="Phase 2"
-          title="Hot composite score"
-          color="orange.50"
-          tone="orange.800"
-        >
-          <code>quality × activity × capacity × newcomerBoost</code>.
-          Quality uses the Wilson lower bound on positive vs negative
-          reputation. Activity is <code>log₂(2 + hours_exchanged) + 0.5 × log₂(2 + comments)</code>.
-          Capacity multiplies by 1.5× when an event/group offer is between
-          75% and 100% full. Owners new to the platform get a small
-          stochastic boost so the feed isn&apos;t dominated by veterans.
-        </PhaseCard>
-        <PhaseCard
-          phase="Phase 3"
-          title="Exploration pool"
-          color="purple.50"
-          tone="purple.800"
-        >
-          A rotating pool that prevents the feed from collapsing onto the
-          same cards. Three sub-buckets: <strong>cold start</strong> (owners
-          with very few completed handshakes), <strong>undershown quality</strong>
-          (high-quality services that haven&apos;t been touched in N days),
-          and <strong>stale recurring</strong> (recurring offers flagged by
-          the growth check). Discovery surfaces this pool directly.
-        </PhaseCard>
-        <PhaseCard
-          phase="Viewer overlays"
-          title="Proximity & social"
-          color="green.50"
-          tone="green.800"
-        >
-          When you enable location, hot scores are multiplied by a
-          distance-decay curve (half-life ~10 km by default). Authenticated
-          viewers also get a small boost for owners they follow or have
-          previously transacted with.
-        </PhaseCard>
-        <PhaseCard
-          phase="Search"
-          title="Match scoring"
-          color="blue.50"
-          tone="blue.800"
-        >
-          When you type a query, results are re-ranked by where the match
-          lands: title 1.0 &gt; tag 0.8 &gt; owner name 0.6 &gt; location 0.5
-          &gt; description 0.4. Ties break by hot score so quality still
-          matters on equal-text matches.
-        </PhaseCard>
-      </Stack>
+      <Text fontSize="sm" color={palette.fg} fontWeight="800" mt={1} lineHeight="1.4">
+        {diagnosis.message}
+      </Text>
     </Box>
   )
 }
 
-function PhaseCard({
-  phase,
+function PipelineAccordion({
   title,
-  color,
-  tone,
+  defaultOpen,
   children,
 }: {
-  phase: string
   title: string
-  color: string
-  tone: string
+  defaultOpen?: boolean
   children: ReactNode
 }) {
+  const [open, setOpen] = useState(Boolean(defaultOpen))
   return (
-    <Box
-      bg={color}
-      borderRadius="14px"
-      p={3}
-      border="1px solid"
-      borderColor="whiteAlpha.700"
-    >
-      <Flex align="center" gap={2} mb={1}>
-        <Text fontSize="9px" fontWeight="900" color={tone}
-          style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
-        >
-          {phase}
-        </Text>
-        <Text fontSize="xs" fontWeight="800" color={tone}>
+    <Box border="1px solid" borderColor="gray.200" borderRadius="16px" bg="whiteAlpha.900">
+      <Flex
+        as="button"
+        onClick={() => setOpen(value => !value)}
+        align="center"
+        justify="space-between"
+        w="100%"
+        px={3}
+        py={2.5}
+        bg="transparent"
+      >
+        <Text fontSize="xs" fontWeight="900" color="gray.700" letterSpacing="0.04em" textTransform="uppercase">
           {title}
         </Text>
+        {open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
       </Flex>
-      <Text fontSize="11px" color={tone} lineHeight="1.5">
-        {children}
-      </Text>
+      {open ? (
+        <Box px={3} pb={3}>
+          {children}
+        </Box>
+      ) : null}
     </Box>
   )
 }
 
-function MetricPill({ label, value }: { label: string; value: string }) {
+function Phase1Body({ phase1 }: { phase1: RecommendationDebugPhase1 }) {
+  const sortLabel = (() => {
+    if (phase1.sort_mode === 'composite')   return 'composite_score (hot sort)'
+    if (phase1.sort_mode === 'explore_only') return 'explore rotation'
+    return 'created_at (chronological)'
+  })()
   return (
-    <Box
-      minW="76px"
-      px={2.5}
-      py={2}
-      borderRadius="14px"
-      bg="white"
-      border="1px solid"
-      borderColor="gray.200"
-      boxShadow="0 2px 10px rgba(15, 23, 42, 0.04)"
-    >
-      <Text fontSize="10px" color="gray.500" fontWeight="700">{label}</Text>
-      <Text fontSize="xs" color="gray.800" fontWeight="900" mt="2px">{value}</Text>
-    </Box>
+    <Stack gap={2}>
+      {phase1.sort_mode !== 'composite' ? (
+        <Box bg="amber.50" border="1px solid" borderColor="amber.200" borderRadius="10px" p={2}>
+          <Text fontSize="xs" color="amber.800" fontWeight="800">
+            {phase1.sort_mode === 'chronological'
+              ? `In '${phase1.active_filter}' mode the list is sorted by created_at descending. Composite_score below is informational and does not decide order.`
+              : `In '${phase1.active_filter}' mode the list comes from the Phase 3 explore rotation, not composite ranking.`}
+          </Text>
+        </Box>
+      ) : null}
+      <Flex gap={2} wrap="wrap">
+        <MiniStat label="Filter" value={phase1.active_filter} />
+        <MiniStat label="Sort" value={sortLabel} />
+        <MiniStat label="Type" value={phase1.service_type} />
+        <MiniStat label="Location" value={phase1.location_type} />
+        <MiniStat label="Search" value={phase1.search_score.toFixed(3)} />
+        <MiniStat
+          label="Distance"
+          value={phase1.distance_km == null ? 'n/a' : `${phase1.distance_km.toFixed(1)} km`}
+        />
+        <MiniStat label="Pinned" value={phase1.is_pinned ? 'Yes' : 'No'} />
+      </Flex>
+    </Stack>
+  )
+}
+
+function Phase2ABody({
+  factors,
+  formulaLines,
+  selected,
+}: {
+  factors: RecommendationDebugFactors
+  formulaLines: string[]
+  selected: RecommendationDebugSelectedService
+}) {
+  const isEvent = factors.kind === 'event'
+  const quality = isEvent
+    ? (factors as RecommendationDebugFactorsEvent).organiser_quality
+    : (factors as RecommendationDebugFactorsService).quality
+  const qualityIsZero = quality === 0
+  const stats = isEvent
+    ? [
+        { label: 'P', value: String((factors as RecommendationDebugFactorsEvent).positive_count) },
+        { label: 'N', value: String((factors as RecommendationDebugFactorsEvent).negative_count) },
+        { label: 'RSVPs 7d', value: String((factors as RecommendationDebugFactorsEvent).rsvps_last_7d) },
+      ]
+    : [
+        { label: 'P', value: String((factors as RecommendationDebugFactorsService).positive_count) },
+        { label: 'N', value: String((factors as RecommendationDebugFactorsService).negative_count) },
+        { label: 'C', value: String((factors as RecommendationDebugFactorsService).comment_count) },
+        { label: 'Hours', value: (factors as RecommendationDebugFactorsService).hours_exchanged.toFixed(1) },
+      ]
+  return (
+    <Stack gap={2}>
+      <Flex gap={2} wrap="wrap">
+        {stats.map(stat => <MiniStat key={stat.label} label={stat.label} value={stat.value} />)}
+        <MiniStat label="Newcomer" value={factors.is_newcomer ? `×${factors.newcomer_boost.toFixed(2)}` : 'No'} />
+        <MiniStat label="Capacity" value={factors.capacity_multiplier === 1 ? '×1.00' : `×${factors.capacity_multiplier.toFixed(2)}`} />
+      </Flex>
+      <Box bg="gray.50" border="1px solid" borderColor="gray.200" borderRadius="10px" p={2}>
+        <Stack gap={1}>
+          {formulaLines.map(line => {
+            const flagsZero = qualityIsZero
+              && (line.toLowerCase().includes('quality')
+                || line.toLowerCase().includes('organiser'))
+            return (
+              <Flex key={line} gap={2} align="center">
+                <Text fontSize="xs" color="gray.700" fontFamily="mono" flex={1}>
+                  {line}
+                </Text>
+                {flagsZero ? (
+                  <Box bg="red.100" color="red.800" px={2} py="2px" borderRadius="6px">
+                    <Text fontSize="9px" fontWeight="900">× zeros total</Text>
+                  </Box>
+                ) : null}
+              </Flex>
+            )
+          })}
+        </Stack>
+      </Box>
+      <Flex gap={2}>
+        <MiniStat label="Stored hot" value={selected.stored_hot_score.toFixed(3)} />
+        <MiniStat label="Recomputed" value={selected.recomputed_hot_score.toFixed(3)} />
+      </Flex>
+    </Stack>
+  )
+}
+
+function Phase2BBody({ phase2b }: { phase2b: RecommendationDebugPhase2B }) {
+  const noProximity = phase2b.distance_km == null
+  return (
+    <Stack gap={2}>
+      <Flex gap={2} wrap="wrap">
+        <MiniStat label="Hot" value={phase2b.hot_score.toFixed(3)} />
+        <MiniStat
+          label="Proximity"
+          value={noProximity ? 'n/a' : `×${phase2b.proximity_factor.toFixed(2)}`}
+        />
+        <MiniStat
+          label="Distance"
+          value={noProximity ? 'n/a' : `${phase2b.distance_km!.toFixed(1)} km`}
+        />
+        <MiniStat label="Half-life" value={`${phase2b.proximity_half_life_km.toFixed(0)} km`} />
+        <MiniStat label="Social" value={phase2b.social_boost.toFixed(2)} />
+        <MiniStat label="Network" value={phase2b.social_reason} />
+      </Flex>
+      <Box bg="gray.50" border="1px solid" borderColor="gray.200" borderRadius="10px" p={2}>
+        <Text fontSize="xs" fontFamily="mono" color="gray.700">
+          composite = {phase2b.hot_score.toFixed(3)}
+          {noProximity ? '' : ` × ${phase2b.proximity_factor.toFixed(3)}`}
+          {' + 0.5 × '}
+          {phase2b.social_boost.toFixed(3)}
+          {' = '}
+          <Text as="span" fontWeight="900">{phase2b.composite_score.toFixed(3)}</Text>
+        </Text>
+      </Box>
+    </Stack>
+  )
+}
+
+function Phase3Body({ phase3 }: { phase3: RecommendationDebugPhase3 }) {
+  return (
+    <Stack gap={2}>
+      {phase3.injected_on_this_request ? (
+        <Box bg="green.50" border="1px solid" borderColor="green.300" borderRadius="10px" p={2}>
+          <Text fontSize="xs" color="green.800" fontWeight="900">
+            Injected at slot {phase3.injected_slot_index ?? '?'} on this request.
+          </Text>
+        </Box>
+      ) : null}
+      <Flex gap={2} wrap="wrap">
+        <MiniStat label="Pool" value={phase3.pool ?? 'none'} />
+        <MiniStat label="Explore rate" value={`${Math.round(phase3.exploration_rate * 100)}%`} />
+        <MiniStat label="Owner h.shakes" value={String(phase3.lifetime_completed_handshakes)} />
+        <MiniStat
+          label="Days idle"
+          value={
+            phase3.days_since_last_completed_handshake == null
+              ? 'never'
+              : `${phase3.days_since_last_completed_handshake}d`
+          }
+        />
+      </Flex>
+      <Text fontSize="xs" color="gray.600">
+        {phase3.pool === 'cold_start'
+          ? `Eligible because the owner has < ${phase3.cold_start_threshold} completed handshakes.`
+          : phase3.pool === 'undershown_quality'
+            ? `Eligible because quality is high but the service has had no completed handshake in the last ${phase3.undershown_stale_days} days.`
+            : phase3.pool === 'stale_recurring'
+              ? 'Eligible because the recurring growth check flagged this listing as stale.'
+              : 'Not eligible for the explore bucket. Served from the regular hot list.'}
+        {phase3.injected_card_id && !phase3.injected_on_this_request
+          ? ` On this request the explore slot went to a different card (${phase3.injected_card_id.slice(0, 8)}…).`
+          : ''}
+      </Text>
+    </Stack>
+  )
+}
+
+function SortBody({ sort }: { sort: RecommendationDebugSort }) {
+  const isComposite = sort.sort_mode === 'composite'
+  const cardKeyLine = isComposite
+    ? `(${String(sort.this_card_key.is_pinned)}, ${sort.this_card_key.composite_score.toFixed(3)}, ${new Date(sort.this_card_key.created_at).toISOString().slice(0, 10)})`
+    : `(${String(sort.this_card_key.is_pinned)}, ${new Date(sort.this_card_key.created_at).toISOString().slice(0, 10)})`
+  return (
+    <Stack gap={2}>
+      <Box bg="gray.50" border="1px solid" borderColor="gray.200" borderRadius="10px" p={2}>
+        <Text fontSize="xs" fontFamily="mono" color="gray.700">
+          Sort key: {sort.sort_key}
+        </Text>
+        <Text fontSize="xs" fontFamily="mono" color="gray.700" mt={1}>
+          This card: {cardKeyLine}
+        </Text>
+        {sort.pinned_count_in_list > 0 ? (
+          <Text fontSize="xs" color="purple.700" fontWeight="800" mt={1}>
+            {sort.pinned_count_in_list} pinned card(s) on this page sit above all unpinned cards.
+          </Text>
+        ) : null}
+      </Box>
+      <Stack gap={1}>
+        {sort.neighbours.map(neighbour => {
+          const tail = isComposite
+            ? `(${neighbour.is_pinned ? 'P' : '·'}, ${neighbour.composite_score.toFixed(3)})`
+            : `(${neighbour.is_pinned ? 'P' : '·'}, ${new Date(neighbour.created_at).toISOString().slice(0, 10)})`
+          return (
+            <Flex
+              key={neighbour.id}
+              align="center"
+              gap={2}
+              px={2}
+              py={1.5}
+              bg={neighbour.is_selected ? 'orange.50' : 'transparent'}
+              border="1px solid"
+              borderColor={neighbour.is_selected ? 'orange.200' : 'gray.100'}
+              borderRadius="8px"
+            >
+              <Text fontSize="xs" color="gray.500" w="36px">#{neighbour.position}</Text>
+              <Text fontSize="xs" color="gray.800" flex={1} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+                {neighbour.title}
+              </Text>
+              <Text fontSize="10px" fontFamily="mono" color="gray.600">
+                {tail}
+              </Text>
+            </Flex>
+          )
+        })}
+      </Stack>
+    </Stack>
   )
 }
 
@@ -526,8 +540,8 @@ function ContextChip({
 }) {
   const palette = {
     orange: { bg: 'orange.50', color: 'orange.700' },
-    blue: { bg: 'blue.50', color: 'blue.700' },
-    green: { bg: 'green.50', color: 'green.700' },
+    blue:   { bg: 'blue.50',   color: 'blue.700'   },
+    green:  { bg: 'green.50',  color: 'green.700'  },
   }[color]
 
   return (
@@ -569,14 +583,5 @@ function StatusChip({ label, icon }: { label: string; icon?: ReactNode }) {
         <Text fontSize="10px" fontWeight="800" color="gray.600">{label}</Text>
       </Flex>
     </Box>
-  )
-}
-
-function LegendDot({ color, label }: { color: string; label: string }) {
-  return (
-    <Flex align="center" gap={1}>
-      <Box w="7px" h="7px" borderRadius="full" bg={color} />
-      <Text fontSize="10px" color="gray.500" fontWeight="700">{label}</Text>
-    </Flex>
   )
 }

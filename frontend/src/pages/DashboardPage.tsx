@@ -20,11 +20,7 @@ import {
   FiSliders,
   FiMenu,
   FiX,
-  FiZap,
-  FiCompass,
-  FiNavigation,
   FiCheck,
-  FiGrid,
 } from 'react-icons/fi'
 
 // Lazy-load the Mapbox-backed MapView. mapbox-gl is ~1.79 MB / 492 KB gzipped
@@ -33,7 +29,7 @@ import {
 const MapView = lazy(() =>
   import('@/components/MapView').then((m) => ({ default: m.MapView })),
 )
-import { serviceAPI, type ServiceListParams } from '@/services/serviceAPI'
+import { serviceAPI, type ServiceListParams, type RankingMeta } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useGeoStore } from '@/store/useGeoStore'
@@ -42,6 +38,7 @@ import { MainSidebar } from '@/components/MainSidebar'
 import { Avatar } from '@/components/Avatar'
 import { Pagination } from '@/components/Pagination'
 import RecommendationShowcaseBar from '@/components/RecommendationShowcaseBar'
+import FeaturedSection from '@/components/FeaturedSection'
 import type { Handshake } from '@/services/handshakeAPI'
 import DashboardTour from '@/components/dashboard-tour/DashboardTour'
 
@@ -61,23 +58,6 @@ const DEBOUNCE_DISTANCE = 250
 const POLL_INTERVAL     = 300_000  // 5 min — Browse is interactive, no need for 60s pings
 const GEO_TIMEOUT       = 10_000
 const PAGE_SIZE         = 15
-
-// ─── Ranking modes ────────────────────────────────────────────────────────────
-
-type RankingMode = 'discovery' | 'newest' | 'nearby' | 'all'
-
-interface RankingButtonDef {
-  id: RankingMode
-  label: string
-  icon: React.ReactNode
-}
-
-const RANKING_BUTTONS: RankingButtonDef[] = [
-  { id: 'discovery', label: 'Discovery', icon: <FiCompass size={12} /> },
-  { id: 'newest',    label: 'Newest',    icon: <FiZap size={12} /> },
-  { id: 'nearby',    label: 'Nearby',    icon: <FiNavigation size={12} /> },
-  { id: 'all',       label: 'All',       icon: <FiGrid size={12} /> },
-]
 
 // Secondary filters live in the [More filters ▾] popover. Multi-select. Sent
 // to the backend (`location_type=`, `schedule_type=`, `weekend=`) so the page
@@ -441,7 +421,6 @@ const DashboardPage = () => {
   const [searchParams, setSearchParams]             = useSearchParams()
   const page                                         = Math.max(1, Number(searchParams.get('page') ?? 1))
 
-  const [rankingMode, setRankingMode]               = useState<RankingMode>('all')
   const [activeTypes, setActiveTypes]               = useState<Set<'Offer' | 'Need' | 'Event'>>(new Set())
   const [secondaryFilters, setSecondaryFilters]     = useState<Set<SecondaryFilter>>(new Set())
   const [searchQuery, setSearchQuery]               = useState('')
@@ -449,6 +428,7 @@ const DashboardPage = () => {
 
   const [services, setServices]                     = useState<Service[]>([])
   const [totalCount, setTotalCount]                 = useState(0)
+  const [rankingMeta, setRankingMeta]               = useState<RankingMeta | null>(null)
   const [filtersOpen, setFiltersOpen]               = useState(false)
   const [sidebarOpen, setSidebarOpen]               = useState(false)
 
@@ -480,16 +460,15 @@ const DashboardPage = () => {
     )
   }, [setSearchParams])
 
-  // Reset to page 1 whenever a filter / search / mode changes — otherwise the
+  // Reset to page 1 whenever a filter / search changes — otherwise the
   // viewer sees an empty page when the result set shrinks.
   const filterKey = useMemo(
     () => JSON.stringify({
-      mode: rankingMode,
       types: Array.from(activeTypes).sort(),
       filters: Array.from(secondaryFilters).sort(),
       search: debouncedSearch,
     }),
-    [rankingMode, activeTypes, secondaryFilters, debouncedSearch],
+    [activeTypes, secondaryFilters, debouncedSearch],
   )
   const previousFilterKey = useRef(filterKey)
   useEffect(() => {
@@ -542,30 +521,16 @@ const DashboardPage = () => {
       ...secondaryFiltersToParams(secondaryFilters),
     }
 
-    // Map ranking button → backend sort/explore/lat-lng knobs. `all` is the
-    // explicit "no ranking lens" choice — `skip_onboarding` opts out of the
-    // implicit skill-based slice so the viewer sees the full active catalog.
-    switch (rankingMode) {
-      case 'discovery':
-        // `_list_for_you` short-circuits on `sort=for_you`, so leave sort
-        // unset and rely on `explore_only` to surface the Phase 3 pool.
-        baseParams.explore_only = true
-        break
-      case 'newest':
-        baseParams.sort = 'latest'
-        break
-      case 'nearby':
-        baseParams.sort = 'hot'
-        if (locationEnabled && userLocation) {
-          baseParams.lat = userLocation.lat
-          baseParams.lng = userLocation.lng
-          baseParams.distance = debouncedDistance
-        }
-        break
-      case 'all':
-      default:
-        baseParams.skip_onboarding = true
-        break
+    // Single sort path: ranking engine sorts the full catalog, viewer's
+    // location boosts proximate cards when available. The four old mode
+    // buttons (Discovery / Newest / Nearby / All) collapsed into this one
+    // call as part of the unified browse / home redesign -- the YouTube-style
+    // "always show everything, just reorder" policy.
+    baseParams.sort = 'hot'
+    if (locationEnabled && userLocation) {
+      baseParams.lat = userLocation.lat
+      baseParams.lng = userLocation.lng
+      baseParams.distance = debouncedDistance
     }
 
     // Multi-type chip selection rides on the new repeated `?type=` keys —
@@ -577,10 +542,10 @@ const DashboardPage = () => {
     const resp = await serviceAPI.listPaged(baseParams, signal)
     setServices(resp.results)
     setTotalCount(resp.count)
+    setRankingMeta(resp.ranking_meta ?? null)
   }, [
     debouncedSearch,
     page,
-    rankingMode,
     activeTypes,
     secondaryFilters,
     locationEnabled,
@@ -906,58 +871,18 @@ const DashboardPage = () => {
             </Suspense>
           </Box>
 
-          {/* Ranking-mode buttons — single-select. Sits between the map and
-              the grid so the map shows the ranked slice you're viewing. */}
+          {/* Featured section — three tabs (Friends / Nearby / Nearly Full)
+              feed a horizontal carousel below the map. The main grid below
+              this row stays sorted by composite_score regardless of which tab
+              is active; the tabs are slice previews, not list filters. */}
           <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} px={{ base: 3, md: 5 }} py="10px">
-            <Flex
-              data-tour="ranking-modes"
-              gap="6px"
-              overflowX="auto"
-              align="center"
-              style={{ scrollbarWidth: 'none' }}
-            >
-              {RANKING_BUTTONS.map((btn) => {
-                const isActive = rankingMode === btn.id
-                const disabled = isRankingButtonDisabled(btn.id, {
-                  hasGeo: Boolean(locationEnabled && userLocation),
-                })
-                return (
-                  <Box
-                    key={btn.id}
-                    as="button"
-                    flexShrink={0}
-                    title={
-                      disabled
-                        ? btn.id === 'nearby'
-                          ? 'Enable location to see nearby services'
-                          : ''
-                        : ''
-                    }
-                    onClick={() => !disabled && setRankingMode(btn.id)}
-                    px="14px"
-                    py="7px"
-                    borderRadius="9999px"
-                    fontSize="12px"
-                    fontWeight={isActive ? 700 : 500}
-                    bg={isActive ? GREEN : WHITE}
-                    color={isActive ? WHITE : disabled ? GRAY400 : GRAY700}
-                    border={`1px solid ${isActive ? GREEN : GRAY200}`}
-                    transition="all 0.12s"
-                    display="flex"
-                    alignItems="center"
-                    gap="6px"
-                    style={{
-                      cursor: disabled ? 'not-allowed' : 'pointer',
-                      opacity: disabled ? 0.55 : 1,
-                    }}
-                    _hover={isActive || disabled ? {} : { borderColor: GRAY400 }}
-                  >
-                    <Box color={isActive ? WHITE : disabled ? GRAY400 : GRAY500}>{btn.icon}</Box>
-                    {btn.label}
-                  </Box>
-                )
-              })}
-            </Flex>
+            <FeaturedSection
+              services={displayServices}
+              userLocation={locationEnabled && userLocation ? userLocation : null}
+              maxNearbyKm={debouncedDistance}
+              isAuthenticated={isAuthenticated}
+              onServicePress={(id) => navigate(`/service-detail/${id}`)}
+            />
           </Box>
 
           {/* Grid */}
@@ -1039,26 +964,17 @@ const DashboardPage = () => {
         <RecommendationShowcaseBar
           services={displayServices}
           hoveredServiceId={hoveredServiceId}
-          activeFilter={rankingMode}
+          activeFilter="all"
           search={debouncedSearch}
           lat={userLocation?.lat}
           lng={userLocation?.lng}
           distance={debouncedDistance}
+          phase3InjectedId={rankingMeta?.phase3_injected_id ?? null}
+          phase3SlotIndex={rankingMeta?.phase3_slot_index ?? null}
         />
       )}
     </Box>
   )
-}
-
-// ─── Helpers used by the topbar ───────────────────────────────────────────────
-
-interface RankingDisabledContext {
-  hasGeo: boolean
-}
-
-function isRankingButtonDisabled(id: RankingMode, ctx: RankingDisabledContext): boolean {
-  if (id === 'nearby') return !ctx.hasGeo
-  return false
 }
 
 interface MoreFiltersButtonProps {
