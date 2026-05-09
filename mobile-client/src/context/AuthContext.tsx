@@ -30,6 +30,7 @@ import {
   clearCurrentUser,
   clearAllUserCaches,
 } from "../cache/offlineCache";
+import { shouldSkipSoftUserRefresh } from "../utils/authRefresh";
 
 interface AuthState {
   user: UserSummary | null;
@@ -43,7 +44,20 @@ interface AuthContextValue extends AuthState {
   login: (body: LoginRequest) => Promise<void>;
   register: (body: RegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
-  refreshUser: () => Promise<void>;
+  refreshUser: (options?: { force?: boolean }) => Promise<void>;
+}
+
+let inFlightUserRequest: Promise<UserSummary> | null = null;
+let lastConfirmedUserAt = 0;
+
+async function getMeSingleFlight(): Promise<UserSummary> {
+  if (inFlightUserRequest) return inFlightUserRequest;
+
+  inFlightUserRequest = getMe().finally(() => {
+    inFlightUserRequest = null;
+  });
+
+  return inFlightUserRequest;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -60,6 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const persistUser = useCallback((u: UserSummary) => {
     setUser(u);
     setIsStale(false);
+    lastConfirmedUserAt = Date.now();
     try {
       saveCurrentUser(u);
     } catch {
@@ -70,6 +85,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const clearSessionLocal = useCallback(async (prevUserId: string | null) => {
     setUser(null);
     setIsStale(false);
+    lastConfirmedUserAt = 0;
+    inFlightUserRequest = null;
     clearCurrentUser();
     if (prevUserId) {
       try {
@@ -80,9 +97,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const refreshUser = useCallback(async () => {
+  const refreshUser = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force ?? true;
+    if (
+      shouldSkipSoftUserRefresh({
+        force,
+        lastConfirmedAt: lastConfirmedUserAt,
+        now: Date.now(),
+      })
+    ) {
+      return;
+    }
+
     try {
-      const u = await getMe();
+      const u = await getMeSingleFlight();
       persistUser(u);
     } catch (err) {
       if (err instanceof ApiNetworkError) {
@@ -95,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (refresh) {
         try {
           await authApi.refresh({ refresh });
-          const u = await getMe();
+          const u = await getMeSingleFlight();
           persistUser(u);
           return;
         } catch (refreshErr) {
@@ -156,7 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const u = await getMe();
+        const u = await getMeSingleFlight();
         if (cancelled) return;
         // Different user than cached? wipe the previous user's caches.
         if (cached && cached.data.id !== u.id) {
@@ -180,7 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (refresh) {
           try {
             await authApi.refresh({ refresh });
-            const u = await getMe();
+            const u = await getMeSingleFlight();
             if (!cancelled) persistUser(u);
             return;
           } catch (refreshErr) {

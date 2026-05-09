@@ -216,7 +216,7 @@ function App() {
     // On protected route changes, keep fast-changing profile fields such as
     // time balance fresh while still bootstrapping anonymous sessions normally.
     if (user) {
-      refreshUser()
+      refreshUser({ force: false })
     } else {
       checkAuth()
     }

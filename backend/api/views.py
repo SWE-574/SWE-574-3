@@ -1164,14 +1164,51 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             to_attr='_profile_event_handshakes',
         )
         
+        user_badges_prefetch = Prefetch(
+            'user__badges',
+            queryset=UserBadge.objects.select_related('badge')
+        )
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused', 'checked_in', 'attended', 'no_show']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+
         # Filter services by visibility - admins can see all, others only visible
         is_admin = self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES
+        services_queryset = (
+            Service.objects
+            .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
+            .select_related('user', 'event_evaluation_summary')
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
+        )
+        if self.request.user.is_authenticated:
+            from .models import SavedService, ServiceDismissal
+            services_queryset = services_queryset.annotate(
+                is_saved_anno=Exists(
+                    SavedService.objects.filter(
+                        user=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_dismissed_anno=Exists(
+                    ServiceDismissal.objects.filter(
+                        viewer=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+            )
         if is_admin:
-            services_prefetch = Prefetch('services', queryset=Service.objects.prefetch_related('tags'))
+            services_prefetch = Prefetch('services', queryset=services_queryset)
         else:
             services_prefetch = Prefetch(
                 'services',
-                queryset=Service.objects.filter(is_visible=True).exclude(status='Cancelled').prefetch_related('tags')
+                queryset=services_queryset.filter(is_visible=True).exclude(status='Cancelled')
             )
 
         return (

@@ -3,10 +3,12 @@ import type { User } from '@/types'
 import apiClient, { getErrorMessage } from '@/services/api'
 
 let inFlightUserRequest: Promise<User> | null = null
+let lastUserRefreshAt = 0
 
 const RATE_LIMIT_STATUS = 429
 const MAX_ME_RETRIES = 2
 const BACKOFF_BASE_MS = 300
+const SOFT_REFRESH_MIN_INTERVAL_MS = 30_000
 
 const sleep = (ms: number) => new Promise((resolve) => {
   window.setTimeout(resolve, ms)
@@ -82,7 +84,7 @@ interface AuthState {
     last_name: string
   }) => Promise<void>
   logout: () => Promise<void>
-  refreshUser: () => Promise<void>
+  refreshUser: (options?: { force?: boolean }) => Promise<void>
   checkAuth: (force?: boolean) => Promise<void>
   updateUserOptimistically: (updates: Partial<User>) => void
 }
@@ -156,10 +158,17 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ user: null, isAuthenticated: false, error: null })
   },
 
-  refreshUser: async () => {
+  refreshUser: async (options = { force: true }) => {
+    const force = options.force ?? true
+    const now = Date.now()
+    if (!force && lastUserRefreshAt > 0 && now - lastUserRefreshAt < SOFT_REFRESH_MIN_INTERVAL_MS) {
+      return
+    }
+
     try {
       inFlightUserRequest = null
       const user = await fetchCurrentUserFresh()
+      lastUserRefreshAt = Date.now()
       set({ user, isAuthenticated: true })
     } catch (error) {
       if (isRateLimitError(error)) {

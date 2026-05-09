@@ -111,7 +111,7 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!profileUserId) return;
-      void refreshUser();
+      void refreshUser({ force: false });
     }, [profileUserId, refreshUser]),
   );
 
