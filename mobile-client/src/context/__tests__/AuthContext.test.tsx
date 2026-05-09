@@ -12,6 +12,11 @@ import React from "react";
 import { Text, View } from "react-native";
 import { act, render, waitFor } from "@testing-library/react-native";
 
+// First mount of AuthProvider in CI can take longer than the 5s default
+// (Expo / RN test renderer cold start). Local runs are ~1.6s; give CI
+// headroom.
+jest.setTimeout(20000);
+
 const mockAuthApiLogout = jest.fn();
 const mockNotificationReset = jest.fn();
 const mockClearCurrentUser = jest.fn();
