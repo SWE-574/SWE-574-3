@@ -26,7 +26,10 @@ test.describe('Owner edit locks', () => {
 
     await page.locator('input[name="title"]').fill(title)
     await page.locator('textarea[name="description"]').fill('Playwright creates this offer to verify unlocked owner editing.')
-    await page.locator('input[name="duration"]').fill('1.5')
+    // Offer / Need duration is validated as a whole-hour integer in the
+    // service-form schema (min=1, max=10). A fractional value silently
+    // fails zod validation and the submit button is a no-op.
+    await page.locator('input[name="duration"]').fill('2')
     await page.getByRole('button', { name: 'Online' }).click()
 
     await page.getByRole('button', { name: 'Post Offer' }).click()
@@ -56,7 +59,7 @@ test.describe('Owner edit locks', () => {
 
     await page.locator('input[name="title"]').fill(title)
     await page.locator('textarea[name="description"]').fill('This offer is created for handshake lock verification.')
-    await page.locator('input[name="duration"]').fill('1.0')
+    await page.locator('input[name="duration"]').fill('1')
     await page.getByRole('button', { name: 'Online' }).click()
 
     await page.getByRole('button', { name: 'Post Offer' }).click()

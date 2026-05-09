@@ -37,6 +37,69 @@ async function stubSendVerification(page: Page) {
   return () => calls
 }
 
+/**
+ * Make doubly sure /users/me/ returns the unverified payload for this Page.
+ *
+ * The shared loginAs helper already installs a route on '**\/api\/users\/me\/'
+ * with the override applied, but the auth store calls the endpoint with a
+ * cache-busting query (?_=<ts>) and Playwright's URL glob does not match the
+ * trailing query against a pattern that ends in '/'. Override the route here
+ * with a glob that explicitly accepts a query suffix, then trigger a refetch
+ * by reloading so the auth store hydrates with the unverified payload before
+ * we assert on the dashboard banner.
+ *
+ * Mirrors the shape User expects so the navbar and protected routes still
+ * render — only the verification flag is forced.
+ */
+async function ensureUnverifiedAuthState(
+  page: Page,
+  email: string,
+): Promise<void> {
+  // Capture the live user payload via a one-shot fetch so the stubbed
+  // response carries id / role / badge fields instead of a hand-rolled
+  // skeleton that the rest of the SPA might reject.
+  let realUser: Record<string, unknown> = {}
+  try {
+    const captured = await page.evaluate(async () => {
+      const res = await fetch('/api/users/me/', { credentials: 'include' })
+      if (!res.ok) return null
+      return (await res.json()) as Record<string, unknown>
+    })
+    if (captured) realUser = captured
+  } catch { /* fall back to skeleton below */ }
+
+  const stubbed = {
+    id: 'stub-user-id',
+    role: 'member',
+    first_name: 'Cem',
+    last_name: 'Demir',
+    featured_badges: [],
+    featured_badges_detail: [],
+    ...realUser,
+    email,
+    is_verified: false,
+    is_onboarded: true,
+    is_admin: false,
+    is_active: true,
+  }
+
+  await page.unroute('**/api/users/me/').catch(() => { /* nothing to unroute */ })
+  await page.route('**/api/users/me/**', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(stubbed),
+    })
+  })
+  // Reload so the next App mount calls /users/me/ against the fresh stub
+  // and the EmailVerificationBanner resolves to is_verified === false.
+  await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
+}
+
 test.describe('post-* route email verification gate', () => {
   for (const { path, label } of [
     { path: '/post-offer', label: 'post an Offer' },
@@ -45,11 +108,13 @@ test.describe('post-* route email verification gate', () => {
   ]) {
     test(`unverified user is blocked on ${path}`, async ({ page }) => {
       await loginAs(page, USERS.cem, { is_verified: false })
-      // Sentinel: confirm the unverified state has been hydrated into the
-      // auth store by waiting for the dashboard's "Limited access" banner.
-      // Without this wait the subsequent navigation can race ahead of the
-      // /users/me/ stub being applied, leaving `user.is_verified` undefined
-      // when RequireVerifiedEmail mounts (it then falls through to children).
+      // The loginAs helper stubs /users/me/ but the auth store fetches it
+      // with a cache-busting ?_=<ts> query that the helper's glob does not
+      // catch. Replace the route with a query-tolerant pattern and reload
+      // before asserting the dashboard's "Limited access" banner — the
+      // banner only renders when user.is_verified === false, so its
+      // visibility is positive proof the unverified payload landed.
+      await ensureUnverifiedAuthState(page, USERS.cem.email)
       await expect(
         page.locator('text=Limited access').first(),
       ).toBeVisible({ timeout: 15_000 })
@@ -88,8 +153,10 @@ test.describe('post-* route email verification gate', () => {
 test.describe('service detail join/request email verification gate', () => {
   test('unverified user sees the verification modal when requesting an Offer', async ({ page }) => {
     await loginAs(page, USERS.cem, { is_verified: false })
-    // Sentinel: confirm the unverified state has been hydrated into the
-    // auth store before exercising any flow that reads `is_verified`.
+    // See ensureUnverifiedAuthState — loginAs's /users/me/ glob misses the
+    // cache-busting query the auth store appends. Reapply with a tolerant
+    // pattern and reload so the unverified payload lands in the store.
+    await ensureUnverifiedAuthState(page, USERS.cem.email)
     await expect(
       page.locator('text=Limited access').first(),
     ).toBeVisible({ timeout: 15_000 })

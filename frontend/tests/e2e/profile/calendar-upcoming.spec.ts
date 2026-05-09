@@ -37,36 +37,34 @@ test.describe('UpcomingSchedule — calendar view (#446)', () => {
     )
   })
 
-  test('expand toggle reveals month grid', async ({ page }) => {
+  test('month grid renders day-of-week headers by default', async ({ page }) => {
     await loginAs(page, USERS.elif)
     await page.goto('/profile')
 
-    // Wait for UPCOMING section to appear (it may be loading)
+    // Wait for the agenda preview section header to appear
     await expect(page.getByText('UPCOMING')).toBeVisible({ timeout: 20_000 })
 
-    // Find and click the "View calendar" expand toggle
-    const expandBtn = page.getByText('View calendar')
-    await expect(expandBtn).toBeVisible({ timeout: 10_000 })
-    await expandBtn.click()
-
-    // Month grid should now be visible (Mon-Sun day headers)
-    await expect(page.getByText('Mon')).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByText('Tue')).toBeVisible()
+    // The calendar grid is rendered by default (no expand toggle anymore).
+    // Day-of-week headers ("Mon" through "Sun") sit inside the month grid.
+    await expect(page.getByText('Mon', { exact: true }).first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('Tue', { exact: true }).first()).toBeVisible()
   })
 
-  test('collapse button hides month grid', async ({ page }) => {
+  test('Upcoming toggle hides the month grid and Today restores it', async ({ page }) => {
     await loginAs(page, USERS.elif)
     await page.goto('/profile')
 
     await expect(page.getByText('UPCOMING')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText('Mon', { exact: true }).first()).toBeVisible({ timeout: 10_000 })
 
-    // Expand
-    await page.getByText('View calendar').click()
-    await expect(page.getByText('Mon')).toBeVisible({ timeout: 5_000 })
+    // The "Upcoming" pill in the calendar header collapses the grid into the
+    // agenda-only preview by clearing the selected date (selectedDate=null).
+    await page.getByRole('button', { name: 'Show upcoming schedule' }).click()
+    await expect(page.getByText('Mon', { exact: true })).toHaveCount(0, { timeout: 5_000 })
 
-    // Collapse
-    await page.getByText('Collapse').click()
-    await expect(page.getByText('Mon')).not.toBeVisible({ timeout: 5_000 })
+    // The "Today" button re-selects the current date and the grid returns.
+    await page.getByRole('button', { name: 'Go to today' }).click()
+    await expect(page.getByText('Mon', { exact: true }).first()).toBeVisible({ timeout: 5_000 })
   })
 
   test('demo user sees seeded Offer service session in agenda preview', async ({ page }) => {
@@ -110,15 +108,14 @@ test.describe('UpcomingSchedule — calendar view (#446)', () => {
     await expect(section).toBeVisible()
   })
 
-  test('clicking expand then clicking a day filters the agenda list', async ({ page }) => {
+  test('clicking a day filters the agenda list', async ({ page }) => {
     await loginAs(page, USERS.elif)
     await page.goto('/profile')
 
     await expect(page.getByText('UPCOMING')).toBeVisible({ timeout: 20_000 })
 
-    // Expand
-    await page.getByText('View calendar').click()
-    await expect(page.getByText('Mon')).toBeVisible({ timeout: 5_000 })
+    // The grid is rendered by default — wait for day-of-week headers.
+    await expect(page.getByText('Mon', { exact: true }).first()).toBeVisible({ timeout: 5_000 })
 
     // Click on a day that is likely to be empty (far future)
     // Use the month grid navigation to go to next month first
@@ -151,19 +148,19 @@ test.describe('UpcomingSchedule — calendar view (#446)', () => {
   })
 
   test('mobile viewport renders single-column layout in expanded mode', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 812 })
+    // loginAs waits for the desktop user-menu-trigger which is hidden on
+    // narrow viewports — so log in at desktop width first, then switch.
     await loginAs(page, USERS.elif)
+    await page.setViewportSize({ width: 375, height: 812 })
     await page.goto('/profile')
 
     await expect(page.getByText('UPCOMING')).toBeVisible({ timeout: 20_000 })
 
-    // Expand
-    await page.getByText('View calendar').click()
-    await expect(page.getByText('Mon')).toBeVisible({ timeout: 5_000 })
+    // The grid is rendered by default on mobile too — wait for day headers.
+    await expect(page.getByText('Mon', { exact: true }).first()).toBeVisible({ timeout: 5_000 })
 
     // In mobile, the grid is single-column. The month grid and agenda should
-    // both be visible (stacked vertically, not side-by-side)
-    // At minimum, both the month header and the grid should be in the DOM
+    // both be visible (stacked vertically, not side-by-side).
     const monthLabel = page.getByRole('grid').first()
     await expect(monthLabel).toBeVisible()
   })
