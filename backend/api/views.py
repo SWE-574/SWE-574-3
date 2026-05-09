@@ -2118,6 +2118,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'page_size': request.query_params.get('page_size'),
             'user': request.query_params.get('user'),
             'is_admin': str(is_admin),  # Different cache for admin vs non-admin
+            # Per-viewer: is_saved, smart-pill signals, and future personalization
+            # must not leak across users sharing the same filter/page cache entry.
+            'viewer': (
+                str(request.user.id)
+                if request.user.is_authenticated
+                else 'anon'
+            ),
         }
         
         sort_param = request.query_params.get('sort', 'latest')
@@ -2180,8 +2187,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 phase3_injected_id = str(explore.id)
                 phase3_slot_index = slot
 
-        # Smart-pill plumbing: attach for_you_signals + source + explore_pool
-        # to each card on the regular browse path so the frontend can render
+        # Smart-pill plumbing: attach for_you_signals + source on the regular
+        # browse path so the frontend can render
         # a small "why" pill ("Matches your interests" / "From your network" /
         # "Hidden gem"). The score itself is unused here -- we keep the hot
         # ordering -- but the per-card signals come from the same scorer the
@@ -2273,10 +2280,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
         })
 
     def _attach_smart_pill_signals(self, page, viewer, phase3_injected_id):
-        """Stamp `for_you_signals`, `source`, and `explore_pool` on each
-        service so the regular browse list carries the same per-card signal
-        breakdown the /for_you path emits. Used by the new YouTube-style
-        smart pill on the Browse feed (chips strip + pill on each card).
+        """Stamp `for_you_signals` and `source` on each service for the Browse
+        smart pill. `explore_pool` is only set on the `explore_only` list path.
         """
         from .ranking_personalized import score_for_you
 
