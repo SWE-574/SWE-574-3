@@ -289,7 +289,7 @@ class PublicChatConsumer(AsyncWebsocketConsumer):
             return Handshake.objects.filter(
                 service=service,
                 requester=user,
-                status__in=['accepted', 'checked_in', 'attended'],
+                status__in=['accepted', 'checked_in', 'attended', 'completed', 'no_show'],
             ).exists()
         except ChatRoom.DoesNotExist:
             return False

@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRoute, useNavigation } from "@react-navigation/native";
+import { useRoute, useNavigation, StackActions } from "@react-navigation/native";
 import type {
   NativeStackNavigationProp,
   NativeStackScreenProps,
@@ -149,43 +149,34 @@ export default function GroupChatScreen() {
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data as string) as Record<
-          string,
-          unknown
-        >;
-        if (data.messages && Array.isArray(data.messages)) {
-          const normalized = (
-            data.messages as Record<string, unknown>[]
-          ).map(normalizeMessage);
-          setMessages((prev) => dedupeMessages([...prev, ...normalized]));
-          scrollToBottom(false);
-        } else if (
-          data.type === "message" ||
-          data.body !== undefined ||
-          data.content !== undefined
-        ) {
-          const incoming = normalizeMessage(data);
-          setMessages((prev) => {
-            const next = prev.filter(
-              (m) =>
-                !(
-                  m.pending &&
-                  (m.body ?? m.content ?? "").trim() ===
-                    (incoming.body ?? incoming.content ?? "").trim() &&
-                  (m.sender_id === incoming.sender_id ||
-                    m.sender === incoming.sender)
-                ),
-            );
-            return dedupeMessages([...next, incoming]);
-          });
-          scrollToBottom();
-        } else if (Array.isArray(data)) {
-          const normalized = (data as Record<string, unknown>[]).map(
-            normalizeMessage,
+        const payload = JSON.parse(event.data as string) as Record<string, unknown>;
+
+        // Backend sends {"type": "chat_message", "message": {...}}
+        const incoming =
+          payload.message && typeof payload.message === "object"
+            ? normalizeMessage(payload.message as Record<string, unknown>)
+            : payload.type === "message" ||
+                payload.body !== undefined ||
+                payload.content !== undefined
+              ? normalizeMessage(payload)
+              : null;
+
+        if (!incoming) return;
+
+        setMessages((prev) => {
+          const next = prev.filter(
+            (m) =>
+              !(
+                m.pending &&
+                (m.body ?? m.content ?? "").trim() ===
+                  (incoming.body ?? incoming.content ?? "").trim() &&
+                (m.sender_id === incoming.sender_id ||
+                  m.sender === incoming.sender)
+              ),
           );
-          setMessages((prev) => dedupeMessages([...prev, ...normalized]));
-          scrollToBottom(false);
-        }
+          return dedupeMessages([...next, incoming]);
+        });
+        scrollToBottom();
       } catch {
         // Non-JSON or unexpected payload — ignore silently
       }
@@ -204,7 +195,19 @@ export default function GroupChatScreen() {
   }, [groupId, dedupeMessages, scrollToBottom]);
 
   useEffect(() => {
-    navigation.setOptions({ headerTitle: threadTitle || groupTitle });
+    const isRootScreen = navigation.getState().index === 0;
+    navigation.setOptions({
+      headerTitle: threadTitle || groupTitle,
+      headerLeft: isRootScreen ? () => (
+        <TouchableOpacity
+          onPress={() => navigation.dispatch(StackActions.replace("MessagesList"))}
+          hitSlop={8}
+          style={{ paddingRight: 8 }}
+        >
+          <Ionicons name="chevron-back" size={28} color="#007AFF" />
+        </TouchableOpacity>
+      ) : undefined,
+    });
   }, [navigation, groupTitle, threadTitle]);
 
   const openParticipantProfile = useCallback(

@@ -16,6 +16,8 @@ import { authAPI } from '@/services/authAPI'
 import type { Service, BadgeProgress, ProfileReview } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
 import { groupHistoryItems, isOwnHistoryItem, type GroupedHistoryEntry } from '@/utils/historyGrouping'
+import { profileDataUserId } from '@/utils/profileDataLoad'
+import { isOngoingProfileService } from '@/utils/profileServices'
 import {
   GREEN, GREEN_LT,
   AMBER, AMBER_LT,
@@ -145,6 +147,7 @@ const UserProfile = () => {
   const routerLocation = useLocation()
   const [searchParams] = useSearchParams()
   const { user, updateUserOptimistically, refreshUser } = useAuthStore()
+  const userId = profileDataUserId(user)
 
   const initialTab: ServiceTab = (() => {
     const tabParam = searchParams.get('tab')
@@ -155,7 +158,7 @@ const UserProfile = () => {
   })()
 
   useEffect(() => {
-    void refreshUser()
+    void refreshUser({ force: false })
   }, [refreshUser])
 
   // ── Profile edit modal state ─────────────────────────────────────────────────
@@ -209,15 +212,15 @@ const UserProfile = () => {
   const [sendingVerification, setSendingVerification] = useState(false)
 
   useEffect(() => {
-    if (!user) return
+    if (!userId) return
     const ac = new AbortController()
     setServicesLoading(true)
-    serviceAPI.list({ user_id: user.id, page_size: 50 }, ac.signal)
+    serviceAPI.list({ user_id: userId, page_size: 50 }, ac.signal)
       .then(setServices).catch(() => {}).finally(() => setServicesLoading(false))
     setHistoryLoading(true)
-    userAPI.getHistory(user.id, ac.signal)
+    userAPI.getHistory(userId, ac.signal)
       .then(setHistory).catch(() => {}).finally(() => setHistoryLoading(false))
-    userAPI.getBadgeProgress(user.id, ac.signal).then(setBadges).catch(() => {})
+    userAPI.getBadgeProgress(userId, ac.signal).then(setBadges).catch(() => {})
     setEventsLoading(true)
     handshakeAPI.list(ac.signal)
       .then((list) => setEventHandshakes(list.filter((h) => h.service_type === 'Event')))
@@ -225,19 +228,19 @@ const UserProfile = () => {
       .finally(() => setEventsLoading(false))
     setReviewsLoading(true)
     Promise.all([
-      userAPI.getVerifiedReviews(user.id, { role: 'provider', signal: ac.signal }),
-      userAPI.getVerifiedReviews(user.id, { role: 'receiver', signal: ac.signal }),
-      userAPI.getVerifiedReviews(user.id, { role: 'organizer', signal: ac.signal }),
+      userAPI.getVerifiedReviews(userId, { role: 'provider', signal: ac.signal }),
+      userAPI.getVerifiedReviews(userId, { role: 'receiver', signal: ac.signal }),
+      userAPI.getVerifiedReviews(userId, { role: 'organizer', signal: ac.signal }),
     ]).then(([rProvider, rTaker, rOrganizer]) => {
       setReviewsAsProvider(rProvider.results)
       setReviewsAsTaker(rTaker.results)
       setReviewsAsOrganizer(rOrganizer.results)
     }).catch(() => {}).finally(() => setReviewsLoading(false))
     return () => ac.abort()
-  }, [user])
+  }, [userId])
 
   useEffect(() => {
-    if (!user) return
+    if (!userId) return
     const relevant = eventHandshakes.filter((h) => ['accepted', 'checked_in', 'attended'].includes(h.status))
     const idsToFetch = Array.from(new Set(relevant.map(getHandshakeServiceId).filter(Boolean))).filter(
       (id) => !(id in joinedEventServicesById),
@@ -253,7 +256,7 @@ const UserProfile = () => {
         if (Object.keys(next).length > 0) setJoinedEventServicesById((prev) => ({ ...prev, ...next }))
       }).catch(() => {})
     return () => ac.abort()
-  }, [user, eventHandshakes, joinedEventServicesById])
+  }, [userId, eventHandshakes, joinedEventServicesById])
 
   const handleChangePassword = async () => {
     if (!pwNew || !pwCurrent) { toast.error('Please fill in all password fields.'); return }
@@ -285,8 +288,8 @@ const UserProfile = () => {
 
   const ownHistory = history.filter(isOwnHistoryItem)
   const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
-  const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
-  const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
+  const offersTab  = services.filter(s => s.type === 'Offer' && isOngoingProfileService(s))
+  const needsTab   = services.filter(s => s.type === 'Need'  && isOngoingProfileService(s))
   const eventServices = services.filter(s => s.type === 'Event' && s.status === 'Active')
 
   useEffect(() => {
