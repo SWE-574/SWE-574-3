@@ -12,6 +12,12 @@ export interface ServiceListParams {
   distance?: number
   search?: string
   type?: 'Offer' | 'Need' | 'Event'
+  // Repeated `type=` keys for multi-select (Browse). Backend honors `type__in`.
+  types?: ('Offer' | 'Need' | 'Event')[]
+  // Repeated `location_type=` keys for Online + In-Person multi-select.
+  location_types?: ('Online' | 'In-Person')[]
+  schedule_type?: 'One-Time' | 'Recurrent'
+  weekend?: boolean
   status?: string
   tags?: string[]
   page?: number
@@ -84,6 +90,12 @@ export const serviceAPI = {
     if (params?.distance != null) queryParams.set('distance', String(params.distance))
     if (params?.search) queryParams.set('search', params.search)
     if (params?.type) queryParams.set('type', params.type)
+    if (params?.types?.length) params.types.forEach((t) => queryParams.append('type', t))
+    if (params?.location_types?.length) {
+      params.location_types.forEach((v) => queryParams.append('location_type', v))
+    }
+    if (params?.schedule_type) queryParams.set('schedule_type', params.schedule_type)
+    if (params?.weekend) queryParams.set('weekend', 'true')
     if (params?.status) queryParams.set('status', params.status)
     if (params?.tags?.length) params.tags.forEach(t => queryParams.append('tags', t))
     if (params?.page) queryParams.set('page', String(params.page))
@@ -115,6 +127,12 @@ export const serviceAPI = {
     if (params?.distance != null) queryParams.set('distance', String(params.distance))
     if (params?.search) queryParams.set('search', params.search)
     if (params?.type) queryParams.set('type', params.type)
+    if (params?.types?.length) params.types.forEach((t) => queryParams.append('type', t))
+    if (params?.location_types?.length) {
+      params.location_types.forEach((v) => queryParams.append('location_type', v))
+    }
+    if (params?.schedule_type) queryParams.set('schedule_type', params.schedule_type)
+    if (params?.weekend) queryParams.set('weekend', 'true')
     if (params?.status) queryParams.set('status', params.status)
     if (params?.tags?.length) params.tags.forEach((t) => queryParams.append('tags', t))
     if (params?.page) queryParams.set('page', String(params.page))

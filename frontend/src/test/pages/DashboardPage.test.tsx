@@ -126,11 +126,11 @@ describe('DashboardPage (Browse)', () => {
     expect(call.exclude_own).toBe(true)
   })
 
-  it('defaults to Trending ranking (sort=hot)', async () => {
+  it('defaults to For-you ranking when the viewer is onboarded with skills', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
     const call = listPagedMock.mock.calls[0][0]
-    expect(call.sort).toBe('hot')
+    expect(call.sort).toBe('for_you')
   })
 
   it('switches to sort=latest when Newest is clicked', async () => {
@@ -143,19 +143,42 @@ describe('DashboardPage (Browse)', () => {
     })
   })
 
-  it('does not render the recurrent filter or a result count', async () => {
+  it('switches to no sort param when All is clicked', async () => {
+    renderPage()
+    await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByText('All'))
+    await waitFor(() => {
+      const last = listPagedMock.mock.calls.at(-1)?.[0]
+      expect(last?.sort).toBeUndefined()
+    })
+  })
+
+  it('does not render the recurrent filter, the Trending button, or a result count', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
     expect(screen.queryByText('Recurrent')).not.toBeInTheDocument()
+    expect(screen.queryByText('Trending')).not.toBeInTheDocument()
     expect(screen.queryByText(/\d+ services?$/)).not.toBeInTheDocument()
   })
 
-  it('renders Pulse-style ranking buttons in the top bar', async () => {
+  it('renders the ranking buttons (no Trending; All on the right)', async () => {
     renderPage()
     await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
-    for (const label of ['For you', 'Discovery', 'Trending', 'Newest', 'Nearby']) {
+    for (const label of ['For you', 'Discovery', 'Newest', 'Nearby', 'All']) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
+    expect(screen.queryByText('Trending')).not.toBeInTheDocument()
+  })
+
+  it('renders the ranking row below the map element', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('map-view')).toBeInTheDocument())
+    const map = screen.getByTestId('map-view')
+    const rankingButton = screen.getByText('Newest')
+    const order = map.compareDocumentPosition(rankingButton)
+    // The map should appear BEFORE the ranking button in the DOM.
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4
+    expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('uses page_size 15', async () => {
@@ -173,5 +196,18 @@ describe('DashboardPage (Browse)', () => {
     renderPage()
     await waitFor(() => expect(screen.getByLabelText('Page 1')).toBeInTheDocument())
     expect(screen.getByLabelText('Page 4')).toBeInTheDocument()
+  })
+
+  it('sends repeated type= keys when multiple chips are active', async () => {
+    renderPage()
+    await waitFor(() => expect(listPagedMock).toHaveBeenCalled())
+    // Both the desktop and mobile rows render in jsdom (no responsive
+    // matching), so click the first occurrence of each chip.
+    fireEvent.click(screen.getAllByText('Offers')[0])
+    fireEvent.click(screen.getAllByText('Needs')[0])
+    await waitFor(() => {
+      const last = listPagedMock.mock.calls.at(-1)?.[0]
+      expect(last?.types).toEqual(expect.arrayContaining(['Offer', 'Need']))
+    })
   })
 })

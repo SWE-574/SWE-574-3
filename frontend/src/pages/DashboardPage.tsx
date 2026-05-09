@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from 'react'
 import { usePolling } from '@/hooks/usePolling'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -22,12 +22,18 @@ import {
   FiX,
   FiZap,
   FiCompass,
-  FiTrendingUp,
   FiNavigation,
   FiStar,
   FiCheck,
+  FiGrid,
 } from 'react-icons/fi'
-import { MapView } from '@/components/MapView'
+
+// Lazy-load the Mapbox-backed MapView. mapbox-gl is ~1.79 MB / 492 KB gzipped
+// and was previously eager — splitting it out moves the cost off the initial
+// paint of Browse.
+const MapView = lazy(() =>
+  import('@/components/MapView').then((m) => ({ default: m.MapView })),
+)
 import { serviceAPI, type ServiceListParams } from '@/services/serviceAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -53,13 +59,13 @@ import { isEventRecurrent } from '@/utils/eventRecurrence'
 
 const DEBOUNCE_SEARCH   = 400
 const DEBOUNCE_DISTANCE = 250
-const POLL_INTERVAL     = 60_000
+const POLL_INTERVAL     = 300_000  // 5 min — Browse is interactive, no need for 60s pings
 const GEO_TIMEOUT       = 10_000
 const PAGE_SIZE         = 15
 
 // ─── Ranking modes ────────────────────────────────────────────────────────────
 
-type RankingMode = 'for_you' | 'discovery' | 'trending' | 'newest' | 'nearby'
+type RankingMode = 'for_you' | 'discovery' | 'newest' | 'nearby' | 'all'
 
 interface RankingButtonDef {
   id: RankingMode
@@ -70,13 +76,14 @@ interface RankingButtonDef {
 const RANKING_BUTTONS: RankingButtonDef[] = [
   { id: 'for_you',   label: 'For you',   icon: <FiStar size={12} /> },
   { id: 'discovery', label: 'Discovery', icon: <FiCompass size={12} /> },
-  { id: 'trending',  label: 'Trending',  icon: <FiTrendingUp size={12} /> },
   { id: 'newest',    label: 'Newest',    icon: <FiZap size={12} /> },
   { id: 'nearby',    label: 'Nearby',    icon: <FiNavigation size={12} /> },
+  { id: 'all',       label: 'All',       icon: <FiGrid size={12} /> },
 ]
 
-// Secondary filters live in the [More filters ▾] popover. Multi-select; applied
-// client-side over the current page slice.
+// Secondary filters live in the [More filters ▾] popover. Multi-select. Sent
+// to the backend (`location_type=`, `schedule_type=`, `weekend=`) so the page
+// stays consistent with the pager.
 type SecondaryFilter = 'online' | 'in_person' | 'one_time' | 'weekend'
 
 interface SecondaryFilterDef {
@@ -141,23 +148,33 @@ function timeAgo(d: string) {
     : new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function sortServicesByFeedPriority(a: Service, b: Service) {
-  const pinDiff = Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned))
-  if (pinDiff !== 0) return pinDiff
-
-  const hotDiff = Number(b.hot_score ?? 0) - Number(a.hot_score ?? 0)
-  if (hotDiff !== 0) return hotDiff
-
-  return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+// Secondary filters are now applied server-side. The translation from the
+// chip set to backend params lives in `secondaryFiltersToParams` below.
+function secondaryFiltersToParams(filters: Set<SecondaryFilter>): {
+  location_types?: ('Online' | 'In-Person')[]
+  schedule_type?: 'One-Time' | 'Recurrent'
+  weekend?: boolean
+} {
+  const out: ReturnType<typeof secondaryFiltersToParams> = {}
+  const locs: ('Online' | 'In-Person')[] = []
+  if (filters.has('online')) locs.push('Online')
+  if (filters.has('in_person')) locs.push('In-Person')
+  // Both = no filter (treat as "any").
+  if (locs.length === 1) out.location_types = locs
+  if (filters.has('one_time')) out.schedule_type = 'One-Time'
+  if (filters.has('weekend')) out.weekend = true
+  return out
 }
 
-function matchesSecondaryFilter(service: Service, filter: SecondaryFilter): boolean {
-  switch (filter) {
-    case 'online':    return service.location_type === 'Online'
-    case 'in_person': return service.location_type === 'In-Person'
-    case 'one_time':  return service.schedule_type === 'One-Time'
-    case 'weekend':   return /saturday|sunday|weekend/i.test(service.schedule_details ?? '')
-  }
+// `pickGradient` runs a regex over (title + tag-names). Cache the result per
+// service object so re-renders skip the work.
+const gradientCache = new WeakMap<Service, [string, string]>()
+function getGradient(service: Service): [string, string] {
+  let g = gradientCache.get(service)
+  if (g) return g
+  g = pickGradient(service)
+  gradientCache.set(service, g)
+  return g
 }
 
 // ─── Tiny reusable bits ───────────────────────────────────────────────────────
@@ -245,7 +262,18 @@ function CardHeader({ service, gradient }: { service: Service; gradient: [string
   )
 }
 
-function ServiceCard({
+interface ServiceCardProps {
+  service: Service
+  isOwn: boolean
+  handshake?: Handshake
+  incomingCount: number
+  pendingCount: number
+  onClick: () => void
+  onHover?: () => void
+  dataTour?: string
+}
+
+function ServiceCardImpl({
   service, isOwn, handshake, incomingCount, pendingCount, onClick, onHover, dataTour,
 }: {
   service: Service
@@ -261,7 +289,7 @@ function ServiceCard({
   const isOffer   = service.type === 'Offer'
   const isRecurr  = isEventRecurrent(service)
   const isFixedGroupOffer = isOffer && service.schedule_type === 'One-Time' && service.max_participants > 1
-  const gradient  = pickGradient(service)
+  const gradient  = getGradient(service)
 
   const showBadge = handshake && !(isRecurr && handshake.status === 'completed')
   const hsCfg     = showBadge ? HANDSHAKE_BADGE[handshake!.status] : null
@@ -390,6 +418,20 @@ function ServiceCard({
   )
 }
 
+// Wrap the card in React.memo so the grid doesn't redo all 15 cards when
+// peripheral state (hovered service id, polling tick, etc.) changes. The
+// custom comparator covers every prop the card actually reads.
+const ServiceCard = memo(ServiceCardImpl, (prev, next) => {
+  return (
+    prev.service.id === next.service.id &&
+    prev.service.participant_count === next.service.participant_count &&
+    prev.isOwn === next.isOwn &&
+    prev.handshake?.status === next.handshake?.status &&
+    prev.incomingCount === next.incomingCount &&
+    prev.pendingCount === next.pendingCount &&
+    prev.dataTour === next.dataTour
+  )
+}) as (props: ServiceCardProps) => React.ReactElement
 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -401,7 +443,10 @@ const DashboardPage = () => {
   const [searchParams, setSearchParams]             = useSearchParams()
   const page                                         = Math.max(1, Number(searchParams.get('page') ?? 1))
 
-  const [rankingMode, setRankingMode]               = useState<RankingMode>('trending')
+  const isOnboardedWithSkills = Boolean(user?.is_onboarded && user?.skills?.length)
+  const [rankingMode, setRankingMode]               = useState<RankingMode>(
+    isOnboardedWithSkills ? 'for_you' : 'all',
+  )
   const [activeTypes, setActiveTypes]               = useState<Set<'Offer' | 'Need' | 'Event'>>(new Set())
   const [secondaryFilters, setSecondaryFilters]     = useState<Set<SecondaryFilter>>(new Set())
   const [searchQuery, setSearchQuery]               = useState('')
@@ -499,9 +544,12 @@ const DashboardPage = () => {
       search: debouncedSearch || undefined,
       page,
       page_size: PAGE_SIZE,
+      ...secondaryFiltersToParams(secondaryFilters),
     }
 
-    // Map ranking button → backend sort/explore/lat-lng knobs.
+    // Map ranking button → backend sort/explore/lat-lng knobs. `all` is the
+    // explicit "no ranking lens" choice — leave `sort` unset and the backend
+    // falls back to its default `-is_pinned, -created_at` ordering.
     switch (rankingMode) {
       case 'for_you':
         baseParams.sort = 'for_you'
@@ -509,9 +557,6 @@ const DashboardPage = () => {
       case 'discovery':
         baseParams.sort = 'for_you'
         baseParams.explore_only = true
-        break
-      case 'trending':
-        baseParams.sort = 'hot'
         break
       case 'newest':
         baseParams.sort = 'latest'
@@ -524,38 +569,16 @@ const DashboardPage = () => {
           baseParams.distance = debouncedDistance
         }
         break
+      case 'all':
+      default:
+        // No `sort` param — backend default ordering kicks in.
+        break
     }
 
-    // Backend `type=` filter is single-valued. When the viewer ticks more
-    // than one type chip we fan out one request per type and merge — bounded
-    // by the 3 service types so even at PAGE_SIZE=15 this is at most three
-    // small requests.
-    if (activeTypes.size > 1) {
-      const typeArr = Array.from(activeTypes)
-      const responses = await Promise.all(
-        typeArr.map((t) =>
-          serviceAPI.listPaged({ ...baseParams, type: t }, signal),
-        ),
-      )
-      const merged = new Map<string, Service>()
-      let combinedCount = 0
-      for (const r of responses) {
-        for (const s of r.results) merged.set(s.id, s)
-        combinedCount += r.count
-      }
-      const list = Array.from(merged.values())
-      list.sort((a, b) =>
-        rankingMode === 'newest'
-          ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          : sortServicesByFeedPriority(a, b),
-      )
-      setServices(list.slice(0, PAGE_SIZE))
-      setTotalCount(combinedCount)
-      return
-    }
-
-    if (activeTypes.size === 1) {
-      baseParams.type = Array.from(activeTypes)[0]
+    // Multi-type chip selection rides on the new repeated `?type=` keys —
+    // backend filters with `type__in=[...]` and pagination stays correct.
+    if (activeTypes.size > 0) {
+      baseParams.types = Array.from(activeTypes) as ('Offer' | 'Need' | 'Event')[]
     }
 
     const resp = await serviceAPI.listPaged(baseParams, signal)
@@ -566,6 +589,7 @@ const DashboardPage = () => {
     page,
     rankingMode,
     activeTypes,
+    secondaryFilters,
     locationEnabled,
     userLocation,
     debouncedDistance,
@@ -671,23 +695,21 @@ const DashboardPage = () => {
   // ── Derived ───────────────────────────────────────────────────────────────
   const ownServiceHandshakes = useMemo(() => Array.from(incomingMap.values()).flat(), [incomingMap])
 
-  // Hide events from the browse feed where the logged-in user was removed
-  // (i.e. their handshake was cancelled by an admin after a report). Past
-  // events drop out, and the secondary-filter popover (Online / In-person /
-  // One-time / Weekend) is applied client-side over the page slice.
+  // Server-side filters now cover type / location_type / schedule_type /
+  // weekend, so the only client-side narrowing left is removing past events
+  // and events the viewer was kicked from. Sort denied/cancelled rows to the
+  // bottom for the auth path.
   const displayServices = useMemo(() => {
-    const filters = Array.from(secondaryFilters)
-    return (isAuthenticated
+    const base = isAuthenticated
       ? services.filter((s) => {
           if (s.type !== 'Event') return true
           const hs = handshakeMap.get(s.id)
           return hs?.status !== 'cancelled'
         })
       : services
-    )
+    return base
       .filter((s) => {
         if (s.type === 'Event' && s.scheduled_time && new Date(s.scheduled_time).getTime() <= Date.now()) return false
-        if (filters.length && !filters.every((f) => matchesSecondaryFilter(s, f))) return false
         return true
       })
       .sort((a, b) => {
@@ -696,7 +718,7 @@ const DashboardPage = () => {
         if (aInactive === bInactive) return 0
         return aInactive ? 1 : -1
       })
-  }, [services, isAuthenticated, handshakeMap, secondaryFilters])
+  }, [services, isAuthenticated, handshakeMap])
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
   const pendingHs          = myServices.filter((service) => {
@@ -867,11 +889,36 @@ const DashboardPage = () => {
               </Box>
             </Flex>
 
-            {/* Ranking-mode buttons — single-select, default Trending */}
+          </Box>
+
+          {/* Map panel — always visible, fixed height. Lazy-loaded. */}
+          <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
+            <Suspense
+              fallback={
+                <Box
+                  bg={GRAY100}
+                  h="280px"
+                  borderRadius="12px"
+                  border={`1px solid ${GRAY200}`}
+                />
+              }
+            >
+              <MapView
+                services={displayServices}
+                height="280px"
+                onServiceClick={(id) => navigate(`/service-detail/${id}`)}
+                userLocation={userLocation}
+                isRefreshing={isLoading && services.length > 0}
+              />
+            </Suspense>
+          </Box>
+
+          {/* Ranking-mode buttons — single-select. Sits between the map and
+              the grid so the map shows the ranked slice you're viewing. */}
+          <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} px={{ base: 3, md: 5 }} py="10px">
             <Flex
               data-tour="ranking-modes"
               gap="6px"
-              mt="10px"
               overflowX="auto"
               align="center"
               style={{ scrollbarWidth: 'none' }}
@@ -892,9 +939,11 @@ const DashboardPage = () => {
                       disabled
                         ? btn.id === 'for_you'
                           ? 'Add your skills to unlock For you'
-                          : btn.id === 'nearby'
-                            ? 'Enable location to see nearby services'
-                            : ''
+                          : btn.id === 'discovery'
+                            ? 'Add your skills to unlock Discovery'
+                            : btn.id === 'nearby'
+                              ? 'Enable location to see nearby services'
+                              : ''
                         : ''
                     }
                     onClick={() => !disabled && setRankingMode(btn.id)}
@@ -922,17 +971,6 @@ const DashboardPage = () => {
                 )
               })}
             </Flex>
-          </Box>
-
-          {/* Map panel — always visible, fixed height. */}
-          <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
-            <MapView
-              services={displayServices}
-              height="280px"
-              onServiceClick={(id) => navigate(`/service-detail/${id}`)}
-              userLocation={userLocation}
-              isRefreshing={isLoading && services.length > 0}
-            />
           </Box>
 
           {/* Grid */}
@@ -1051,10 +1089,28 @@ interface MoreFiltersButtonProps {
 
 function MoreFiltersButton({ active, open, onOpenChange, onToggle, onClear, compact }: MoreFiltersButtonProps) {
   const count = active.size
+
+  // Close on Escape so keyboard users aren't trapped.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onOpenChange(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onOpenChange])
+
+  const handleClear = useCallback(() => {
+    onClear()
+    onOpenChange(false)
+  }, [onClear, onOpenChange])
+
   return (
     <Box position="relative">
       <Box
         as="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
         onClick={() => onOpenChange(!open)}
         px={compact ? '11px' : '12px'}
         py="6px"
@@ -1094,10 +1150,13 @@ function MoreFiltersButton({ active, open, onOpenChange, onToggle, onClear, comp
       </Box>
       {open && (
         <>
+          {/* Outside-click backdrop. zIndex sits clearly above the navbar
+              (Chakra defaults to ~10) so the click reaches the backdrop
+              instead of bubbling into surrounding chrome. */}
           <Box
             position="fixed"
             inset={0}
-            zIndex={30}
+            zIndex={1500}
             onClick={() => onOpenChange(false)}
           />
           <Box
@@ -1110,13 +1169,22 @@ function MoreFiltersButton({ active, open, onOpenChange, onToggle, onClear, comp
             borderRadius="12px"
             boxShadow="0 4px 18px rgba(0,0,0,0.10)"
             p="10px"
-            zIndex={40}
+            zIndex={1501}
+            role="dialog"
+            aria-label="Refine filters"
           >
-            <Text fontSize="10px" fontWeight={700} color={GRAY400} px="6px" mb="6px"
-              style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
-            >
-              Refine
-            </Text>
+            <Flex align="center" justify="space-between" px="6px" mb="6px">
+              <Text fontSize="10px" fontWeight={700} color={GRAY400}
+                style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
+              >
+                Refine
+              </Text>
+              {count > 0 && (
+                <Text fontSize="10px" fontWeight={700} color={GREEN}>
+                  {count} active
+                </Text>
+              )}
+            </Flex>
             {SECONDARY_FILTERS.map((f) => {
               const isActive = active.has(f.id)
               return (
@@ -1153,7 +1221,7 @@ function MoreFiltersButton({ active, open, onOpenChange, onToggle, onClear, comp
               <Box
                 as="button"
                 aria-disabled={count === 0 || undefined}
-                onClick={count > 0 ? onClear : undefined}
+                onClick={count > 0 ? handleClear : undefined}
                 fontSize="12px"
                 color={GRAY500}
                 _hover={{ color: GRAY700 }}
