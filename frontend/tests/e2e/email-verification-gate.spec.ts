@@ -47,11 +47,42 @@ async function stubSendVerification(page: Page) {
  * with a glob that explicitly accepts a query suffix, then trigger a refetch
  * by reloading so the auth store hydrates with the unverified payload before
  * we assert on the dashboard banner.
+ *
+ * Mirrors the shape User expects so the navbar and protected routes still
+ * render — only the verification flag is forced.
  */
 async function ensureUnverifiedAuthState(
   page: Page,
   email: string,
 ): Promise<void> {
+  // Capture the live user payload via a one-shot fetch so the stubbed
+  // response carries id / role / badge fields instead of a hand-rolled
+  // skeleton that the rest of the SPA might reject.
+  let realUser: Record<string, unknown> = {}
+  try {
+    const captured = await page.evaluate(async () => {
+      const res = await fetch('/api/users/me/', { credentials: 'include' })
+      if (!res.ok) return null
+      return (await res.json()) as Record<string, unknown>
+    })
+    if (captured) realUser = captured
+  } catch { /* fall back to skeleton below */ }
+
+  const stubbed = {
+    id: 'stub-user-id',
+    role: 'member',
+    first_name: 'Cem',
+    last_name: 'Demir',
+    featured_badges: [],
+    featured_badges_detail: [],
+    ...realUser,
+    email,
+    is_verified: false,
+    is_onboarded: true,
+    is_admin: false,
+    is_active: true,
+  }
+
   await page.unroute('**/api/users/me/').catch(() => { /* nothing to unroute */ })
   await page.route('**/api/users/me/**', async (route) => {
     if (route.request().method() !== 'GET') {
@@ -61,15 +92,7 @@ async function ensureUnverifiedAuthState(
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({
-        email,
-        first_name: 'Cem',
-        last_name: 'Demir',
-        is_verified: false,
-        is_onboarded: true,
-        is_admin: false,
-        is_active: true,
-      }),
+      body: JSON.stringify(stubbed),
     })
   })
   // Reload so the next App mount calls /users/me/ against the fresh stub
