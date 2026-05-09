@@ -15,6 +15,8 @@ from api.models import Service, Tag
 from api.search_filters import (
     SearchStrategy,
     LocationStrategy,
+    LocationTypeStrategy,
+    ScheduleFilterStrategy,
     TagStrategy,
     TextStrategy,
     TypeStrategy,
@@ -597,8 +599,127 @@ class TestTypeStrategy:
         params = {'type': 'Invalid'}
         
         result = self.strategy.apply(queryset, params)
-        
+
         # Invalid type is ignored, all services returned
+        assert result.count() == 2
+
+    def test_type_strategy_filters_by_multiple_types(self):
+        """`types=[...]` filters with type__in (used by Browse multi-select)."""
+        Service.objects.create(
+            user=self.user, title='Need Service', description='need',
+            type='Need', duration=Decimal('1.00'),
+            location_type='Online', max_participants=1, schedule_type='One-Time',
+        )
+        queryset = Service.objects.filter(status='Active')
+        result = self.strategy.apply(queryset, {'types': ['Offer', 'Need']})
+        types = sorted(set(s.type for s in result))
+        assert types == ['Need', 'Offer']
+
+    def test_type_strategy_ignores_invalid_values_in_list(self):
+        """Unknown values in `types` are dropped before filtering."""
+        queryset = Service.objects.filter(status='Active')
+        result = self.strategy.apply(queryset, {'types': ['Offer', 'Bogus']})
+        assert all(s.type == 'Offer' for s in result)
+
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestLocationTypeStrategy:
+    """Test cases for LocationTypeStrategy."""
+
+    def setup_method(self, method):
+        self.user = User.objects.create_user(
+            email='loc-type@test.com', password='x', first_name='T', last_name='U',
+            timebank_balance=Decimal('10.00'),
+        )
+        self.online = Service.objects.create(
+            user=self.user, title='Online Service', description='d',
+            type='Offer', duration=Decimal('1.00'), location_type='Online',
+            max_participants=1, schedule_type='One-Time',
+        )
+        self.in_person = Service.objects.create(
+            user=self.user, title='IRL Service', description='d',
+            type='Offer', duration=Decimal('1.00'), location_type='In-Person',
+            max_participants=1, schedule_type='One-Time',
+        )
+        self.strategy = LocationTypeStrategy()
+
+    def test_keeps_only_online(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'location_types': ['Online']},
+        )
+        titles = [s.title for s in result]
+        assert 'Online Service' in titles
+        assert 'IRL Service' not in titles
+
+    def test_keeps_only_in_person(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'location_types': ['In-Person']},
+        )
+        titles = [s.title for s in result]
+        assert 'IRL Service' in titles
+        assert 'Online Service' not in titles
+
+    def test_both_values_is_noop(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'location_types': ['Online', 'In-Person']},
+        )
+        assert result.count() == 2
+
+    def test_empty_is_noop(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'), {'location_types': []},
+        )
+        assert result.count() == 2
+
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestScheduleFilterStrategy:
+    """Test cases for ScheduleFilterStrategy."""
+
+    def setup_method(self, method):
+        self.user = User.objects.create_user(
+            email='sched@test.com', password='x', first_name='T', last_name='U',
+            timebank_balance=Decimal('10.00'),
+        )
+        self.one_time = Service.objects.create(
+            user=self.user, title='Once', description='d', type='Offer',
+            duration=Decimal('1.00'), location_type='Online',
+            max_participants=1, schedule_type='One-Time',
+            schedule_details='Tuesday 18:00',
+        )
+        self.recurrent = Service.objects.create(
+            user=self.user, title='Weekly', description='d', type='Offer',
+            duration=Decimal('1.00'), location_type='Online',
+            max_participants=1, schedule_type='Recurrent',
+            schedule_details='Every Sunday 10:00',
+        )
+        self.strategy = ScheduleFilterStrategy()
+
+    def test_filters_by_schedule_type(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'schedule_type': 'Recurrent'},
+        )
+        titles = [s.title for s in result]
+        assert titles == ['Weekly']
+
+    def test_weekend_matches_schedule_details(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'), {'weekend': True},
+        )
+        titles = [s.title for s in result]
+        assert 'Weekly' in titles  # 'Sunday' matches
+        assert 'Once' not in titles
+
+    def test_no_params_is_noop(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'), {},
+        )
         assert result.count() == 2
 
 

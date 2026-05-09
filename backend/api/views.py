@@ -2316,6 +2316,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
         search_engine = SearchEngine()
         search_params = {
             'type': self.request.query_params.get('type'),
+            # Repeated `type=` (Browse multi-select) is honored when present.
+            'types': self.request.query_params.getlist('type'),
+            # Repeated `location_type=` for Online / In-Person multi-select.
+            'location_types': self.request.query_params.getlist('location_type'),
+            'schedule_type': self.request.query_params.get('schedule_type'),
+            'weekend': str(
+                self.request.query_params.get('weekend', '')
+            ).strip().lower() in {'1', 'true', 'yes'},
             'tag': self.request.query_params.get('tag'),
             'tags': self.request.query_params.getlist('tags'),
             'search': self.request.query_params.get('search'),

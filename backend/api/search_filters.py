@@ -205,15 +205,62 @@ class TypeStrategy(SearchStrategy):
     Filter services by type (Offer, Need, or Event).
 
     Parameters:
-        - type: 'Offer', 'Need', or 'Event'
+        - type:  'Offer' | 'Need' | 'Event' (single value, legacy)
+        - types: list of valid types, e.g. ['Offer', 'Need'] — used by Browse
+                 when multiple type chips are active.
     """
 
+    VALID = {'Offer', 'Need', 'Event'}
+
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        types_list = [t for t in (params.get('types') or []) if t in self.VALID]
+        if types_list:
+            return queryset.filter(type__in=types_list)
+
         service_type = params.get('type')
-
-        if service_type and service_type in ['Offer', 'Need', 'Event']:
+        if service_type and service_type in self.VALID:
             queryset = queryset.filter(type=service_type)
+        return queryset
 
+
+class LocationTypeStrategy(SearchStrategy):
+    """
+    Filter services by location_type (Online / In-Person).
+
+    Parameters:
+        - location_types: list of values to keep. When empty or both values
+          are present, the filter is a no-op (equivalent to "all").
+    """
+
+    VALID = {'Online', 'In-Person'}
+
+    def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        values = [v for v in (params.get('location_types') or []) if v in self.VALID]
+        if not values or set(values) == self.VALID:
+            return queryset
+        return queryset.filter(location_type__in=values)
+
+
+class ScheduleFilterStrategy(SearchStrategy):
+    """
+    Filter services by schedule_type and/or weekend matching.
+
+    Parameters:
+        - schedule_type: 'One-Time' | 'Recurrent' (optional)
+        - weekend: bool — when true, restrict to services whose
+          schedule_details mention saturday / sunday / weekend.
+    """
+
+    VALID = {'One-Time', 'Recurrent'}
+
+    def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        schedule_type = params.get('schedule_type')
+        if schedule_type in self.VALID:
+            queryset = queryset.filter(schedule_type=schedule_type)
+        if params.get('weekend'):
+            queryset = queryset.filter(
+                schedule_details__iregex=r'(saturday|sunday|weekend)',
+            )
         return queryset
 
 
@@ -310,11 +357,13 @@ class SearchEngine:
     def __init__(self):
         """Initialize with default strategy order"""
         self.strategies: list[SearchStrategy] = [
-            TypeStrategy(),       # Filter by type first (most selective)
-            DateRangeStrategy(),  # Event-only: scheduled_time window
-            TagStrategy(),        # Then by tags
-            TextStrategy(),       # Then by text search
-            LocationStrategy(),   # Location last (adds ordering by distance)
+            TypeStrategy(),             # Filter by type first (most selective)
+            LocationTypeStrategy(),     # Online vs In-Person filter
+            ScheduleFilterStrategy(),   # schedule_type + weekend
+            DateRangeStrategy(),        # Event-only: scheduled_time window
+            TagStrategy(),              # Then by tags
+            TextStrategy(),             # Then by text search
+            LocationStrategy(),         # Location last (adds ordering by distance)
         ]
 
     def search(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
