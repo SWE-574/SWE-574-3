@@ -116,42 +116,62 @@ class TestLocationStrategy:
     def test_location_strategy_filters_by_distance(self):
         """Test LocationStrategy filters services within specified distance."""
         queryset = Service.objects.filter(status='Active')
-        
+
         # Search from Besiktas center with 10km radius
         params = {
             'lat': 41.0422,
             'lng': 29.0089,
             'distance': 10
         }
-        
+
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
-        
-        # Should include Besiktas and Kadikoy (within 10km), but not Ankara or online
-        assert len(result_list) == 2
+
+        # Should include Besiktas and Kadikoy (within 10km), and Online
+        # services (no location is not subject to the geo filter), but
+        # not Ankara.
         titles = [s.title for s in result_list]
         assert 'Besiktas Service' in titles
         assert 'Kadikoy Service' in titles
+        assert 'Online Service' in titles
         assert 'Ankara Service' not in titles
-        assert 'Online Service' not in titles
-    
+
     def test_location_strategy_with_small_radius(self):
         """Test LocationStrategy with small radius only returns nearby services."""
         queryset = Service.objects.filter(status='Active')
-        
+
         # Search from Besiktas center with 2km radius
         params = {
             'lat': 41.0422,
             'lng': 29.0089,
             'distance': 2
         }
-        
+
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
-        
-        # Should only include Besiktas service
-        assert len(result_list) == 1
-        assert result_list[0].title == 'Besiktas Service'
+
+        # Should include Besiktas (within 2km) and the Online service
+        # (no location, not subject to the geo filter). Kadikoy and Ankara
+        # are filtered out by distance.
+        titles = [s.title for s in result_list]
+        assert 'Besiktas Service' in titles
+        assert 'Online Service' in titles
+        assert 'Kadikoy Service' not in titles
+        assert 'Ankara Service' not in titles
+
+    def test_location_strategy_keeps_online_services(self):
+        """Online services (location IS NULL) bypass the distance filter."""
+        queryset = Service.objects.filter(status='Active')
+
+        params = {'lat': 41.0422, 'lng': 29.0089, 'distance': 1}
+
+        result_list = list(self.strategy.apply(queryset, params))
+
+        titles = [s.title for s in result_list]
+        # Even with a 1km radius the Online service must still be visible.
+        assert 'Online Service' in titles
+        # In-Person services beyond 1km must still be filtered out.
+        assert 'Ankara Service' not in titles
     
     def test_location_strategy_orders_by_distance(self):
         """Test LocationStrategy orders results by distance (nearest first)."""
@@ -681,20 +701,22 @@ class TestSearchEngine:
     def test_search_engine_with_location(self):
         """Test SearchEngine with location filter."""
         queryset = Service.objects.filter(status='Active')
-        
+
         # Search near Besiktas with small radius
         params = {
             'lat': 41.0422,
             'lng': 29.0089,
             'distance': 2
         }
-        
+
         result = self.search_engine.search(queryset, params)
-        result_list = list(result)
-        
-        # Only Besiktas service should be in 2km radius
-        assert len(result_list) == 1
-        assert result_list[0].title == 'Python Programming'
+        titles = [s.title for s in result]
+
+        # In-Person services within 2km plus Online services (no location,
+        # not subject to the geo filter).
+        assert 'Python Programming' in titles  # In Besiktas, within 2km
+        assert 'Need Help with Python' in titles  # Online — bypasses filter
+        assert 'Cooking Class' not in titles  # Kadikoy is ~7km away
     
     def test_search_engine_all_filters(self):
         """Test SearchEngine with all filters combined."""

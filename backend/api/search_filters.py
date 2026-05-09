@@ -89,11 +89,14 @@ class LocationStrategy(SearchStrategy):
         # Create user location point (lng, lat order for PostGIS)
         user_location = Point(lng, lat, srid=4326)
 
-        # Filter by distance and annotate with calculated distance
-        # Only filter services that have a location set
+        # In-Person services must fall within `distance_km`. Online services
+        # (location IS NULL) are NOT subject to the distance filter and remain
+        # visible regardless of slider position — otherwise a viewer with
+        # location enabled would lose every Online service the moment they
+        # narrow the radius.
         queryset = queryset.filter(
-            location__isnull=False,
-            location__distance_lte=(user_location, D(km=distance_km))
+            Q(location__isnull=True)
+            | Q(location__distance_lte=(user_location, D(km=distance_km)))
         ).annotate(
             distance=Distance('location', user_location)
         ).order_by('distance')

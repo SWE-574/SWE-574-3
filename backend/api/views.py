@@ -2366,6 +2366,15 @@ class ServiceViewSet(viewsets.ModelViewSet):
             eligible_ids = [s.id for s in (*cold, *under, *stale)]
             queryset = queryset.filter(id__in=eligible_ids)
 
+        # Optional `exclude_own` toggle — Browse uses this so the viewer
+        # never sees their own services in the discovery feed.
+        exclude_own_raw = self.request.query_params.get('exclude_own', '')
+        if (
+            str(exclude_own_raw).strip().lower() in {'1', 'true', 'yes'}
+            and self.request.user.is_authenticated
+        ):
+            queryset = queryset.exclude(user=self.request.user)
+
         # Filter by owner user (for profile pages)
         if user_param:
             queryset = queryset.filter(user_id=user_param)
