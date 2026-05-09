@@ -1,4 +1,4 @@
-import { test } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 
 import { createNeed, expectNavbarBalance, getCurrentBalance, loginAsUserWithBalanceAtLeast } from '../helpers'
 
@@ -22,9 +22,11 @@ test('FR-06d: request creation reserves hours equal to the request duration from
   await page.goto('/notifications')
   await expectNavbarBalance(page, startingBalance - duration)
 
-  // Cross-check the current user payload so the numeric deduction matches the visible balance change.
-  const currentBalance = await getCurrentBalance(page)
-  if (currentBalance !== startingBalance - duration) {
-    throw new Error(`Expected balance ${startingBalance - duration}, received ${currentBalance}.`)
-  }
+  // Cross-check the current user payload so the numeric deduction matches
+  // the visible balance change. The reservation write may be a step or two
+  // behind the navbar refresh, so poll instead of asserting once.
+  const expected = startingBalance - duration
+  await expect
+    .poll(() => getCurrentBalance(page), { timeout: 10_000 })
+    .toBe(expected)
 })
