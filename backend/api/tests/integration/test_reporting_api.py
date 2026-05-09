@@ -97,6 +97,53 @@ class TestReportingAPI:
         )
         assert_api_response(handshake_report, 201, contains={'report_id'})
 
+    def test_user_profile_report_creates_report(self):
+        reporter = UserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(reporter)
+
+        response = client.post(
+            f"/api/users/{target.id}/report/",
+            {"issue_type": "harassment", "description": "Harassing messages elsewhere."},
+            format="json",
+        )
+        assert_api_response(response, 201, contains={'report_id'})
+        row = Report.objects.get(id=response.data["report_id"])
+        assert row.reporter_id == reporter.id
+        assert row.reported_user_id == target.id
+        assert row.reported_service_id is None
+
+    def test_user_profile_report_rejects_self_report(self):
+        user = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(user)
+
+        response = client.post(
+            f"/api/users/{user.id}/report/",
+            {"issue_type": "spam", "description": "test"},
+            format="json",
+        )
+        assert_problem_detail(response, 400)
+
+    def test_user_profile_report_duplicates_blocked(self):
+        reporter = UserFactory()
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(reporter)
+
+        first = client.post(
+            f"/api/users/{target.id}/report/",
+            {"issue_type": "spam", "description": "First."},
+            format="json",
+        )
+        assert_api_response(first, 201)
+
+        second = client.post(
+            f"/api/users/{target.id}/report/",
+            {"issue_type": "spam", "description": "Second."},
+            format="json",
+        )
+        assert_problem_detail(second, 400)
+        assert "already reported" in (second.data.get("detail", "") or "").lower()
+
     def test_non_event_handshake_report_keeps_active_status(self):
         provider = UserFactory()
         reporter = UserFactory()

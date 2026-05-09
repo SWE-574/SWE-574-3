@@ -1982,6 +1982,125 @@ class UserFollowingListView(APIView):
         return _user_follow_list_response(request, id, 'following')
 
 
+class UserReportView(APIView):
+    """
+    Report another user's profile for moderation (no related listing or handshake).
+
+    **POST /api/users/{id}/report/** — Body: ``issue_type``, optional ``description``.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [SensitiveOperationThrottle]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    @extend_schema(
+        summary='Report user profile',
+        description=(
+            'Creates a moderation report targeting the user profile only. '
+            'Distinct from listing reports (POST /api/services/{id}/report/).'
+        ),
+        request={
+            'application/json': inline_serializer(
+                name='UserReportRequest',
+                fields={
+                    'issue_type': drf_serializers.ChoiceField(
+                        choices=[
+                            'inappropriate_content',
+                            'spam',
+                            'service_issue',
+                            'scam',
+                            'harassment',
+                            'other',
+                        ],
+                    ),
+                    'description': drf_serializers.CharField(required=False, allow_blank=True),
+                },
+            ),
+        },
+        responses={
+            201: OpenApiResponse(description='Report created; returns status and report_id.'),
+            400: OpenApiResponse(description='Validation error or duplicate profile report.'),
+            404: OpenApiResponse(description='User not found.'),
+        },
+        tags=['Users'],
+    )
+    def post(self, request, id):
+        try:
+            target = User.objects.get(id=id)
+        except User.DoesNotExist:
+            return create_error_response(
+                'User not found.',
+                code=ErrorCodes.NOT_FOUND,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        if target.id == request.user.id:
+            return create_error_response(
+                'You cannot report yourself.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        issue_type = request.data.get('issue_type', 'inappropriate_content')
+        description = (request.data.get('description') or '').strip()
+
+        allowed_types = {'inappropriate_content', 'spam', 'service_issue', 'scam', 'harassment', 'other'}
+        if issue_type not in allowed_types:
+            return create_error_response(
+                'Invalid issue_type.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        already_reported = Report.objects.filter(
+            reporter=request.user,
+            reported_user=target,
+            reported_service__isnull=True,
+            related_handshake__isnull=True,
+            reported_forum_topic__isnull=True,
+            reported_forum_post__isnull=True,
+        ).exists()
+        if already_reported:
+            return create_error_response(
+                'You have already reported this profile. Moderators are reviewing your report.',
+                code=ErrorCodes.VALIDATION_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not description:
+            type_labels = {
+                'inappropriate_content': 'Inappropriate content',
+                'spam': 'Spam or misleading behavior',
+                'service_issue': 'Issue with conduct or profile information',
+                'scam': 'Suspected scam or fraud',
+                'harassment': 'Harassment or abusive behavior',
+                'other': 'Other issue reported by user',
+            }
+            description = type_labels.get(issue_type, 'Reported by user')
+
+        report = Report.objects.create(
+            reporter=request.user,
+            reported_user=target,
+            type=issue_type,
+            description=description,
+        )
+
+        admins = User.objects.filter(role__in=['admin', 'super_admin'], is_active=True)
+        display_name = f'{target.first_name} {target.last_name}'.strip() or target.email
+        for admin in admins:
+            create_notification(
+                user=admin,
+                notification_type='new_report',
+                title='New User Profile Report',
+                message=f"New {report.get_type_display()} report for profile: {display_name}",
+                related_user=target,
+                report=report,
+            )
+        notify_reporter_of_receipt(report)
+
+        return Response({'status': 'success', 'report_id': str(report.id)}, status=status.HTTP_201_CREATED)
+
+
 class ServiceViewSet(viewsets.ModelViewSet):
     """
     Service Management
