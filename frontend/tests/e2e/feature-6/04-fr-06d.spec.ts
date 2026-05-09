@@ -6,8 +6,10 @@ test('FR-06d: request creation reserves hours equal to the request duration from
   const title = `FR-06d Need ${Date.now()}`
   const duration = 1
 
-  // Start from a user who can afford the request and capture their available balance.
-  const { balance: startingBalance } = await loginAsUserWithBalanceAtLeast(page, duration)
+  // Pick a user with extra headroom so the assertion is not left guessing
+  // when a concurrent worker temporarily reserves on the same shared demo
+  // account between the starting-balance read and createNeed.
+  const { balance: startingBalance } = await loginAsUserWithBalanceAtLeast(page, duration + 2)
 
   await createNeed(page, {
     title,

@@ -1916,9 +1916,15 @@ export default function ChatPage() {
 
   const handleInitiate = useCallback(async (payload: InitiatePayload) => {
     if (!selectedId) return
-    await handshakeAPI.initiate(selectedId, payload)
-    toast.success('Session details sent!')
-    refreshConversations()
+    try {
+      await handshakeAPI.initiate(selectedId, payload)
+      toast.success('Session details sent!')
+      refreshConversations()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(err?.response?.data?.detail ?? err?.message ?? 'Failed to send session details.')
+      throw e
+    }
   }, [selectedId, refreshConversations])
 
   const handleApprove = useCallback(async () => {
