@@ -1822,13 +1822,13 @@ class UserProfileSerializer(FeaturedBadgesDetailMixin, ProfileFollowStatsMixin, 
             value = []
         if not isinstance(value, list):
             raise serializers.ValidationError('Must be a list.')
-        # Drop blanks / whitespace (FormData uses '' to mean "clear all featured badges")
-        value = [s.strip() for s in value if isinstance(s, str) and s.strip()]
-        if len(value) > 2:
-            raise serializers.ValidationError('At most 2 featured badges are allowed.')
         for entry in value:
             if not isinstance(entry, str):
                 raise serializers.ValidationError('All entries must be strings.')
+        # Drop blanks / whitespace (FormData uses '' to mean "clear all featured badges")
+        value = [s.strip() for s in value if s.strip()]
+        if len(value) > 2:
+            raise serializers.ValidationError('At most 2 featured badges are allowed.')
         if len(value) != len(set(value)):
             raise serializers.ValidationError('Duplicate badge IDs are not allowed.')
         if value:
