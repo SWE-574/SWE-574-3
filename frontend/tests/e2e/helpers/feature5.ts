@@ -99,9 +99,10 @@ export async function initiateOnlineSessionAsOwner(page: Page, options: {
 }): Promise<void> {
   const minutes = ['00', '15', '30', '45']
   const seed = Date.now()
+  const totalAttempts = 24
   let result: { ok: boolean; status: number; body: string } | null = null
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
     const { date } = futureDateParts((options.daysAhead ?? 3) + Math.floor(attempt / 4))
     const slotHour = 9 + ((seed + attempt) % 8)
     const slotMinute = minutes[(Math.floor(seed / 1000) + attempt) % minutes.length] ?? '00'
@@ -299,9 +300,10 @@ export async function acceptPendingHandshakeViaApi(page: Page, options: {
     // Offer/Need flow: provider initiates session details, requester approves.
     const minutes = ['00', '15', '30', '45']
     const seed = Date.now()
+    const totalAttempts = 24
     let initiateResult: { ok: boolean; status: number; body: string } | null = null
 
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
       const { date } = futureDateParts(3 + Math.floor(attempt / 4))
       const slotHour = 9 + ((seed + attempt) % 8)
       const slotMinute = minutes[(Math.floor(seed / 1000) + attempt) % minutes.length] ?? '00'
