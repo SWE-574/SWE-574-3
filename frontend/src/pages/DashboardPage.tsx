@@ -620,6 +620,8 @@ const DashboardPage = () => {
                 alignItems="center" justifyContent="center"
                 w="34px" h="34px" borderRadius="9px" flexShrink={0}
                 bg={GRAY100} color={GRAY600}
+                aria-label={sidebarOpen ? 'Close filters' : 'Open filters'}
+                aria-expanded={sidebarOpen}
                 onClick={() => setSidebarOpen((v) => !v)}
               >
                 {sidebarOpen ? <FiX size={16} /> : <FiMenu size={16} />}
