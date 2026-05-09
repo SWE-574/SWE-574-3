@@ -1,7 +1,7 @@
 import { type Page, expect } from '@playwright/test'
 
 // ─── Demo user credentials (seeded by setup_demo.py) ─────────────────────────
-export const USERS = {
+const DEMO_USERS = {
   elif:   { email: 'elif@demo.com',   password: 'demo123', name: 'Elif Yılmaz' },
   cem:    { email: 'cem@demo.com',    password: 'demo123', name: 'Cem Demir'   },
   ayse:   { email: 'ayse@demo.com',   password: 'demo123', name: 'Ayşe Kaya'   },
@@ -11,6 +11,14 @@ export const USERS = {
   deniz:  { email: 'deniz@demo.com',  password: 'demo123', name: 'Deniz Aydın' },
   burak:  { email: 'burak@demo.com',  password: 'demo123', name: 'Burak Kurt'  },
   yasemin:{ email: 'yasemin@demo.com',password: 'demo123', name: 'Yasemin Ergin' },
+} as const
+
+// `regular` is the role-agnostic alias used by tests that just need any
+// signed-in non-admin (e.g. the a11y baseline). Aliased to `cem` (member
+// role, no admin flag) so the seed stays the source of truth.
+export const USERS = {
+  ...DEMO_USERS,
+  regular: DEMO_USERS.cem,
 } as const
 
 export type DemoUser = (typeof USERS)[keyof typeof USERS]
