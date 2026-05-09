@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -24,9 +25,23 @@ import {
   type TransactionSummary,
 } from "../../api/transactions";
 import { listHandshakes, type Handshake } from "../../api/handshakes";
+import { getGroupChat, type GroupChatParticipant } from "../../api/chats";
 import { getUserHistory } from "../../api/users";
 import type { UserHistoryItem } from "../../api/types";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
+import {
+  activeAgreementParticipantLabel,
+  completedGroupOfferParticipantCount,
+  completedTransactionParticipantLabel,
+  groupActiveAgreements,
+  groupTransactionRows,
+  isTimeActivityParticipantStatus,
+  timeActivityAvatarPreview,
+  timeActivityAvatarStackWidth,
+  timeActivityVisibleParticipants,
+  type GroupedTransactionRow,
+  type TimeActivityAgreement as ExpectedAgreement,
+} from "../../utils/timeActivityGrouping";
 
 const PAGE_SIZE = 20;
 const ACTIVE_HANDSHAKE_STATUSES = new Set(["accepted", "checked_in", "attended"]);
@@ -37,21 +52,6 @@ const FILTERS: Array<{ key: TransactionDirection; label: string }> = [
   { key: "debit", label: "Used" },
 ];
 const SERVICE_TYPE_ORDER = ["Offer", "Need", "Event"] as const;
-
-type ExpectedAgreement = {
-  id: string;
-  service_id?: string | null;
-  service_title: string;
-  service_type?: Handshake["service_type"];
-  is_current_user_provider: boolean;
-  counterpart_id?: string | null;
-  counterpart_name: string;
-  counterpart_avatar_url?: string | null;
-  status: Handshake["status"];
-  reserved_delta: number;
-  expected_delta: number;
-  note: string;
-};
 
 type EventHistoryItem = UserHistoryItem & {
   event_status: "completed" | "attended";
@@ -216,9 +216,7 @@ function handshakeCounterpartName(handshake: Handshake, currentUserName?: string
 }
 
 function activeHandshakeLabel(status: Handshake["status"]): string {
-  if (status === "checked_in") return "Checked in";
-  if (status === "attended") return "Attended";
-  return "Session confirmed";
+  return activeAgreementParticipantLabel(status);
 }
 
 function toExpectedAgreement(
@@ -243,6 +241,10 @@ function toExpectedAgreement(
     service_id: handshake.service_id ?? null,
     service_title: String(handshake.service_title ?? "Untitled service"),
     service_type: handshake.service_type,
+    schedule_type: handshake.schedule_type,
+    max_participants: handshake.max_participants,
+    scheduled_time:
+      typeof handshake.scheduled_time === "string" ? handshake.scheduled_time : null,
     is_current_user_provider: isProvider,
     counterpart_id: handshake.counterpart?.id ?? null,
     counterpart_name: handshakeCounterpartName(handshake, currentUserName),
@@ -256,6 +258,59 @@ function toExpectedAgreement(
       ? "Time expected after completion"
       : "Already reserved at acceptance",
   };
+}
+
+function eventGroupParticipantToAgreement(
+  participant: GroupChatParticipant,
+  sourceAgreement: ExpectedAgreement,
+  index: number,
+): ExpectedAgreement {
+  return {
+    ...sourceAgreement,
+    id: `event-participant:${sourceAgreement.service_id}:${participant.id}`,
+    counterpart_id: participant.id,
+    counterpart_name: participant.name || "Unknown user",
+    counterpart_avatar_url: participant.avatar_url ?? null,
+    is_current_user_provider: index === 0,
+    reserved_delta: 0,
+    expected_delta: 0,
+    note: index === 0 ? "Organizer" : "Attendee",
+    participants: undefined,
+    is_grouped_multi_use: false,
+  };
+}
+
+async function enrichEventAgreementParticipants(
+  agreements: ExpectedAgreement[],
+): Promise<ExpectedAgreement[]> {
+  const eventServices = new Map<string, ExpectedAgreement>();
+  for (const agreement of agreements) {
+    if (agreement.service_type === "Event" && agreement.service_id && !eventServices.has(agreement.service_id)) {
+      eventServices.set(agreement.service_id, agreement);
+    }
+  }
+  if (eventServices.size === 0) return agreements;
+
+  const participantEntries = await Promise.all(
+    Array.from(eventServices.entries()).map(async ([serviceId, sourceAgreement]) => {
+      try {
+        const thread = await getGroupChat(serviceId);
+        const participants = (thread.participants ?? []).map((participant, index) =>
+          eventGroupParticipantToAgreement(participant, sourceAgreement, index),
+        );
+        return [serviceId, participants] as const;
+      } catch {
+        return [serviceId, [] as ExpectedAgreement[]] as const;
+      }
+    }),
+  );
+
+  const participantsByServiceId = new Map(participantEntries);
+  return agreements.map((agreement) => {
+    if (agreement.service_type !== "Event" || !agreement.service_id) return agreement;
+    const participants = participantsByServiceId.get(agreement.service_id);
+    return participants?.length ? { ...agreement, participants } : agreement;
+  });
 }
 
 function typeTone(type: "Offer" | "Need" | "Event") {
@@ -359,6 +414,7 @@ export default function TimeActivityScreen() {
   const [eventHistory, setEventHistory] = useState<EventHistoryItem[]>([]);
   const [summary, setSummary] = useState<TransactionSummary>(EMPTY_SUMMARY);
   const [activeAgreements, setActiveAgreements] = useState<ExpectedAgreement[]>([]);
+  const [agreementParticipants, setAgreementParticipants] = useState<ExpectedAgreement[]>([]);
   const [direction, setDirection] = useState<TransactionDirection>("all");
   const [page, setPage] = useState(1);
   const [count, setCount] = useState(0);
@@ -368,6 +424,9 @@ export default function TimeActivityScreen() {
   const [isAgreementsOpen, setIsAgreementsOpen] = useState(false);
   const [isEventActivityOpen, setIsEventActivityOpen] = useState(false);
   const [openAgreementSections, setOpenAgreementSections] = useState<Record<string, boolean>>({});
+  const [selectedAgreementGroup, setSelectedAgreementGroup] = useState<ExpectedAgreement | null>(null);
+  const [selectedTransactionGroup, setSelectedTransactionGroup] =
+    useState<GroupedTransactionRow<Transaction> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const totalPages = useMemo(
@@ -397,6 +456,26 @@ export default function TimeActivityScreen() {
     }
     return map;
   }, [activeAgreements]);
+  const agreementParticipantsByServiceId = useMemo(() => {
+    const map = new Map<string, ExpectedAgreement[]>();
+    for (const agreement of agreementParticipants) {
+      if (!agreement.service_id || agreement.service_type !== "Offer") continue;
+      if (agreement.schedule_type !== "One-Time" || (agreement.max_participants ?? 0) <= 1) continue;
+      if (!isTimeActivityParticipantStatus(agreement.status)) continue;
+      map.set(agreement.service_id, [...(map.get(agreement.service_id) ?? []), agreement]);
+    }
+    return map;
+  }, [agreementParticipants]);
+  const completedAgreementParticipantsByServiceId = useMemo(() => {
+    const map = new Map<string, ExpectedAgreement[]>();
+    for (const agreement of agreementParticipants) {
+      if (!agreement.service_id || agreement.service_type !== "Offer") continue;
+      if (agreement.schedule_type !== "One-Time" || (agreement.max_participants ?? 0) <= 1) continue;
+      if (agreement.status !== "completed") continue;
+      map.set(agreement.service_id, [...(map.get(agreement.service_id) ?? []), agreement]);
+    }
+    return map;
+  }, [agreementParticipants]);
   const activeAgreementSections = useMemo(
     () =>
       SERVICE_TYPE_ORDER.map((type) => ({
@@ -404,6 +483,59 @@ export default function TimeActivityScreen() {
         items: activeAgreements.filter((agreement) => agreement.service_type === type),
       })).filter((section) => section.items.length > 0),
     [activeAgreements],
+  );
+  const groupedTransactions = useMemo(
+    () =>
+      groupTransactionRows<Transaction>(transactions, {
+        counterpartLabel: (transaction) => {
+          const matchingAgreement =
+            transaction.service_id && isServiceLevelNeedTransaction(transaction)
+              ? activeAgreementByServiceId.get(transaction.service_id)
+              : undefined;
+          return matchingAgreement?.counterpart_name ?? transactionCounterpartName(transaction, user?.id);
+        },
+        counterpartId: (transaction) => {
+          const matchingAgreement =
+            transaction.service_id && isServiceLevelNeedTransaction(transaction)
+              ? activeAgreementByServiceId.get(transaction.service_id)
+              : undefined;
+          return matchingAgreement?.counterpart_id ?? transaction.counterpart?.id ?? null;
+        },
+        counterpartAvatarUrl: (transaction) => {
+          const matchingAgreement =
+            transaction.service_id && isServiceLevelNeedTransaction(transaction)
+              ? activeAgreementByServiceId.get(transaction.service_id)
+              : undefined;
+          return matchingAgreement?.counterpart_avatar_url ?? transaction.counterpart?.avatar_url ?? null;
+        },
+        description: transactionFriendlyDescription,
+        participantCount: (transaction) => {
+          const participants = transaction.service_id
+            ? agreementParticipantsByServiceId.get(transaction.service_id)
+            : undefined;
+          const completedParticipants = transaction.service_id
+            ? completedAgreementParticipantsByServiceId.get(transaction.service_id)
+            : undefined;
+          return completedGroupOfferParticipantCount({
+            participantCount: participants?.length,
+            completedCount: completedParticipants?.length,
+          });
+        },
+        participants: (transaction) => {
+          if (!transaction.service_id) return undefined;
+          const completedParticipants = completedAgreementParticipantsByServiceId.get(transaction.service_id);
+          return completedParticipants && completedParticipants.length > 0
+            ? completedParticipants
+            : agreementParticipantsByServiceId.get(transaction.service_id);
+        },
+      }),
+    [
+      activeAgreementByServiceId,
+      agreementParticipantsByServiceId,
+      completedAgreementParticipantsByServiceId,
+      transactions,
+      user?.id,
+    ],
   );
   const insightStats = useMemo(() => {
     const now = new Date();
@@ -552,13 +684,17 @@ export default function TimeActivityScreen() {
   const loadAgreements = useCallback(async () => {
     try {
       const res = await listHandshakes({ page: 1, page_size: 100 });
-      const nextAgreements = (res.results ?? [])
-        .filter((handshake) => ACTIVE_HANDSHAKE_STATUSES.has(handshake.status))
+      const allAgreements = (res.results ?? [])
         .map((handshake) => toExpectedAgreement(handshake, currentUserName, user?.id))
         .filter((item): item is ExpectedAgreement => item !== null);
+      const nextAgreements = allAgreements
+        .filter((agreement) => ACTIVE_HANDSHAKE_STATUSES.has(agreement.status as Handshake["status"]));
+      const enrichedAgreements = await enrichEventAgreementParticipants(nextAgreements);
 
-      setActiveAgreements(nextAgreements);
+      setAgreementParticipants(allAgreements);
+      setActiveAgreements(groupActiveAgreements(enrichedAgreements));
     } catch {
+      setAgreementParticipants([]);
       setActiveAgreements([]);
     }
   }, [currentUserName, user?.id]);
@@ -727,14 +863,15 @@ export default function TimeActivityScreen() {
   }, []);
 
   return (
+    <>
     <FlatList
       style={styles.container}
       contentContainerStyle={{
         paddingTop: 16,
         paddingBottom: Math.max(24, insets.bottom + 12),
       }}
-      data={transactions}
-      keyExtractor={(item) => item.id}
+      data={groupedTransactions}
+      keyExtractor={(item) => item.key}
       refreshControl={
         <RefreshControl
           refreshing={isRefreshing}
@@ -1122,6 +1259,9 @@ export default function TimeActivityScreen() {
                           : agreement.reserved_delta),
                       0,
                     );
+                    const sectionSummary = section.type === "Event"
+                      ? `${section.items.length} active`
+                      : `${section.items.length} active · ${formatAmount(sectionTotal)}`;
 
                     return (
                       <View key={section.type}>
@@ -1156,7 +1296,7 @@ export default function TimeActivityScreen() {
                                 { color: sectionTone.color },
                               ]}
                             >
-                              {section.items.length} active · {formatAmount(sectionTotal)}
+                              {sectionSummary}
                             </Text>
                             <Ionicons
                               name={sectionOpen ? "chevron-up" : "chevron-down"}
@@ -1168,10 +1308,12 @@ export default function TimeActivityScreen() {
 
                         {sectionOpen ? section.items.map((agreement, index) => {
                           const accent = roleAccent(agreement.is_current_user_provider);
+                          const isGroupedAgreement = agreement.is_grouped_multi_use === true;
                           const displayDelta =
                             agreement.expected_delta !== 0
                               ? agreement.expected_delta
                               : agreement.reserved_delta;
+                          const showTimeValue = agreement.service_type !== "Event" || displayDelta !== 0;
                           const valueColor =
                             displayDelta > 0
                               ? colors.GREEN
@@ -1184,13 +1326,21 @@ export default function TimeActivityScreen() {
                               : agreement.reserved_delta !== 0
                                 ? "Reserved now"
                                 : "No time change";
+                          const agreementParticipants = isGroupedAgreement
+                            ? timeActivityVisibleParticipants(agreement.participants)
+                            : [];
+                          const agreementAvatarPreview = timeActivityAvatarPreview(agreementParticipants);
 
                           return (
-                            <View
+                            <Pressable
                               key={agreement.id}
+                              onPress={() => {
+                                if (isGroupedAgreement) setSelectedAgreementGroup(agreement);
+                              }}
                               style={[
                                 styles.agreementRow,
                                 index > 0 && styles.agreementRowBorder,
+                                isGroupedAgreement && styles.pressableRow,
                               ]}
                             >
                               <View style={styles.agreementLeft}>
@@ -1222,18 +1372,68 @@ export default function TimeActivityScreen() {
                                     </Text>
                                   </Pressable>
                                   <View style={styles.compactBadgeRow}>
-                                    <Pressable
-                                      onPress={() => openPublicProfile(agreement.counterpart_id)}
-                                      disabled={!agreement.counterpart_id || agreement.counterpart_id === user?.id}
-                                      style={({ pressed }) => [
-                                        styles.neutralPill,
-                                        pressed && styles.pressed,
-                                      ]}
-                                    >
-                                      <Text style={styles.neutralPillText}>
-                                        {agreement.counterpart_name}
-                                      </Text>
-                                    </Pressable>
+                                    {agreementParticipants.length > 0 ? (
+                                      <View style={styles.memberPill}>
+                                        <View
+                                          style={[
+                                            styles.avatarStack,
+                                            {
+                                              width: timeActivityAvatarStackWidth(
+                                                agreementAvatarPreview.visibleParticipants.length + (agreementAvatarPreview.overflowCount > 0 ? 1 : 0),
+                                              ),
+                                            },
+                                          ]}
+                                        >
+                                          {agreementAvatarPreview.visibleParticipants.map((participant, avatarIndex) => {
+                                            const initial = participant.counterpart_name.trim().charAt(0).toUpperCase() || "?";
+                                            return participant.counterpart_avatar_url ? (
+                                              <Image
+                                                key={participant.id}
+                                                source={{ uri: participant.counterpart_avatar_url }}
+                                                style={[
+                                                  styles.stackedAvatar,
+                                                  avatarIndex > 0 && styles.stackedAvatarOverlap,
+                                                ]}
+                                              />
+                                            ) : (
+                                              <View
+                                                key={participant.id}
+                                                style={[
+                                                  styles.stackedAvatar,
+                                                  styles.whoAvatarFallback,
+                                                  avatarIndex > 0 && styles.stackedAvatarOverlap,
+                                                ]}
+                                              >
+                                                <Text style={styles.whoAvatarInitial}>{initial}</Text>
+                                              </View>
+                                            );
+                                          })}
+                                          {agreementAvatarPreview.overflowCount > 0 ? (
+                                            <View style={[styles.stackedAvatar, styles.avatarOverflowBadge, styles.stackedAvatarOverlap]}>
+                                              <Text style={styles.avatarOverflowText}>
+                                                +{agreementAvatarPreview.overflowCount}
+                                              </Text>
+                                            </View>
+                                          ) : null}
+                                        </View>
+                                        <Text style={styles.neutralPillText}>
+                                          {agreement.participant_count} members
+                                        </Text>
+                                      </View>
+                                    ) : (
+                                      <Pressable
+                                        onPress={() => openPublicProfile(agreement.counterpart_id)}
+                                        disabled={!agreement.counterpart_id || agreement.counterpart_id === user?.id}
+                                        style={({ pressed }) => [
+                                          styles.neutralPill,
+                                          pressed && styles.pressed,
+                                        ]}
+                                      >
+                                        <Text style={styles.neutralPillText}>
+                                          {agreement.counterpart_name}
+                                        </Text>
+                                      </Pressable>
+                                    )}
                                     <View
                                       style={[
                                         styles.statePill,
@@ -1265,13 +1465,15 @@ export default function TimeActivityScreen() {
                                 </View>
                               </View>
 
-                              <View style={styles.agreementRight}>
-                                <Text style={[styles.agreementValue, { color: valueColor }]}>
-                                  {displayDelta !== 0 ? formatAmount(displayDelta) : "No hours"}
-                                </Text>
-                                <Text style={styles.agreementNote}>{valueNote}</Text>
-                              </View>
-                            </View>
+                              {showTimeValue ? (
+                                <View style={styles.agreementRight}>
+                                  <Text style={[styles.agreementValue, { color: valueColor }]}>
+                                    {displayDelta !== 0 ? formatAmount(displayDelta) : "No hours"}
+                                  </Text>
+                                  <Text style={styles.agreementNote}>{valueNote}</Text>
+                                </View>
+                              ) : null}
+                            </Pressable>
                           );
                         }) : null}
                       </View>
@@ -1299,11 +1501,6 @@ export default function TimeActivityScreen() {
                   </Text>
                 </View>
                 <View style={styles.sectionHeaderMeta}>
-                  <View style={[styles.upcomingChip, { backgroundColor: colors.WHITE }]}>
-                    <Text style={[styles.upcomingChipText, { color: colors.AMBER }]}>
-                      {formatHours(eventHistory.reduce((sum, event) => sum + Number(event.duration || 0), 0))}
-                    </Text>
-                  </View>
                   <Ionicons
                     name={isEventActivityOpen ? "chevron-up" : "chevron-down"}
                     size={20}
@@ -1371,14 +1568,6 @@ export default function TimeActivityScreen() {
                       </View>
                     </View>
 
-                    <View style={styles.agreementRight}>
-                      <Text style={[styles.agreementValue, { color: colors.AMBER }]}>
-                        {formatHours(Number(event.duration))}
-                      </Text>
-                      <Text style={styles.agreementNote}>
-                        {formatDate(event.completed_date)}
-                      </Text>
-                    </View>
                   </View>
                 ))}
               </View>
@@ -1428,48 +1617,65 @@ export default function TimeActivityScreen() {
         </>
       }
       renderItem={({ item }) => {
-        const accent = transactionAccent(item);
-        const matchingAgreement =
-          item.service_id && isServiceLevelNeedTransaction(item)
-            ? activeAgreementByServiceId.get(item.service_id)
-            : undefined;
-        const counterpart =
-          matchingAgreement?.counterpart_name ?? transactionCounterpartName(item, user?.id);
-        const counterpartId = matchingAgreement?.counterpart_id ?? item.counterpart?.id ?? null;
-        const counterpartAvatarUrl =
-          matchingAgreement?.counterpart_avatar_url ?? item.counterpart?.avatar_url ?? null;
+        const transaction = item.primary;
+        const accent = transactionAccent(transaction);
+        const counterpart = item.counterpartLabel;
+        const counterpartId = item.counterpartId ?? null;
+        const counterpartAvatarUrl = item.counterpartAvatarUrl ?? null;
         const counterpartInitial = counterpart.trim().charAt(0).toUpperCase() || "?";
-        const isRefund = item.transaction_type === "refund";
+        const participantAvatars = item.isMultiUse
+          ? timeActivityVisibleParticipants(item.participants)
+          : [];
+        const participantAvatarPreview = timeActivityAvatarPreview(participantAvatars);
+        const isRefund = transaction.transaction_type === "refund";
         const isPositive = item.amount >= 0;
         const amountColor = isRefund ? colors.PURPLE : isPositive ? colors.GREEN : colors.AMBER;
         const amountBg = isRefund ? colors.PURPLE_LT : isPositive ? colors.GREEN_LT : colors.AMBER_LT;
         return (
-          <View style={styles.transactionCard}>
+          <Pressable
+            onPress={() => {
+              if (item.isMultiUse) setSelectedTransactionGroup(item);
+            }}
+            style={({ pressed }) => [
+              styles.transactionCard,
+              item.isMultiUse && styles.pressableRow,
+              pressed && item.isMultiUse && styles.pressed,
+            ]}
+          >
             <View style={styles.transactionTopRow}>
               <View style={styles.transactionTopLeft}>
                 <View style={[styles.iconBadge, { backgroundColor: accent.bg }]}>
                   <Ionicons name={accent.icon} size={18} color={accent.color} />
                 </View>
                 <Pressable
-                  onPress={() => openServiceDetail(item.service_id)}
-                  disabled={!item.service_id}
+                  onPress={() => openServiceDetail(transaction.service_id)}
+                  disabled={!transaction.service_id}
                   style={({ pressed }) => [
                     styles.transactionHeadText,
                     pressed && styles.pressed,
                   ]}
                 >
                   <Text style={styles.transactionAction} numberOfLines={1}>
-                    {transactionActionTitle(item)}
+                    {transactionActionTitle(transaction)}
                   </Text>
                   <Text
                     style={[
                       styles.transactionService,
-                      item.service_id && styles.linkText,
+                      transaction.service_id && styles.linkText,
                     ]}
                     numberOfLines={1}
                   >
-                    {transactionDisplayTitle(item)}
+                    {transactionDisplayTitle(transaction)}
                   </Text>
+                  {item.isMultiUse ? (
+                    <View style={styles.compactBadgeRow}>
+                      <View style={styles.neutralPill}>
+                        <Text style={styles.neutralPillText}>
+                          {item.participantCount} members
+                        </Text>
+                      </View>
+                    </View>
+                  ) : null}
                 </Pressable>
               </View>
               <View style={[styles.amountPill, { backgroundColor: amountBg }]}>
@@ -1488,7 +1694,50 @@ export default function TimeActivityScreen() {
                   pressed && styles.pressed,
                 ]}
               >
-                {counterpartAvatarUrl ? (
+                {participantAvatars.length > 0 ? (
+                  <View
+                    style={[
+                      styles.avatarStack,
+                      {
+                        width: timeActivityAvatarStackWidth(
+                          participantAvatarPreview.visibleParticipants.length + (participantAvatarPreview.overflowCount > 0 ? 1 : 0),
+                        ),
+                      },
+                    ]}
+                  >
+                    {participantAvatarPreview.visibleParticipants.map((participant, avatarIndex) => {
+                      const initial = participant.counterpart_name.trim().charAt(0).toUpperCase() || "?";
+                      return participant.counterpart_avatar_url ? (
+                        <Image
+                          key={participant.id}
+                          source={{ uri: participant.counterpart_avatar_url }}
+                          style={[
+                            styles.stackedAvatar,
+                            avatarIndex > 0 && styles.stackedAvatarOverlap,
+                          ]}
+                        />
+                      ) : (
+                        <View
+                          key={participant.id}
+                          style={[
+                            styles.stackedAvatar,
+                            styles.whoAvatarFallback,
+                            avatarIndex > 0 && styles.stackedAvatarOverlap,
+                          ]}
+                        >
+                          <Text style={styles.whoAvatarInitial}>{initial}</Text>
+                        </View>
+                      );
+                    })}
+                    {participantAvatarPreview.overflowCount > 0 ? (
+                      <View style={[styles.stackedAvatar, styles.avatarOverflowBadge, styles.stackedAvatarOverlap]}>
+                        <Text style={styles.avatarOverflowText}>
+                          +{participantAvatarPreview.overflowCount}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : counterpartAvatarUrl ? (
                   <Image
                     source={{ uri: counterpartAvatarUrl }}
                     style={styles.whoAvatar}
@@ -1502,10 +1751,10 @@ export default function TimeActivityScreen() {
                   {counterpart}
                 </Text>
               </Pressable>
-              <Text style={styles.transactionDate}>{formatDate(item.created_at)}</Text>
+              <Text style={styles.transactionDate}>{formatDate(item.createdAt)}</Text>
             </View>
 
-          </View>
+          </Pressable>
         );
       }}
       ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
@@ -1519,7 +1768,7 @@ export default function TimeActivityScreen() {
         )
       }
       ListFooterComponent={
-        transactions.length > 0 ? (
+        groupedTransactions.length > 0 ? (
           <View style={styles.footerWrap}>
             {isLoadingMore ? (
               <ActivityIndicator size="small" color={colors.GREEN} />
@@ -1539,6 +1788,180 @@ export default function TimeActivityScreen() {
       }
       ListFooterComponentStyle={{ paddingTop: 16 }}
     />
+
+    <Modal
+      visible={Boolean(selectedAgreementGroup)}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setSelectedAgreementGroup(null)}
+    >
+      <Pressable
+        style={styles.modalBackdrop}
+        onPress={() => setSelectedAgreementGroup(null)}
+      />
+      <View style={styles.participantSheet}>
+        <View style={styles.participantSheetHandle} />
+        <View style={styles.participantSheetHeader}>
+          <View style={styles.participantSheetTitleWrap}>
+            <Text style={styles.participantSheetTitle}>
+              {selectedAgreementGroup?.service_title ?? "Group session"}
+            </Text>
+            <Text style={styles.participantSheetSubtitle}>
+              {selectedAgreementGroup?.service_type === "Event"
+                ? `${selectedAgreementGroup?.participant_count ?? 0} organizers and attendees`
+                : `${selectedAgreementGroup?.participant_count ?? 0} active member${
+                    (selectedAgreementGroup?.participant_count ?? 0) === 1 ? "" : "s"
+                  }`}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => setSelectedAgreementGroup(null)}
+            style={({ pressed }) => [
+              styles.participantSheetClose,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="close" size={18} color={colors.GRAY700} />
+          </Pressable>
+        </View>
+
+        <ScrollView style={styles.participantList} contentContainerStyle={styles.participantListContent}>
+          {(selectedAgreementGroup?.participants ?? []).map((participant) => {
+            const isEventParticipant =
+              selectedAgreementGroup?.service_type === "Event" || participant.service_type === "Event";
+            const delta = participant.expected_delta !== 0
+              ? participant.expected_delta
+              : participant.reserved_delta;
+            const initial = participant.counterpart_name.trim().charAt(0).toUpperCase() || "?";
+
+            return (
+              <Pressable
+                key={participant.id}
+                onPress={() => {
+                  if (!participant.counterpart_id) return;
+                  setSelectedAgreementGroup(null);
+                  openPublicProfile(participant.counterpart_id);
+                }}
+                disabled={!participant.counterpart_id || participant.counterpart_id === user?.id}
+                style={({ pressed }) => [
+                  styles.participantRow,
+                  pressed && styles.pressed,
+                ]}
+              >
+                {participant.counterpart_avatar_url ? (
+                  <Image
+                    source={{ uri: participant.counterpart_avatar_url }}
+                    style={styles.participantAvatar}
+                  />
+                ) : (
+                  <View style={[styles.participantAvatar, styles.whoAvatarFallback]}>
+                    <Text style={styles.whoAvatarInitial}>{initial}</Text>
+                  </View>
+                )}
+                <View style={styles.participantInfo}>
+                  <Text style={styles.participantName} numberOfLines={1}>
+                    {participant.counterpart_name}
+                  </Text>
+                  <Text style={styles.participantMeta} numberOfLines={1}>
+                    {isEventParticipant ? participant.note : activeHandshakeLabel(participant.status)}
+                  </Text>
+                </View>
+                {!isEventParticipant ? (
+                  <Text style={styles.participantValue}>
+                    {delta !== 0 ? formatAmount(delta) : "0h"}
+                  </Text>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+    </Modal>
+
+    <Modal
+      visible={Boolean(selectedTransactionGroup)}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setSelectedTransactionGroup(null)}
+    >
+      <Pressable
+        style={styles.modalBackdrop}
+        onPress={() => setSelectedTransactionGroup(null)}
+      />
+      <View style={styles.participantSheet}>
+        <View style={styles.participantSheetHandle} />
+        <View style={styles.participantSheetHeader}>
+          <View style={styles.participantSheetTitleWrap}>
+            <Text style={styles.participantSheetTitle}>
+              {selectedTransactionGroup?.primary.service_title ?? "Group activity"}
+            </Text>
+            <Text style={styles.participantSheetSubtitle}>
+              {(selectedTransactionGroup?.participantCount ?? 0)} member
+              {(selectedTransactionGroup?.participantCount ?? 0) === 1 ? "" : "s"}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => setSelectedTransactionGroup(null)}
+            style={({ pressed }) => [
+              styles.participantSheetClose,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="close" size={18} color={colors.GRAY700} />
+          </Pressable>
+        </View>
+
+        <ScrollView style={styles.participantList} contentContainerStyle={styles.participantListContent}>
+          {(
+            selectedTransactionGroup?.participants ?? []
+          ).map((participant) => {
+            const delta = participant.expected_delta !== 0
+              ? participant.expected_delta
+              : participant.reserved_delta;
+            const initial = participant.counterpart_name.trim().charAt(0).toUpperCase() || "?";
+
+            return (
+              <Pressable
+                key={participant.id}
+                onPress={() => {
+                  if (!participant.counterpart_id) return;
+                  setSelectedTransactionGroup(null);
+                  openPublicProfile(participant.counterpart_id);
+                }}
+                disabled={!participant.counterpart_id || participant.counterpart_id === user?.id}
+                style={({ pressed }) => [
+                  styles.participantRow,
+                  pressed && styles.pressed,
+                ]}
+              >
+                {participant.counterpart_avatar_url ? (
+                  <Image
+                    source={{ uri: participant.counterpart_avatar_url }}
+                    style={styles.participantAvatar}
+                  />
+                ) : (
+                  <View style={[styles.participantAvatar, styles.whoAvatarFallback]}>
+                    <Text style={styles.whoAvatarInitial}>{initial}</Text>
+                  </View>
+                )}
+                <View style={styles.participantInfo}>
+                  <Text style={styles.participantName} numberOfLines={1}>
+                    {participant.counterpart_name}
+                  </Text>
+                  <Text style={styles.participantMeta} numberOfLines={1}>
+                    {completedTransactionParticipantLabel()}
+                  </Text>
+                </View>
+                <Text style={styles.participantValue}>
+                  {delta !== 0 ? formatAmount(delta) : "0h"}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+    </Modal>
+    </>
   );
 }
 
@@ -2093,6 +2516,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.GRAY100,
   },
+  pressableRow: {
+    borderRadius: 14,
+  },
   agreementLeft: {
     flex: 1,
     flexDirection: "row",
@@ -2288,6 +2714,40 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.GRAY600,
   },
+  avatarStack: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  memberPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: colors.GRAY100,
+  },
+  stackedAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: colors.WHITE,
+    backgroundColor: colors.GRAY100,
+  },
+  stackedAvatarOverlap: {
+    marginLeft: -10,
+  },
+  avatarOverflowBadge: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.GRAY800,
+  },
+  avatarOverflowText: {
+    color: colors.WHITE,
+    fontSize: 8,
+    fontWeight: "900",
+  },
   whoName: {
     fontSize: 13,
     fontWeight: "600",
@@ -2408,6 +2868,103 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
     alignItems: "center",
     justifyContent: "center",
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15, 23, 42, 0.36)",
+  },
+  participantSheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    maxHeight: "72%",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    backgroundColor: colors.WHITE,
+    paddingTop: 10,
+    paddingHorizontal: 18,
+    paddingBottom: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -6 },
+    elevation: 12,
+  },
+  participantSheetHandle: {
+    alignSelf: "center",
+    width: 44,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: colors.GRAY200,
+    marginBottom: 14,
+  },
+  participantSheetHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 8,
+  },
+  participantSheetTitleWrap: {
+    flex: 1,
+  },
+  participantSheetTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: colors.GRAY900,
+  },
+  participantSheetSubtitle: {
+    marginTop: 3,
+    fontSize: 13,
+    color: colors.GRAY500,
+  },
+  participantSheetClose: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.GRAY100,
+  },
+  participantList: {
+    maxHeight: 360,
+  },
+  participantListContent: {
+    paddingBottom: 8,
+  },
+  participantRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.GRAY100,
+  },
+  participantAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.GRAY100,
+  },
+  participantInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  participantName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.GRAY800,
+  },
+  participantMeta: {
+    marginTop: 2,
+    fontSize: 12,
+    color: colors.GRAY500,
+  },
+  participantValue: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.GREEN,
   },
   pressed: {
     opacity: 0.85,

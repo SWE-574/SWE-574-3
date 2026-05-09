@@ -7,10 +7,23 @@ import {
 } from 'react-icons/fi'
 import { transactionAPI, type TransactionDirection } from '@/services/transactionAPI'
 import { handshakeAPI, type Handshake } from '@/services/handshakeAPI'
+import { groupChatAPI, type GroupChatParticipant } from '@/services/conversationAPI'
 import { userAPI, type UserHistoryItem } from '@/services/userAPI'
 import { useAuthStore } from '@/store/useAuthStore'
 import type { Transaction, TransactionSummary, User } from '@/types'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
+import {
+  completedGroupOfferParticipantCount,
+  completedGroupOfferParticipants,
+  groupActiveAgreements,
+  groupTransactionRows,
+  isTimeActivityParticipantStatus,
+  timeActivityAvatarPreview,
+  timeActivityVisibleParticipants,
+  transactionGroupDetailParticipants,
+  type GroupedTransactionRow,
+  type TimeActivityAgreement as ExpectedAgreement,
+} from '@/utils/timeActivityGrouping'
 import {
   AMBER, AMBER_LT, BLUE, BLUE_LT, GRAY100, GRAY200, GRAY400,
   GRAY50, GRAY500, GRAY600, GRAY700, GRAY800, GRAY900, GREEN, GREEN_LT,
@@ -31,43 +44,11 @@ const FILTERS: { key: TransactionDirection; label: string }[] = [
   { key: 'debit', label: 'Used' },
 ]
 
-const ACTIVE_HANDSHAKE_STATUSES = new Set(['accepted', 'checked_in', 'attended'])
+const ACTIVE_HANDSHAKE_STATUSES = new Set<Handshake['status']>(['accepted', 'checked_in', 'attended'])
 const INSIGHT_SERVICE_TYPES = ['Offer', 'Need', 'Event'] as const
-
-interface ExpectedAgreement {
-  id: string
-  service_id?: string | null
-  service_title: string
-  service_type?: Handshake['service_type']
-  is_current_user_provider: boolean
-  counterpart_id?: string | null
-  counterpart_name: string
-  counterpart_email: string
-  counterpart_avatar_url?: string | null
-  status: Handshake['status']
-  provisioned_hours: number
-  reserved_delta: number
-  expected_delta: number
-  note: string
-}
 
 type EventHistoryItem = UserHistoryItem & {
   event_status: 'completed' | 'attended'
-}
-
-interface GroupedTransactionRow {
-  key: string
-  serviceId?: string | null
-  primary: Transaction
-  items: Transaction[]
-  amount: number
-  balanceAfter: number
-  createdAt: string
-  counterpartLabel: string
-  counterpartId?: string | null
-  counterpartAvatarUrl?: string | null
-  description: string
-  isMultiUse: boolean
 }
 
 function formatHours(value: number): string {
@@ -194,16 +175,6 @@ function isMultiUseHandshake(handshake: Handshake) {
   return handshake.schedule_type === 'One-Time' && (handshake.max_participants ?? 0) > 1
 }
 
-function isMultiUseTransaction(transaction: Transaction, completedCount: number) {
-  return (
-    transaction.transaction_type === 'transfer'
-    && transaction.is_current_user_provider === true
-    && transaction.schedule_type === 'One-Time'
-    && (transaction.max_participants ?? 0) > 1
-    && completedCount > 1
-  )
-}
-
 function handshakeCounterpartName(handshake: Handshake, currentUserName?: string): string {
   const counterpart = handshake.counterpart
   const fullName = counterpart
@@ -251,6 +222,9 @@ function toExpectedAgreement(handshake: Handshake, currentUser?: User | null): E
     service_id: handshake.service_id ?? null,
     service_title: handshake.service_title,
     service_type: handshake.service_type,
+    schedule_type: handshake.schedule_type,
+    max_participants: handshake.max_participants,
+    scheduled_time: handshake.scheduled_time,
     is_current_user_provider: isProvider,
     counterpart_id: handshake.counterpart?.id ?? null,
     counterpart_name: counterpartName,
@@ -266,6 +240,62 @@ function toExpectedAgreement(handshake: Handshake, currentUser?: User | null): E
       ? `Time expected after completion`
       : `Already reserved at acceptance`,
   }
+}
+
+function eventGroupParticipantToAgreement(
+  participant: GroupChatParticipant,
+  sourceAgreement: ExpectedAgreement,
+  index: number,
+): ExpectedAgreement {
+  return {
+    ...sourceAgreement,
+    id: `event-participant:${sourceAgreement.service_id}:${participant.id}`,
+    counterpart_id: participant.id,
+    counterpart_name: participant.name || 'Unknown user',
+    counterpart_email: '',
+    counterpart_avatar_url: participant.avatar_url ?? null,
+    is_current_user_provider: index === 0,
+    provisioned_hours: 0,
+    reserved_delta: 0,
+    expected_delta: 0,
+    note: index === 0 ? 'Organizer' : 'Attendee',
+    participants: undefined,
+    is_grouped_multi_use: false,
+  }
+}
+
+async function enrichEventAgreementParticipants(
+  agreements: ExpectedAgreement[],
+  signal?: AbortSignal,
+): Promise<ExpectedAgreement[]> {
+  const eventServices = new Map<string, ExpectedAgreement>()
+  for (const agreement of agreements) {
+    if (agreement.service_type === 'Event' && agreement.service_id && !eventServices.has(agreement.service_id)) {
+      eventServices.set(agreement.service_id, agreement)
+    }
+  }
+  if (eventServices.size === 0) return agreements
+
+  const participantEntries = await Promise.all(
+    Array.from(eventServices.entries()).map(async ([serviceId, sourceAgreement]) => {
+      try {
+        const thread = await groupChatAPI.getMessages(serviceId, signal)
+        const participants = (thread.participants ?? []).map((participant, index) =>
+          eventGroupParticipantToAgreement(participant, sourceAgreement, index),
+        )
+        return [serviceId, participants] as const
+      } catch {
+        return [serviceId, [] as ExpectedAgreement[]] as const
+      }
+    }),
+  )
+
+  const participantsByServiceId = new Map(participantEntries)
+  return agreements.map((agreement) => {
+    if (agreement.service_type !== 'Event' || !agreement.service_id) return agreement
+    const participants = participantsByServiceId.get(agreement.service_id)
+    return participants?.length ? { ...agreement, participants } : agreement
+  })
 }
 
 function amountTone(value: number) {
@@ -360,6 +390,58 @@ function EmptyLedgerIllustration() {
   )
 }
 
+function ParticipantAvatarStack({ participants, fallbackName }: {
+  participants?: ExpectedAgreement[]
+  fallbackName: string
+}) {
+  const { visibleParticipants, overflowCount } = timeActivityAvatarPreview(participants)
+
+  if (visibleParticipants.length === 0) {
+    return (
+      <Box p="5px" borderRadius="full" bg={GRAY100} color={GRAY500}>
+        <FiUser size={12} />
+      </Box>
+    )
+  }
+
+  return (
+    <Flex align="center" minW="34px">
+      {visibleParticipants.map((participant, index) => (
+        <Avatar.Root
+          key={participant.id}
+          size="xs"
+          border={`2px solid ${WHITE}`}
+          ml={index === 0 ? 0 : '-10px'}
+          zIndex={visibleParticipants.length - index}
+          boxShadow="0 2px 6px rgba(15,23,42,0.12)"
+        >
+          <Avatar.Image src={participant.counterpart_avatar_url ?? undefined} alt={participant.counterpart_name} />
+          <Avatar.Fallback name={participant.counterpart_name || fallbackName} />
+        </Avatar.Root>
+      ))}
+      {overflowCount > 0 && (
+        <Flex
+          align="center"
+          justify="center"
+          w="24px"
+          h="24px"
+          ml="-10px"
+          border={`2px solid ${WHITE}`}
+          borderRadius="full"
+          bg={GRAY800}
+          color={WHITE}
+          fontSize="9px"
+          fontWeight={900}
+          zIndex={0}
+          boxShadow="0 2px 6px rgba(15,23,42,0.12)"
+        >
+          +{overflowCount}
+        </Flex>
+      )}
+    </Flex>
+  )
+}
+
 const TransactionHistoryPage = () => {
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
@@ -378,6 +460,7 @@ const TransactionHistoryPage = () => {
   const [isExporting, setIsExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedTransactionGroup, setSelectedTransactionGroup] = useState<GroupedTransactionRow | null>(null)
+  const [selectedActiveAgreementGroup, setSelectedActiveAgreementGroup] = useState<ExpectedAgreement | null>(null)
   const [showActiveAgreements, setShowActiveAgreements] = useState(false)
   const [openActiveAgreementSections, setOpenActiveAgreementSections] = useState<Record<string, boolean>>({})
 
@@ -610,6 +693,32 @@ const TransactionHistoryPage = () => {
     return map
   }, [activeAgreements])
 
+  const groupOfferParticipantsByServiceId = useMemo(() => {
+    const map = new Map<string, ExpectedAgreement[]>()
+    for (const handshake of handshakes) {
+      if (!isMultiUseHandshake(handshake) || handshake.service_type !== 'Offer') continue
+      if (!isTimeActivityParticipantStatus(handshake.status)) continue
+
+      const agreement = toExpectedAgreement(handshake, user)
+      if (!agreement?.service_id) continue
+      map.set(agreement.service_id, [...(map.get(agreement.service_id) ?? []), agreement])
+    }
+    return map
+  }, [handshakes, user])
+
+  const completedGroupOfferParticipantsByServiceId = useMemo(() => {
+    const map = new Map<string, ExpectedAgreement[]>()
+    for (const handshake of handshakes) {
+      if (!isMultiUseHandshake(handshake) || handshake.service_type !== 'Offer') continue
+      if (handshake.status !== 'completed') continue
+
+      const agreement = toExpectedAgreement(handshake, user)
+      if (!agreement?.service_id) continue
+      map.set(agreement.service_id, [...(map.get(agreement.service_id) ?? []), agreement])
+    }
+    return map
+  }, [handshakes, user])
+
   const activeAgreementSections = useMemo(() => {
     return INSIGHT_SERVICE_TYPES
       .map((type) => ({
@@ -620,55 +729,54 @@ const TransactionHistoryPage = () => {
   }, [activeAgreements])
 
   const groupedTransactions = useMemo(() => {
-    const groups = new Map<string, GroupedTransactionRow>()
-
-    for (const transaction of transactions) {
+    return groupTransactionRows<Transaction>(transactions, {
+      counterpartLabel: (transaction) => {
       const matchingAgreement = transaction.service_id && isServiceLevelNeedTransaction(transaction)
         ? activeAgreementByServiceId.get(transaction.service_id)
         : undefined
-      const completedCount = transaction.service_id
-        ? (completedMultiUseByService.get(transaction.service_id)?.length ?? 0)
-        : 0
-      const shouldGroup = isMultiUseTransaction(transaction, completedCount)
-      const key = shouldGroup ? `${transaction.transaction_type}:${transaction.service_id}` : transaction.id
-      const existing = groups.get(key)
-
-      if (existing) {
-        existing.items.push(transaction)
-        existing.createdAt = new Date(transaction.created_at).getTime() > new Date(existing.createdAt).getTime()
-          ? transaction.created_at
-          : existing.createdAt
-        existing.balanceAfter = transaction.balance_after
-        existing.amount = Math.max(existing.amount, transaction.amount)
-        continue
-      }
-
-      const label = shouldGroup
-        ? `${completedCount} members`
-        : matchingAgreement?.counterpart_name ?? counterpartName(transaction, user?.id)
-
-      groups.set(key, {
-        key,
-        serviceId: transaction.service_id,
-        primary: transaction,
-        items: [transaction],
-        amount: transaction.amount,
-        balanceAfter: transaction.balance_after,
-        createdAt: transaction.created_at,
-        counterpartLabel: label,
-        counterpartId: matchingAgreement?.counterpart_id ?? transaction.counterpart?.id ?? null,
-        counterpartAvatarUrl: shouldGroup ? null : (matchingAgreement?.counterpart_avatar_url ?? transaction.counterpart?.avatar_url ?? null),
-        description: shouldGroup
-          ? `Settled once for ${completedCount} participants. Open details to view everyone in this session.`
-          : transactionFriendlyDescription(transaction),
-        isMultiUse: shouldGroup,
-      })
-    }
-
-    return Array.from(groups.values()).sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    )
-  }, [activeAgreementByServiceId, completedMultiUseByService, transactions, user?.id])
+        return matchingAgreement?.counterpart_name ?? counterpartName(transaction, user?.id)
+      },
+      counterpartId: (transaction) => {
+        const matchingAgreement = transaction.service_id && isServiceLevelNeedTransaction(transaction)
+          ? activeAgreementByServiceId.get(transaction.service_id)
+          : undefined
+        return matchingAgreement?.counterpart_id ?? transaction.counterpart?.id ?? null
+      },
+      counterpartAvatarUrl: (transaction) => {
+        const matchingAgreement = transaction.service_id && isServiceLevelNeedTransaction(transaction)
+          ? activeAgreementByServiceId.get(transaction.service_id)
+          : undefined
+        return matchingAgreement?.counterpart_avatar_url ?? transaction.counterpart?.avatar_url ?? null
+      },
+      description: transactionFriendlyDescription,
+      participantCount: (transaction) => {
+        const participants = transaction.service_id
+          ? groupOfferParticipantsByServiceId.get(transaction.service_id)
+          : undefined
+        const completedCount = transaction.service_id
+          ? (completedMultiUseByService.get(transaction.service_id)?.length ?? 0)
+          : 0
+        return completedGroupOfferParticipantCount({
+          participantCount: participants?.length,
+          completedCount,
+        })
+      },
+      participants: (transaction) => {
+        if (!transaction.service_id) return undefined
+        return completedGroupOfferParticipants({
+          participants: groupOfferParticipantsByServiceId.get(transaction.service_id),
+          completedParticipants: completedGroupOfferParticipantsByServiceId.get(transaction.service_id),
+        })
+      },
+    })
+  }, [
+    activeAgreementByServiceId,
+    completedGroupOfferParticipantsByServiceId,
+    completedMultiUseByService,
+    groupOfferParticipantsByServiceId,
+    transactions,
+    user?.id,
+  ])
 
   const fetchTransactions = useCallback(async (signal?: AbortSignal) => {
     const requestId = ++requestIdRef.current
@@ -730,8 +838,10 @@ const TransactionHistoryPage = () => {
         .filter((handshake) => ACTIVE_HANDSHAKE_STATUSES.has(handshake.status))
         .map((handshake) => toExpectedAgreement(handshake, user))
         .filter((item): item is ExpectedAgreement => item !== null)
+      const enrichedAgreements = await enrichEventAgreementParticipants(nextAgreements, signal)
+      if (requestId !== agreementRequestIdRef.current) return
 
-      setActiveAgreements(nextAgreements)
+      setActiveAgreements(groupActiveAgreements(enrichedAgreements))
     } catch (error) {
       const isAbort =
         signal?.aborted ||
@@ -1409,6 +1519,9 @@ const TransactionHistoryPage = () => {
                     (sum, agreement) => sum + (agreement.expected_delta !== 0 ? agreement.expected_delta : agreement.reserved_delta),
                     0,
                   )
+                  const sectionSummary = section.type === 'Event'
+                    ? `${section.items.length} active`
+                    : `${section.items.length} active · ${formatAmount(sectionTotal)}`
 
                   return (
                     <Box key={section.type} borderTop={sectionIndex === 0 ? 'none' : `1px solid ${GRAY100}`}>
@@ -1432,7 +1545,7 @@ const TransactionHistoryPage = () => {
                         </Flex>
                         <Flex align="center" gap={2}>
                           <Text fontSize="11px" color={sectionTone.color} fontWeight={800}>
-                            {section.items.length} active · {formatAmount(sectionTotal)}
+                            {sectionSummary}
                           </Text>
                           <Text fontSize="13px" color={sectionTone.color} fontWeight={900}>
                             {sectionOpen ? '−' : '+'}
@@ -1445,7 +1558,9 @@ const TransactionHistoryPage = () => {
                         const Icon = accent.icon
                         const typeTone = typeBadgeTone(agreement.service_type)
                         const ownListing = isOwnService(agreement.service_type, agreement.is_current_user_provider)
+                        const isGroupedAgreement = agreement.is_grouped_multi_use === true
                         const displayDelta = agreement.expected_delta !== 0 ? agreement.expected_delta : agreement.reserved_delta
+                        const showTimeValue = agreement.service_type !== 'Event' || displayDelta !== 0
                         const timeColor = displayDelta > 0 ? GREEN : displayDelta < 0 ? AMBER : GRAY700
                         const timeBg = displayDelta > 0 ? GREEN_LT : displayDelta < 0 ? AMBER_LT : GRAY100
                         const timeLabel = agreement.expected_delta !== 0
@@ -1453,6 +1568,9 @@ const TransactionHistoryPage = () => {
                           : agreement.reserved_delta !== 0
                             ? 'reserved now'
                             : 'no time change'
+                        const participantAvatars = isGroupedAgreement
+                          ? timeActivityVisibleParticipants(agreement.participants)
+                          : []
 
                         return (
                           <Grid
@@ -1463,6 +1581,10 @@ const TransactionHistoryPage = () => {
                             px={{ base: 4, md: 5 }}
                             py={3}
                             borderTop={index === 0 ? 'none' : `1px solid ${GRAY100}`}
+                            onClick={() => {
+                              if (isGroupedAgreement) setSelectedActiveAgreementGroup(agreement)
+                            }}
+                            style={{ cursor: isGroupedAgreement ? 'pointer' : 'default' }}
                           >
                             <Flex align="center" gap={3} minW={0}>
                               <Box p="9px" borderRadius="12px" bg={accent.bg} color={accent.color}>
@@ -1471,7 +1593,10 @@ const TransactionHistoryPage = () => {
                               <Box minW={0}>
                                 <Text
                                   as={agreement.service_id ? 'button' : undefined}
-                                  onClick={() => openServiceDetail(agreement.service_id)}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    openServiceDetail(agreement.service_id)
+                                  }}
                                   fontSize="13px"
                                   fontWeight={800}
                                   color={agreement.service_id ? GREEN : GRAY800}
@@ -1496,6 +1621,11 @@ const TransactionHistoryPage = () => {
                                   <Box px="7px" py="2px" borderRadius="999px" bg={GRAY100} color={GRAY600} fontSize="10px" fontWeight={800}>
                                     {activeHandshakeLabel(agreement.status)}
                                   </Box>
+                                  {isGroupedAgreement && (
+                                    <Box px="7px" py="2px" borderRadius="999px" bg={GREEN_LT} color={GREEN} fontSize="10px" fontWeight={800}>
+                                      {agreement.participant_count} members
+                                    </Box>
+                                  )}
                                 </Flex>
                               </Box>
                             </Flex>
@@ -1506,10 +1636,20 @@ const TransactionHistoryPage = () => {
                               gap={2}
                               minW={0}
                               textAlign="left"
-                              onClick={() => openPublicProfile(agreement.counterpart_id)}
-                              style={{ cursor: agreement.counterpart_id ? 'pointer' : 'default' }}
+                              onClick={(event) => {
+                                if (isGroupedAgreement) {
+                                  event.stopPropagation()
+                                  setSelectedActiveAgreementGroup(agreement)
+                                  return
+                                }
+                                event.stopPropagation()
+                                openPublicProfile(agreement.counterpart_id)
+                              }}
+                              style={{ cursor: isGroupedAgreement || agreement.counterpart_id ? 'pointer' : 'default' }}
                             >
-                              {agreement.counterpart_avatar_url ? (
+                              {participantAvatars.length > 0 ? (
+                                <ParticipantAvatarStack participants={participantAvatars} fallbackName={agreement.counterpart_name} />
+                              ) : agreement.counterpart_avatar_url ? (
                                 <Avatar.Root size="xs">
                                   <Avatar.Image src={agreement.counterpart_avatar_url} alt={agreement.counterpart_name} />
                                   <Avatar.Fallback name={agreement.counterpart_name} />
@@ -1522,14 +1662,16 @@ const TransactionHistoryPage = () => {
                               </Text>
                             </Flex>
 
-                            <Flex align={{ base: 'center', md: 'flex-end' }} justify="space-between" direction={{ base: 'row', md: 'column' }} gap={1}>
-                              <Box px="10px" py="5px" borderRadius="999px" bg={timeBg} color={timeColor} fontSize="13px" fontWeight={900}>
-                                {displayDelta !== 0 ? formatAmount(displayDelta) : 'No hours'}
-                              </Box>
-                              <Text fontSize="11px" color={GRAY500}>
-                                {timeLabel}
-                              </Text>
-                            </Flex>
+                            {showTimeValue ? (
+                              <Flex align={{ base: 'center', md: 'flex-end' }} justify="space-between" direction={{ base: 'row', md: 'column' }} gap={1}>
+                                <Box px="10px" py="5px" borderRadius="999px" bg={timeBg} color={timeColor} fontSize="13px" fontWeight={900}>
+                                  {displayDelta !== 0 ? formatAmount(displayDelta) : 'No hours'}
+                                </Box>
+                                <Text fontSize="11px" color={GRAY500}>
+                                  {timeLabel}
+                                </Text>
+                              </Flex>
+                            ) : <Box />}
                           </Grid>
                         )
                       })}
@@ -1558,7 +1700,7 @@ const TransactionHistoryPage = () => {
               {eventHistory.slice(0, 5).map((event, index) => (
                 <Grid
                   key={`${event.service_id}-${event.completed_date}-${index}`}
-                  templateColumns={{ base: '1fr', md: 'minmax(260px, 1fr) 220px 140px' }}
+                  templateColumns={{ base: '1fr', md: 'minmax(260px, 1fr) 220px' }}
                   gap={{ base: 3, md: 4 }}
                   alignItems="center"
                   px={{ base: 4, md: 5 }}
@@ -1620,14 +1762,6 @@ const TransactionHistoryPage = () => {
                     </Text>
                   </Flex>
 
-                  <Box textAlign={{ base: 'left', md: 'right' }}>
-                    <Text fontSize="13px" fontWeight={800} color={GRAY800}>
-                      {formatHours(Number(event.duration))}
-                    </Text>
-                    <Text fontSize="11px" color={GRAY500}>
-                      {formatDate(event.completed_date)}
-                    </Text>
-                  </Box>
                 </Grid>
               ))}
             </Box>
@@ -1726,6 +1860,7 @@ const TransactionHistoryPage = () => {
                 const isClickable = row.isMultiUse
                 const typeTone = typeBadgeTone(row.primary.service_type)
                 const ownListing = isOwnService(row.primary.service_type, row.primary.is_current_user_provider)
+                const participantAvatars = row.isMultiUse ? row.participants : undefined
 
                 return (
                   <Box
@@ -1790,7 +1925,9 @@ const TransactionHistoryPage = () => {
                             }}
                             style={{ cursor: row.counterpartId ? 'pointer' : 'default' }}
                           >
-                            {row.counterpartAvatarUrl ? (
+                            {participantAvatars?.length ? (
+                              <ParticipantAvatarStack participants={participantAvatars} fallbackName={name} />
+                            ) : row.counterpartAvatarUrl ? (
                               <Avatar.Root size="xs">
                                 <Avatar.Image src={row.counterpartAvatarUrl ?? undefined} alt={name} />
                                 <Avatar.Fallback name={name} />
@@ -1832,7 +1969,9 @@ const TransactionHistoryPage = () => {
                           }}
                           style={{ cursor: row.counterpartId ? 'pointer' : 'default' }}
                         >
-                          {row.counterpartAvatarUrl ? (
+                          {participantAvatars?.length ? (
+                            <ParticipantAvatarStack participants={participantAvatars} fallbackName={name} />
+                          ) : row.counterpartAvatarUrl ? (
                             <Avatar.Root size="xs">
                               <Avatar.Image src={row.counterpartAvatarUrl ?? undefined} alt={name} />
                               <Avatar.Fallback name={name} />
@@ -1852,7 +1991,7 @@ const TransactionHistoryPage = () => {
                               {name}
                             </Text>
                             <Text fontSize="11px" color={GRAY500}>
-                              {row.isMultiUse ? `${row.items.length} linked records` : counterpartSubtitle(row.primary, user?.id)}
+                              {row.isMultiUse ? `${row.participantCount} members` : counterpartSubtitle(row.primary, user?.id)}
                             </Text>
                           </Box>
                         </Flex>
@@ -1964,23 +2103,63 @@ const TransactionHistoryPage = () => {
         isOpen={!!selectedTransactionGroup}
         title={selectedTransactionGroup?.primary.service_title ?? 'Session details'}
         subtitle={selectedTransactionGroup
-          ? `${completedMultiUseByService.get(selectedTransactionGroup.serviceId ?? '')?.length ?? 0} participants completed this one-time session.`
+          ? `${selectedTransactionGroup.participantCount} participants completed this one-time session.`
           : undefined}
         onClose={() => setSelectedTransactionGroup(null)}
-        items={(
-          selectedTransactionGroup?.serviceId
+        items={transactionGroupDetailParticipants(
+          (selectedTransactionGroup?.serviceId
             ? (completedMultiUseByService.get(selectedTransactionGroup.serviceId) ?? [])
             : []
-        ).map((handshake) => ({
-          id: handshake.id,
-          title: handshake.counterpart
-            ? `${handshake.counterpart.first_name} ${handshake.counterpart.last_name}`.trim() || handshake.counterpart.email
-            : handshake.requester_name,
-          subtitle: 'Completed participant',
-          meta: formatDate(handshake.updated_at),
-          value: formatHours(handshake.provisioned_hours),
-          avatarUrl: handshake.counterpart?.avatar_url ?? null,
-        }))}
+          ).map((handshake) => ({
+            id: handshake.id,
+            title: handshake.counterpart
+              ? `${handshake.counterpart.first_name} ${handshake.counterpart.last_name}`.trim() || handshake.counterpart.email
+              : handshake.requester_name,
+            subtitle: 'Completed participant',
+            meta: formatDate(handshake.updated_at),
+            value: formatHours(handshake.provisioned_hours),
+            avatarUrl: handshake.counterpart?.avatar_url ?? null,
+          })),
+          (selectedTransactionGroup?.participants ?? []).map((agreement) => ({
+            id: agreement.id,
+            title: agreement.counterpart_name,
+            subtitle: activeHandshakeLabel(agreement.status),
+            meta: agreement.note,
+            value: formatAmount(agreement.expected_delta !== 0 ? agreement.expected_delta : agreement.reserved_delta),
+            avatarUrl: agreement.counterpart_avatar_url ?? null,
+            onClick: agreement.counterpart_id
+              ? () => openPublicProfile(agreement.counterpart_id)
+              : undefined,
+          })),
+        )}
+      />
+
+      <MultiUseDetailsModal
+        isOpen={!!selectedActiveAgreementGroup}
+        title={selectedActiveAgreementGroup?.service_title ?? 'Group session'}
+        subtitle={selectedActiveAgreementGroup
+          ? selectedActiveAgreementGroup.service_type === 'Event'
+            ? `${selectedActiveAgreementGroup.participant_count ?? 0} organizers and attendees in this event.`
+            : `${selectedActiveAgreementGroup.participant_count ?? 0} active participants in this group offer.`
+          : undefined}
+        onClose={() => setSelectedActiveAgreementGroup(null)}
+        items={(selectedActiveAgreementGroup?.participants ?? []).map((agreement) => {
+          const isEventParticipant = selectedActiveAgreementGroup?.service_type === 'Event' || agreement.service_type === 'Event'
+          return {
+            id: agreement.id,
+            title: agreement.counterpart_name,
+            subtitle: isEventParticipant ? agreement.note : activeHandshakeLabel(agreement.status),
+            meta: isEventParticipant ? undefined : agreement.note,
+            value: isEventParticipant
+              ? undefined
+              : formatAmount(agreement.expected_delta !== 0 ? agreement.expected_delta : agreement.reserved_delta),
+            avatarUrl: agreement.counterpart_avatar_url ?? null,
+            onClick: agreement.counterpart_id
+              ? () => openPublicProfile(agreement.counterpart_id)
+              : undefined,
+          }
+        })}
+        emptyMessage="No participants to show yet."
       />
     </Box>
   )
