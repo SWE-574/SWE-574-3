@@ -414,6 +414,7 @@ export interface Handshake {
   updated_at: string
   dispute_reason?: string
   notes?: string
+  cancellation_reason?: string
 }
 
 // ─── Chat & Message Types ─────────────────────────────────────────────────────

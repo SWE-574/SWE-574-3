@@ -10,7 +10,7 @@
  *    HTTP 401 from `/auth/refresh/` clears the session.
  */
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { UserSummary } from "../api/types";
 import * as authApi from "../api/auth";
 import { useNotificationStore } from "../store/useNotificationStore";
@@ -30,6 +30,11 @@ import {
   clearCurrentUser,
   clearAllUserCaches,
 } from "../cache/offlineCache";
+import {
+  isCurrentAuthSession,
+  nextAuthSessionGeneration,
+  shouldSkipSoftUserRefresh,
+} from "../utils/authRefresh";
 
 interface AuthState {
   user: UserSummary | null;
@@ -43,7 +48,20 @@ interface AuthContextValue extends AuthState {
   login: (body: LoginRequest) => Promise<void>;
   register: (body: RegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
-  refreshUser: () => Promise<void>;
+  refreshUser: (options?: { force?: boolean }) => Promise<void>;
+}
+
+let inFlightUserRequest: Promise<UserSummary> | null = null;
+let lastConfirmedUserAt = 0;
+
+async function getMeSingleFlight(): Promise<UserSummary> {
+  if (inFlightUserRequest) return inFlightUserRequest;
+
+  inFlightUserRequest = getMe().finally(() => {
+    inFlightUserRequest = null;
+  });
+
+  return inFlightUserRequest;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -56,10 +74,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isStale, setIsStale] = useState(false);
+  const sessionGenerationRef = useRef(0);
 
   const persistUser = useCallback((u: UserSummary) => {
     setUser(u);
     setIsStale(false);
+    lastConfirmedUserAt = Date.now();
     try {
       saveCurrentUser(u);
     } catch {
@@ -68,8 +88,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const clearSessionLocal = useCallback(async (prevUserId: string | null) => {
+    sessionGenerationRef.current = nextAuthSessionGeneration(sessionGenerationRef.current);
     setUser(null);
     setIsStale(false);
+    lastConfirmedUserAt = 0;
+    inFlightUserRequest = null;
     clearCurrentUser();
     if (prevUserId) {
       try {
@@ -80,9 +103,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const refreshUser = useCallback(async () => {
+  const refreshUser = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force ?? true;
+    const startedSessionGeneration = sessionGenerationRef.current;
+    if (
+      shouldSkipSoftUserRefresh({
+        force,
+        lastConfirmedAt: lastConfirmedUserAt,
+        now: Date.now(),
+      })
+    ) {
+      return;
+    }
+
     try {
-      const u = await getMe();
+      const u = await getMeSingleFlight();
+      if (!isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
       persistUser(u);
     } catch (err) {
       if (err instanceof ApiNetworkError) {
@@ -95,7 +131,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (refresh) {
         try {
           await authApi.refresh({ refresh });
-          const u = await getMe();
+          if (!isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
+          const u = await getMeSingleFlight();
+          if (!isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
           persistUser(u);
           return;
         } catch (refreshErr) {
@@ -106,6 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // fallthrough to logout
         }
       }
+      if (!isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
       const prevId = user?.id ?? null;
       await authApi.logout();
       await clearSessionLocal(prevId);
@@ -130,6 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     const prevId = user?.id ?? null;
+    sessionGenerationRef.current = nextAuthSessionGeneration(sessionGenerationRef.current);
     await authApi.logout();
     useNotificationStore.getState().reset();
     await clearSessionLocal(prevId);
@@ -140,8 +180,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initConnectivity();
 
     async function restoreSession() {
+      const startedSessionGeneration = sessionGenerationRef.current;
       const tokens = await getStoredTokens();
-      if (!tokens || cancelled) {
+      if (!tokens || cancelled || !isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) {
         setIsLoading(false);
         return;
       }
@@ -149,15 +190,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Hydrate from cached snapshot first so the shell renders immediately.
       const cached = await readCurrentUser();
-      if (cached && !cancelled) {
+      if (cached && !cancelled && isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) {
         setUser(cached.data);
         setIsStale(true);
         setIsLoading(false);
       }
 
       try {
-        const u = await getMe();
-        if (cancelled) return;
+        const u = await getMeSingleFlight();
+        if (cancelled || !isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
         // Different user than cached? wipe the previous user's caches.
         if (cached && cached.data.id !== u.id) {
           try {
@@ -180,8 +221,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (refresh) {
           try {
             await authApi.refresh({ refresh });
-            const u = await getMe();
-            if (!cancelled) persistUser(u);
+            const u = await getMeSingleFlight();
+            if (!cancelled && isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) persistUser(u);
             return;
           } catch (refreshErr) {
             if (cancelled) return;

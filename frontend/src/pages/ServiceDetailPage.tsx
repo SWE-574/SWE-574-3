@@ -10,6 +10,7 @@ import {
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useNotificationStore } from '@/store/useNotificationStore'
 import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
@@ -27,6 +28,7 @@ import {
   spotsLeft, formatEventDateTime, formatGroupOfferDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
 } from '@/utils/eventUtils'
 import type { Service, EventEvaluationSummary } from '@/types'
+import { isServiceDetailRefreshType } from '@/utils/serviceDetailRefreshTypes'
 import type { Comment } from '@/services/commentAPI'
 import type { Handshake } from '@/services/handshakeAPI'
 
@@ -477,6 +479,7 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
   )
 }
 
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ServiceDetailPage() {
@@ -484,6 +487,7 @@ export default function ServiceDetailPage() {
   const navigate   = useNavigate()
   const [searchParams] = useSearchParams()
   const { isAuthenticated, user, refreshUser, updateUserOptimistically } = useAuthStore()
+  const lastNotification = useNotificationStore((s) => s.notifications[0])
 
   const [service, setService]           = useState<Service | null>(null)
   const [loading, setLoading]           = useState(true)
@@ -536,6 +540,16 @@ export default function ServiceDetailPage() {
     if (!isAuthenticated) return
     handshakeAPI.list().then(setHandshakes).catch(() => {})
   }, [isAuthenticated])
+
+  // Re-fetch when a relevant notification arrives (e.g. check-in, handshake status change).
+  useEffect(() => {
+    if (!lastNotification || !service?.id) return
+    if (String(lastNotification.related_service) !== String(service.id)) return
+    if (!isServiceDetailRefreshType(lastNotification.type)) return
+    // Refresh both the service (participant_count etc.) and the handshake list.
+    serviceAPI.get(service.id).then(setService).catch(() => {})
+    if (isAuthenticated) handshakeAPI.list().then(setHandshakes).catch(() => {})
+  }, [lastNotification, service?.id, isAuthenticated])
 
   useEffect(() => {
     if (!user?.id || !service?.id) return
@@ -1558,7 +1572,10 @@ export default function ServiceDetailPage() {
                           // Event reports should not alter owner-facing attendance/status display.
                           const alreadyReportedParticipant = reportedParticipantIds.has(exId(h.requester) ?? '')
                           const displayStatus = h.status === 'reported' ? 'accepted' : h.status
-                          const cfg = HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 }
+                          const isSkipped = displayStatus === 'accepted' && service?.status === 'Completed'
+                          const cfg = isSkipped
+                            ? { label: 'Skipped', bg: '#f3f4f6', color: '#6b7280' }
+                            : (HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 })
                           return (
                             <Flex key={h.id} align="center" justify="space-between"
                               p="10px" bg={GRAY50} borderRadius="9px" gap={2}
@@ -1707,13 +1724,24 @@ export default function ServiceDetailPage() {
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'cancelled' ? (
-                    /* Participant was removed from event */
+                    /* Participant left voluntarily or was removed by moderation */
                     <Stack gap={2}>
                       <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}>
-                        <Text fontSize="13px" fontWeight={700} color={RED}>Removed From Event</Text>
-                        <Text fontSize="12px" color="#991B1B" mt="3px">
-                          You have been removed from this event after a moderation review.
-                        </Text>
+                        {myEventHandshake.cancellation_reason === 'user_left' ? (
+                          <>
+                            <Text fontSize="13px" fontWeight={700} color={RED}>You Left This Event</Text>
+                            <Text fontSize="12px" color="#991B1B" mt="3px">
+                              You cancelled your registration for this event.
+                            </Text>
+                          </>
+                        ) : (
+                          <>
+                            <Text fontSize="13px" fontWeight={700} color={RED}>Removed From Event</Text>
+                            <Text fontSize="12px" color="#991B1B" mt="3px">
+                              You have been removed from this event after a moderation review.
+                            </Text>
+                          </>
+                        )}
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'checked_in' ? (
@@ -1752,7 +1780,7 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
-                      {!myEventHandshake.user_has_reviewed && (
+                      {service?.status === 'Completed' && !myEventHandshake.user_has_reviewed && (
                         <Box as="button" w="full" py="11px" borderRadius="10px"
                           bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
                           display="flex" alignItems="center" justifyContent="center" gap="7px"
@@ -1769,6 +1797,36 @@ export default function ServiceDetailPage() {
                         style={{ border: 'none', cursor: 'pointer' }}
                       >
                         <FiMessageSquare size={14} /> Event Chat
+                      </Box>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'no_show' ? (
+                    /* Was checked in but organizer closed event without marking attended */
+                    <Stack gap={2}>
+                      <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiAlertTriangle size={20} color={RED} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={RED}>Marked as No-Show</Text>
+                          <Text fontSize="12px" color="#991B1B" mt="2px">
+                            The event ended without your attendance being confirmed.
+                          </Text>
+                        </Box>
+                      </Box>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'accepted' && service.status === 'Completed' ? (
+                    /* Joined but event completed without check-in */
+                    <Stack gap={2}>
+                      <Box bg={GRAY100} borderRadius="12px" p={4} border={`1px solid ${GRAY200}`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiCheckCircle size={20} color={GRAY400} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={GRAY700}>Event Completed</Text>
+                          <Text fontSize="12px" color={GRAY500} mt="2px">
+                            This event has been marked as completed.
+                          </Text>
+                        </Box>
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'accepted' && isFutureEvent(service.scheduled_time) ? (
@@ -2380,7 +2438,7 @@ export default function ServiceDetailPage() {
         />
       )}
 
-      {isEvent && myEventHandshake?.status === 'attended' && !myEventHandshake.user_has_reviewed && (
+      {isEvent && service?.status === 'Completed' && myEventHandshake?.status === 'attended' && !myEventHandshake.user_has_reviewed && (
         <ServiceEvaluationModal
           isOpen={showEvaluationModal}
           onClose={() => setShowEvaluationModal(false)}

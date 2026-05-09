@@ -146,20 +146,18 @@ function buildGroupChatEntries(chats: Chat[]): GroupChatListEntry[] {
   for (const [serviceId, convs] of byService) {
     if (!convs.some(isAcceptedHandshake)) continue;
 
-    let latest: Chat | null = null;
+    // Use the most-recently-updated handshake to pick the representative conv
+    // (for title / member count), but do NOT expose its last_message as the
+    // group preview — those are 1-to-1 handshake messages, not group messages.
+    let rep = convs[0];
     let latestTs = 0;
     for (const c of convs) {
-      const msgT = c.last_message?.created_at
-        ? new Date(c.last_message.created_at).getTime()
-        : 0;
       const upT = c.updated_at ? new Date(c.updated_at).getTime() : 0;
-      const t = Math.max(msgT, upT);
-      if (t >= latestTs) {
-        latestTs = t;
-        latest = c;
+      if (upT > latestTs) {
+        latestTs = upT;
+        rep = c;
       }
     }
-    const rep = latest ?? convs[0];
     const acceptedCount = convs.filter(isAcceptedHandshake).length;
     const memberCount =
       typeof rep.service_member_count === "number"
@@ -170,8 +168,8 @@ function buildGroupChatEntries(chats: Chat[]): GroupChatListEntry[] {
       serviceId,
       serviceTitle: rep.service_title ?? "Group chat",
       memberCount,
-      previewBody: rep.last_message?.body ?? null,
-      previewAt: rep.last_message?.created_at ?? null,
+      previewBody: null,
+      previewAt: null,
     });
   }
 

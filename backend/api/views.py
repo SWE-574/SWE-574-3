@@ -1164,14 +1164,51 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             to_attr='_profile_event_handshakes',
         )
         
+        user_badges_prefetch = Prefetch(
+            'user__badges',
+            queryset=UserBadge.objects.select_related('badge')
+        )
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused', 'checked_in', 'attended', 'no_show']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+
         # Filter services by visibility - admins can see all, others only visible
         is_admin = self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES
+        services_queryset = (
+            Service.objects
+            .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
+            .select_related('user', 'event_evaluation_summary')
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
+        )
+        if self.request.user.is_authenticated:
+            from .models import SavedService, ServiceDismissal
+            services_queryset = services_queryset.annotate(
+                is_saved_anno=Exists(
+                    SavedService.objects.filter(
+                        user=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_dismissed_anno=Exists(
+                    ServiceDismissal.objects.filter(
+                        viewer=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+            )
         if is_admin:
-            services_prefetch = Prefetch('services', queryset=Service.objects.prefetch_related('tags'))
+            services_prefetch = Prefetch('services', queryset=services_queryset)
         else:
             services_prefetch = Prefetch(
                 'services',
-                queryset=Service.objects.filter(is_visible=True).exclude(status='Cancelled').prefetch_related('tags')
+                queryset=services_queryset.filter(is_visible=True).exclude(status='Cancelled')
             )
 
         return (
@@ -1545,6 +1582,15 @@ class UserHistoryView(APIView):
             'service', 'service__user', 'requester'
         ).order_by('-updated_at')[:50]  # Limit to last 50
         
+        # Pre-fetch handshake IDs where the target user already submitted a review,
+        # so we can set evaluation_pending=False for those without per-row queries.
+        reviewed_handshake_ids = set(
+            ReputationRep.objects.filter(
+                handshake__in=completed_handshakes,
+                giver=target_user,
+            ).values_list('handshake_id', flat=True)
+        )
+
         history = []
         for handshake in completed_handshakes:
             provider, receiver = get_provider_and_receiver(handshake)
@@ -1577,8 +1623,13 @@ class UserHistoryView(APIView):
                 'partner_avatar_url': partner.avatar_url,
                 'completed_date': handshake.updated_at,
                 'was_provider': was_provider,
-                # For events: True when the attendee's evaluation window is still open.
-                'evaluation_pending': handshake.service.type == 'Event' and handshake.status == 'attended',
+                # For events: True only for attendees (not the organizer) with an open evaluation window.
+                'evaluation_pending': (
+                    handshake.service.type == 'Event'
+                    and handshake.status == 'attended'
+                    and not was_provider
+                    and handshake.id not in reviewed_handshake_ids
+                ),
             })
 
         # Include owner-completed events that currently have no qualifying
@@ -2070,6 +2121,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         }
         
         sort_param = request.query_params.get('sort', 'latest')
+        user_param = request.query_params.get('user')
         # Don't cache location-based queries (results vary by user location).
         # Also skip cache for hot-sort by authenticated users -- social boost is per-user.
         # And skip cache when sort=hot AND exploration is enabled, since Phase 3
@@ -2083,6 +2135,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         explore_only_param = request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes')
         use_cache = not (
             (request.query_params.get('lat') and request.query_params.get('lng'))
+            or user_param
             or (sort_param == 'hot' and request.user.is_authenticated)
             or sort_param == 'for_you'
             or explore_enabled
@@ -2261,6 +2314,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     @track_performance
     def get_queryset(self):
+        user_param = self.request.query_params.get('user')
         # Use Prefetch object to optimize nested user badges query
         user_badges_prefetch = Prefetch(
             'user__badges',
@@ -2277,8 +2331,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
         )
 
         # Base queryset with optimizations (annotate comment_count to avoid N+1 in list)
+        visible_statuses = ['Active', 'Agreed'] if user_param else ['Active']
         queryset = (
-            Service.objects.filter(status='Active')
+            Service.objects.filter(status__in=visible_statuses)
             .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
             .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
@@ -2316,6 +2371,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
         search_engine = SearchEngine()
         search_params = {
             'type': self.request.query_params.get('type'),
+            # Repeated `type=` (Browse multi-select) is honored when present.
+            'types': self.request.query_params.getlist('type'),
+            # Repeated `location_type=` for Online / In-Person multi-select.
+            'location_types': self.request.query_params.getlist('location_type'),
+            'schedule_type': self.request.query_params.get('schedule_type'),
+            'weekend': str(
+                self.request.query_params.get('weekend', '')
+            ).strip().lower() in {'1', 'true', 'yes'},
             'tag': self.request.query_params.get('tag'),
             'tags': self.request.query_params.getlist('tags'),
             'search': self.request.query_params.get('search'),
@@ -2334,8 +2397,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
             # Surface the field-level error instead of swallowing it.
             raise drf_serializers.ValidationError({exc.field: exc.message})
 
-        user_param = self.request.query_params.get('user')
-
         # Onboarding tag fallback (#478): when an onboarded viewer with
         # declared skills hits the feed without an explicit tag filter,
         # prefer services tagged with their skills and top up from the
@@ -2347,7 +2408,13 @@ class ServiceViewSet(viewsets.ModelViewSet):
             self.request.query_params.get('tag')
             or self.request.query_params.getlist('tags')
         )
-        if not explicit_tag and not user_param:
+        # Browse's "All" mode opts out of the implicit skills filter so the
+        # viewer sees the full active catalog instead of a skill-aware slice.
+        skip_onboarding_raw = self.request.query_params.get('skip_onboarding', '')
+        skip_onboarding = (
+            str(skip_onboarding_raw).strip().lower() in {'1', 'true', 'yes'}
+        )
+        if not explicit_tag and not user_param and not skip_onboarding:
             from .ranking import apply_onboarding_fallback
             queryset, _ = apply_onboarding_fallback(
                 queryset,
@@ -2365,6 +2432,15 @@ class ServiceViewSet(viewsets.ModelViewSet):
             cold, under, stale = _eligible_exploration(sample)
             eligible_ids = [s.id for s in (*cold, *under, *stale)]
             queryset = queryset.filter(id__in=eligible_ids)
+
+        # Optional `exclude_own` toggle — Browse uses this so the viewer
+        # never sees their own services in the discovery feed.
+        exclude_own_raw = self.request.query_params.get('exclude_own', '')
+        if (
+            str(exclude_own_raw).strip().lower() in {'1', 'true', 'yes'}
+            and self.request.user.is_authenticated
+        ):
+            queryset = queryset.exclude(user=self.request.user)
 
         # Filter by owner user (for profile pages)
         if user_param:
@@ -3240,12 +3316,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['get'],
         url_path='debug-ranking-availability',
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[permissions.IsAuthenticated],
     )
     def debug_ranking_availability(self, request):
-        # Admin-only per #371. The PlatformSetting flag remains as a master
-        # on/off but is now redundant with the IsAdminUser gate; left for
-        # backwards compatibility with the existing admin UI toggle.
+        # Recommendation Showcase: gated solely by the PlatformSetting toggle
+        # so a moderator can flip it on for the whole community at once.
         platform_settings = PlatformSetting.get_solo()
         return Response({'enabled': platform_settings.ranking_debug_enabled})
 
@@ -3253,16 +3328,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['post'],
         url_path='debug-ranking',
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[permissions.IsAuthenticated],
     )
     def debug_ranking(self, request):
-        # Admin-only per #371. Optional simulated_user_id lets an admin compute
-        # the payload from another user's perspective (read-only -- no access to
-        # the simulated user's messages, settings, or other private state).
+        # Open to any authenticated user once the moderator turns the showcase
+        # on. simulated_user_id stays admin-only because it'd otherwise leak
+        # another user's tag overlap and follow signal.
         platform_settings = PlatformSetting.get_solo()
         if not platform_settings.ranking_debug_enabled:
             return create_error_response(
-                'Ranking debug is currently disabled by an administrator.',
+                'Ranking showcase is currently disabled by a moderator.',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN,
             )
@@ -3286,6 +3361,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 return None
 
         simulated_user_id = request.data.get('simulated_user_id')
+        # `simulated_user_id` would expose another user's tag overlap and
+        # follow graph, so keep it admin-only even when the showcase is open
+        # for everyone else.
+        if simulated_user_id and getattr(request.user, 'role', None) not in ADMIN_ROLES:
+            simulated_user_id = None
 
         payload = build_service_debug_payload(
             service_ids=service_ids,
@@ -6241,7 +6321,7 @@ class PublicChatViewSet(viewsets.ViewSet):
         has_active_hs = Handshake.objects.filter(
             service=service,
             requester=user,
-            status__in=['accepted', 'checked_in', 'attended'],
+            status__in=['accepted', 'checked_in', 'attended', 'completed', 'no_show'],
         ).exists()
         if has_active_hs:
             return None
