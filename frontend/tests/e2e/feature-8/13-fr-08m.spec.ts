@@ -17,7 +17,7 @@ test('FR-08m: websocket notifications surface representative handshake state tra
   const title = `FR-08m Offer ${Date.now()}`
 
   const ownerWatcherContext = await browser.newContext({
-    baseURL: 'http://localhost:5173',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost',
   })
   const ownerWatcherPage = await ownerWatcherContext.newPage()
 
