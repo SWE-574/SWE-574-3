@@ -321,6 +321,7 @@ const PublicProfile = () => {
       navigate('/profile', { replace: true })
       return
     }
+    let active = true
     const ac = new AbortController()
 
     const loadProfile = async () => {
@@ -331,22 +332,31 @@ const PublicProfile = () => {
 
       try {
         const u = await userAPI.getUser(userId, ac.signal)
+        if (!active) return
         setProfileUser(u)
         serviceAPI.list({ user_id: userId, page_size: 50 }, ac.signal)
-          .then((items) => setServices(items.filter(isOngoingProfileService))).catch(() => {})
+          .then((items) => {
+            if (active) setServices(items.filter(isOngoingProfileService))
+          })
+          .catch(() => {})
         if (u.show_history) {
-          userAPI.getHistory(userId, ac.signal).then(setHistory).catch(() => {})
+          userAPI.getHistory(userId, ac.signal).then((h) => active && setHistory(h)).catch(() => {})
         }
-        userAPI.getBadgeProgress(userId, ac.signal).then(setBadges).catch(() => {})
+        userAPI.getBadgeProgress(userId, ac.signal).then((b) => active && setBadges(b)).catch(() => {})
         setReviewsLoading(true)
         Promise.all([
           userAPI.getVerifiedReviews(userId, { role: 'provider', signal: ac.signal }),
           userAPI.getVerifiedReviews(userId, { role: 'receiver', signal: ac.signal }),
-        ]).then(([rProvider, rTaker]) => {
-          setReviewsAsProvider(rProvider.results)
-          setReviewsAsTaker(rTaker.results)
-        }).catch(() => {}).finally(() => setReviewsLoading(false))
+        ])
+          .then(([rProvider, rTaker]) => {
+            if (!active) return
+            setReviewsAsProvider(rProvider.results)
+            setReviewsAsTaker(rTaker.results)
+          })
+          .catch(() => {})
+          .finally(() => active && setReviewsLoading(false))
       } catch (err) {
+        if (!active) return
         if (isAbortLikeError(err)) return
         const status = (err as { response?: { status?: number } })?.response?.status
         if (status === 404) setNotFound(true)
@@ -357,13 +367,16 @@ const PublicProfile = () => {
           setProfileLoadError(getErrorMessage(err, 'Profile is temporarily unavailable.'))
         }
       } finally {
-        setLoading(false)
+        if (active) setLoading(false)
       }
     }
 
     void loadProfile()
 
-    return () => ac.abort()
+    return () => {
+      active = false
+      ac.abort()
+    }
     // Use viewer id only — full `user` object identity changes on Zustand updates and would
     // abort in-flight requests when opening a profile from the follow list.
   }, [userId, viewerId, navigate, retryKey])
