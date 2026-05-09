@@ -2391,7 +2391,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'entity_type': self.request.query_params.get('entity_type'),
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
-            'distance': self.request.query_params.get('distance', 10),
+            # No default radius -- LocationStrategy treats missing distance as
+            # signal-only (annotate + order, no hard cutoff). The previous
+            # default of 10 silently filtered out any service beyond 10 km
+            # whenever location was enabled. Distance is now opt-in via the
+            # More-filters slider; the frontend sends it explicitly when on.
+            'distance': self.request.query_params.get('distance'),
             # FR-12c — event date-range filter (only fires when type=Event).
             'date_from': self.request.query_params.get('date_from'),
             'date_to': self.request.query_params.get('date_to'),

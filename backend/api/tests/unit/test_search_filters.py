@@ -237,6 +237,42 @@ class TestLocationStrategy:
         result = self.strategy.apply(queryset, params)
         assert result.count() == original_count
 
+    def test_search_engine_signal_only_when_distance_omitted(self):
+        """End-to-end via SearchEngine: a request with lat/lng but no
+        distance must pass through every strategy without losing rows. This
+        guards against the views.py default that previously injected
+        `distance=10` even when the client didn't send it.
+        """
+        engine = SearchEngine()
+        queryset = Service.objects.filter(status='Active')
+        original_count = queryset.count()
+
+        # `distance` deliberately absent. Mirrors the params dict views.py
+        # constructs after the fix (distance is None when missing).
+        params = {
+            'lat': 41.0422,
+            'lng': 29.0089,
+            'distance': None,
+            'tags': [],
+            'type': None,
+            'types': [],
+            'location_types': [],
+            'schedule_type': None,
+            'weekend': False,
+            'tag': None,
+            'search': None,
+            'entity_type': None,
+            'date_from': None,
+            'date_to': None,
+        }
+        result = engine.search(queryset, params)
+        result_titles = [s.title for s in result]
+        # All services -- including Ankara, far outside any reasonable radius
+        # -- still surface. LocationStrategy only annotates when distance
+        # is missing.
+        assert len(result_titles) == original_count
+        assert 'Ankara Service' in result_titles
+
     def test_location_strategy_signal_only_when_no_distance(self):
         """When lat/lng are present without `distance`, the queryset must
         keep every row (no hard radius cutoff). The viewer asked for the
