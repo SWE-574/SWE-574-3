@@ -58,9 +58,6 @@ export interface ProfileHeroProps {
   /** Both modes: completed exchanges count */
   completedExchanges?: number;
 
-  /** Public profile: average reputation score */
-  reputationScore?: number;
-
   followers?: number;
   following?: number;
 
@@ -155,7 +152,6 @@ export default function ProfileHero({
   user,
   activeServicesCount,
   completedExchanges,
-  reputationScore,
   followers,
   following,
   onEditPress,
@@ -359,14 +355,6 @@ export default function ProfileHero({
                       <StatItem
                         label="Exchanges"
                         value={completedExchanges ?? 0}
-                      />
-                      <StatItem
-                        label="Reputation"
-                        value={
-                          reputationScore != null
-                            ? reputationScore.toFixed(1)
-                            : "—"
-                        }
                       />
                     </>
                   )}

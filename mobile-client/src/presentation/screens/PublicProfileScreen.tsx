@@ -302,19 +302,6 @@ export default function PublicProfileScreen() {
   const exchangesCount = groupHistoryItems(
     historyItems.filter(isOwnHistoryItem),
   ).length;
-  const reputationParts = [
-    user.punctual_count ?? 0,
-    user.helpful_count ?? 0,
-    user.kind_count ?? 0,
-  ];
-  const reputationScore = reputationParts.some((value) => value > 0)
-    ? Math.round(
-        (reputationParts.reduce((total, value) => total + value, 0) /
-          reputationParts.length) *
-          10,
-      ) / 10
-    : undefined;
-
   const renderServicesSection = () => {
     if (!activeServices.length) {
       return (
@@ -524,7 +511,6 @@ export default function PublicProfileScreen() {
             featured_badges_detail: user.featured_badges_detail ?? [],
           }}
           completedExchanges={exchangesCount}
-          reputationScore={reputationScore}
           onFollowersPress={() => openFollowList("followers")}
           onFollowingPress={() => openFollowList("following")}
           isFollowing={Boolean(user.is_following)}
