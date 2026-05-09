@@ -456,7 +456,6 @@ const PublicProfile = () => {
             setFollowListModal('following')
           }}
           completedExchanges={groupedOwnHistory.length}
-          reputationScore={hasRep ? Math.round(((punctual + helpful + kind) / 3) * 10) / 10 : undefined}
           onFollowPress={showFollowButton ? handleFollowToggle : undefined}
           isFollowing={Boolean(profileUser.is_following)}
           followActionLoading={followActionLoading}

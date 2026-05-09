@@ -152,14 +152,15 @@ describe('ProfileHero — public mode', () => {
     expect(screen.queryByText('View Time Activity →')).toBeNull()
   })
 
-  it('hides time balance tile and shows reputation instead', () => {
+  it('shows Member since in At a glance (no star reputation tile on public hero)', () => {
     render(
       <Wrapper>
-        <ProfileHero user={baseUser} mode="public" reputationScore={4.7} />
+        <ProfileHero user={{ ...baseUser, date_joined: '2026-05-01T10:00:00Z' }} mode="public" />
       </Wrapper>,
     )
     expect(screen.queryByText('Time balance')).toBeNull()
-    expect(screen.getByText('Reputation')).toBeInTheDocument()
+    expect(screen.queryByText('Reputation')).toBeNull()
+    expect(screen.getByText('Member since')).toBeInTheDocument()
   })
 
   it('renders Follow beside the name when onFollowPress is set', () => {

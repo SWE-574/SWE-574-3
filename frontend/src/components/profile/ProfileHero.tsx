@@ -58,7 +58,6 @@ type Props = {
   followStats?: { followers: number; following: number }
   onFollowersClick?: () => void
   onFollowingClick?: () => void
-  reputationScore?: number
   completedExchanges?: number
   /** @deprecated Time balance is no longer shown in the hero — shown in sidebar instead */
   timeBalance?: number
@@ -207,7 +206,6 @@ const ProfileHero = ({
   followStats,
   onFollowersClick,
   onFollowingClick,
-  reputationScore,
   completedExchanges,
   activeServicesCount,
   onFollowPress,
@@ -463,24 +461,11 @@ const ProfileHero = ({
                   label="Karma"
                   value={user.karma_score != null ? user.karma_score : '—'}
                 />
-                <StatTile
-                  label="Reputation"
-                  value={
-                    reputationScore != null
-                      ? (
-                        <Flex align="center" gap="4px">
-                          <FiStar size={16} style={{ color: '#FCD34D' }} />
-                          {reputationScore.toFixed(1)}
-                        </Flex>
-                      )
-                      : '—'
-                  }
-                />
+                <StatTile label="Member since" value={memberSince} />
                 <StatTile
                   label="Community"
                   value={<CommunityStatValue followers={followers} following={following} onFollowersClick={onFollowersClick} onFollowingClick={onFollowingClick} />}
                 />
-                <StatTile label="Member since" value={memberSince} />
               </>
             )}
           </Grid>
