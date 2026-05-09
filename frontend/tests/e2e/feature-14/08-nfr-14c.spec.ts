@@ -24,18 +24,30 @@ test('NFR-14c: evaluation form clearly distinguishes required trait selection fr
   await page.getByText(/Leave Evaluation/i).first().click()
 
   // Trait selection section must be labelled (required input indicator).
-  await expect(page.getByText(/Select trait/i).first()).toBeVisible({ timeout: 10_000 })
+  // The modal groups traits into "Nice Traits" / "Needs Improvement"; either
+  // header signals the required selection band.
+  await expect(
+    page.getByText(/Nice Traits|Needs Improvement/i).first(),
+  ).toBeVisible({ timeout: 10_000 })
 
   // Comment field must be labelled "optional".
-  await expect(page.getByText(/optional/i).first()).toBeVisible()
+  await expect(page.getByText(/Review \(optional\)|optional/i).first()).toBeVisible()
 
   // Attempting to submit without selecting any trait should be blocked.
   await page.getByRole('button', { name: 'Submit Evaluation' }).click()
-  // Either a toast error or the form stays open without navigating away.
-  const staysOpen = await page.getByText(/Select trait/i).isVisible({ timeout: 3_000 }).catch(() => false)
-  const errorToast = await page.locator('[data-sonner-toaster] li').filter({ hasText: /select at least one/i }).isVisible({ timeout: 3_000 }).catch(() => false)
+  // The modal stays open (Submit Evaluation still visible) and surfaces a
+  // sonner error toast asking for at least one trait.
+  const stillOpen = await page
+    .getByRole('button', { name: 'Submit Evaluation' })
+    .isVisible({ timeout: 3_000 })
+    .catch(() => false)
+  const errorToast = await page
+    .locator('[data-sonner-toaster] li')
+    .filter({ hasText: /select at least one/i })
+    .isVisible({ timeout: 3_000 })
+    .catch(() => false)
   expect(
-    staysOpen || errorToast,
+    stillOpen || errorToast,
     'Submitting with no traits selected should show an error or keep the form open',
   ).toBeTruthy()
 })
