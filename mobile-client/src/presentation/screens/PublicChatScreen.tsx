@@ -115,7 +115,7 @@ export default function PublicChatScreen() {
     (participant: ChatParticipantItem) => {
       if (!participant.id) return;
       setShowParticipantsSheet(false);
-      navigation.navigate("UserPublicProfile", { userId: participant.id });
+      navigation.navigate("PublicProfile", { userId: participant.id });
     },
     [navigation],
   );
