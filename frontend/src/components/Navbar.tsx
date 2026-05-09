@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { Box, Flex, Text } from '@chakra-ui/react'
+import { Box, Flex, Text, useBreakpointValue } from '@chakra-ui/react'
 import {
   FiBookmark,
   FiMessageSquare,
@@ -143,6 +143,10 @@ const Navbar = () => {
   const location  = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const mobileRef = useRef<HTMLDivElement>(null)
+  // Match Chakra's `md` breakpoint (768px). `false` on first SSR/hydration
+  // pass so the desktop trigger keeps its testid in tests that boot before
+  // the breakpoint resolves.
+  const isMobile = useBreakpointValue({ base: true, md: false }) ?? false
 
   const handleLogout = () => { logout(); navigate('/') }
 
@@ -293,7 +297,7 @@ const Navbar = () => {
                 <Dropdown
                   trigger={
                     <Flex
-                      data-testid="user-menu-trigger"
+                      data-testid={isMobile ? undefined : 'user-menu-trigger'}
                       align="center" gap="6px" p="5px" borderRadius="10px"
                       style={{ cursor: 'pointer', transition: 'background 0.15s' }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GRAY100 }}
@@ -331,9 +335,12 @@ const Navbar = () => {
                 </Dropdown>
               </Box>
 
-              {/* Mobile hamburger */}
+              {/* Mobile hamburger — also serves as the user menu trigger
+                  on small viewports (the desktop avatar dropdown is hidden). */}
               <Box
                 as="button" display={{ base: 'flex', md: 'none' }}
+                data-testid={isMobile ? 'user-menu-trigger' : undefined}
+                aria-label="Open menu"
                 alignItems="center" justifyContent="center"
                 w="36px" h="36px" borderRadius="10px"
                 bg={mobileOpen ? GRAY100 : 'transparent'}

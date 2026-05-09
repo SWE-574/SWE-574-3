@@ -20,12 +20,24 @@
 
 import { test, expect, type Page } from '@playwright/test'
 import { loginAs, expectToast, USERS } from './helpers/auth'
+import { openServiceFromDashboard } from './helpers/navigation'
 
 const TARGET_SERVICE = 'Watercolor Postcards for the Community Board'
 const PENDING_INITIATE_SERVICE = 'Help Organizing Family Recipe Notes'
 
 async function openServiceGroup(page: Page, serviceTitle: string) {
+  // The chat sidebar groups conversations by service title in collapsible
+  // accordions. If the conversation is in the closed/completed section the
+  // accordion is collapsed inside a hidden region — expand the
+  // 'Completed / Closed' container first when the active list does not
+  // contain the target so the header is reachable from either bucket.
   const groupHeader = page.locator('button').filter({ hasText: new RegExp(serviceTitle, 'i') }).first()
+  if (!(await groupHeader.isVisible().catch(() => false))) {
+    const closedToggle = page.getByRole('button', { name: /Completed \/ Closed/i }).first()
+    if (await closedToggle.isVisible().catch(() => false)) {
+      await closedToggle.click()
+    }
+  }
   await expect(groupHeader).toBeVisible({ timeout: 20_000 })
   await groupHeader.click()
 }
@@ -33,11 +45,10 @@ async function openServiceGroup(page: Page, serviceTitle: string) {
 test.describe('Handshake — express interest', () => {
   test('requester can request a service from the dashboard', async ({ page }) => {
     await loginAs(page, USERS.can)
-    await page.goto('/dashboard')
-
-    await expect(page.getByText(TARGET_SERVICE).first()).toBeVisible({ timeout: 20_000 })
-    await page.getByText(TARGET_SERVICE).first().click()
-    await expect(page).toHaveURL(/\/service-detail\//)
+    // The seeded Watercolor offer is not guaranteed to be on the first page
+    // of curated dashboard cards. Use the dashboard search bar to locate it
+    // deterministically instead of scrolling for the title text.
+    await openServiceFromDashboard(page, TARGET_SERVICE)
 
     const requestBtn = page.getByRole('button', { name: /Request this Service|Offer to Help/i })
     const alreadyBtn = page.getByRole('button', { name: /View Chat/i })
@@ -63,11 +74,9 @@ test.describe('Handshake — express interest', () => {
 
   test('provider sees incoming request on their service detail page', async ({ page }) => {
     await loginAs(page, USERS.ayse)
-    await page.goto('/dashboard')
-
-    await expect(page.getByText(TARGET_SERVICE).first()).toBeVisible({ timeout: 20_000 })
-    await page.getByText(TARGET_SERVICE).first().click()
-    await expect(page).toHaveURL(/\/service-detail\//)
+    // The seeded Watercolor offer is not guaranteed to be on the first page
+    // of curated dashboard cards. Use the dashboard search bar.
+    await openServiceFromDashboard(page, TARGET_SERVICE)
 
     const sectionHeader = page.getByText(/Incoming Requests|Participants/i)
     await expect(sectionHeader.first()).toBeVisible({ timeout: 10_000 })

@@ -1,14 +1,14 @@
 import { test, expect } from '@playwright/test'
-import { loginAs, expectToast, USERS } from '../helpers'
+import { loginAs, expectToast, openServiceFromDashboard, USERS } from '../helpers'
 
 const TARGET_SERVICE = 'Watercolor Postcards for the Community Board'
 
 test('FR-10b: opening message is auto-created when private thread starts', async ({ page }) => {
   // Ensure the private thread exists first.
   await loginAs(page, USERS.can)
-  await page.goto('/dashboard')
-  await expect(page.getByText(TARGET_SERVICE).first()).toBeVisible({ timeout: 20_000 })
-  await page.getByText(TARGET_SERVICE).first().click()
+  // Use the dashboard search rather than scrolling — the seed item is not
+  // guaranteed to be on the first page of curated cards.
+  await openServiceFromDashboard(page, TARGET_SERVICE)
 
   const requestButton = page.getByRole('button', { name: /Request this Service|Offer to Help/i })
   if (await requestButton.isVisible()) {

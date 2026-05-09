@@ -28,20 +28,25 @@ test.describe('@a11y baseline', () => {
   test('@a11y dashboard for an authenticated user', async ({ page }) => {
     await loginAs(page, USERS.regular)
     await page.goto('/dashboard')
+    await page.waitForLoadState('networkidle')
     await expectNoBlockingA11y(page)
   })
 
   test('@a11y profile page', async ({ page }) => {
     await loginAs(page, USERS.regular)
     await page.goto('/profile')
+    await page.waitForLoadState('networkidle')
     await expectNoBlockingA11y(page)
   })
 
-  test('@a11y create offer modal', async ({ page }) => {
+  test('@a11y create offer form', async ({ page }) => {
+    // The dashboard no longer hosts an in-page "Create Offer" modal — the
+    // entry point now navigates to the dedicated /post-offer route. Scan the
+    // form view there instead. (Was Category A drift in CI run 25603881034.)
     await loginAs(page, USERS.regular)
-    await page.goto('/dashboard')
-    await page.getByRole('button', { name: /create.*offer/i }).first().click()
-    await expectNoBlockingA11y(page, { selector: '[role="dialog"]' })
+    await page.goto('/post-offer')
+    await page.waitForLoadState('networkidle')
+    await expectNoBlockingA11y(page)
   })
 
   test('@a11y registration page', async ({ page }) => {
@@ -52,18 +57,21 @@ test.describe('@a11y baseline', () => {
   test('@a11y forum topic list', async ({ page }) => {
     await loginAs(page, USERS.regular)
     await page.goto('/forum')
+    await page.waitForLoadState('networkidle')
     await expectNoBlockingA11y(page)
   })
 
   test('@a11y search / dashboard with active query', async ({ page }) => {
     await loginAs(page, USERS.regular)
     await page.goto('/dashboard?q=tutoring')
+    await page.waitForLoadState('networkidle')
     await expectNoBlockingA11y(page)
   })
 
   test('@a11y create event modal', async ({ page }) => {
     await loginAs(page, USERS.regular)
     await page.goto('/dashboard')
+    await page.waitForLoadState('networkidle')
     const createEvent = page.getByRole('button', { name: /create.*event/i }).first()
     if (!(await createEvent.isVisible().catch(() => false))) {
       test.skip(true, 'No create-event entry point on this dashboard variant')

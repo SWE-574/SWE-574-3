@@ -19,4 +19,9 @@ export async function openConversationForService(page: Page, serviceTitle: strin
   const conversationRow = page.locator('button').filter({ hasText: new RegExp(serviceTitle, 'i') }).first()
   await expect(conversationRow).toBeVisible({ timeout: 20_000 })
   await conversationRow.click()
+  // Wait for the message composer to render — without this the next
+  // click on a status-button (Initiate Handshake / Cancel / Confirm
+  // Completion) can fire while ChatPage is still hydrating the
+  // selected conversation, missing the button entirely.
+  await expect(page.getByPlaceholder(/Write a message/i)).toBeVisible({ timeout: 10_000 })
 }

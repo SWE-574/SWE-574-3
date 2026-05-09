@@ -1,8 +1,9 @@
 import { expect, type Page } from '@playwright/test'
 
-import { expectToast } from './auth'
+import { type DemoUser, expectToast } from './auth'
 import { futureDateParts } from './common'
 import { openConversationForService, openDashboardSearch, openServiceFromDashboard } from './navigation'
+import { switchUser } from './session'
 
 const ONE_PIXEL_PNG_BYTES = Uint8Array.from([
   137, 80, 78, 71, 13, 10, 26, 10,
@@ -96,48 +97,63 @@ export async function initiateOnlineSessionAsOwner(page: Page, options: {
   meetingLink?: string
   daysAhead?: number
 }): Promise<void> {
-  const { date, time } = futureDateParts(options.daysAhead ?? 3)
-  const result = await page.evaluate(async ({ serviceTitle, requesterName, duration, meetingLink, date, time }) => {
-    const listRes = await fetch('/api/handshakes/', { credentials: 'include' })
-    const handshakes = await listRes.json()
-    const target = (Array.isArray(handshakes) ? handshakes : []).find((handshake: Record<string, unknown>) => {
-      return handshake.service_title === serviceTitle
-        && handshake.status === 'pending'
-        && handshake.requester_name === requesterName
+  const minutes = ['00', '15', '30', '45']
+  const seed = Date.now()
+  const totalAttempts = 24
+  let result: { ok: boolean; status: number; body: string } | null = null
+
+  for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+    const { date } = futureDateParts((options.daysAhead ?? 3) + Math.floor(attempt / 4))
+    const slotHour = 9 + ((seed + attempt) % 8)
+    const slotMinute = minutes[(Math.floor(seed / 1000) + attempt) % minutes.length] ?? '00'
+    const time = `${String(slotHour).padStart(2, '0')}:${slotMinute}`
+
+    result = await page.evaluate(async ({ serviceTitle, requesterName, duration, meetingLink, date, time }) => {
+      const listRes = await fetch('/api/handshakes/', { credentials: 'include' })
+      const handshakes = await listRes.json()
+      const target = (Array.isArray(handshakes) ? handshakes : []).find((handshake: Record<string, unknown>) => {
+        return handshake.service_title === serviceTitle
+          && handshake.status === 'pending'
+          && handshake.requester_name === requesterName
+      })
+
+      if (!target) {
+        return { ok: false, status: 404, body: 'Pending handshake not found for initiate' }
+      }
+
+      const initiateRes = await fetch(`/api/handshakes/${target.id}/initiate/`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          exact_location: meetingLink,
+          exact_duration: duration,
+          scheduled_time: `${date}T${time}:00`,
+        }),
+      })
+
+      return {
+        ok: initiateRes.ok,
+        status: initiateRes.status,
+        body: await initiateRes.text(),
+      }
+    }, {
+      serviceTitle: options.serviceTitle,
+      requesterName: options.requesterName,
+      duration: options.duration ?? 1,
+      meetingLink: options.meetingLink ?? 'https://meet.example.com/feature-edit-lock',
+      date,
+      time,
     })
 
-    if (!target) {
-      return { ok: false, status: 404, body: 'Pending handshake not found for initiate' }
+    if (result.ok || !result.body.toLowerCase().includes('schedule conflict')) {
+      break
     }
+  }
 
-    const initiateRes = await fetch(`/api/handshakes/${target.id}/initiate/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        exact_location: meetingLink,
-        exact_duration: duration,
-        scheduled_time: `${date}T${time}:00`,
-      }),
-    })
-
-    return {
-      ok: initiateRes.ok,
-      status: initiateRes.status,
-      body: await initiateRes.text(),
-    }
-  }, {
-    serviceTitle: options.serviceTitle,
-    requesterName: options.requesterName,
-    duration: options.duration ?? 1,
-    meetingLink: options.meetingLink ?? 'https://meet.example.com/feature-edit-lock',
-    date,
-    time,
-  })
-
-  expect(result.ok, `Initiate handshake failed: ${result.status} ${result.body}`).toBeTruthy()
+  expect(result?.ok, `Initiate handshake failed: ${result?.status} ${result?.body}`).toBeTruthy()
 }
 
 export async function approveSessionAsRequester(page: Page): Promise<void> {
@@ -222,12 +238,15 @@ export function extractServiceId(detailUrl: string): string {
   return match[1]
 }
 
-export async function acceptPendingHandshakeViaApi(page: Page, options: {
+async function findPendingHandshakeIdForService(page: Page, options: {
   serviceId: string
   requesterName: string
-}): Promise<void> {
-  const result = await page.evaluate(async ({ serviceId, requesterName }) => {
+}): Promise<string | null> {
+  return await page.evaluate(async ({ serviceId, requesterName }) => {
     const listRes = await fetch('/api/handshakes/', { credentials: 'include' })
+    if (!listRes.ok) {
+      return null
+    }
     const handshakes = await listRes.json()
     const target = (Array.isArray(handshakes) ? handshakes : []).find((handshake: Record<string, unknown>) => {
       const service = handshake.service
@@ -241,11 +260,117 @@ export async function acceptPendingHandshakeViaApi(page: Page, options: {
         && handshake.requester_name === requesterName
     })
 
-    if (!target) {
-      return { ok: false, status: 404, body: 'Pending handshake not found' }
+    return typeof target?.id === 'string' ? target.id : null
+  }, options)
+}
+
+/**
+ * Drive a pending Offer/Need handshake to ``accepted`` state.
+ *
+ * The backend rejects a direct ``accept`` call on Offer/Need services with
+ * ``INVALID_STATE: "Set session details first via Initiate"``: the provider
+ * must first ``initiate`` session details and the requester must then
+ * ``approve`` them.  This helper performs that handshake from the test, so
+ * call sites that previously POSTed ``accept`` keep working.
+ *
+ * The page must already be authenticated as the owner.  When ``owner`` and
+ * ``requester`` are passed the helper switches to the requester to call
+ * ``approve`` and then switches back to the owner.  For Event services pass
+ * neither and the helper falls through to a single ``accept`` call.
+ */
+export async function acceptPendingHandshakeViaApi(page: Page, options: {
+  serviceId: string
+  requesterName: string
+  owner?: DemoUser
+  requester?: DemoUser
+  duration?: number
+  meetingLink?: string
+}): Promise<void> {
+  const handshakeId = await findPendingHandshakeIdForService(page, {
+    serviceId: options.serviceId,
+    requesterName: options.requesterName,
+  })
+
+  if (!handshakeId) {
+    expect(handshakeId, `Pending handshake not found for service ${options.serviceId} / ${options.requesterName}`).toBeTruthy()
+    return
+  }
+
+  if (options.owner && options.requester) {
+    // Offer/Need flow: provider initiates session details, requester approves.
+    const minutes = ['00', '15', '30', '45']
+    const seed = Date.now()
+    const totalAttempts = 24
+    let initiateResult: { ok: boolean; status: number; body: string } | null = null
+
+    for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+      const { date } = futureDateParts(3 + Math.floor(attempt / 4))
+      const slotHour = 9 + ((seed + attempt) % 8)
+      const slotMinute = minutes[(Math.floor(seed / 1000) + attempt) % minutes.length] ?? '00'
+      const time = `${String(slotHour).padStart(2, '0')}:${slotMinute}`
+
+      initiateResult = await page.evaluate(async ({ handshakeId, duration, meetingLink, date, time }) => {
+        const response = await fetch(`/api/handshakes/${handshakeId}/initiate/`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            exact_location: meetingLink,
+            exact_duration: duration,
+            scheduled_time: `${date}T${time}:00`,
+          }),
+        })
+
+        return {
+          ok: response.ok,
+          status: response.status,
+          body: await response.text(),
+        }
+      }, {
+        handshakeId,
+        duration: options.duration ?? 1,
+        meetingLink: options.meetingLink ?? 'https://meet.example.com/feature-accept',
+        date,
+        time,
+      })
+
+      if (initiateResult.ok || !initiateResult.body.toLowerCase().includes('schedule conflict')) {
+        break
+      }
     }
 
-    const acceptRes = await fetch(`/api/handshakes/${target.id}/accept/`, {
+    expect(initiateResult?.ok, `Initiate handshake failed: ${initiateResult?.status} ${initiateResult?.body}`).toBeTruthy()
+
+    await switchUser(page, options.requester)
+
+    const approveResult = await page.evaluate(async ({ handshakeId }) => {
+      const response = await fetch(`/api/handshakes/${handshakeId}/approve/`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      })
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        body: await response.text(),
+      }
+    }, { handshakeId })
+
+    expect(approveResult.ok, `Approve handshake failed: ${approveResult.status} ${approveResult.body}`).toBeTruthy()
+
+    await switchUser(page, options.owner)
+    return
+  }
+
+  // Event services support direct accept by the provider.
+  const result = await page.evaluate(async ({ handshakeId }) => {
+    const acceptRes = await fetch(`/api/handshakes/${handshakeId}/accept/`, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -259,7 +384,7 @@ export async function acceptPendingHandshakeViaApi(page: Page, options: {
       status: acceptRes.status,
       body: await acceptRes.text(),
     }
-  }, options)
+  }, { handshakeId })
 
   expect(result.ok, `Accept handshake failed: ${result.status} ${result.body}`).toBeTruthy()
 }
