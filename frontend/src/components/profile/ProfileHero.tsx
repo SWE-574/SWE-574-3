@@ -451,34 +451,36 @@ const ProfileHero = ({
             )}
           </Grid>
 
-          {/* View Time Activity link */}
-          <Box mb={2}>
-            <Link
-              to="/transaction-history"
-              style={{ textDecoration: 'none' }}
-            >
-              <Flex
-                align="center"
-                gap="5px"
-                display="inline-flex"
-                px="10px"
-                py="5px"
-                borderRadius="999px"
-                fontSize="11px"
-                fontWeight={600}
-                style={{
-                  background: 'rgba(255,255,255,0.15)',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  color: WHITE,
-                  cursor: 'pointer',
-                  backdropFilter: 'blur(4px)',
-                }}
+          {/* View Time Activity is only for own profile */}
+          {mode === 'own' && (
+            <Box mb={2}>
+              <Link
+                to="/transaction-history"
+                style={{ textDecoration: 'none' }}
               >
-                <FiClock size={11} />
-                View Time Activity →
-              </Flex>
-            </Link>
-          </Box>
+                <Flex
+                  align="center"
+                  gap="5px"
+                  display="inline-flex"
+                  px="10px"
+                  py="5px"
+                  borderRadius="999px"
+                  fontSize="11px"
+                  fontWeight={600}
+                  style={{
+                    background: 'rgba(255,255,255,0.15)',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    color: WHITE,
+                    cursor: 'pointer',
+                    backdropFilter: 'blur(4px)',
+                  }}
+                >
+                  <FiClock size={11} />
+                  View Time Activity →
+                </Flex>
+              </Link>
+            </Box>
+          )}
 
         </Box>
       </Grid>
