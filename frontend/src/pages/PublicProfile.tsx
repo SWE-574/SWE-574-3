@@ -14,6 +14,7 @@ import { serviceAPI } from '@/services/serviceAPI'
 import type { User, Service, BadgeProgress, ProfileReview } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
 import { groupHistoryItems, isOwnHistoryItem, type GroupedHistoryEntry } from '@/utils/historyGrouping'
+import { isOngoingProfileService } from '@/utils/profileServices'
 import {
   GREEN, GREEN_LT,
   AMBER, AMBER_LT,
@@ -164,8 +165,8 @@ const PublicProfile = () => {
       try {
         const u = await userAPI.getUser(userId, ac.signal)
         setProfileUser(u)
-        serviceAPI.list({ user_id: userId, status: 'Active', page_size: 50 }, ac.signal)
-          .then(setServices).catch(() => {})
+        serviceAPI.list({ user_id: userId, page_size: 50 }, ac.signal)
+          .then((items) => setServices(items.filter(isOngoingProfileService))).catch(() => {})
         if (u.show_history) {
           userAPI.getHistory(userId, ac.signal).then(setHistory).catch(() => {})
         }

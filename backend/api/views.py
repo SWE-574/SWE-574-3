@@ -2107,6 +2107,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         }
         
         sort_param = request.query_params.get('sort', 'latest')
+        user_param = request.query_params.get('user')
         # Don't cache location-based queries (results vary by user location).
         # Also skip cache for hot-sort by authenticated users -- social boost is per-user.
         # And skip cache when sort=hot AND exploration is enabled, since Phase 3
@@ -2120,6 +2121,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         explore_only_param = request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes')
         use_cache = not (
             (request.query_params.get('lat') and request.query_params.get('lng'))
+            or user_param
             or (sort_param == 'hot' and request.user.is_authenticated)
             or sort_param == 'for_you'
             or explore_enabled
@@ -2298,6 +2300,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     @track_performance
     def get_queryset(self):
+        user_param = self.request.query_params.get('user')
         # Use Prefetch object to optimize nested user badges query
         user_badges_prefetch = Prefetch(
             'user__badges',
@@ -2314,8 +2317,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
         )
 
         # Base queryset with optimizations (annotate comment_count to avoid N+1 in list)
+        visible_statuses = ['Active', 'Agreed'] if user_param else ['Active']
         queryset = (
-            Service.objects.filter(status='Active')
+            Service.objects.filter(status__in=visible_statuses)
             .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
             .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
@@ -2370,8 +2374,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
         except InvalidSearchParam as exc:
             # Surface the field-level error instead of swallowing it.
             raise drf_serializers.ValidationError({exc.field: exc.message})
-
-        user_param = self.request.query_params.get('user')
 
         # Onboarding tag fallback (#478): when an onboarded viewer with
         # declared skills hits the feed without an explicit tag filter,

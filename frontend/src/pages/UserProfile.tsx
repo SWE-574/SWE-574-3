@@ -16,6 +16,7 @@ import { authAPI } from '@/services/authAPI'
 import type { Service, BadgeProgress, ProfileReview } from '@/types'
 import type { UserHistoryItem } from '@/services/userAPI'
 import { groupHistoryItems, isOwnHistoryItem, type GroupedHistoryEntry } from '@/utils/historyGrouping'
+import { isOngoingProfileService } from '@/utils/profileServices'
 import {
   GREEN, GREEN_LT,
   AMBER, AMBER_LT,
@@ -285,8 +286,8 @@ const UserProfile = () => {
 
   const ownHistory = history.filter(isOwnHistoryItem)
   const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
-  const offersTab  = services.filter(s => s.type === 'Offer' && s.status === 'Active')
-  const needsTab   = services.filter(s => s.type === 'Need'  && s.status === 'Active')
+  const offersTab  = services.filter(s => s.type === 'Offer' && isOngoingProfileService(s))
+  const needsTab   = services.filter(s => s.type === 'Need'  && isOngoingProfileService(s))
   const eventServices = services.filter(s => s.type === 'Event' && s.status === 'Active')
 
   useEffect(() => {
