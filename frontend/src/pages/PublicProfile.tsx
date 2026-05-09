@@ -584,27 +584,16 @@ const PublicProfile = () => {
             </Box>
           </Box>
 
-          {/* Right column */}
-          <Box w={{ base: '100%', lg: '260px' }} flexShrink={0}>
-            {earnedBadges.length > 0 && (
+          {/* Right column — badges only (no empty placeholder) */}
+          {earnedBadges.length > 0 && (
+            <Box w={{ base: '100%', lg: '260px' }} flexShrink={0}>
               <SectionCard label="Badges" mb={0}>
                 <Stack gap={2}>
                   {earnedBadges.slice(0, 6).map(b => <BadgeChip key={b.badge_type} badge={b} />)}
                 </Stack>
               </SectionCard>
-            )}
-
-            {earnedBadges.length === 0 && (
-              <SectionCard mb={0}>
-                <Flex direction="column" align="center" py={4} gap={2}>
-                  <FiUser size={24} color={GRAY300} />
-                  <Text fontSize="12px" color={GRAY400} textAlign="center">
-                    Badges will appear here as this user completes exchanges.
-                  </Text>
-                </Flex>
-              </SectionCard>
-            )}
-          </Box>
+            </Box>
+          )}
         </Flex>
       </Box>
 
