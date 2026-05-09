@@ -23,6 +23,7 @@ import {
 } from '@/theme/tokens'
 import MultiUseDetailsModal from '@/components/MultiUseDetailsModal'
 import FollowListModal from '@/components/FollowListModal'
+import ReportModal, { type ReportOption } from '@/components/ReportModal'
 import SectionCard from '@/components/ui/SectionCard'
 import ProfileHero from '@/components/profile/ProfileHero'
 import { TabBtn } from '@/components/ui/TabBtn'
@@ -30,6 +31,18 @@ import { ServiceCard } from '@/components/profile/ServiceCard'
 import { ProfileReviewRow } from '@/components/profile/ProfileReviewRow'
 
 type PublicProfileTab = 'services' | 'history' | 'reviews'
+
+/** Matches service listing reports / POST /api/users/{id}/report/ allowed types */
+const PROFILE_REPORT_OPTIONS: ReportOption[] = [
+  { value: 'inappropriate_content', label: 'Inappropriate content', desc: 'Offensive or violates guidelines' },
+  { value: 'spam', label: 'Spam', desc: 'Misleading or abusive behavior' },
+  { value: 'scam', label: 'Scam or fraud', desc: 'Attempting to deceive users' },
+  { value: 'harassment', label: 'Harassment', desc: 'Abusive or threatening behavior' },
+  { value: 'service_issue', label: 'Conduct or profile issue', desc: 'Misrepresentation or harmful conduct' },
+  { value: 'other', label: 'Other', desc: 'Something else not listed above' },
+]
+
+type ProfileReportType = (typeof PROFILE_REPORT_OPTIONS)[number]['value']
 
 const AVATAR_PALETTE = [GREEN, BLUE, TEAL, AMBER, '#0D9488', ORANGE]
 const AVATAR_IMAGE_BG = `linear-gradient(180deg, ${WHITE} 0%, ${GRAY100} 100%)`
@@ -146,7 +159,8 @@ const PublicProfile = () => {
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
   const [followActionLoading, setFollowActionLoading] = useState(false)
   const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
-  const [, setReportModalOpen] = useState(false)
+  const [reportModalOpen, setReportModalOpen] = useState(false)
+  const [reportSubmitting, setReportSubmitting] = useState(false)
   const [activePublicTab, setActivePublicTab] = useState<PublicProfileTab>('services')
 
   useEffect(() => {
@@ -195,6 +209,21 @@ const PublicProfile = () => {
   const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
 
   const showFollowButton = isAuthenticated && currentUser && userId && currentUser.id !== userId
+
+  const handleProfileReport = async (issueType: string, statement = '') => {
+    const targetUserId = profileUser?.id ?? userId
+    if (!targetUserId) return
+    setReportSubmitting(true)
+    try {
+      await userAPI.reportUser(targetUserId, issueType as ProfileReportType, statement)
+      toast.success('Report submitted. Thank you for helping keep the community safe.')
+      setReportModalOpen(false)
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Could not submit report.'))
+    } finally {
+      setReportSubmitting(false)
+    }
+  }
 
   const handleFollowToggle = async () => {
     if (!userId || !profileUser || followActionLoading) return
@@ -265,7 +294,13 @@ const PublicProfile = () => {
             }
             toast.info('Messaging coming soon.')
           }}
-          onReportClick={() => setReportModalOpen(true)}
+          onReportClick={() => {
+            if (!isAuthenticated) {
+              toast.info('Sign in to report this profile.')
+              return
+            }
+            setReportModalOpen(true)
+          }}
           onFollowersClick={() => {
             if (!isAuthenticated) { toast.info('Sign in to see followers.'); return }
             setFollowListModal('followers')
@@ -503,6 +538,17 @@ const PublicProfile = () => {
         userId={userId ?? null}
         onClose={() => setFollowListModal(null)}
       />
+
+      {reportModalOpen && (
+        <ReportModal
+          onClose={() => { if (!reportSubmitting) setReportModalOpen(false) }}
+          onSubmit={(type, statement) => { void handleProfileReport(type, statement) }}
+          loading={reportSubmitting}
+          options={PROFILE_REPORT_OPTIONS}
+          title="Report this profile"
+          subtitle="Tell us what is wrong. Moderators review every report."
+        />
+      )}
     </Box>
   )
 }

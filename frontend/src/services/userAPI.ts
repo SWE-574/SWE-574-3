@@ -146,6 +146,20 @@ export const userAPI = {
     return res.data.results
   },
 
+  /** Report another member's profile (no related listing). Authenticated only. */
+  reportUser: async (
+    userId: string,
+    issueType: 'inappropriate_content' | 'spam' | 'service_issue' | 'scam' | 'harassment' | 'other',
+    description: string,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    await apiClient.post(
+      `/users/${userId}/report/`,
+      { issue_type: issueType, description },
+      { signal },
+    )
+  },
+
   /**
    * Update profile.
    * Pass a FormData when avatar/banner files are included (multipart);
