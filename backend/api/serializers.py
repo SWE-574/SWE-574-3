@@ -1676,9 +1676,10 @@ class UserProfileSerializer(FeaturedBadgesDetailMixin, ProfileFollowStatsMixin, 
         child=serializers.CharField(allow_blank=True), write_only=True, required=False
     )
 
-    # Featured badges (writable list of badge IDs, max 2, must be earned)
+    # Featured badges (writable list of badge IDs, max 2, must be earned).
+    # allow_blank: multipart "clear" sends featured_badges='' → ['']; we normalize in validate.
     featured_badges = serializers.ListField(
-        child=serializers.CharField(), required=False, default=list
+        child=serializers.CharField(allow_blank=True), required=False, default=list
     )
     featured_badges_detail = serializers.SerializerMethodField()
 
@@ -1821,6 +1822,8 @@ class UserProfileSerializer(FeaturedBadgesDetailMixin, ProfileFollowStatsMixin, 
             value = []
         if not isinstance(value, list):
             raise serializers.ValidationError('Must be a list.')
+        # Drop blanks / whitespace (FormData uses '' to mean "clear all featured badges")
+        value = [s.strip() for s in value if isinstance(s, str) and s.strip()]
         if len(value) > 2:
             raise serializers.ValidationError('At most 2 featured badges are allowed.')
         for entry in value:

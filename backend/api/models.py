@@ -134,6 +134,9 @@ class User(AbstractUser):
         ids = self.featured_badges
         if not isinstance(ids, list):
             raise ValidationError({'featured_badges': ['Must be a list.']})
+        # Drop blank entries (e.g. multipart sends '' as a list item)
+        ids = [e.strip() for e in ids if isinstance(e, str) and e.strip()]
+        self.featured_badges = ids
         if len(ids) > 2:
             raise ValidationError({'featured_badges': ['At most 2 featured badges are allowed.']})
         for entry in ids:
