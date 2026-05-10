@@ -67,10 +67,12 @@ export function chipForSignals(signals?: ForYouSignals | null): SignalChip {
     ['cooccur', signals.cooccur * FOR_YOU_WEIGHTS.cooccur],
     ['engagement', (signals.engagement ?? 0) * FOR_YOU_WEIGHTS.engagement],
   ]
-  let [topName, topValue] = entries.reduce(
+  const argmax = entries.reduce(
     (best, current) => (current[1] > best[1] ? current : best),
-    ['default' as SignalChip['name'], 0],
+    ['default' as SignalChip['name'], 0] as [SignalChip['name'], number],
   )
+  let topName: SignalChip['name'] = argmax[0]
+  const topValue = argmax[1]
   if (topValue <= 0) return DEFAULT_CHIP
 
   // Follow-saturation override: when follow wins by argmax but an interest

@@ -703,25 +703,36 @@ const DashboardPage = () => {
           return hs?.status !== 'cancelled'
         })
       : services
+    const isInactive = (s: Service) =>
+      ['denied', 'cancelled'].includes(handshakeMap.get(s.id)?.status ?? '')
     const filtered = base
       .filter((s) => {
         if (s.type === 'Event' && s.scheduled_time && new Date(s.scheduled_time).getTime() <= Date.now()) return false
         return true
       })
       .sort((a, b) => {
-        const aInactive = ['denied', 'cancelled'].includes(handshakeMap.get(a.id)?.status ?? '')
-        const bInactive = ['denied', 'cancelled'].includes(handshakeMap.get(b.id)?.status ?? '')
+        const aInactive = isInactive(a)
+        const bInactive = isInactive(b)
         if (aInactive === bInactive) return 0
         return aInactive ? 1 : -1
       })
     // Anti-clustering: when the viewer has many connections, the `follow`
     // signal dominates and the grid renders runs of identical "From your
     // network" pills. `diversifyByChip` walks the result and swaps in a
-    // different-chip neighbour from the next 3 cards whenever a duplicate
+    // different-chip neighbour from the next few cards whenever a duplicate
     // would land. Caps total swaps at floor(N/2) so the underlying ranking
-    // signal is preserved — the helper rotates within a window, not across
-    // the whole page.
-    return diversifyByChip(filtered)
+    // signal is preserved.
+    //
+    // The diversifier swaps within a windowed lookahead — without
+    // partitioning, an active-vs-inactive boundary that lands inside that
+    // window can be crossed and a denied/cancelled row can get pulled back
+    // above active ones, undoing the inactive-bottom sort. Diversify only
+    // the active partition and append the inactive tail untouched.
+    const firstInactive = filtered.findIndex(isInactive)
+    if (firstInactive === -1) return diversifyByChip(filtered)
+    const active = filtered.slice(0, firstInactive)
+    const inactive = filtered.slice(firstInactive)
+    return [...diversifyByChip(active), ...inactive]
   }, [services, isAuthenticated, handshakeMap])
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))

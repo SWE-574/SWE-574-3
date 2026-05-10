@@ -275,10 +275,11 @@ describe('DashboardPage (Browse)', () => {
 
     const titles = ['Follow card 1', 'Follow card 2', 'Follow card 3', 'Tag card 1']
     const elements = titles.map((t) => screen.getByText(t))
-    // sort the elements by document order (compareDocumentPosition returns
-    // a bitmask: 4 = "is following", so a follows b means a is later).
+    // Sort the elements by document order. `a.compareDocumentPosition(b) &
+    // DOCUMENT_POSITION_FOLLOWING` is set when **b** is following **a** in
+    // the document — i.e. **a** is the earlier element and should sort
+    // first, so the comparator returns -1 when that bit is set.
     const ordered = [...elements].sort((a, b) => {
-      // eslint-disable-next-line no-bitwise
       return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
     })
     const orderedTitles = ordered.map((el) => el.textContent)
@@ -287,5 +288,54 @@ describe('DashboardPage (Browse)', () => {
     // it forward to break the cluster.
     expect(orderedTitles[3]).not.toBe('Tag card 1')
     expect(orderedTitles).toContain('Tag card 1')
+  })
+
+  it('does not let the diversifier pull a denied/cancelled card above active rows', async () => {
+    // Inactive (denied/cancelled) cards are sorted to the bottom by the
+    // useMemo. Without partitioning the diversifier's swap window can
+    // reach across that boundary and pull a denied card forward to break
+    // a same-chip run, undoing the inactive-bottom intent.
+    const followStrong = (id: string, title: string): Service => ({
+      ...makeService(id, title),
+      for_you_signals: { tag: 0, follow: 1, cooccur: 0, recency_penalty: 0 },
+    } as Service)
+    const tagStrongDenied = (id: string, title: string): Service => ({
+      ...makeService(id, title),
+      for_you_signals: { tag: 0.6, follow: 0, cooccur: 0, recency_penalty: 0 },
+    } as Service)
+
+    listPagedMock.mockResolvedValue({
+      results: [
+        followStrong('f1', 'Active follow 1'),
+        followStrong('f2', 'Active follow 2'),
+        followStrong('f3', 'Active follow 3'),
+        followStrong('f4', 'Active follow 4'),
+        tagStrongDenied('td', 'Denied tag card'),
+      ],
+      count: 5,
+    })
+    handshakeListMock.mockResolvedValue([
+      { id: 'h-td', service: 'td', requester: 'me', status: 'denied' },
+    ])
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Active follow 1')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Denied tag card')).toBeInTheDocument())
+
+    const titles = [
+      'Active follow 1', 'Active follow 2', 'Active follow 3', 'Active follow 4',
+      'Denied tag card',
+    ]
+    const elements = titles.map((t) => screen.getByText(t))
+    const ordered = [...elements].sort((a, b) => {
+      return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+    })
+    const orderedTitles = ordered.map((el) => el.textContent)
+
+    // The denied card must stay at the bottom — the diversifier should
+    // operate on the active partition only and leave the inactive tail
+    // untouched.
+    expect(orderedTitles[orderedTitles.length - 1]).toBe('Denied tag card')
   })
 })
