@@ -102,6 +102,26 @@ describe('extractFieldErrors', () => {
     })
     expect(out).toEqual({ kept: 'ok' })
   })
+
+  it('pins the exact envelope produced by the backend custom_exception_handler', () => {
+    // This is the literal shape `backend/api/exceptions.py` builds for a
+    // serializer-level `ValidationError({...})`. Every form that uses the
+    // shared parser depends on this contract — pinning it here keeps the
+    // two sides in lockstep without each form having to re-prove it.
+    const payload = {
+      detail: 'Validation failed.',
+      code: 'VALIDATION_ERROR',
+      field_errors: {
+        title: ['This field may not be blank.'],
+        duration: ['Ensure this value is less than or equal to 10.'],
+      },
+    }
+    expect(extractFieldErrors(payload)).toEqual({
+      title: 'This field may not be blank.',
+      duration: 'Ensure this value is less than or equal to 10.',
+    })
+    expect(extractTopLevelDetail(payload)).toBe('Validation failed.')
+  })
 })
 
 describe('extractTopLevelDetail', () => {
