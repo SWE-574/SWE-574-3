@@ -271,6 +271,100 @@ class TestCompleteTimebankTransfer:
             handshake__service=service,
         ).count() == 1
 
+    def test_group_one_time_offer_pays_provider_when_trailing_handshake_cancels(self):
+        """Provider must still earn the single payout when a trailing
+        handshake cancels after earlier participants completed.
+
+        Regression for #557: previously the provider was paid only once
+        every active handshake reached ``completed``. A cancellation that
+        drained the last active slot left the provider unpaid even though
+        the service had already been delivered to other participants.
+        """
+        provider = UserFactory(timebank_balance=Decimal('0.00'))
+        receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver3 = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('3.00'),
+            schedule_type='One-Time',
+            max_participants=3,
+        )
+        handshake1 = HandshakeFactory(service=service, requester=receiver1, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake2 = HandshakeFactory(service=service, requester=receiver2, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake3 = HandshakeFactory(service=service, requester=receiver3, status='accepted', provisioned_hours=Decimal('3.00'))
+
+        provision_timebank(handshake1)
+        provision_timebank(handshake2)
+        provision_timebank(handshake3)
+
+        with transaction.atomic():
+            complete_timebank_transfer(handshake1)
+        with transaction.atomic():
+            complete_timebank_transfer(handshake2)
+
+        provider.refresh_from_db()
+        # Two completed, one still accepted → provider not paid yet.
+        assert provider.timebank_balance == Decimal('0.00')
+
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake3)
+
+        provider.refresh_from_db()
+        receiver3.refresh_from_db()
+        handshake3.refresh_from_db()
+
+        # Cancellation refunds the trailing receiver and triggers the
+        # provider's single asymmetric payout.
+        assert handshake3.status == 'cancelled'
+        assert receiver3.timebank_balance == Decimal('5.00')
+        assert provider.timebank_balance == Decimal('3.00')
+        assert TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).count() == 1
+
+    def test_group_one_time_offer_skips_payout_when_no_one_completed(self):
+        """If every participant cancels before completing, the provider must
+        not be paid. The payout is only owed when at least one receiver
+        actually completed the service.
+        """
+        provider = UserFactory(timebank_balance=Decimal('0.00'))
+        receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('3.00'),
+            schedule_type='One-Time',
+            max_participants=2,
+        )
+        handshake1 = HandshakeFactory(service=service, requester=receiver1, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake2 = HandshakeFactory(service=service, requester=receiver2, status='accepted', provisioned_hours=Decimal('3.00'))
+
+        provision_timebank(handshake1)
+        provision_timebank(handshake2)
+
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake1)
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake2)
+
+        provider.refresh_from_db()
+        receiver1.refresh_from_db()
+        receiver2.refresh_from_db()
+
+        assert provider.timebank_balance == Decimal('0.00')
+        assert receiver1.timebank_balance == Decimal('5.00')
+        assert receiver2.timebank_balance == Decimal('5.00')
+        assert not TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).exists()
+
 
 @pytest.mark.django_db
 @pytest.mark.unit
