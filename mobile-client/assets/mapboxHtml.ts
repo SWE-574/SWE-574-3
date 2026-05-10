@@ -20,9 +20,8 @@ export const MAPBOX_HTML = `<!DOCTYPE html>
     html, body { margin: 0; padding: 0; height: 100%; background: #fff; }
     #map { position: absolute; inset: 0; }
     .mapboxgl-ctrl-attrib { display: none; }
-    .mapboxgl-ctrl-bottom-right { bottom: 96px; right: 12px; }
-    .mapboxgl-ctrl-bottom-left { bottom: 96px; left: 12px; }
-    .mapboxgl-ctrl-group { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
+    .mapboxgl-ctrl-bottom-right,
+    .mapboxgl-ctrl-bottom-left { display: none; }
   </style>
 </head>
 <body>
@@ -43,10 +42,17 @@ export const MAPBOX_HTML = `<!DOCTYPE html>
       }
 
       function colorFor(type) {
+        // Mirror the web tokens (frontend/src/theme/tokens.ts):
+        //   GREEN  = #2D5C4E (Offer)
+        //   BLUE   = #1D4ED8 (Need)
+        //   AMBER  = #D97706 (Event)
+        // The previous lighter hex values disagreed with the type pill
+        // colours used on the rest of the app, so an Offer marker on the
+        // map didn't match the green Offer pill on a service card.
         switch (type) {
-          case "Offer": return "#23B97A";
-          case "Need":  return "#3B82F6";
-          case "Event": return "#F59E0B";
+          case "Offer": return "#2D5C4E";
+          case "Need":  return "#1D4ED8";
+          case "Event": return "#D97706";
           default:      return "#6B7280";
         }
       }
@@ -159,10 +165,12 @@ export const MAPBOX_HTML = `<!DOCTYPE html>
           attributionControl: false,
           logoPosition: "bottom-left",
         });
-        map.addControl(
-          new mapboxgl.NavigationControl({ showCompass: false, visualizePitch: false }),
-          "bottom-right"
-        );
+        // No NavigationControl on mobile: the +/- buttons collide with
+        // the find-me FAB (also bottom-right) and duplicate gestures
+        // Mapbox GL already binds — pinch-to-zoom and double-tap-to-zoom
+        // are enabled by default on touch, so the buttons are redundant.
+        // Apple Maps and Google Maps both omit them on mobile for the
+        // same reason.
         map.on("load", function () {
           loaded = true;
           send({ type: "ready" });
