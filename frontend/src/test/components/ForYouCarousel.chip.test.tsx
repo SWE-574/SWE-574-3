@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest'
 
-import { chipForSignals, diversifyByChip } from '@/utils/forYouChips'
+import { chipForSignals, diversifyByChip, pillIdentity } from '@/utils/forYouChips'
 import type { ForYouSignals, Service } from '@/types'
 
 function svc(id: string, signals: ForYouSignals): Service {
@@ -230,4 +230,51 @@ describe('weighted chip picker', () => {
     } as ForYouSignals)
     expect(c.name).toBe('tag')
   })
+
+  it('promotes newcomer over follow only on indirect (friend-of-friend) connections', () => {
+    // Demo seed creates direct follows (signal=1.0) and second-degree
+    // follows (signal=0.5). When the owner is a newcomer, only the
+    // indirect cards should flip to "Rising newcomer" -- direct
+    // follows keep "From your network" because that IS the actual
+    // discovery story (the viewer chose to follow this person). On
+    // densely-connected seeds this still surfaces a third pill colour
+    // for the indirect-follow newcomers without erasing the follow
+    // chip on direct-follow cards.
+
+    // Direct follow + newcomer => stays follow (the explicit follow
+    // is the more relevant story than "rising newcomer").
+    const directFollowNewcomer = {
+      id: 'd', type: 'Offer',
+      for_you_signals: { tag: 0, follow: 1.0, cooccur: 0, recency_penalty: 0 },
+      is_newcomer_owner: true,
+    } as unknown as Service
+    expect(pillIdentity(directFollowNewcomer)).toBe('follow')
+
+    // Indirect follow + newcomer => promoted to newcomer.
+    const indirectFollowNewcomer = {
+      id: 'i', type: 'Offer',
+      for_you_signals: { tag: 0, follow: 0.5, cooccur: 0, recency_penalty: 0 },
+      is_newcomer_owner: true,
+    } as unknown as Service
+    expect(pillIdentity(indirectFollowNewcomer)).toBe('newcomer')
+
+    // Indirect follow + non-newcomer => stays follow (no newcomer story
+    // to promote).
+    const indirectFollowOldOwner = {
+      id: 'o', type: 'Offer',
+      for_you_signals: { tag: 0, follow: 0.5, cooccur: 0, recency_penalty: 0 },
+      is_newcomer_owner: false,
+    } as unknown as Service
+    expect(pillIdentity(indirectFollowOldOwner)).toBe('follow')
+
+    // No for-you signals + newcomer => still resolves through the
+    // existing fallback branch.
+    const newcomerOnly = {
+      id: 'n', type: 'Offer',
+      for_you_signals: { tag: 0, follow: 0, cooccur: 0, recency_penalty: 0 },
+      is_newcomer_owner: true,
+    } as unknown as Service
+    expect(pillIdentity(newcomerOnly)).toBe('newcomer')
+  })
+
 })

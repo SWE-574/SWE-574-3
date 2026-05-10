@@ -89,6 +89,29 @@ interface SmartPillProps {
  */
 export default function SmartPill({ service }: SmartPillProps) {
   const chip = chipForSignals(service.for_you_signals)
+  // Newcomer-over-follow promotion: when the for-you chip resolves to
+  // `follow`, the owner is a newcomer, AND the follow signal is from an
+  // indirect (friend-of-friend, raw signal < 1.0) connection, render
+  // the newcomer story instead. Direct follows keep "From your network"
+  // because that IS the actual discovery insight -- the viewer chose to
+  // follow this person. Mirrors the same branch in `pillIdentity` so
+  // the diversifier and the renderer agree on the chip identity.
+  const followSignal = service.for_you_signals?.follow ?? 0
+  if (
+    chip.name === 'follow'
+    && service.is_newcomer_owner
+    && followSignal < 1
+  ) {
+    return (
+      <PillBox
+        label={NEWCOMER_FLAVOUR.label}
+        bg={NEWCOMER_FLAVOUR.bg}
+        fg={NEWCOMER_FLAVOUR.fg}
+        border={NEWCOMER_FLAVOUR.border}
+        Icon={NEWCOMER_FLAVOUR.Icon}
+      />
+    )
+  }
   if (chip.name !== 'default') {
     const Icon =
       chip.name === 'follow' ? FiUsers

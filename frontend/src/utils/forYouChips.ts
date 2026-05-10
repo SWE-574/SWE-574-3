@@ -111,8 +111,27 @@ export function chipForSignals(signals?: ForYouSignals | null): SignalChip {
 // sync with SmartPill.tsx's priority chain. Used by the diversifier and
 // (re-exported via SmartPill) by the renderer itself, so a single source
 // of truth governs both.
+//
+// Newcomer-over-follow promotion: when the for-you chip resolves to
+// `follow` BUT the connection is indirect (friend-of-friend, raw
+// signal < 1.0) AND the owner is also a newcomer, surface the newcomer
+// story instead. Direct follows (signal === 1.0) keep "From your
+// network" because that IS the actual discovery story -- the viewer
+// chose to follow this person. Indirect follows are weaker social
+// proof, and on densely-connected seeds the newcomer pill never gets a
+// chance to fire because every card has *some* follow signal. This
+// surfaces the third pill colour on the demo grid without erasing the
+// follow chip on real direct connections.
 export function pillIdentity(service: Service): PillIdentity {
   const chip = chipForSignals(service.for_you_signals)
+  const followSignal = service.for_you_signals?.follow ?? 0
+  if (
+    chip.name === 'follow'
+    && service.is_newcomer_owner
+    && followSignal < 1
+  ) {
+    return 'newcomer'
+  }
   if (chip.name !== 'default') return chip.name
   if (service.is_newcomer_owner) return 'newcomer'
   const max = service.max_participants ?? 0
