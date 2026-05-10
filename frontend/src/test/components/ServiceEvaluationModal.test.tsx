@@ -1,5 +1,6 @@
 import { ChakraProvider } from '@chakra-ui/react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
@@ -33,7 +34,7 @@ vi.mock('sonner', () => ({
   toast: { success: toastSuccessMock, error: toastErrorMock },
 }))
 
-function renderModal(props: Partial<React.ComponentProps<typeof ServiceEvaluationModal>> = {}) {
+function renderModal(props: Partial<ComponentProps<typeof ServiceEvaluationModal>> = {}) {
   const onClose = props.onClose ?? vi.fn()
   const onSubmitted = props.onSubmitted ?? vi.fn()
   const utils = render(
