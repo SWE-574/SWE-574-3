@@ -6,7 +6,7 @@ Creates authentic demo data with Turkish users, realistic services, and proper s
 Final demo balances (after all handshakes settle):
 
   - Cem (cem@demo.com)       : 5.00h  ← pinned sub-10h fixture for FR-07i
-  - Other Turkish demo users : varies between 4-9h after handshakes
+  - Other Turkish demo users : varies after handshakes settle
   - Admin / superadmin       : 10.00h
 
 Cem is the canonical low-balance fixture: end-to-end flows that exercise
