@@ -251,13 +251,20 @@ export default function MapScreen() {
     const center = userLocation
       ? { lat: userLocation.latitude, lng: userLocation.longitude }
       : { lat: DEFAULT_LOCATION.latitude, lng: DEFAULT_LOCATION.longitude };
+    const initServices = toPayload(services);
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[MapScreen] posting init: ${initServices.length} services, center=${JSON.stringify(center)}, hasUser=${!!userLocation}`,
+      );
+    }
     post({
       type: "init",
       token: mapboxToken,
       style: MAPBOX_STYLE,
       center,
       zoom: 11,
-      services: toPayload(services),
+      services: initServices,
       user: userLocation
         ? { lat: userLocation.latitude, lng: userLocation.longitude }
         : null,
@@ -309,15 +316,20 @@ export default function MapScreen() {
         : { page_size: 500 };
 
       const { results } = await listServices(params);
-      setServices(
-        (results ?? []).filter(
-          (s) =>
-            s.location_lat &&
-            s.location_lng &&
-            !Number.isNaN(Number(s.location_lat)) &&
-            !Number.isNaN(Number(s.location_lng)),
-        ),
+      const filteredResults = (results ?? []).filter(
+        (s) =>
+          s.location_lat &&
+          s.location_lng &&
+          !Number.isNaN(Number(s.location_lat)) &&
+          !Number.isNaN(Number(s.location_lng)),
       );
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[MapScreen] fetchServices: api returned ${(results ?? []).length}, ${filteredResults.length} have valid coords (params=${JSON.stringify(params)})`,
+        );
+      }
+      setServices(filteredResults);
     } catch (error) {
       console.error("Error fetching services for map:", error);
     } finally {
@@ -354,7 +366,12 @@ export default function MapScreen() {
   // Push the visible service set to the WebView whenever it changes (after init).
   useEffect(() => {
     if (!mapInited) return;
-    post({ type: "updateServices", services: toPayload(visibleServices) });
+    const payload = toPayload(visibleServices);
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log(`[MapScreen] posting updateServices: ${payload.length} features`);
+    }
+    post({ type: "updateServices", services: payload });
   }, [visibleServices, mapInited, post]);
 
   useEffect(() => {
@@ -375,6 +392,10 @@ export default function MapScreen() {
         return;
       }
       if (!parsed) return;
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log(`[MapScreen] WebView msg: ${parsed.type ?? '?'} ${parsed.message ?? ''}`);
+      }
       switch (parsed.type) {
         case "loaded":
         case "ready":
