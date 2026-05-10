@@ -96,12 +96,20 @@ export function pillIdentity(service: Service): PillIdentity {
 // Caps total swaps so the ranking signal isn't wiped out by aggressive
 // rotation.
 //
-// `lookahead = 4` is tuned for the 10-card web carousel and the Browse
-// grid. Earlier value of 3 left visible 4-in-a-row clusters intact when
-// the diverging card sat just past the window. Mobile renders 5 cards
-// via ForYouSection and currently does not call this helper; if it ever
-// does, drop `lookahead` to 2 so we don't search beyond half the row.
-export function diversifyByChip(services: Service[], lookahead = 4): Service[] {
+// `lookahead = 7` is tuned for the 15-card Browse grid (3 columns × 5
+// rows). On demo data ~80% of cards win the chip on `follow` because
+// the seed is densely connected (94 follows / 13 users), and only ~3
+// of the top 15 resolve to other signals. With the previous value of 4
+// the diversifier could reach the first off-chip card but ran out of
+// reach by the second row, leaving positions 2-4 as a visible
+// monochrome cluster. 7 spans both visible rows above the fold so the
+// rare non-follow cards can be pulled forward to actually break the
+// run; the swap cap (floor(N / 2)) still bounds total rearrangement.
+//
+// Mobile renders 5 cards via ForYouSection and currently does not call
+// this helper; if it ever does, drop `lookahead` to 2 so we don't
+// search beyond half the visible row.
+export function diversifyByChip(services: Service[], lookahead = 7): Service[] {
   const out = services.slice()
   const maxSwaps = Math.floor(out.length / 2)
   let swaps = 0

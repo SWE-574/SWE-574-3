@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest'
 
-import { diversifyByChip } from '@/utils/forYouChips'
+import { chipForSignals, diversifyByChip } from '@/utils/forYouChips'
 import type { ForYouSignals, Service } from '@/types'
 
 function svc(id: string, signals: ForYouSignals): Service {
@@ -122,6 +122,40 @@ describe('diversifyByChip', () => {
 
     const out = diversifyByChip(cards)
     expect(out.map(s => s.id)).toEqual(['0', '1', '2', '3', '4'])
+  })
+
+  it('breaks up follow-saturated runs across the first two visible rows of a 15-card grid', () => {
+    // Mirrors Elif's account on the demo seed, where ~80% of cards win
+    // the chip on `follow` (everyone-follows-everyone) and only 3 of 15
+    // resolve to `tag`. With a too-narrow lookahead the diversifier can
+    // only reach the first tag card and leaves positions 3-4-5 as an
+    // all-follow cluster — the second row of the 3-column grid renders
+    // as three identical "From your network" pills.
+    const followCard = (id: string) =>
+      svc(id, { tag: 0, follow: 1, cooccur: 0, recency_penalty: 0 })
+    const tagCard = (id: string, weight: number) =>
+      svc(id, { tag: weight, follow: 0, cooccur: 0, recency_penalty: 0 })
+    const cards = [
+      followCard('0'), followCard('1'), tagCard('2', 0.5),
+      followCard('3'), followCard('4'), followCard('5'),
+      followCard('6'), followCard('7'), followCard('8'),
+      followCard('9'), followCard('10'), tagCard('11', 1.0),
+      followCard('12'), tagCard('13', 0.67), followCard('14'),
+    ]
+
+    const out = diversifyByChip(cards)
+
+    // No three consecutive cards anywhere in the first two visible rows
+    // (positions 0-5) may share a chip identity. This is the regression
+    // the bumped lookahead unlocks: rows 1 and 2 must each render at
+    // least one non-follow pill so the page does not look monochrome.
+    const namesInFirstSixRows = out
+      .slice(0, 6)
+      .map(s => chipForSignals(s.for_you_signals).name)
+    for (let i = 0; i + 2 < namesInFirstSixRows.length; i++) {
+      const triplet = namesInFirstSixRows.slice(i, i + 3)
+      expect(new Set(triplet).size).toBeGreaterThan(1)
+    }
   })
 })
 
