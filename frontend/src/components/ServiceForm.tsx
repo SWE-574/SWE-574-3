@@ -872,6 +872,12 @@ export default function ServiceForm({
           })
           unmanagedMediaIds.forEach((mediaId) => fd.append('media_order', `existing:${mediaId}`))
         }
+        // NFR-05d: round-trip the optimistic-lock counter so the backend
+        // can reject a concurrent owner edit with 409 instead of silently
+        // overwriting the other writer.
+        if (typeof initialService?.version === 'number') {
+          fd.append('version', String(initialService.version))
+        }
         const updated = await serviceAPI.update(serviceId, fd)
         if (type === 'Need') await refreshUser()
         toast.success(`${type} updated successfully!`)
@@ -956,7 +962,29 @@ export default function ServiceForm({
         navigate(`/service-detail/${created.id}`)
       }
     } catch (err: unknown) {
-      const data = (err as { response?: { data?: unknown } })?.response?.data
+      const response = (err as { response?: { status?: number; data?: unknown } })?.response
+      const data = response?.data
+      // NFR-05d: a VERSION_CONFLICT means another owner session saved
+      // first. Keep the form open and surface a non-blocking toast that
+      // offers a reload — discarding the user's draft silently would
+      // be the worse failure mode.
+      if (
+        response?.status === 409
+        && data && typeof data === 'object'
+        && (data as Record<string, unknown>).code === 'VERSION_CONFLICT'
+      ) {
+        const detail = typeof (data as Record<string, unknown>).detail === 'string'
+          ? String((data as Record<string, string>).detail)
+          : 'This listing was updated elsewhere — reload to see the latest changes.'
+        toast.warning(detail, {
+          action: {
+            label: 'Reload',
+            onClick: () => { window.location.reload() },
+          },
+          duration: 10_000,
+        })
+        return
+      }
       let msg = 'Failed to post. Please try again.'
       if (data && typeof data === 'object') {
         if ('detail' in data && typeof (data as Record<string, unknown>).detail === 'string') {
