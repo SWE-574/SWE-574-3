@@ -21,6 +21,7 @@ import {
   effectiveScheduleType,
   recurrenceIntervalForSubmission,
 } from '@/utils/eventRecurrence'
+import { extractFieldErrors, extractTopLevelDetail } from '@/utils/formErrors'
 
 import {
   GREEN, GREEN_LT,
@@ -477,7 +478,7 @@ export default function ServiceForm({
   const [requiresQrCheckin, setRequiresQrCheckin]   = useState(false)
 
   const schema = useMemo(() => getSchema(type), [type])
-  const { register, handleSubmit, control, watch, trigger, reset, formState } = useForm<FormValues>({
+  const { register, handleSubmit, control, watch, trigger, reset, setError, formState } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: { location_type: 'In-Person', schedule_type: 'One-Time', max_participants: 1 },
   })
@@ -956,20 +957,67 @@ export default function ServiceForm({
         navigate(`/service-detail/${created.id}`)
       }
     } catch (err: unknown) {
+      // Preserve everything the user typed. We only surface the API-side
+      // validation errors next to the offending input — the form values,
+      // tags, media, and location selections all stay intact.
       const data = (err as { response?: { data?: unknown } })?.response?.data
-      let msg = 'Failed to post. Please try again.'
-      if (data && typeof data === 'object') {
-        if ('detail' in data && typeof (data as Record<string, unknown>).detail === 'string') {
-          msg = (data as Record<string, string>).detail
-        } else {
-          // DRF returns field-level errors as { field: [msg, ...], ... }
-          const firstError = Object.values(data as Record<string, unknown>)
-            .flatMap((v) => (Array.isArray(v) ? v : [v]))
-            .find((v) => typeof v === 'string')
-          if (firstError) msg = String(firstError)
+      const fieldErrors = extractFieldErrors(data)
+      const detail = extractTopLevelDetail(data)
+      let routedAny = false
+
+      // Inputs registered with react-hook-form: route directly via setError.
+      const rhfFields: (keyof FormValues)[] = [
+        'title',
+        'description',
+        'duration',
+        'max_participants',
+        'schedule_type',
+        'location_type',
+        'schedule_details',
+        'recurrence_interval_days',
+      ]
+      for (const name of rhfFields) {
+        const msg = fieldErrors[name]
+        if (msg) {
+          setError(name, { type: 'server', message: msg }, { shouldFocus: !routedAny })
+          routedAny = true
         }
       }
-      toast.error(msg)
+
+      // Inputs that live outside of react-hook-form. We reuse the existing
+      // inline error slots that the form already renders for client-side
+      // validation, so the user sees the message right under the input.
+      const locationFieldMsg =
+        fieldErrors.location_area
+        ?? fieldErrors.location_lat
+        ?? fieldErrors.location_lng
+      if (locationFieldMsg) {
+        setLocationError(locationFieldMsg)
+        routedAny = true
+      }
+
+      const sessionFieldMsg =
+        fieldErrors.session_exact_location
+        ?? fieldErrors.session_exact_location_lat
+        ?? fieldErrors.session_exact_location_lng
+        ?? fieldErrors.session_location_guide
+      if (sessionFieldMsg) {
+        setSessionExactLocationError(sessionFieldMsg)
+        routedAny = true
+      }
+
+      if (fieldErrors.scheduled_time) {
+        setEventDateTimeError(fieldErrors.scheduled_time)
+        routedAny = true
+      }
+
+      // Anything we couldn't pin to a specific input still needs a banner so
+      // the user knows the submit didn't go through.
+      if (!routedAny) {
+        toast.error(detail ?? 'Failed to post. Please try again.')
+      } else if (detail) {
+        toast.error(detail)
+      }
     } finally { setSubmitting(false) }
   }
 
