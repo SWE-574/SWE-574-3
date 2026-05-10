@@ -1125,6 +1125,7 @@ export default function ServiceForm({
                   />
                 )}
               />
+              <ErrTxt msg={errors.location_type?.message} />
             </Box>
 
             {locType === 'In-Person' && (
@@ -1303,6 +1304,7 @@ export default function ServiceForm({
                         />
                       )}
                     />
+                    <ErrTxt msg={errors.schedule_type?.message} />
                   </Box>
 
                   {schedType === 'Recurrent' && (
@@ -1317,6 +1319,7 @@ export default function ServiceForm({
                         style={inputStyle}
                         _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
                       />
+                      <ErrTxt msg={errors.recurrence_interval_days?.message} />
                       <Text fontSize="11px" color={GRAY400} mt="5px">
                         When this event is completed, a fresh copy is reposted with the date shifted forward by this many days.
                       </Text>
@@ -1367,6 +1370,7 @@ export default function ServiceForm({
                   style={inputStyle}
                   _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
                 />
+                <ErrTxt msg={errors.schedule_details?.message} />
               </Box>
             )}
           </Stack>
