@@ -818,3 +818,149 @@ class TestParticipantCountField:
         assert len(handshake_queries) == 0, (
             f"Expected no Handshake queries when prefetched, got {len(handshake_queries)}"
         )
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestServiceSerializerTagUpsertHelpers:
+    """Direct coverage for the #575 tag-upsert helpers — every branch.
+
+    Routing through `ServiceSerializer.create` only reaches the happy
+    paths because IntegrityError fallbacks need a racing concurrent
+    insert; mocking `Tag.objects.create` here lets each branch be tested
+    in isolation without hitting the DB twice.
+    """
+
+    def test_upsert_qid_returns_existing_row_when_qid_already_present(self):
+        """Branch 1: existing Tag(id=QID) is returned without rename or insert."""
+        existing = Tag.objects.create(id='Q9999', name='Stored Label')
+        tag, created = ServiceSerializer._upsert_qid_tag('Q9999', 'Different Label')
+        assert created is False
+        assert tag.id == existing.id
+        # No rename — branch is "found by id, return as-is".
+        assert tag.name == 'Stored Label'
+
+    def test_upsert_qid_returns_existing_name_when_id_misses_but_label_collides(self):
+        """Branch 2 (the #575 collision path): same label exists under a
+        different id; prefer the stored row over inserting a duplicate."""
+        existing = Tag.objects.create(id='manual-tag', name='Yoga')
+        tag, created = ServiceSerializer._upsert_qid_tag('Q11111', 'Yoga')
+        assert created is False
+        assert tag.id == existing.id
+
+    def test_upsert_qid_inserts_a_fresh_row_when_no_collision(self):
+        """Branch 3: id and name both free — create a brand new row."""
+        tag, created = ServiceSerializer._upsert_qid_tag('Q22222', 'Brand New Tag')
+        assert created is True
+        assert tag.id == 'Q22222'
+        assert tag.name == 'Brand New Tag'
+
+    def test_upsert_qid_recovers_when_insert_races(self):
+        """Branch 4: INSERT lost a race; helper re-resolves to the winner."""
+        from django.db import IntegrityError
+        # Simulate the race: another writer landed the same QID first.
+        Tag.objects.create(id='Q33333', name='Race Winner')
+        with patch('api.serializers.Tag.objects.create', side_effect=IntegrityError('uniq')):
+            tag, created = ServiceSerializer._upsert_qid_tag('Q33333', 'Race Loser')
+        assert created is False
+        assert tag.id == 'Q33333'
+        # Helper picked up the existing row, didn't try a second insert.
+        assert tag.name == 'Race Winner'
+
+    def test_upsert_qid_recovers_via_name_lookup_when_id_race_misses(self):
+        """Branch 4-name: race fell to neither id nor a fresh insert; the
+        recovery path looks up by name as the secondary fallback."""
+        from django.db import IntegrityError
+        Tag.objects.create(id='other-id', name='Race Pottery')
+        with patch('api.serializers.Tag.objects.create', side_effect=IntegrityError('uniq')):
+            tag, created = ServiceSerializer._upsert_qid_tag('Q44444', 'Race Pottery')
+        assert created is False
+        assert tag.id == 'other-id'
+
+    def test_upsert_qid_returns_none_when_every_lookup_misses(self):
+        """Branch 4-give-up: race left no row to attach to (extremely rare,
+        but the helper must return None instead of raising)."""
+        from django.db import IntegrityError
+        with patch('api.serializers.Tag.objects.create', side_effect=IntegrityError('uniq')):
+            tag, created = ServiceSerializer._upsert_qid_tag('Q55555', 'Nothing Here')
+        assert tag is None
+        assert created is False
+
+    def test_upsert_named_returns_existing_name_when_present(self):
+        """Branch 1: name already exists — re-use it."""
+        existing = Tag.objects.create(id='woodworking', name='Woodworking')
+        tag = ServiceSerializer._upsert_named_tag('Woodworking')
+        assert tag.id == existing.id
+
+    def test_upsert_named_creates_fresh_when_name_unique(self):
+        """Branch 2: brand-new name slugifies to a free id — INSERT it."""
+        tag = ServiceSerializer._upsert_named_tag('Backyard Beekeeping')
+        assert tag.id == 'backyard_beekeeping'
+        assert tag.name == 'Backyard Beekeeping'
+
+    def test_upsert_named_disambiguates_slug_when_id_collides(self):
+        """Branch 3: slug clashes with an existing id; helper appends a
+        uuid suffix so the INSERT does not 500."""
+        Tag.objects.create(id='cooking', name='Already Taken')
+        tag = ServiceSerializer._upsert_named_tag('Cooking')
+        assert tag.name == 'Cooking'
+        # Suffixed id so the unique-id index is honoured.
+        assert tag.id != 'cooking'
+        assert tag.id.startswith('cooking_')
+
+    def test_upsert_named_recovers_when_insert_races(self):
+        """Branch 4: INSERT raced and lost; recovery picks the winner up
+        via name lookup. The entry-point ``.get(name)`` must miss so we
+        actually reach the try/except (otherwise the helper short-
+        circuits at line 1076). Patching ``.get`` to raise simulates the
+        race window: at entry no row, by INSERT-time another writer
+        landed."""
+        from django.db import IntegrityError
+        existing = Tag.objects.create(id='knitting', name='Knitting')
+        with patch('api.serializers.Tag.objects.get', side_effect=Tag.DoesNotExist), \
+             patch('api.serializers.Tag.objects.create', side_effect=IntegrityError('uniq')):
+            tag = ServiceSerializer._upsert_named_tag('Knitting')
+        assert tag is not None
+        assert tag.id == existing.id
+
+    # The last two recovery branches in `_upsert_qid_tag` (post-
+    # IntegrityError, found-by-id and post-IntegrityError, found-by-
+    # name) need a queryset whose ``.first()`` returns different values
+    # across calls — the entry-time check must miss while the recovery
+    # check finds the racing row. Savepoint rollback prevents arranging
+    # this with a real DB row, so the queryset is mocked outright.
+
+    def test_upsert_qid_recovery_returns_id_match_after_race(self):
+        """Cover the post-IntegrityError 'found by id' return path."""
+        from django.db import IntegrityError
+        from unittest.mock import MagicMock
+        race_winner = Tag(id='Q88888', name='Race Winner')
+        qs = MagicMock()
+        # Two .first() calls happen with tag_name=None: entry-by-id and
+        # recovery-by-id. Entry misses, recovery finds the winner.
+        qs.first.side_effect = [None, race_winner]
+        with patch('api.serializers.Tag.objects.filter', return_value=qs), \
+             patch('api.serializers.Tag.objects.create', side_effect=IntegrityError('uniq')):
+            tag, created = ServiceSerializer._upsert_qid_tag('Q88888', None)
+        assert created is False
+        assert tag is race_winner
+
+    def test_upsert_qid_recovery_returns_name_match_after_race(self):
+        """Cover the post-IntegrityError 'found by name' return path —
+        id recovery still misses but the unique-name index still has a
+        row to attach to."""
+        from django.db import IntegrityError
+        from unittest.mock import MagicMock
+        race_winner = Tag(id='other-id', name='Race Pottery')
+        qs = MagicMock()
+        # .first() call sequence with tag_name set:
+        #   1. entry-by-id  -> None
+        #   2. entry-by-name -> None
+        #   3. recovery-by-id -> None
+        #   4. recovery-by-name -> winner
+        qs.first.side_effect = [None, None, None, race_winner]
+        with patch('api.serializers.Tag.objects.filter', return_value=qs), \
+             patch('api.serializers.Tag.objects.create', side_effect=IntegrityError('uniq')):
+            tag, created = ServiceSerializer._upsert_qid_tag('Q99999', 'Race Pottery')
+        assert created is False
+        assert tag is race_winner
