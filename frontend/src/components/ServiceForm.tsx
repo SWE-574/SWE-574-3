@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useForm, Controller, type Resolver } from 'react-hook-form'
+import { useForm, Controller, type Resolver, type SubmitErrorHandler } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
@@ -1023,8 +1023,26 @@ export default function ServiceForm({
 
   // ── Render ───────────────────────────────────────────────────────────────
 
+  // When zod rejects a field, surface the failure and scroll the first
+  // offending input into view so the user (and the test harness) gets a
+  // visible signal instead of a silent stay-on-page.
+  const onInvalid: SubmitErrorHandler<FormValues> = (fieldErrors) => {
+    const firstField = Object.keys(fieldErrors)[0]
+    if (firstField) {
+      const el = document.querySelector<HTMLElement>(`[name="${firstField}"]`)
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+      const focusable = el as HTMLInputElement | null
+      if (focusable && typeof focusable.focus === 'function') {
+        focusable.focus({ preventScroll: true })
+      }
+    }
+    toast.error('Please check the highlighted fields and try again.')
+  }
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate>
+    <form onSubmit={handleSubmit(onSubmit, onInvalid)} noValidate>
       <Stack gap={7}>
 
         {/* ── Basic Info ─────────────────────────────────────────────────── */}
