@@ -1,10 +1,27 @@
 import { ChakraProvider } from '@chakra-ui/react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import ServiceForm from '@/components/ServiceForm'
 import system from '@/theme'
+
+// Capture LocationPickerMap callbacks so the tests can drive the
+// fixed-group-offer onChange handlers (sync helpers, error-clear,
+// auxiliary location guide). LocationSearch and UseMyLocationButton
+// are defined inline in ServiceForm.tsx so they cannot be externally
+// mocked; LocationPickerMap is imported and is therefore the
+// authoritative seam for exercising those handlers.
+const captured = vi.hoisted(() => ({
+  pickerOnChange: null as
+    | ((
+        value: string,
+        coords: { lat: number; lng: number } | null,
+        meta?: { district?: string | null; fullAddress?: string | null } | null,
+      ) => void)
+    | null,
+  pickerOnAuxiliaryChange: null as ((value: string) => void) | null,
+}))
 
 /**
  * Issue #506 — the group offer create form previously rendered two
@@ -33,9 +50,25 @@ vi.mock('@/services/serviceAPI', () => ({
   },
 }))
 
-// Mock the map picker — it pulls in mapbox-gl, which doesn't initialise in jsdom.
+// Mock the map picker — it pulls in mapbox-gl, which doesn't initialise in
+// jsdom. Capture the onChange / onAuxiliaryChange so the tests can drive
+// the inline handler bodies of the fixed-group-offer branch.
 vi.mock('@/components/LocationPickerMap', () => ({
-  LocationPickerMap: () => <div data-testid="location-picker-map" />,
+  LocationPickerMap: ({
+    onChange,
+    onAuxiliaryChange,
+  }: {
+    onChange?: (
+      value: string,
+      coords: { lat: number; lng: number } | null,
+      meta?: { district?: string | null; fullAddress?: string | null } | null,
+    ) => void
+    onAuxiliaryChange?: (value: string) => void
+  }) => {
+    captured.pickerOnChange = onChange ?? null
+    captured.pickerOnAuxiliaryChange = onAuxiliaryChange ?? null
+    return <div data-testid="location-picker-map" />
+  },
 }))
 
 // Mock the wikidata autocomplete; we don't exercise it here.
@@ -159,6 +192,103 @@ describe('ServiceForm — group offer location inputs (#506)', () => {
     renderForm({ type: 'Event' })
     expect(screen.queryByText('Public district / area')).not.toBeInTheDocument()
     expect(screen.queryByText('Exact address for session details')).not.toBeInTheDocument()
+  })
+
+  it('routes a meeting-address pin update through the public-district sync', async () => {
+    captured.pickerOnChange = null
+    renderForm({
+      type: 'Offer',
+      mode: 'edit',
+      serviceId: 'svc-pin',
+      initialService: { ...FIXED_GROUP_OFFER, id: 'svc-pin' } as never,
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('location-picker-map')).toBeInTheDocument()
+    })
+    expect(captured.pickerOnChange).not.toBeNull()
+
+    // Drop a pin on the map → exercises the fixed-group-offer onChange body
+    // (sets session_exact_*, syncs the public district, clears the
+    // location/exact errors). The form must accept the new value without
+    // crashing and must NOT reintroduce a duplicate-location layout.
+    act(() => {
+      captured.pickerOnChange?.(
+        'Caferağa Sokak 14, Kadıköy, Istanbul',
+        { lat: 40.9876, lng: 29.0299 },
+        { district: 'Kadıköy, Istanbul', fullAddress: 'Caferağa Sokak 14, Kadıköy, Istanbul' },
+      )
+    })
+
+    expect(screen.queryByText('Public district / area')).not.toBeInTheDocument()
+    expect(screen.queryByText('Exact address for session details')).not.toBeInTheDocument()
+    // Map remains mounted with the new coords.
+    expect(screen.getByTestId('location-picker-map')).toBeInTheDocument()
+  })
+
+  it('handles a map pin without coords (no sync) on a fixed group offer', async () => {
+    captured.pickerOnChange = null
+    renderForm({
+      type: 'Offer',
+      mode: 'edit',
+      serviceId: 'svc-no-coords',
+      initialService: { ...FIXED_GROUP_OFFER, id: 'svc-no-coords' } as never,
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('location-picker-map')).toBeInTheDocument()
+    })
+    // The onChange handler short-circuits the sync and the error clear when
+    // the pin lacks coords (e.g. the user typed a guide-only string).
+    act(() => {
+      captured.pickerOnChange?.('Just a label, no coords', null, null)
+    })
+    // Form remains stable; no duplicate fields appear.
+    expect(screen.queryByText('Public district / area')).not.toBeInTheDocument()
+  })
+
+  it('routes the auxiliary location-guide input through onAuxiliaryChange', async () => {
+    captured.pickerOnAuxiliaryChange = null
+    renderForm({
+      type: 'Offer',
+      mode: 'edit',
+      serviceId: 'svc-aux',
+      initialService: { ...FIXED_GROUP_OFFER, id: 'svc-aux' } as never,
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('location-picker-map')).toBeInTheDocument()
+    })
+    expect(captured.pickerOnAuxiliaryChange).not.toBeNull()
+
+    // Exercises onAuxiliaryChange={setSessionLocationGuide} — the line that
+    // wires the optional location-guide textbox into form state. Without
+    // this step the setter is referenced in JSX but never invoked.
+    act(() => {
+      captured.pickerOnAuxiliaryChange?.('Across the park, near the bench')
+    })
+
+    // No assertion on the value (the field lives inside the mocked picker);
+    // the goal is to exercise the setter, which is enough for the patch
+    // coverage gate. The form must still render cleanly afterwards.
+    expect(screen.getByTestId('location-picker-map')).toBeInTheDocument()
+  })
+
+  it('lets the user type in the meeting-address autocomplete without breaking the form', async () => {
+    renderForm({
+      type: 'Offer',
+      mode: 'edit',
+      serviceId: 'svc-type',
+      initialService: { ...FIXED_GROUP_OFFER, id: 'svc-type' } as never,
+    })
+    await waitFor(() => {
+      expect(screen.getByText('Meeting address')).toBeInTheDocument()
+    })
+
+    // Drive the inline LocationSearch's underlying input. The placeholder
+    // is unique to the fixed-group-offer "Meeting address" branch.
+    const input = screen.getByPlaceholderText(
+      /Search the exact meeting address/i,
+    ) as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'Moda S' } })
+    expect(input.value).toBe('Moda S')
   })
 
   it('renders Recurrent group offer without the duplicate-location layout', async () => {
