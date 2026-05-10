@@ -61,7 +61,7 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   return <ChakraProvider value={system}>{children}</ChakraProvider>
 }
 
-describe('ServiceForm onInvalid handler', () => {
+describe('ServiceForm submit feedback', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -87,5 +87,42 @@ describe('ServiceForm onInvalid handler', () => {
     // The mocked serviceAPI.create must NOT have been invoked — the submit
     // handler short-circuited at the validation step.
     expect(serviceCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('runs the success path when the minimum valid fields are filled', async () => {
+    serviceCreateMock.mockResolvedValueOnce({ id: 'svc-123' })
+
+    const { container } = render(
+      <Wrapper>
+        <ServiceForm type="Need" />
+      </Wrapper>,
+    )
+
+    const titleInput = container.querySelector('input[name="title"]') as HTMLInputElement
+    const descriptionInput = container.querySelector('textarea[name="description"]') as HTMLTextAreaElement
+    const durationInput = container.querySelector('input[name="duration"]') as HTMLInputElement
+
+    fireEvent.change(titleInput, { target: { value: 'Need help moving boxes' } })
+    fireEvent.change(descriptionInput, { target: { value: 'A short description that satisfies the 10-char minimum.' } })
+    fireEvent.change(durationInput, { target: { value: '1' } })
+
+    // Default location_type is 'In-Person', which requires a Mapbox-confirmed
+    // address. Switch to 'Online' to bypass that branch and let the submit
+    // proceed straight to serviceAPI.create.
+    fireEvent.click(screen.getByRole('button', { name: 'Online' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Post Need/i }))
+
+    await waitFor(() => {
+      expect(serviceCreateMock).toHaveBeenCalledTimes(1)
+    })
+
+    // The success flow runs after create resolves: success toast and navigate
+    // to the new service's detail page.
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledWith('Need posted successfully!')
+    })
+    expect(navigateMock).toHaveBeenCalledWith('/service-detail/svc-123')
+    expect(toastErrorMock).not.toHaveBeenCalled()
   })
 })
