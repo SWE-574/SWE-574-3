@@ -140,6 +140,7 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
   const [bannerPreview, setBannerPreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [featuredBadgesError, setFeaturedBadgesError] = useState<string | null>(null)
+  const [identityFieldErrors, setIdentityFieldErrors] = useState<Record<string, string>>({})
   const [activeTab, setActiveTab] = useState<EditTab>(initialTab)
 
   // Crop modal
@@ -158,6 +159,7 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
       setAvatarPreview(null)
       setBannerPreview(null)
       setFeaturedBadgesError(null)
+      setIdentityFieldErrors({})
       setConfirmDiscard(false)
       setActiveTab(initialTab)
     }
@@ -223,6 +225,7 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
     if (!dirty) return
     setSaving(true)
     setFeaturedBadgesError(null)
+    setIdentityFieldErrors({})
     try {
       // Resolve skills to real DB tags
       const isUuid = (id: string) =>
@@ -294,22 +297,47 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
       toast.success('Profile updated')
       onClose()
     } catch (err) {
-      // Surface featured_badges validation errors (top-level or field_errors)
+      // Surface backend validation errors per field, routing the user to the
+      // tab that owns the offending input so silent failures cannot hide.
       const raw = err as {
         response?: {
-          data?: {
-            featured_badges?: string[]
-            field_errors?: { featured_badges?: string[] }
+          data?: Record<string, unknown> & {
+            field_errors?: Record<string, unknown>
           }
         }
       }
-      const d = raw?.response?.data
-      const badgeErrors = d?.featured_badges ?? d?.field_errors?.featured_badges
-      if (badgeErrors && badgeErrors.length > 0) {
+      const data = raw?.response?.data ?? {}
+      const fieldErrors = (data.field_errors ?? {}) as Record<string, unknown>
+      const pickFirst = (key: string): string | null => {
+        const top = data[key]
+        const nested = fieldErrors[key]
+        const source = Array.isArray(top) ? top : Array.isArray(nested) ? nested : null
+        if (!source) return null
+        const first = source.find((v) => typeof v === 'string')
+        return typeof first === 'string' ? first : null
+      }
+
+      const badgeError = pickFirst('featured_badges')
+      const identityErrors: Record<string, string> = {}
+      for (const key of ['first_name', 'last_name', 'bio', 'location'] as const) {
+        const msg = pickFirst(key)
+        if (msg) identityErrors[key] = msg
+      }
+
+      if (badgeError) {
         setActiveTab('showcase')
-        setFeaturedBadgesError(badgeErrors.join(' '))
-      } else {
+        setFeaturedBadgesError(badgeError)
+      }
+      if (Object.keys(identityErrors).length > 0) {
+        if (!badgeError) setActiveTab('identity')
+        setIdentityFieldErrors(identityErrors)
+      }
+      if (!badgeError && Object.keys(identityErrors).length === 0) {
         toast.error(getErrorMessage(err))
+      } else {
+        // Also surface a top-line toast so the user notices the failure even
+        // before scanning the offending tab.
+        toast.error('Please fix the highlighted fields and try again.')
       }
     } finally {
       setSaving(false)
@@ -524,11 +552,17 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
                   value={form.first_name}
                   onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
                   bg={GRAY50}
-                  borderColor={GRAY200}
+                  borderColor={identityFieldErrors.first_name ? RED : GRAY200}
                   borderRadius="8px"
                   fontSize="13px"
                   aria-label="First name"
+                  aria-invalid={!!identityFieldErrors.first_name}
                 />
+                {identityFieldErrors.first_name && (
+                  <Text fontSize="11px" color={RED} mt="4px" data-testid="profile-error-first_name">
+                    {identityFieldErrors.first_name}
+                  </Text>
+                )}
               </Box>
               <Box flex={1}>
                 <FieldLabel>Last name</FieldLabel>
@@ -536,11 +570,17 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
                   value={form.last_name}
                   onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
                   bg={GRAY50}
-                  borderColor={GRAY200}
+                  borderColor={identityFieldErrors.last_name ? RED : GRAY200}
                   borderRadius="8px"
                   fontSize="13px"
                   aria-label="Last name"
+                  aria-invalid={!!identityFieldErrors.last_name}
                 />
+                {identityFieldErrors.last_name && (
+                  <Text fontSize="11px" color={RED} mt="4px" data-testid="profile-error-last_name">
+                    {identityFieldErrors.last_name}
+                  </Text>
+                )}
               </Box>
             </Flex>
             <Box mb={3}>
@@ -565,7 +605,13 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
                 label="City / Location"
                 placeholder="Search city, district, or address"
                 helperText="Choose a Mapbox result so your public location stays consistent."
+                isInvalid={!!identityFieldErrors.location}
               />
+              {identityFieldErrors.location && (
+                <Text fontSize="11px" color={RED} mt="4px" data-testid="profile-error-location">
+                  {identityFieldErrors.location}
+                </Text>
+              )}
             </Box>
           </DrawerSection>}
           </Box>
@@ -586,14 +632,20 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
                 placeholder="Tell others about yourself…"
                 rows={4}
                 bg={GRAY50}
-                borderColor={GRAY200}
+                borderColor={identityFieldErrors.bio ? RED : GRAY200}
                 borderRadius="8px"
                 fontSize="13px"
                 resize="vertical"
                 aria-label="Bio"
                 aria-describedby="bio-counter"
+                aria-invalid={!!identityFieldErrors.bio}
               />
               <Text id="bio-counter" srOnly>{form.bio.length} of 280 characters used</Text>
+              {identityFieldErrors.bio && (
+                <Text fontSize="11px" color={RED} mt="4px" data-testid="profile-error-bio">
+                  {identityFieldErrors.bio}
+                </Text>
+              )}
             </Box>
           </DrawerSection>}
           </Box>

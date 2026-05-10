@@ -1155,6 +1155,11 @@ class ForumTopic(models.Model):
     body = models.TextField(max_length=10000)
     is_pinned = models.BooleanField(default=False, help_text='Pinned topics appear at the top')
     is_locked = models.BooleanField(default=False, help_text='Locked topics cannot receive new posts')
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text='Soft delete flag. Hides topic from public views while preserving moderation history (reports).',
+    )
+    deleted_at = models.DateTimeField(null=True, blank=True, help_text='When the topic was soft-deleted')
     view_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1168,6 +1173,7 @@ class ForumTopic(models.Model):
             models.Index(fields=['category', '-is_pinned', '-created_at']),
             models.Index(fields=['author', 'created_at']),
             models.Index(fields=['category', 'is_pinned']),
+            models.Index(fields=['category', 'is_deleted', '-created_at']),
         ]
 
 

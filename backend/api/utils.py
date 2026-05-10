@@ -288,6 +288,76 @@ def _is_group_one_time_service(service: Service) -> bool:
     )
 
 
+def _settle_group_offer_provider_payout(service: Service, handshake: Handshake) -> bool:
+    """Pay the group offer's provider their single asymmetric payout.
+
+    For one-time group offers, the provider earns ``service.duration`` once,
+    regardless of how many receivers participated (the surplus is a deliberate
+    system sink — see project docs). This helper performs the payment exactly
+    once per service: it locks the provider, double-checks that no prior
+    transfer transaction exists for the same service, and records both the
+    balance update and a TransactionHistory entry.
+
+    The caller is responsible for deciding *when* the payout should fire (e.g.
+    after the last active handshake reaches a terminal state) and for being
+    inside an atomic transaction.
+
+    Returns True if the payout was applied, False if it was a no-op.
+    """
+    if not _is_group_one_time_service(service):
+        return False
+
+    provider, _ = get_provider_and_receiver(handshake)
+    provider = User.objects.select_for_update().get(id=provider.id)
+
+    # Idempotency: filter on the direct ``service`` FK rather than chaining
+    # through ``handshake``. ``TransactionHistory.handshake`` is SET_NULL, so
+    # a later handshake deletion (e.g. demo-data cleanup) would otherwise
+    # hide the prior payout row from this guard and the provider could be
+    # paid a second time. ``TransactionHistory.service`` is also SET_NULL,
+    # but if the service itself were deleted there is no caller to re-enter
+    # this branch in the first place.
+    already_paid = TransactionHistory.objects.filter(
+        user=provider,
+        transaction_type='transfer',
+        service=service,
+    ).exists()
+    if already_paid:
+        return False
+
+    # No completed handshakes yet → nothing was actually delivered, skip payout.
+    completed_exists = Handshake.objects.filter(
+        service=service,
+        status='completed',
+    ).exists()
+    if not completed_exists:
+        return False
+
+    hours = Decimal(service.duration)
+    provider.timebank_balance = F("timebank_balance") + hours
+    provider.save(update_fields=["timebank_balance"])
+    provider.refresh_from_db(fields=["timebank_balance"])
+
+    TransactionHistory.objects.create(
+        user=provider,
+        transaction_type='transfer',
+        amount=hours,
+        balance_after=provider.timebank_balance,
+        service=service,
+        handshake=handshake,
+        description=(
+            f"Group service completed: '{service.title}' "
+            f"({hours} hours transferred after all participants settled)"
+        ),
+    )
+
+    provider.karma_score = F("karma_score") + 5
+    provider.save(update_fields=["karma_score"])
+    provider.refresh_from_db(fields=["karma_score"])
+
+    return True
+
+
 def complete_timebank_transfer(handshake: Handshake) -> bool:
     """Credit the provider once both parties confirm completion.
     
@@ -362,35 +432,16 @@ def complete_timebank_transfer(handshake: Handshake) -> bool:
                 service.status = 'Completed'
                 service.save(update_fields=['status'])
 
-            if _is_group_one_time_service(service) and active_count_after == 0:
-                provider = User.objects.select_for_update().get(id=provider.id)
-                already_paid = TransactionHistory.objects.filter(
-                    user=provider,
-                    transaction_type='transfer',
-                    handshake__service=service,
-                ).exists()
-                if not already_paid:
-                    hours = Decimal(service.duration)
-                    provider.timebank_balance = F("timebank_balance") + hours
-                    provider.save(update_fields=["timebank_balance"])
-                    provider.refresh_from_db(fields=["timebank_balance"])
-
-                    TransactionHistory.objects.create(
-                        user=provider,
-                        transaction_type='transfer',
-                        amount=hours,
-                        balance_after=provider.timebank_balance,
-                        service=service,
-                        handshake=handshake,
-                        description=(
-                            f"Group service completed: '{service.title}' "
-                            f"({hours} hours transferred after all participants completed)"
-                        )
-                    )
-
-                    provider.karma_score = F("karma_score") + 5
-                    provider.save(update_fields=["karma_score"])
-                    provider.refresh_from_db(fields=["karma_score"])
+            # Group one-time offers settle the provider payout on the FIRST
+            # completion, not the last. The settlement helper is already
+            # idempotent (TransactionHistory uniqueness on service+type and a
+            # post-write completed_exists guard), so re-running it on later
+            # completions is a no-op. Gating on active_count_after == 0 just
+            # delayed a transfer the helper would correctly self-gate, and
+            # caused completed receivers to disappear from the provider's
+            # active card with no credit until the last handshake settled.
+            if _is_group_one_time_service(service):
+                _settle_group_offer_provider_payout(service, handshake)
 
         return True
 
@@ -402,12 +453,21 @@ def cancel_timebank_transfer(handshake: Handshake) -> bool:
     helper agreement should reopen/keep the Need with its reservation intact;
     the reserved hours are returned only when the Need listing itself is
     cancelled/deleted via release_timebank_for_need_service().
-    
+
+    For one-time group offers, the provider earns a single asymmetric payout
+    once every active handshake has reached a terminal state and at least one
+    receiver actually completed. If this cancellation drains the last active
+    handshake on such a service, settle the provider's payout here so the
+    transfer is not blocked by a partial set of completions.
+
     Note: Caller must wrap in transaction.atomic() for atomicity.
     """
+    service_for_settlement: Service | None = None
+
     # Refund for accepted, reported, or paused handshakes (all have escrowed hours)
     if handshake.status in ("accepted", "reported", "paused"):
         service = Service.objects.select_for_update().get(id=handshake.service.id)
+        service_for_settlement = service
         provider, receiver = get_provider_and_receiver(handshake)
 
         if service.type != 'Need':
@@ -449,6 +509,20 @@ def cancel_timebank_transfer(handshake: Handshake) -> bool:
 
     handshake.status = "cancelled"
     handshake.save(update_fields=["status"])
+
+    # If this cancellation just drained the last active handshake on a one-time
+    # group offer where some receivers already completed, settle the provider's
+    # asymmetric payout now. Without this, a trailing cancellation could leave
+    # the provider unpaid even though earlier participants completed the
+    # service.
+    if service_for_settlement is not None and _is_group_one_time_service(service_for_settlement):
+        active_remaining = Handshake.objects.filter(
+            service=service_for_settlement,
+            status__in=['pending', 'accepted', 'reported', 'paused'],
+        ).count()
+        if active_remaining == 0:
+            _settle_group_offer_provider_payout(service_for_settlement, handshake)
+
     return True
 
 

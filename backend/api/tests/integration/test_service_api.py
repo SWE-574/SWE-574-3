@@ -2,6 +2,8 @@
 Integration tests for service API endpoints
 """
 import pytest
+import requests
+from unittest.mock import patch
 from rest_framework import status
 from rest_framework.test import APIClient
 from decimal import Decimal
@@ -11,7 +13,7 @@ from django.utils import timezone
 from api.tests.helpers.factories import UserFactory, ServiceFactory, TagFactory, HandshakeFactory
 from api.tests.helpers.factories import AdminUserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Service, Notification, TransactionHistory
+from api.models import Service, Notification, TransactionHistory, Tag
 from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
@@ -314,6 +316,35 @@ class TestServiceViewSet:
         
         service.refresh_from_db()
         assert service.title == 'Updated Title'
+
+    def test_update_non_active_service_is_rejected_with_clear_403(self):
+        """Editing must be limited to Active services. Non-Active statuses must
+        return 403 with a status-aware message, not a misleading 404."""
+        owner = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+
+        for status_value in ('Agreed', 'Completed', 'Cancelled'):
+            service = ServiceFactory(user=owner, status=status_value, title='Original')
+            response = client.patch(
+                f'/api/services/{service.id}/', {'title': f'Renamed {status_value}'},
+            )
+            assert_problem_detail(response, 403, contains_text='no longer be edited')
+            service.refresh_from_db()
+            assert service.title == 'Original', (
+                f'{status_value} service title was mutated despite 403 response.'
+            )
+
+    def test_update_active_hidden_service_is_allowed_for_owner(self):
+        """Owners must still be able to edit their own hidden (is_visible=False)
+        Active listings; the list visibility filter must not leak into writes."""
+        owner = UserFactory()
+        service = ServiceFactory(user=owner, status='Active', is_visible=False, title='Original')
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+
+        response = client.patch(f'/api/services/{service.id}/', {'title': 'Renamed hidden'})
+        assert_api_response(response, 200, schema={'title': 'Renamed hidden'})
+        service.refresh_from_db()
+        assert service.title == 'Renamed hidden'
 
     def test_update_offer_allowed_when_application_exists_and_notifies_applicant(self):
         """Offer owner can edit and pending applicants get notified."""
@@ -1014,3 +1045,170 @@ class TestServiceDetailQueryCount:
             f'detail query count {len(ctx)} exceeds the 25-query cap '
             f'in the presence of unrelated SavedService / Dismissal rows'
         )
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestOfferCreateTagPayloads:
+    """Regression tests for issue #575 — POST /api/services/ must never 500
+    based on the contents of `tag_ids` or `tag_names`.
+
+    The pre-fix create path raised on three legitimate inputs:
+
+    1. A QID in `tag_ids` that did not yet exist as a Tag, where the
+       Wikidata label happened to collide with an existing tag's `name`
+       (`Tag.name` is unique). `Tag.objects.get_or_create(id=...,
+       defaults={'name': label})` then surfaced an `IntegrityError` as
+       a 500.
+    2. A QID in `tag_ids` that did not yet exist as a Tag, where the
+       Wikidata fetch raised an exception not caught upstream (anything
+       that wasn't `RequestException / KeyError / ValueError`).
+    3. The `tag_names` flow, where `Tag.objects.create(...)` raced with
+       a concurrent insert on the unique `name` index.
+
+    Each test below expects the create call to succeed with 201, with
+    unresolvable QIDs silently dropped from the response payload. The
+    pre-fix behaviour was 500.
+    """
+
+    def _payload(self, tag_ids=None, tag_names=None, wikidata_labels_json=None):
+        body = {
+            'title': 'Tag Payload Offer',
+            'description': 'Exercises the tag-creation path on /api/services/.',
+            'type': 'Offer',
+            'duration': 1.0,
+            'location_type': 'Online',
+            'max_participants': 1,
+            'schedule_type': 'One-Time',
+            'status': 'Active',
+        }
+        if tag_ids is not None:
+            body['tag_ids'] = tag_ids
+        if tag_names is not None:
+            body['tag_names'] = tag_names
+        if wikidata_labels_json is not None:
+            body['wikidata_labels_json'] = wikidata_labels_json
+        return body
+
+    def _client(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+        return client
+
+    def test_create_with_valid_tag_ids_returns_201(self):
+        """Baseline: existing tag id resolves and is attached."""
+        tag = TagFactory()
+        client = self._client()
+
+        response = client.post('/api/services/', self._payload(tag_ids=[tag.id]))
+
+        assert_api_response(response, 201)
+        attached = {t['id'] for t in response.data.get('tags', [])}
+        assert tag.id in attached
+
+    def test_create_with_empty_tag_ids_returns_201(self):
+        """Empty tag list must not regress the create path."""
+        client = self._client()
+
+        response = client.post('/api/services/', self._payload(tag_ids=[]))
+
+        assert_api_response(response, 201)
+        assert response.data.get('tags', []) == []
+
+    @patch('api.wikidata.fetch_wikidata_claims', return_value=None)
+    @patch('api.wikidata.fetch_wikidata_item', return_value=None)
+    def test_create_with_mixed_valid_and_unknown_tag_ids_returns_201(
+        self, _mock_item, _mock_claims
+    ):
+        """Mixed payload: valid tag survives, unknown non-QID id is dropped."""
+        tag = TagFactory()
+        client = self._client()
+
+        response = client.post(
+            '/api/services/',
+            self._payload(tag_ids=[tag.id, 'not-a-real-tag-id-xyz']),
+        )
+
+        assert_api_response(response, 201)
+        attached = {t['id'] for t in response.data.get('tags', [])}
+        assert tag.id in attached
+        assert 'not-a-real-tag-id-xyz' not in attached
+
+    @patch(
+        'api.wikidata.fetch_wikidata_item',
+        side_effect=requests.RequestException('wikidata down'),
+    )
+    def test_create_with_qid_when_wikidata_raises_returns_201(self, _mock_item):
+        """If Wikidata is down (raises RequestException), the create
+        endpoint must still succeed — the QID is best-effort enrichment.
+
+        Pre-fix this path 500'd because the exception propagated out of
+        `ServiceSerializer.create`. The fix wraps the lookup in a
+        defensive try/except so the create transaction commits and the
+        caller gets 201.
+        """
+        client = self._client()
+
+        response = client.post('/api/services/', self._payload(tag_ids=['Q424242']))
+
+        assert_api_response(response, 201)
+
+    @patch('api.wikidata.fetch_wikidata_claims', return_value=None)
+    def test_create_with_qid_label_colliding_with_existing_tag_returns_201(
+        self, _mock_claims
+    ):
+        """Reproduces the original #575 500: a fresh QID whose Wikidata
+        label collides with an existing `Tag.name` triggered an
+        IntegrityError on the unique-name index from
+        `Tag.objects.get_or_create(id=..., defaults={'name': label})`.
+
+        Post-fix the create succeeds and the existing tag is reused.
+        """
+        existing = Tag.objects.create(id='hand_made_tag', name='Yoga')
+        client = self._client()
+
+        with patch(
+            'api.wikidata.fetch_wikidata_item',
+            return_value={'id': 'Q9888', 'label': 'Yoga'},
+        ):
+            response = client.post(
+                '/api/services/',
+                self._payload(tag_ids=['Q9888']),
+            )
+
+        assert_api_response(response, 201)
+        attached_ids = {t['id'] for t in response.data.get('tags', [])}
+        # The fix must reuse the existing row by name rather than create
+        # a new row with the same name and 500 on the unique index. Pin
+        # to the stored row's id so a regression that resurrects the
+        # parallel-INSERT path is caught — 'Q9888' showing up here would
+        # mean the helper bypassed the name-collision lookup.
+        assert existing.id in attached_ids
+        assert 'Q9888' not in attached_ids
+        assert not Tag.objects.filter(id='Q9888').exists()
+
+    @patch('api.wikidata.fetch_wikidata_claims', return_value=None)
+    @patch('api.wikidata.fetch_wikidata_item', return_value=None)
+    def test_create_with_tag_names_reuses_existing_row_returns_201(
+        self, _mock_item, _mock_claims
+    ):
+        """`tag_names` flow must reuse an existing tag with the same
+        case-insensitive name instead of attempting a fresh INSERT
+        (which 500'd via IntegrityError on the unique name index in the
+        race window).
+        """
+        existing = Tag.objects.create(id='photography_seed', name='Photography')
+        client = self._client()
+
+        # Different casing — pre-fix the case-insensitive lookup found
+        # the row, but in the race between get() and create() the INSERT
+        # would still fire and 500 on the unique name index. Post-fix the
+        # create path uses a save-pointed get_or_create equivalent.
+        response = client.post(
+            '/api/services/',
+            self._payload(tag_names=['photography']),
+        )
+
+        assert_api_response(response, 201)
+        attached_ids = {t['id'] for t in response.data.get('tags', [])}
+        assert existing.id in attached_ids
