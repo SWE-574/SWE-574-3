@@ -432,7 +432,15 @@ def complete_timebank_transfer(handshake: Handshake) -> bool:
                 service.status = 'Completed'
                 service.save(update_fields=['status'])
 
-            if _is_group_one_time_service(service) and active_count_after == 0:
+            # Group one-time offers settle the provider payout on the FIRST
+            # completion, not the last. The settlement helper is already
+            # idempotent (TransactionHistory uniqueness on service+type and a
+            # post-write completed_exists guard), so re-running it on later
+            # completions is a no-op. Gating on active_count_after == 0 just
+            # delayed a transfer the helper would correctly self-gate, and
+            # caused completed receivers to disappear from the provider's
+            # active card with no credit until the last handshake settled.
+            if _is_group_one_time_service(service):
                 _settle_group_offer_provider_payout(service, handshake)
 
         return True

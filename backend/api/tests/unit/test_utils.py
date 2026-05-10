@@ -228,6 +228,12 @@ class TestCompleteTimebankTransfer:
         ).exists()
 
     def test_group_one_time_offer_transfers_only_once_and_all_receivers_pay(self):
+        """Group one-time offer pays the provider on the FIRST completion.
+
+        Settlement is idempotent: completing handshake2 must not produce a
+        second transfer. Receivers pay per seat on accept and are not
+        refunded on completion (asymmetric system sink).
+        """
         provider = UserFactory(timebank_balance=Decimal('0.00'))
         receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
         receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
@@ -251,7 +257,8 @@ class TestCompleteTimebankTransfer:
         receiver1.refresh_from_db()
         receiver2.refresh_from_db()
 
-        assert provider.timebank_balance == Decimal('0.00')
+        # Provider is paid on the first completion, not the last.
+        assert provider.timebank_balance == Decimal('3.00')
         assert receiver1.timebank_balance == Decimal('2.00')
         assert receiver2.timebank_balance == Decimal('2.00')
 
@@ -262,6 +269,7 @@ class TestCompleteTimebankTransfer:
         receiver1.refresh_from_db()
         receiver2.refresh_from_db()
 
+        # Idempotent: balance unchanged, no second transfer row.
         assert provider.timebank_balance == Decimal('3.00')
         assert receiver1.timebank_balance == Decimal('2.00')
         assert receiver2.timebank_balance == Decimal('2.00')
@@ -271,14 +279,14 @@ class TestCompleteTimebankTransfer:
             handshake__service=service,
         ).count() == 1
 
-    def test_group_one_time_offer_pays_provider_when_trailing_handshake_cancels(self):
-        """Provider must still earn the single payout when a trailing
-        handshake cancels after earlier participants completed.
+    def test_group_one_time_offer_trailing_cancel_only_refunds_the_canceller(self):
+        """Trailing cancellation refunds the canceller and is a no-op for
+        the provider.
 
-        Regression for #557: previously the provider was paid only once
-        every active handshake reached ``completed``. A cancellation that
-        drained the last active slot left the provider unpaid even though
-        the service had already been delivered to other participants.
+        After the first-completion settlement (sgunes review), the provider
+        is already paid by the time anyone cancels. The cancellation path
+        therefore only needs to release escrow for the cancelling receiver
+        and emit no second transfer.
         """
         provider = UserFactory(timebank_balance=Decimal('0.00'))
         receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
@@ -301,12 +309,17 @@ class TestCompleteTimebankTransfer:
 
         with transaction.atomic():
             complete_timebank_transfer(handshake1)
+
+        provider.refresh_from_db()
+        # First completion already settled the provider.
+        assert provider.timebank_balance == Decimal('3.00')
+
         with transaction.atomic():
             complete_timebank_transfer(handshake2)
 
         provider.refresh_from_db()
-        # Two completed, one still accepted → provider not paid yet.
-        assert provider.timebank_balance == Decimal('0.00')
+        # Second completion is idempotent — balance unchanged.
+        assert provider.timebank_balance == Decimal('3.00')
 
         with transaction.atomic():
             cancel_timebank_transfer(handshake3)
@@ -315,8 +328,7 @@ class TestCompleteTimebankTransfer:
         receiver3.refresh_from_db()
         handshake3.refresh_from_db()
 
-        # Cancellation refunds the trailing receiver and triggers the
-        # provider's single asymmetric payout.
+        # Cancellation refunds the trailing receiver only; provider is unchanged.
         assert handshake3.status == 'cancelled'
         assert receiver3.timebank_balance == Decimal('5.00')
         assert provider.timebank_balance == Decimal('3.00')

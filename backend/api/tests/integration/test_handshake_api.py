@@ -457,15 +457,14 @@ class TestHandshakeViewSet:
         provider.refresh_from_db()
         assert provider.timebank_balance > Decimal('5.00')
 
-    def test_group_offer_settles_provider_after_all_receivers_complete(self):
+    def test_group_offer_settles_provider_on_first_completion(self):
         """End-to-end coverage for the asymmetric group-offer settlement.
 
-        The provider earns ``service.duration`` exactly once. Each receiver
-        pays per seat (escrowed at acceptance) and is not refunded when their
-        own handshake completes — the surplus is the documented system sink.
-        Regression for #557: confirms the payout fires reliably only after
-        all participant handshakes complete, not while other participants are
-        still in-flight.
+        Pays the provider on the FIRST completion, not the last (sgunes
+        review). Settlement is idempotent: completing handshake2 must not
+        produce a second transfer. Each receiver pays per seat (escrowed at
+        acceptance) and is not refunded when their own handshake completes —
+        the surplus is the documented system sink.
         """
         provider = UserFactory(timebank_balance=Decimal('0.00'))
         receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
@@ -500,7 +499,7 @@ class TestHandshakeViewSet:
 
         client = AuthenticatedAPIClient()
 
-        # Both sides confirm handshake1 — provider must NOT be paid yet.
+        # Both sides confirm handshake1 — provider settles on this completion.
         client.authenticate_user(provider)
         assert_api_response(client.post(f'/api/handshakes/{handshake1.id}/confirm/'), 200)
         client.authenticate_user(receiver1)
@@ -509,11 +508,17 @@ class TestHandshakeViewSet:
         handshake1.refresh_from_db()
         provider.refresh_from_db()
         assert handshake1.status == 'completed'
-        assert provider.timebank_balance == Decimal('0.00'), (
-            'Group offer must wait until every participant settles before paying the provider'
+        assert provider.timebank_balance == Decimal('3.00'), (
+            'Group offer must pay the provider on the first completion, not the last'
         )
+        # The single transfer row already exists by this point.
+        assert TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).count() == 1
 
-        # Both sides confirm handshake2 — payout fires on the last completion.
+        # Both sides confirm handshake2 — settlement must be idempotent.
         client.authenticate_user(provider)
         assert_api_response(client.post(f'/api/handshakes/{handshake2.id}/confirm/'), 200)
         client.authenticate_user(receiver2)
