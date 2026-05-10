@@ -27,6 +27,7 @@ from api.tests.helpers.factories import (
     ServiceFactory,
     UserFactory,
 )
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 
 
@@ -60,7 +61,7 @@ class TestReportCascadeAudit:
 
         client = AuthenticatedAPIClient().authenticate_user(service_owner)
         response = client.delete(f"/api/services/{service.id}/")
-        assert response.status_code == 204, response.content
+        assert_api_response(response, 204)
 
         # Service row survives (soft-delete).
         service.refresh_from_db()
@@ -79,7 +80,7 @@ class TestReportCascadeAudit:
 
         client = AuthenticatedAPIClient().authenticate_user(post.author)
         response = client.delete(f"/api/forum/posts/{post.id}/")
-        assert response.status_code == 204, response.content
+        assert_api_response(response, 204)
 
         post.refresh_from_db()
         assert post.is_deleted is True
@@ -103,11 +104,8 @@ class TestReportCascadeAudit:
         client = AuthenticatedAPIClient().authenticate_user(reporter)
         response = client.delete(f"/api/handshakes/{handshake.id}/")
         # DRF returns 405 (Method Not Allowed) for unsupported HTTP verbs.
-        assert response.status_code in (
-            405,
-            403,
-            404,
-        ), response.content
+        # 403 / 404 are equally valid "no destructive operation here" replies.
+        assert response.status_code in (405, 403, 404)
 
         handshake.refresh_from_db()
         report.refresh_from_db()
@@ -124,7 +122,7 @@ class TestReportCascadeAudit:
 
         client = AuthenticatedAPIClient().authenticate_user(admin)
         response = client.post(f"/api/admin/users/{target.id}/ban/")
-        assert response.status_code == 200, response.content
+        assert_api_response(response, 200)
 
         target.refresh_from_db()
         assert target.is_active is False
@@ -150,12 +148,12 @@ class TestReportCascadeAudit:
         # Self-delete on /api/users/me/ must not be available; 401/403/404/405
         # all encode "no destructive operation here".
         me_delete = client.delete("/api/users/me/")
-        assert me_delete.status_code in (401, 403, 404, 405), me_delete.content
+        assert me_delete.status_code in (401, 403, 404, 405)
 
         # Admin ban on the reporter likewise leaves the row in place.
         admin_client = AuthenticatedAPIClient().authenticate_user(admin)
         ban = admin_client.post(f"/api/admin/users/{reporter.id}/ban/")
-        assert ban.status_code == 200, ban.content
+        assert_api_response(ban, 200)
         reporter.refresh_from_db()
         assert reporter.is_active is False
 
