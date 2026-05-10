@@ -8,7 +8,7 @@
         shell-backend shell-db shell-redis \
         test test-unit test-integration test-docker coverage coverage-backend coverage-frontend coverage-report \
         test-mutation test-mutation-html test-perf test-mobile-unit \
-        test-assert-sweep
+        test-assert-sweep test-cross-client
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ help: ## Show this help message
 	@grep -E '^shell-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo '\033[1;4mTesting:\033[0m'
-	@grep -E '^(test|test-unit|test-integration|test-docker|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(test|test-unit|test-integration|test-docker|test-cross-client|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 
 
@@ -444,6 +444,10 @@ test-perf: ## Run k6 perf gates against the running stack
 
 test-mobile-unit: ## Run mobile-client Jest test suite
 	@cd mobile-client && npm test -- --watchAll=false
+
+test-cross-client: ## Run cross-client (web↔mobile) integration tests against a live backend
+	$(call _log,"Cross-client tests (requires backend at http://localhost:8000)...")
+	@cd tests/cross-client && node --test
 
 test-assert-sweep: ## Lint guardrail: forbid raw status_code asserts and TestCase subclasses
 	$(call _log,"Checking for raw status_code asserts under api/tests/integration/...")

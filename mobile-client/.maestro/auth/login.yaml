@@ -1,0 +1,23 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+  - auth
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+- launchApp:
+    clearState: true
+- tapOn: "Sign in"
+    optional: true
+- tapOn: "Email"
+- inputText: ${TEST_EMAIL}
+- tapOn: "Password"
+- inputText: ${TEST_PASSWORD}
+- hideKeyboard
+- tapOn:
+    text: "Sign in"
+    index: 0
+- assertVisible:
+    text: "Home"
+    timeout: 10000

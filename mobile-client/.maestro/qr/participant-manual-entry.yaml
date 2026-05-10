@@ -1,0 +1,31 @@
+appId: com.apiary.thehive
+tags:
+  - handshake
+  - qr
+env:
+  # Participant joins the event via manual code entry — the camera-less fallback
+  # used when the camera permission is denied or the device lacks a camera.
+  # The code value comes from an env var so the team can paste a real token in
+  # before running, or wire this up with a backend pre-step.
+  TEST_EMAIL: participant@demo.com
+  TEST_PASSWORD: demo123
+  EVENT_TITLE: Demo Yoga Session
+  QR_CODE: PASTE_A_VALID_TOKEN_HERE
+---
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Home"
+- tapOn:
+    text: ${EVENT_TITLE}
+- tapOn:
+    text: "Check in"
+- tapOn:
+    text: "Enter code manually"
+- tapOn: "Code"
+- inputText: ${QR_CODE}
+- hideKeyboard
+- tapOn:
+    text: "Submit"
+- assertVisible:
+    text: "Checked in"
+    timeout: 10000

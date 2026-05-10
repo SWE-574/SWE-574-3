@@ -1,0 +1,18 @@
+appId: com.apiary.thehive
+tags:
+  - handshake
+env:
+  TEST_EMAIL: provider@demo.com
+  TEST_PASSWORD: demo123
+---
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Messages"
+- tapOn:
+    text: "Maestro test handshake request"
+    optional: true
+- tapOn:
+    text: "Decline"
+- assertVisible:
+    text: "Declined"
+    timeout: 10000

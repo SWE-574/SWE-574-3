@@ -1,0 +1,19 @@
+appId: com.apiary.thehive
+tags:
+  - handshake
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+- runFlow: ../browse/home-to-detail.yaml
+- tapOn:
+    text: "Request"
+- tapOn: "Message"
+    optional: true
+- inputText: "Maestro test handshake request"
+- hideKeyboard
+- tapOn:
+    text: "Send"
+- assertVisible:
+    text: "Pending"
+    timeout: 10000

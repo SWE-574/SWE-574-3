@@ -1,0 +1,26 @@
+appId: com.apiary.thehive
+tags:
+  - auth
+env:
+  TEST_NEW_EMAIL: maestro+${RANDOM}@thehive.local
+  TEST_NEW_PASSWORD: TestPass123!
+  TEST_NEW_USERNAME: maestrouser${RANDOM}
+---
+- launchApp:
+    clearState: true
+- tapOn: "Sign in"
+    optional: true
+- tapOn:
+    text: "Sign up"
+- tapOn: "Email"
+- inputText: ${TEST_NEW_EMAIL}
+- tapOn: "Username"
+- inputText: ${TEST_NEW_USERNAME}
+- tapOn: "Password"
+- inputText: ${TEST_NEW_PASSWORD}
+- hideKeyboard
+- tapOn:
+    text: "Create account"
+- assertVisible:
+    text: "Verify"
+    timeout: 10000

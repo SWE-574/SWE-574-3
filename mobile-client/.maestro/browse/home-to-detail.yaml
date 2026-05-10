@@ -1,0 +1,30 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+- runFlow: ../auth/login.yaml
+- assertVisible:
+    text: "Home"
+    timeout: 10000
+- scroll
+- tapOn:
+    id: "service-card"
+    optional: true
+- tapOn:
+    index: 0
+    childOf:
+      id: "home-feed"
+    optional: true
+# Fallback: tap on the first card by simply tapping a card-like element.
+# When testIDs land on HomeScreen this becomes precise — for now we tap the
+# first ServiceCard by index.
+- assertVisible:
+    id: "service-detail-title"
+    timeout: 8000
+    optional: true
+- assertVisible:
+    text: "Request"
+    timeout: 8000
