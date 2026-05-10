@@ -1,7 +1,17 @@
 #!/usr/bin/env python
 """
 Enhanced demo setup script for The Hive
-Creates authentic demo data with Turkish users, realistic services, and proper system workflows
+Creates authentic demo data with Turkish users, realistic services, and proper system workflows.
+
+Final demo balances (after all handshakes settle):
+
+  - Cem (cem@demo.com)       : 5.00h  ← pinned sub-10h fixture for FR-07i
+  - Other Turkish demo users : varies between 4-9h after handshakes
+  - Admin / superadmin       : 10.00h
+
+Cem is the canonical low-balance fixture: end-to-end flows that exercise
+"insufficient TimeBank balance" paths look him up explicitly so the spec
+is independent of how the wider seed evolves.
 """
 import os
 import django
@@ -3321,6 +3331,15 @@ add_group_chat_messages(demo_fest_done, [
     (zeynep, "Get well soon Cem, health comes first."),
 ], now - timedelta(days=4))
 print(f"  Created: {demo_fest_done.title} (completed, Ayse+Burak attended, Cem no-show, evaluation window open)")
+
+# FR-07i: pin Cem's final balance below the 10-hour threshold so E2E flows
+# that need a sub-10h demo account ("can't afford this Need" scenarios,
+# atomic-rollback checks) always have a deterministic fixture. Done after
+# every handshake-driven balance change so it isn't undone downstream.
+cem.refresh_from_db(fields=['timebank_balance'])
+cem.timebank_balance = Decimal('5.00')
+cem.save(update_fields=['timebank_balance'])
+print(f"  Pinned: Cem's TimeBank balance to 5.00h (FR-07i fixture)")
 
 print("\n" + "=" * 60)
 print("Demo setup complete!")
