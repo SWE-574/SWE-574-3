@@ -264,7 +264,11 @@ class TestServiceSerializer:
     def test_service_update_replaces_and_reorders_media(self):
         """Test edit flow can keep one media item, remove one, and append a new upload."""
         user = UserFactory()
-        service = ServiceFactory(user=user)
+        # ServiceFactory iterates type and schedule_type, so it can land on
+        # Offer/Need + Recurrent — a combination ServiceSerializer now
+        # rejects via #546's validator. Pin schedule_type so the fixture is
+        # always valid; this test is about media ordering, not scheduling.
+        service = ServiceFactory(user=user, schedule_type='One-Time')
         media_keep = ServiceMedia.objects.create(
             service=service,
             media_type='image',

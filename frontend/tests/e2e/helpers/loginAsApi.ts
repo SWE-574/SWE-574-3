@@ -2,29 +2,27 @@ import { type Page, expect } from '@playwright/test'
 
 import { type DemoUser } from './auth'
 
-/**
- * API-only login fixture for multi-user chains.
- *
- * Why this exists alongside `loginAs`:
- *  - `loginAs` does `page.goto('/login')` + `page.goto('/dashboard')` and waits
- *    on the navbar trigger every call. For specs that switch identities 4–6
- *    times (events handshake setup, group exchange traversal) the cumulative
- *    navigation time pushes the spec past its 60s budget on cold CI workers.
- *  - This helper performs the JWT exchange via `page.request` (no browser
- *    navigation), pushes the access cookie onto the browser context, and
- *    primes the in-memory `useAuthStore` user via a `**/api/users/me/**`
- *    route stub so the React tree behaves identically to a real login.
- *  - A module-scoped JWT cache means repeated `loginAsApi(cem)` calls in the
- *    same worker only authenticate once.
- *
- * Trade-offs:
- *  - Tests that exercise the login form itself must keep using `loginAs`
- *    (or `loginViaUI`). This helper bypasses the form on purpose.
- *  - The /users/me/ stub mirrors the live profile by passing through the
- *    payload returned from /auth/login/, with `is_active`, `is_verified`,
- *    and `is_onboarded` defaulted to true. Override with `userOverrides` if
- *    a spec needs a different auth shape (mirroring `loginAs`).
- */
+// API-only login fixture for multi-user chains.
+//
+// Why this exists alongside loginAs:
+//  - loginAs navigates to /login then /dashboard and waits on the navbar
+//    trigger every call. For specs that switch identities 4 to 6 times
+//    (events handshake setup, group exchange traversal) the cumulative
+//    navigation time pushes the spec past its 60s budget on cold CI workers.
+//  - This helper performs the JWT exchange via page.request (no browser
+//    navigation), pushes the access cookie onto the browser context, and
+//    primes the in-memory useAuthStore user via a users-me route stub
+//    so the React tree behaves identically to a real login.
+//  - A module-scoped JWT cache means repeated loginAsApi(cem) calls in the
+//    same worker only authenticate once.
+//
+// Trade-offs:
+//  - Tests that exercise the login form itself must keep using loginAs
+//    (or loginViaUI). This helper bypasses the form on purpose.
+//  - The users-me stub mirrors the live profile by passing through the
+//    payload returned from /auth/login/, with is_active, is_verified,
+//    and is_onboarded defaulted to true. Override with userOverrides if
+//    a spec needs a different auth shape (mirroring loginAs).
 
 interface CachedAuth {
   accessCookie: { name: string; value: string; path: string }
