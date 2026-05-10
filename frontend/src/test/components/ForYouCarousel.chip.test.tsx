@@ -186,4 +186,48 @@ describe('weighted chip picker', () => {
     expect(out[0].id).toBe('a')
     expect(out[1].id).toBe('c')
   })
+
+  it('promotes a competitive interest signal over follow on dense follow graphs', () => {
+    // Mirrors the demo seed: everyone-follows-everyone makes most cards
+    // win on `follow`, even when `tag` overlap is non-trivial. Showing
+    // "From your network" 10 times in a row erases the more actionable
+    // "Matches your interests" story for cards that genuinely have
+    // interest overlap. Promote `tag` whenever its weighted score is at
+    // least half of follow's, so the demo Browse grid no longer renders
+    // a near-monochrome strip of follow chips.
+    //
+    // Raw weights: tag * 0.5, follow * 0.3.
+    // tag=0.5 -> 0.25; follow=1.0 -> 0.30. Ratio 0.83 -> tag wins.
+    const card = chipForSignals({
+      tag: 0.5, follow: 1.0, cooccur: 0, recency_penalty: 0,
+    } as ForYouSignals)
+    expect(card.name).toBe('tag')
+
+    // tag=0.33 -> 0.165; follow=1.0 -> 0.30. Ratio 0.55 -> tag still wins.
+    const moderate = chipForSignals({
+      tag: 0.33, follow: 1.0, cooccur: 0, recency_penalty: 0,
+    } as ForYouSignals)
+    expect(moderate.name).toBe('tag')
+
+    // tag=0.1 -> 0.05; follow=1.0 -> 0.30. Ratio 0.17 -> follow wins.
+    // Below the half-strength bar a tiny tag overlap should not hijack
+    // the chip.
+    const trace = chipForSignals({
+      tag: 0.1, follow: 1.0, cooccur: 0, recency_penalty: 0,
+    } as ForYouSignals)
+    expect(trace.name).toBe('follow')
+  })
+
+  it('does not promote a competitive cooccur/engagement signal over a primary tag chip', () => {
+    // The promotion only fires for follow saturation. A card whose
+    // primary signal is already an interest axis should not flip to a
+    // weaker interest axis just because that axis is competitive.
+    // tag=0.5 -> 0.25; cooccur=1.0 -> 0.20. tag is primary. Ratio
+    // (cooccur / tag) = 0.80, so without the follow-only guard the
+    // logic would replace tag with cooccur and harm clarity.
+    const c = chipForSignals({
+      tag: 0.5, follow: 0, cooccur: 1.0, recency_penalty: 0,
+    } as ForYouSignals)
+    expect(c.name).toBe('tag')
+  })
 })

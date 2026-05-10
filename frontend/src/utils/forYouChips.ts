@@ -48,6 +48,17 @@ export const DEFAULT_CHIP: SignalChip = {
   fg: 'white',
 }
 
+// Threshold for promoting a competitive interest signal over a winning
+// `follow` chip. On dense social graphs (the demo seed creates 94 follows
+// across 13 users, so almost every card has follow=1.0) the follow signal
+// saturates and would label nearly every card "From your network", erasing
+// the more discoverable interest-match story for cards that genuinely
+// also overlap with the viewer's tags. When an interest axis is at least
+// half as strong as follow, prefer it — the viewer already knows who they
+// follow, but "Matches your interests" is the actionable insight that
+// surfaces a discovery they can act on.
+const FOLLOW_PROMOTION_RATIO = 0.5
+
 export function chipForSignals(signals?: ForYouSignals | null): SignalChip {
   if (!signals) return DEFAULT_CHIP
   const entries: Array<[SignalChip['name'], number]> = [
@@ -56,11 +67,32 @@ export function chipForSignals(signals?: ForYouSignals | null): SignalChip {
     ['cooccur', signals.cooccur * FOR_YOU_WEIGHTS.cooccur],
     ['engagement', (signals.engagement ?? 0) * FOR_YOU_WEIGHTS.engagement],
   ]
-  const [topName, topValue] = entries.reduce(
+  let [topName, topValue] = entries.reduce(
     (best, current) => (current[1] > best[1] ? current : best),
     ['default' as SignalChip['name'], 0],
   )
   if (topValue <= 0) return DEFAULT_CHIP
+
+  // Follow-saturation override: when follow wins by argmax but an interest
+  // axis is competitive, swap the chip to that interest axis. Only fires
+  // when the primary is `follow` so a card whose strongest signal is
+  // genuinely an interest signal is never demoted to a weaker interest
+  // signal.
+  if (topName === 'follow') {
+    const threshold = topValue * FOLLOW_PROMOTION_RATIO
+    let promoted: SignalChip['name'] | null = null
+    let promotedValue = -Infinity
+    for (const [name, value] of entries) {
+      if (name === 'follow') continue
+      if (value > 0 && value >= threshold && value > promotedValue) {
+        promoted = name
+        promotedValue = value
+      }
+    }
+    if (promoted !== null) {
+      topName = promoted
+    }
+  }
   if (topName === 'tag') {
     return { name: 'tag', label: 'Matches your interests', bg: 'rgba(168, 85, 247, 0.95)', fg: 'white' }
   }
