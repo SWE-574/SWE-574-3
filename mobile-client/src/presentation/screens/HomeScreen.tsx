@@ -224,6 +224,13 @@ export default function HomeScreen() {
         // skill filter would hide unmatched-tag services (e.g. a fresh
         // event by an account whose tags don't overlap the viewer's).
         skip_onboarding: true,
+        // Match the web Browse grid: composite_score (hot * proximity +
+        // social) drives the order. Without this the backend defaulted
+        // to `latest`, so the freshest demo card (the April 23rd event,
+        // hot_score 0.26) sat at position 1 on mobile while the same
+        // viewer's web feed correctly led with the engagement-weighted
+        // top result (Manti Cooking Circle, hot_score 2.11).
+        sort: "hot",
         search: debouncedSearch || undefined,
         type:
           filters.serviceType !== "all" && filters.serviceType !== "Event"
