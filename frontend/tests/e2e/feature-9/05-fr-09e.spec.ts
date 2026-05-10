@@ -1,6 +1,9 @@
 import { test } from '@playwright/test'
 
 test('FR-09e: handshake QR codes expire after use, cancellation, or scheduled session end', async () => {
-  // QR issuance and scan validation are not exposed in the current frontend runtime.
-  test.skip(true, 'Service QR expiration flow is not implemented in the current frontend.')
+  // Backend `EventQRToken.expires_at` + `is_expired` already enforce expiry,
+  // but exercising it end-to-end requires a time-mock harness (Playwright
+  // can't fast-forward server clocks). Deferred until a clock-fixture lands;
+  // tracked under epic #579 "Testing & Validation".
+  test.skip(true, 'Service QR expiration: deferred, needs time-mock harness (#579).')
 })
