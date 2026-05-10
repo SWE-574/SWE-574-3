@@ -196,4 +196,40 @@ describe('DashboardPage (Browse)', () => {
       expect(last?.types).toEqual(expect.arrayContaining(['Offer', 'Need']))
     })
   })
+
+  // ── Map collapse toggle (§9 Win 2) ────────────────────────────────────────
+
+  it('renders the map by default and exposes a Hide map button', async () => {
+    storage = {}
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('map-view')).toBeInTheDocument())
+    expect(screen.getByTestId('dashboard-map-hide')).toBeInTheDocument()
+    expect(screen.queryByTestId('dashboard-map-show')).not.toBeInTheDocument()
+  })
+
+  it('Hide map collapses the panel and persists the choice in localStorage', async () => {
+    storage = {}
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('map-view')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTestId('dashboard-map-hide'))
+
+    await waitFor(() => expect(screen.queryByTestId('map-view')).not.toBeInTheDocument())
+    expect(screen.getByTestId('dashboard-map-show')).toBeInTheDocument()
+    expect(storage.dashboardMapCollapsed).toBe('true')
+  })
+
+  it('initialises collapsed when localStorage says so, and Show map restores it', async () => {
+    storage = { dashboardMapCollapsed: 'true' }
+    renderPage()
+
+    // Collapsed banner is rendered first; map is not in the tree.
+    await waitFor(() => expect(screen.getByTestId('dashboard-map-show')).toBeInTheDocument())
+    expect(screen.queryByTestId('map-view')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('dashboard-map-show'))
+
+    await waitFor(() => expect(screen.getByTestId('map-view')).toBeInTheDocument())
+    expect(storage.dashboardMapCollapsed).toBe('false')
+  })
 })
