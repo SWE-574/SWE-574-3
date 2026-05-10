@@ -34,18 +34,29 @@ class TestAuthHelpers:
     def test_set_auth_cookies(self, settings):
         settings.IS_PRODUCTION = False
         response = Response()
-        
-        # Test the helper which sets access_token and refresh_token
-        _set_auth_cookies(response, "fake_access", "fake_refresh")
-        
+
+        # _set_auth_cookies refuses non-JWT input as a defence in depth, so
+        # use real JWT-shaped tokens (three base64-segments separated by dots)
+        # that satisfy `_is_jwt_shape` without needing the full SimpleJWT signer.
+        access = (
+            'eyJhbGciOiJIUzI1NiJ9.eyJ0eXBlIjoiYWNjZXNzIiwidXNlcl9pZCI6IjEifQ.'
+            'sig-access-fixture'
+        )
+        refresh = (
+            'eyJhbGciOiJIUzI1NiJ9.eyJ0eXBlIjoicmVmcmVzaCIsInVzZXJfaWQiOiIxIn0.'
+            'sig-refresh-fixture'
+        )
+
+        _set_auth_cookies(response, access, refresh)
+
         # In DRF, cookies are stored in response.cookies (a SimpleCookie object)
         assert 'access_token' in response.cookies
-        assert response.cookies['access_token'].value == "fake_access"
+        assert response.cookies['access_token'].value == access
         assert response.cookies['access_token']['httponly'] is True
         assert response.cookies['access_token']['samesite'].lower() == 'lax'.lower()
 
         assert 'refresh_token' in response.cookies
-        assert response.cookies['refresh_token'].value == "fake_refresh"
+        assert response.cookies['refresh_token'].value == refresh
         assert response.cookies['refresh_token']['httponly'] is True
         assert response.cookies['refresh_token']['samesite'].lower() == 'lax'.lower()
 

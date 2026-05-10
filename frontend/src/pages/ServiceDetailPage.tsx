@@ -986,14 +986,10 @@ export default function ServiceDetailPage() {
 
   const handleCancelEvent = async () => {
     if (!service || !cancelReason.trim()) return
-    // Prefer the API-provided edit_locked; fall back to client-side math
-    // when an older payload doesn't include the field yet (#267).
-    const inLockdown = service.edit_locked ?? isWithinLockdownWindow(service.scheduled_time)
-    const hasParticipants = (service.participant_count ?? 0) > 0
-    const confirmMsg = inLockdown && hasParticipants
-      ? 'You are in the 24h lockdown window. Cancelling now will apply a 30-day event creation ban. Continue?'
-      : 'Are you sure you want to cancel this event? All participants will be notified.'
-    if (!window.confirm(confirmMsg)) return
+    // The cancel modal already collects an explicit reason and renders the
+    // 30-day-ban warning inline when in lockdown; a second native window.confirm
+    // here was redundant, raced Playwright, and broke parity with the rest of
+    // the app's AdminConfirmModal-driven destructive flows.
     setCancelLoading(true)
     setShowCancelModal(false)
     try {

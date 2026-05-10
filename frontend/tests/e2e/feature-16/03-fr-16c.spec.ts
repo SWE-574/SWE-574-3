@@ -6,8 +6,7 @@ import {
   setupAttendedEventHandshake,
 } from '../helpers'
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16c: evaluation comment is not visible in public profile during the blind-review window', async ({ page }) => {
+test('FR-16c: evaluation comment is not visible in public profile during the blind-review window', async ({ page }) => {
   const title = uniqueTitle('FR-16c Event')
   const organizer = USERS.burak
   const participant = USERS.yasemin
@@ -36,8 +35,7 @@ test.skip('FR-16c: evaluation comment is not visible in public profile during th
   await expect(page.getByText(reviewText)).not.toBeVisible({ timeout: 5_000 })
 })
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16c: evaluation trait summary is visible on public profile after submission', async ({ page }) => {
+test('FR-16c: evaluation trait summary is visible on public profile after submission', async ({ page }) => {
   const title = uniqueTitle('FR-16c Traits Event')
   const organizer = USERS.elif
   const participant = USERS.cem

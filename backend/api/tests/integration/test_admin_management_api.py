@@ -108,6 +108,35 @@ class TestAdminManagementApi:
         target_user.refresh_from_db()
         assert target_user.karma_score == 7
 
+    def test_warn_user_response_includes_inline_audit_log_entry(self):
+        """NFR-03b: the warn endpoint must return the freshly-appended audit
+        log entry inline so moderation consoles can update their view
+        without a follow-up GET that may race the writer."""
+        admin = AdminUserFactory()
+        target_user = UserFactory(is_active=True)
+
+        client = AuthenticatedAPIClient().authenticate_admin(admin)
+        response = client.post(
+            f'/api/admin/users/{target_user.id}/warn/',
+            {'message': 'Please follow community guidelines.'},
+            format='json',
+        )
+
+        assert_api_response(response, 200)
+        body = response.json()
+        assert 'audit_log' in body, 'warn response must include the inline audit-log entry'
+        entry = body['audit_log']
+        assert entry['action_type'] == 'warn_user'
+        assert entry['target_entity'] == 'user'
+        assert entry['target_id'] == str(target_user.id)
+        assert entry['reason'] == 'Please follow community guidelines.'
+        # The id must match the row that landed in the database, so
+        # consumers can use it as a stable React key without a refetch.
+        persisted = AdminAuditLog.objects.get(
+            action_type='warn_user', target_id=target_user.id
+        )
+        assert entry['id'] == str(persisted.id)
+
     def test_admin_audit_logs_requires_authentication(self):
         response = APIClient().get('/api/admin/audit-logs/')
         assert_problem_detail(response, 401)

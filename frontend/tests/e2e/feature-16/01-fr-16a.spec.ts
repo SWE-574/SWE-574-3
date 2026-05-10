@@ -10,8 +10,7 @@ import {
   submitPositiveServiceEvalViaApi,
 } from '../helpers'
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16a: 48-hour evaluation window opens immediately after service exchange COMPLETED', async ({ page }) => {
+test('FR-16a: 48-hour evaluation window opens immediately after service exchange COMPLETED', async ({ page }) => {
   const title = uniqueTitle('FR-16a Service')
   const provider = USERS.elif
   const requester = USERS.cem
@@ -27,8 +26,7 @@ test.skip('FR-16a: 48-hour evaluation window opens immediately after service exc
   expect(result.status).toBe(201)
 })
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16a: 48-hour evaluation window opens immediately after event COMPLETED', async ({ page }) => {
+test('FR-16a: 48-hour evaluation window opens immediately after event COMPLETED', async ({ page }) => {
   const title = uniqueTitle('FR-16a Event')
   const organizer = USERS.ayse
   const participant = USERS.mehmet
@@ -50,8 +48,7 @@ test.skip('FR-16a: 48-hour evaluation window opens immediately after event COMPL
   expect(result.status).toBe(201)
 })
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16a: evaluation window is not open before exchange reaches COMPLETED', async ({ page }) => {
+test('FR-16a: evaluation window is not open before exchange reaches COMPLETED', async ({ page }) => {
   const title = uniqueTitle('FR-16a Pending Service')
   const provider = USERS.zeynep
   const requester = USERS.can

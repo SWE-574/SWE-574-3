@@ -5,8 +5,7 @@ import {
   setupAttendedEventHandshake,
 } from '../helpers'
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-15a: event evaluation access is restricted to participants with ATTENDED status', async ({ page }) => {
+test('FR-15a: event evaluation access is restricted to participants with ATTENDED status', async ({ page }) => {
   const title = uniqueTitle('FR-15a Event')
   const organizer = USERS.elif
   const attendee = USERS.cem

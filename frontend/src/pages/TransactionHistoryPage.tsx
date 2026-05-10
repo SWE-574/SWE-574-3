@@ -45,6 +45,20 @@ const FILTERS: { key: TransactionDirection; label: string }[] = [
 ]
 
 const ACTIVE_HANDSHAKE_STATUSES = new Set<Handshake['status']>(['accepted', 'checked_in', 'attended'])
+
+// One-time group offers settle the provider on the first completion, but the
+// group session is not "done" until every other handshake reaches a terminal
+// state. Keep `completed` handshakes visible alongside the still-active ones
+// so the participant doesn't disappear from the active card the moment they
+// settle. Once every handshake on the service has terminated the group is
+// dropped from the active list as a whole.
+function isGroupOneTimeOffer(handshake: Handshake): boolean {
+  return (
+    handshake.service_type === 'Offer' &&
+    handshake.schedule_type === 'One-Time' &&
+    Number(handshake.max_participants ?? 1) > 1
+  )
+}
 const INSIGHT_SERVICE_TYPES = ['Offer', 'Need', 'Event'] as const
 
 type EventHistoryItem = UserHistoryItem & {
@@ -214,8 +228,14 @@ function toExpectedAgreement(handshake: Handshake, currentUser?: User | null): E
   const isProvider = isEvent
     ? requesterId !== String(currentUser?.id ?? '')
     : handshake.is_current_user_provider === true
-  const expectedDelta = isProvider ? hours : 0
-  const reservedDelta = isProvider ? 0 : -hours
+  // Completed handshakes on a one-time group offer have already settled
+  // (provider was paid on the first completion); show them with a
+  // delta of 0 and a "No change" note so the row is still visible while
+  // siblings settle but doesn't double-count the credit.
+  const isSettledGroupOffer =
+    !isEvent && handshake.status === 'completed' && isGroupOneTimeOffer(handshake)
+  const expectedDelta = isSettledGroupOffer ? 0 : isProvider ? hours : 0
+  const reservedDelta = isSettledGroupOffer ? 0 : isProvider ? 0 : -hours
 
   return {
     id: handshake.id,
@@ -236,6 +256,8 @@ function toExpectedAgreement(handshake: Handshake, currentUser?: User | null): E
     expected_delta: expectedDelta,
     note: isEvent
       ? 'Event session'
+      : isSettledGroupOffer
+      ? 'Already settled — no further change'
       : isProvider
       ? `Time expected after completion`
       : `Already reserved at acceptance`,
@@ -834,8 +856,30 @@ const TransactionHistoryPage = () => {
       if (requestId !== agreementRequestIdRef.current) return
       setHandshakes(handshakes)
 
+      // For one-time group offers, surface completed handshakes too — but
+      // only while at least one sibling on the same service is still active,
+      // so the row drops out cleanly once the whole group has settled.
+      const groupServicesWithActiveSibling = new Set<string>()
+      for (const h of handshakes) {
+        if (
+          h.service_id &&
+          isGroupOneTimeOffer(h) &&
+          ACTIVE_HANDSHAKE_STATUSES.has(h.status)
+        ) {
+          groupServicesWithActiveSibling.add(String(h.service_id))
+        }
+      }
+
       const nextAgreements = handshakes
-        .filter((handshake) => ACTIVE_HANDSHAKE_STATUSES.has(handshake.status))
+        .filter((handshake) => {
+          if (ACTIVE_HANDSHAKE_STATUSES.has(handshake.status)) return true
+          return (
+            handshake.status === 'completed' &&
+            isGroupOneTimeOffer(handshake) &&
+            handshake.service_id != null &&
+            groupServicesWithActiveSibling.has(String(handshake.service_id))
+          )
+        })
         .map((handshake) => toExpectedAgreement(handshake, user))
         .filter((item): item is ExpectedAgreement => item !== null)
       const enrichedAgreements = await enrichEventAgreementParticipants(nextAgreements, signal)
@@ -1563,11 +1607,18 @@ const TransactionHistoryPage = () => {
                         const showTimeValue = agreement.service_type !== 'Event' || displayDelta !== 0
                         const timeColor = displayDelta > 0 ? GREEN : displayDelta < 0 ? AMBER : GRAY700
                         const timeBg = displayDelta > 0 ? GREEN_LT : displayDelta < 0 ? AMBER_LT : GRAY100
-                        const timeLabel = agreement.expected_delta !== 0
-                          ? 'after completion'
-                          : agreement.reserved_delta !== 0
-                            ? 'reserved now'
-                            : 'no time change'
+                        // Settled group-offer participants surface a distinct
+                        // "No change" pill so the row stays informative while
+                        // siblings are still active without implying a future delta.
+                        const isSettledGroupOfferRow =
+                          agreement.status === 'completed' && agreement.expected_delta === 0
+                        const timeLabel = isSettledGroupOfferRow
+                          ? 'already settled'
+                          : agreement.expected_delta !== 0
+                            ? 'after completion'
+                            : agreement.reserved_delta !== 0
+                              ? 'reserved now'
+                              : 'no time change'
                         const participantAvatars = isGroupedAgreement
                           ? timeActivityVisibleParticipants(agreement.participants)
                           : []
@@ -1665,7 +1716,9 @@ const TransactionHistoryPage = () => {
                             {showTimeValue ? (
                               <Flex align={{ base: 'center', md: 'flex-end' }} justify="space-between" direction={{ base: 'row', md: 'column' }} gap={1}>
                                 <Box px="10px" py="5px" borderRadius="999px" bg={timeBg} color={timeColor} fontSize="13px" fontWeight={900}>
-                                  {displayDelta !== 0 ? formatAmount(displayDelta) : 'No hours'}
+                                  {displayDelta !== 0
+                                    ? formatAmount(displayDelta)
+                                    : isSettledGroupOfferRow ? 'No change' : 'No hours'}
                                 </Box>
                                 <Text fontSize="11px" color={GRAY500}>
                                   {timeLabel}
@@ -2145,6 +2198,10 @@ const TransactionHistoryPage = () => {
         onClose={() => setSelectedActiveAgreementGroup(null)}
         items={(selectedActiveAgreementGroup?.participants ?? []).map((agreement) => {
           const isEventParticipant = selectedActiveAgreementGroup?.service_type === 'Event' || agreement.service_type === 'Event'
+          // Settled participants in a still-active group offer surface a
+          // "No change" value instead of the reserved/expected delta —
+          // the row is informational, the credit already moved.
+          const settledRow = agreement.status === 'completed' && agreement.expected_delta === 0
           return {
             id: agreement.id,
             title: agreement.counterpart_name,
@@ -2152,6 +2209,8 @@ const TransactionHistoryPage = () => {
             meta: isEventParticipant ? undefined : agreement.note,
             value: isEventParticipant
               ? undefined
+              : settledRow
+              ? 'No change'
               : formatAmount(agreement.expected_delta !== 0 ? agreement.expected_delta : agreement.reserved_delta),
             avatarUrl: agreement.counterpart_avatar_url ?? null,
             onClick: agreement.counterpart_id

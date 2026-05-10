@@ -1,9 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { createOffer, expectToast, loginAs, requestOfferFromDetail, switchUser, uniqueTitle, USERS } from '../helpers'
 
-test('FR-05g: owner can remove a listing with no related exchanges', async ({ page }) => {
-  // Remove Listing migrated from `window.confirm` to AdminConfirmModal (BUG-02);
-  // the legacy `dialog` race is gone, the spec drives the modal directly.
+test('FR-05g: owner can remove an offer with no related exchanges', async ({ page }) => {
   const removableTitle = uniqueTitle('FR-05g Removable Offer')
 
   await loginAs(page, USERS.cem)
@@ -12,11 +10,9 @@ test('FR-05g: owner can remove a listing with no related exchanges', async ({ pa
     description: 'Feature 5 FR-05g validates removable offer without related exchanges.',
   })
 
+  // Removal opens the AdminConfirmModal; click the modal's Remove button.
   await page.getByRole('button', { name: 'Remove Listing' }).click()
-  // The modal's confirm button matches `^Remove$`; the trigger button reads
-  // "Remove Listing" so the strict anchor disambiguates them.
   await page.getByRole('button', { name: /^Remove$/ }).click()
-
   await expectToast(page, /Listing removed/i)
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
 })

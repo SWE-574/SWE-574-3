@@ -2,6 +2,8 @@
 Integration tests for service API endpoints
 """
 import pytest
+import requests
+from unittest.mock import patch
 from rest_framework import status
 from rest_framework.test import APIClient
 from decimal import Decimal
@@ -11,7 +13,7 @@ from django.utils import timezone
 from api.tests.helpers.factories import UserFactory, ServiceFactory, TagFactory, HandshakeFactory
 from api.tests.helpers.factories import AdminUserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Service, Notification, TransactionHistory
+from api.models import Service, Notification, TransactionHistory, Tag
 from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
@@ -579,6 +581,86 @@ class TestServiceViewSet:
             'title': 'Hacked Title'
         })
         assert_problem_detail(response, 403)
+
+    def test_update_service_increments_version_on_success(self):
+        """Successful PATCH bumps Service.version atomically (NFR-05d)."""
+        user = UserFactory()
+        service = ServiceFactory(user=user)
+        assert service.version == 0
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.patch(
+            f'/api/services/{service.id}/',
+            {'title': 'First save', 'version': 0},
+        )
+        assert_api_response(response, 200)
+        service.refresh_from_db()
+        assert service.version == 1
+        assert response.json()['version'] == 1
+
+    def test_update_service_stale_version_returns_409(self):
+        """A second PATCH carrying the original version is rejected (NFR-05d).
+
+        The first writer's payload survives, the second writer is told
+        VERSION_CONFLICT and the row's title reflects the first save.
+        """
+        user = UserFactory()
+        # Pin the initial description so the post-409 assertion has a
+        # known reference value. Without this the factory generates a
+        # random description and the rejected-write check has nothing
+        # specific to compare against.
+        service = ServiceFactory(
+            user=user, title='Original', description='Original description'
+        )
+        assert service.version == 0
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        # Both clients GET version=0 in the same browser tab simulation.
+        first = client.patch(
+            f'/api/services/{service.id}/',
+            {'title': 'First writer', 'version': 0},
+        )
+        assert_api_response(first, 200)
+
+        second = client.patch(
+            f'/api/services/{service.id}/',
+            {'description': 'Second writer wanted to change description', 'version': 0},
+        )
+        assert_problem_detail(second, 409)
+        body = second.json()
+        assert body['code'] == 'VERSION_CONFLICT'
+        assert body['current_version'] == 1
+
+        service.refresh_from_db()
+        # First writer's title survives — the row was not silently overwritten.
+        assert service.title == 'First writer'
+        # Second writer's description was rejected — original survives.
+        assert service.description == 'Original description'
+        assert service.version == 1
+
+    def test_update_service_without_version_keeps_legacy_contract(self):
+        """PATCH without `version` falls through to last-write-wins (#NFR-05d-compat).
+
+        Legacy clients and admin tooling that don't round-trip version still
+        succeed and trigger the same atomic version bump.
+        """
+        user = UserFactory()
+        service = ServiceFactory(user=user)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.patch(
+            f'/api/services/{service.id}/',
+            {'title': 'Legacy client save'},
+        )
+        assert_api_response(response, 200)
+        service.refresh_from_db()
+        assert service.title == 'Legacy client save'
+        assert service.version == 1
+
     
     def test_delete_service(self):
         """Test soft-deleting a service (sets status to Cancelled)"""
@@ -951,3 +1033,357 @@ class TestServiceRetrieveStatusVisibility:
         assert service.session_exact_location_lat == Decimal('40.987654')
         assert service.session_exact_location_lng == Decimal('29.123456')
         assert service.session_location_guide == 'Veterinerin olduğu bina'
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestRecurrentSchedulingValidation:
+    """Recurrent scheduling is Event-only (#546).
+
+    Pre-fix the API silently coerced Offer/Need + Recurrent to One-Time;
+    the contract is now an explicit 400 with a field-error pinpointing
+    schedule_type so client bugs surface instead of being papered over.
+    """
+
+    def _payload(self, service_type, schedule_type):
+        return {
+            'title': f'{service_type} {schedule_type}',
+            'description': f'Test {service_type} with schedule_type={schedule_type}.',
+            'type': service_type,
+            'duration': 1.0,
+            'location_type': 'Online',
+            'max_participants': 1,
+            'schedule_type': schedule_type,
+        }
+
+    def test_post_offer_recurrent_returns_400_with_field_error(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', self._payload('Offer', 'Recurrent'))
+        assert_problem_detail(response, 400)
+        body = response.json()
+        assert 'field_errors' in body
+        assert 'schedule_type' in body['field_errors']
+        assert body['field_errors']['schedule_type'] == [
+            'Recurrent scheduling is only supported on Events.'
+        ]
+
+    def test_post_need_recurrent_returns_400_with_field_error(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', self._payload('Need', 'Recurrent'))
+        assert_problem_detail(response, 400)
+        body = response.json()
+        assert 'field_errors' in body
+        assert 'schedule_type' in body['field_errors']
+        assert body['field_errors']['schedule_type'] == [
+            'Recurrent scheduling is only supported on Events.'
+        ]
+
+    def test_post_offer_one_time_still_201(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', self._payload('Offer', 'One-Time'))
+        assert_api_response(response, 201)
+        assert response.json()['schedule_type'] == 'One-Time'
+
+    def test_patch_offer_to_recurrent_returns_400(self):
+        """Existing Offers cannot be flipped to Recurrent via PATCH either."""
+        user = UserFactory(is_verified=True)
+        service = ServiceFactory(user=user, type='Offer', schedule_type='One-Time')
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.patch(
+            f'/api/services/{service.id}/',
+            {'schedule_type': 'Recurrent'},
+        )
+        assert_problem_detail(response, 400)
+        body = response.json()
+        assert 'field_errors' in body
+        assert 'schedule_type' in body['field_errors']
+        # And the row must not have been coerced.
+        service.refresh_from_db()
+        assert service.schedule_type == 'One-Time'
+
+    def test_post_offer_with_recurrence_interval_returns_400(self):
+        """#546 also covers `recurrence_interval_days` as a non-Event input.
+
+        Pre-fix, an Offer/Need request that accidentally carried a
+        non-null cadence was silently zeroed; that masked client bugs in
+        exactly the same way as the schedule_type coercion. The endpoint
+        now rejects the cadence with a 400 + field-pinpointed error.
+        """
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        payload = self._payload('Offer', 'One-Time')
+        payload['recurrence_interval_days'] = 7
+
+        response = client.post('/api/services/', payload)
+        assert_problem_detail(response, 400)
+        body = response.json()
+        assert 'recurrence_interval_days' in body.get('field_errors', {})
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestServiceDetailQueryCount:
+    """Pin the detail-route query count so a regressed serializer cannot
+    silently re-introduce N+1 against comments / saves / dismissals.
+
+    NFR-13a: the service-detail page exceeded the 2 s budget on Docker CI
+    because `comment_count`, `is_saved`, and `is_dismissed` each fired a
+    per-row query on the detail path. The retrieve queryset now annotates
+    those alongside the existing user / tags / handshakes prefetches.
+    Cap the absolute count generously so unrelated middleware queries
+    don't make this brittle, but reject growth that scales with the row
+    counts of related tables (comments, saved-services, dismissals).
+    """
+
+    def test_detail_query_count_is_constant_across_comment_volume(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from api.models import Comment
+
+        owner = UserFactory()
+        viewer = UserFactory()
+        small_service = ServiceFactory(user=owner, status='Active')
+        large_service = ServiceFactory(user=owner, status='Active')
+
+        # Seed differing comment volumes so per-row N+1 would show up as
+        # a query-count delta tracking the comment counts.
+        Comment.objects.create(service=small_service, user=viewer, body='one')
+        for i in range(15):
+            Comment.objects.create(
+                service=large_service, user=viewer, body=f'c{i}'
+            )
+
+        client = APIClient()
+        client.force_authenticate(user=viewer)
+
+        # Warm caches and module imports so first-hit work doesn't skew the
+        # second observation.
+        client.get(f'/api/services/{small_service.id}/')
+
+        with CaptureQueriesContext(connection) as ctx_small:
+            resp = client.get(f'/api/services/{small_service.id}/')
+            assert_api_response(resp, 200)
+
+        with CaptureQueriesContext(connection) as ctx_large:
+            resp = client.get(f'/api/services/{large_service.id}/')
+            assert_api_response(resp, 200)
+
+        # Detail must not scale with comment volume. Allow a tiny constant
+        # delta for jitter (auth caching, throttle bookkeeping) but reject
+        # anything that grows roughly linearly with the 14-row gap.
+        assert len(ctx_large) - len(ctx_small) <= 2, (
+            f'detail query count grew from {len(ctx_small)} to {len(ctx_large)} '
+            f'when comment volume rose from 1 to 15 — N+1 likely back'
+        )
+        # Hard cap to prevent silent regressions stacking up across releases.
+        assert len(ctx_large) <= 25, (
+            f'detail query count {len(ctx_large)} exceeds the 25-query cap; '
+            f'review the retrieve queryset / serializer'
+        )
+
+    def test_detail_query_count_does_not_scale_with_saved_or_dismissed_volume(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from api.models import SavedService, ServiceDismissal
+
+        viewer = UserFactory()
+        target = ServiceFactory(status='Active')
+
+        # Pollute the SavedService / ServiceDismissal tables for unrelated
+        # services to confirm the per-viewer is_saved / is_dismissed paths
+        # are using EXISTS subqueries rather than per-row table scans.
+        for _ in range(20):
+            other = ServiceFactory(status='Active')
+            SavedService.objects.create(user=viewer, service=other)
+            ServiceDismissal.objects.create(viewer=viewer, service=other)
+
+        client = APIClient()
+        client.force_authenticate(user=viewer)
+        # Warm.
+        client.get(f'/api/services/{target.id}/')
+
+        with CaptureQueriesContext(connection) as ctx:
+            resp = client.get(f'/api/services/{target.id}/')
+            assert_api_response(resp, 200)
+
+        assert len(ctx) <= 25, (
+            f'detail query count {len(ctx)} exceeds the 25-query cap '
+            f'in the presence of unrelated SavedService / Dismissal rows'
+        )
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestOfferCreateTagPayloads:
+    """Regression tests for issue #575 — POST /api/services/ must never 500
+    based on the contents of `tag_ids` or `tag_names`.
+
+    The pre-fix create path raised on three legitimate inputs:
+
+    1. A QID in `tag_ids` that did not yet exist as a Tag, where the
+       Wikidata label happened to collide with an existing tag's `name`
+       (`Tag.name` is unique). `Tag.objects.get_or_create(id=...,
+       defaults={'name': label})` then surfaced an `IntegrityError` as
+       a 500.
+    2. A QID in `tag_ids` that did not yet exist as a Tag, where the
+       Wikidata fetch raised an exception not caught upstream (anything
+       that wasn't `RequestException / KeyError / ValueError`).
+    3. The `tag_names` flow, where `Tag.objects.create(...)` raced with
+       a concurrent insert on the unique `name` index.
+
+    Each test below expects the create call to succeed with 201, with
+    unresolvable QIDs silently dropped from the response payload. The
+    pre-fix behaviour was 500.
+    """
+
+    def _payload(self, tag_ids=None, tag_names=None, wikidata_labels_json=None):
+        body = {
+            'title': 'Tag Payload Offer',
+            'description': 'Exercises the tag-creation path on /api/services/.',
+            'type': 'Offer',
+            'duration': 1.0,
+            'location_type': 'Online',
+            'max_participants': 1,
+            'schedule_type': 'One-Time',
+            'status': 'Active',
+        }
+        if tag_ids is not None:
+            body['tag_ids'] = tag_ids
+        if tag_names is not None:
+            body['tag_names'] = tag_names
+        if wikidata_labels_json is not None:
+            body['wikidata_labels_json'] = wikidata_labels_json
+        return body
+
+    def _client(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+        return client
+
+    def test_create_with_valid_tag_ids_returns_201(self):
+        """Baseline: existing tag id resolves and is attached."""
+        tag = TagFactory()
+        client = self._client()
+
+        response = client.post('/api/services/', self._payload(tag_ids=[tag.id]))
+
+        assert_api_response(response, 201)
+        attached = {t['id'] for t in response.data.get('tags', [])}
+        assert tag.id in attached
+
+    def test_create_with_empty_tag_ids_returns_201(self):
+        """Empty tag list must not regress the create path."""
+        client = self._client()
+
+        response = client.post('/api/services/', self._payload(tag_ids=[]))
+
+        assert_api_response(response, 201)
+        assert response.data.get('tags', []) == []
+
+    @patch('api.wikidata.fetch_wikidata_claims', return_value=None)
+    @patch('api.wikidata.fetch_wikidata_item', return_value=None)
+    def test_create_with_mixed_valid_and_unknown_tag_ids_returns_201(
+        self, _mock_item, _mock_claims
+    ):
+        """Mixed payload: valid tag survives, unknown non-QID id is dropped."""
+        tag = TagFactory()
+        client = self._client()
+
+        response = client.post(
+            '/api/services/',
+            self._payload(tag_ids=[tag.id, 'not-a-real-tag-id-xyz']),
+        )
+
+        assert_api_response(response, 201)
+        attached = {t['id'] for t in response.data.get('tags', [])}
+        assert tag.id in attached
+        assert 'not-a-real-tag-id-xyz' not in attached
+
+    @patch(
+        'api.wikidata.fetch_wikidata_item',
+        side_effect=requests.RequestException('wikidata down'),
+    )
+    def test_create_with_qid_when_wikidata_raises_returns_201(self, _mock_item):
+        """If Wikidata is down (raises RequestException), the create
+        endpoint must still succeed — the QID is best-effort enrichment.
+
+        Pre-fix this path 500'd because the exception propagated out of
+        `ServiceSerializer.create`. The fix wraps the lookup in a
+        defensive try/except so the create transaction commits and the
+        caller gets 201.
+        """
+        client = self._client()
+
+        response = client.post('/api/services/', self._payload(tag_ids=['Q424242']))
+
+        assert_api_response(response, 201)
+
+    @patch('api.wikidata.fetch_wikidata_claims', return_value=None)
+    def test_create_with_qid_label_colliding_with_existing_tag_returns_201(
+        self, _mock_claims
+    ):
+        """Reproduces the original #575 500: a fresh QID whose Wikidata
+        label collides with an existing `Tag.name` triggered an
+        IntegrityError on the unique-name index from
+        `Tag.objects.get_or_create(id=..., defaults={'name': label})`.
+
+        Post-fix the create succeeds and the existing tag is reused.
+        """
+        existing = Tag.objects.create(id='hand_made_tag', name='Yoga')
+        client = self._client()
+
+        with patch(
+            'api.wikidata.fetch_wikidata_item',
+            return_value={'id': 'Q9888', 'label': 'Yoga'},
+        ):
+            response = client.post(
+                '/api/services/',
+                self._payload(tag_ids=['Q9888']),
+            )
+
+        assert_api_response(response, 201)
+        attached_ids = {t['id'] for t in response.data.get('tags', [])}
+        # The fix must reuse the existing row by name rather than create
+        # a new row with the same name and 500 on the unique index. Pin
+        # to the stored row's id so a regression that resurrects the
+        # parallel-INSERT path is caught — 'Q9888' showing up here would
+        # mean the helper bypassed the name-collision lookup.
+        assert existing.id in attached_ids
+        assert 'Q9888' not in attached_ids
+        assert not Tag.objects.filter(id='Q9888').exists()
+
+    @patch('api.wikidata.fetch_wikidata_claims', return_value=None)
+    @patch('api.wikidata.fetch_wikidata_item', return_value=None)
+    def test_create_with_tag_names_reuses_existing_row_returns_201(
+        self, _mock_item, _mock_claims
+    ):
+        """`tag_names` flow must reuse an existing tag with the same
+        case-insensitive name instead of attempting a fresh INSERT
+        (which 500'd via IntegrityError on the unique name index in the
+        race window).
+        """
+        existing = Tag.objects.create(id='photography_seed', name='Photography')
+        client = self._client()
+
+        # Different casing — pre-fix the case-insensitive lookup found
+        # the row, but in the race between get() and create() the INSERT
+        # would still fire and 500 on the unique name index. Post-fix the
+        # create path uses a save-pointed get_or_create equivalent.
+        response = client.post(
+            '/api/services/',
+            self._payload(tag_names=['photography']),
+        )
+
+        assert_api_response(response, 201)
+        attached_ids = {t['id'] for t in response.data.get('tags', [])}
+        assert existing.id in attached_ids

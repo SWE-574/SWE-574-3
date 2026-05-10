@@ -220,7 +220,14 @@ class TestMeCalendarItems:
         active_requester = UserFactory()
         svc = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'), max_participants=3)
         scheduled = timezone.now() + timedelta(days=5)
-        completed_at = timezone.now() - timedelta(days=10)
+        # Pin the completion time to mid-day. The calendar models a completed
+        # session as ending at completed_at and starting duration hours earlier;
+        # if completed_at falls in the small hours the computed start crosses
+        # midnight and lands on the previous day, breaking the same-day
+        # assertion below.
+        completed_at = (timezone.now() - timedelta(days=10)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
         handshake = HandshakeFactory(
             service=svc, requester=requester, status='completed',
             scheduled_time=scheduled,

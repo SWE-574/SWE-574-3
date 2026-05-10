@@ -8,8 +8,7 @@ import {
   submitPositiveServiceEvalViaApi,
 } from '../helpers'
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16d: requester can submit service evaluation without waiting for provider — non-reciprocal allowed', async ({ page }) => {
+test('FR-16d: requester can submit service evaluation without waiting for provider — non-reciprocal allowed', async ({ page }) => {
   const title = uniqueTitle('FR-16d Service')
   const provider = USERS.ayse
   const requester = USERS.mehmet
@@ -27,8 +26,7 @@ test.skip('FR-16d: requester can submit service evaluation without waiting for p
   expect(result.status).toBe(201)
 })
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16d: provider can independently submit their evaluation without requester submitting first', async ({ page }) => {
+test('FR-16d: provider can independently submit their evaluation without requester submitting first', async ({ page }) => {
   const title = uniqueTitle('FR-16d Provider Eval')
   const provider = USERS.zeynep
   const requester = USERS.can
@@ -57,8 +55,7 @@ test.skip('FR-16d: provider can independently submit their evaluation without re
   expect(result.status).toBe(201)
 })
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16d: both parties can independently submit evaluations for the same event', async ({ page }) => {
+test('FR-16d: both parties can independently submit evaluations for the same event', async ({ page }) => {
   const title = uniqueTitle('FR-16d Both Eval Event')
   const organizer = USERS.elif
   const participant = USERS.cem

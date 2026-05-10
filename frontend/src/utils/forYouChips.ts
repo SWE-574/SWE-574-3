@@ -1,7 +1,7 @@
 import type { ForYouSignals, Service } from '@/types'
 
 export interface SignalChip {
-  name: 'tag' | 'follow' | 'cooccur' | 'default'
+  name: 'tag' | 'follow' | 'cooccur' | 'engagement' | 'default'
   label: string
   bg: string
   fg: string
@@ -11,7 +11,20 @@ export interface SignalChip {
 // Argmax on raw values made follow (flat 1.0) always win over Jaccard tag
 // overlap (typically a small float); weighting matches the actual ranking blend
 // so the chip reflects what moved the score.
-export const FOR_YOU_WEIGHTS = { tag: 0.5, follow: 0.3, cooccur: 0.2 } as const
+//
+// `engagement` (Jaccard overlap with the viewer's saved-services tags) is
+// already computed at backend/api/ranking_personalized.py:393 and shipped on
+// the ForYouSignals payload, but never previously surfaced as a chip. It
+// rounds out the pill set with a pure interest-axis signal that is
+// orthogonal to the social graph (`follow`) and the co-occurrence prior
+// (`cooccur`). Weight is intentionally below `cooccur` so it doesn't crowd
+// out the established signals on cards that score similarly across axes.
+export const FOR_YOU_WEIGHTS = {
+  tag: 0.5,
+  follow: 0.3,
+  cooccur: 0.2,
+  engagement: 0.15,
+} as const
 
 export const DEFAULT_CHIP: SignalChip = {
   name: 'default',
@@ -26,6 +39,7 @@ export function chipForSignals(signals?: ForYouSignals | null): SignalChip {
     ['tag', signals.tag * FOR_YOU_WEIGHTS.tag],
     ['follow', signals.follow * FOR_YOU_WEIGHTS.follow],
     ['cooccur', signals.cooccur * FOR_YOU_WEIGHTS.cooccur],
+    ['engagement', (signals.engagement ?? 0) * FOR_YOU_WEIGHTS.engagement],
   ]
   const [topName, topValue] = entries.reduce(
     (best, current) => (current[1] > best[1] ? current : best),
@@ -38,7 +52,10 @@ export function chipForSignals(signals?: ForYouSignals | null): SignalChip {
   if (topName === 'follow') {
     return { name: 'follow', label: 'From your network', bg: 'rgba(245, 158, 11, 0.95)', fg: 'white' }
   }
-  return { name: 'cooccur', label: 'Popular with people like you', bg: 'rgba(59, 130, 246, 0.95)', fg: 'white' }
+  if (topName === 'cooccur') {
+    return { name: 'cooccur', label: 'Popular with people like you', bg: 'rgba(59, 130, 246, 0.95)', fg: 'white' }
+  }
+  return { name: 'engagement', label: 'Saved by others', bg: 'rgba(20, 184, 166, 0.95)', fg: 'white' }
 }
 
 // Reorder so two consecutive cards rarely share a chip. Walks left to right;

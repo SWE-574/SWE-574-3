@@ -5,7 +5,7 @@ import { futureDateParts, uniqueTitle } from './common'
 import { createNeed } from './feature6'
 import { createOffer, requestOfferFromDetail } from './feature5'
 import { findHandshakeId } from './feature7'
-import { switchUser } from './session'
+import { switchUserApi } from './loginAsApi'
 
 export interface E2EHandshake {
   id: string
@@ -83,7 +83,7 @@ export async function createPendingOfferExchange(page: Page, options: {
     throw new Error(`Could not extract service id from URL: ${detailUrl}`)
   }
 
-  await switchUser(page, options.requester)
+  await switchUserApi(page, options.requester)
   await page.goto(detailUrl)
   await requestOfferFromDetail(page)
 
@@ -113,7 +113,7 @@ export async function createPendingNeedExchange(page: Page, options: {
     online: true,
   })
 
-  await switchUser(page, options.responder)
+  await switchUserApi(page, options.responder)
   await page.goto(detailUrl)
   await requestOfferFromDetail(page)
 
