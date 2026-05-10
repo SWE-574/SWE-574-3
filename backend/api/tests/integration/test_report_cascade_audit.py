@@ -116,9 +116,7 @@ class TestReportCascadeAudit:
         # ``http_method_names``. Anything else (204 success, 403, 404)
         # would mean DELETE is reachable for a participant and the
         # CASCADE on ``Report.related_handshake`` is exposed.
-        assert response.status_code == 405, (
-            f"DELETE on handshake detail must return 405; got {response.status_code}"
-        )
+        assert_problem_detail(response, 405)
 
         handshake.refresh_from_db()
         report.refresh_from_db()
