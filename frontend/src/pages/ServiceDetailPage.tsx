@@ -2073,6 +2073,7 @@ export default function ServiceDetailPage() {
                               key={h.id}
                               handshake={h}
                               isOwner={isOwn}
+                              serviceLocationType={service.location_type}
                               onAccept={canDirectlyAcceptHandshake(h.status, service.type)
                                 ? async () => {
                                     try {
@@ -2090,7 +2091,9 @@ export default function ServiceDetailPage() {
                                   }
                                 : undefined}
                               onMarkComplete={
-                                h.status === 'accepted' && !h.provider_confirmed_complete
+                                h.status === 'accepted'
+                                && !h.provider_confirmed_complete
+                                && service.location_type === 'In-Person'
                                   ? () => setMarkCompleteHandshakeId(h.id)
                                   : undefined
                               }

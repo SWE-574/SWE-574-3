@@ -22,6 +22,10 @@ test('FR-13m: owner Interests panel exposes a manual Mark as Complete fallback f
     requester,
     title: `FR-13m Manual Complete ${Date.now()}`,
     duration: 1,
+    // FR-13m's eligibility gate is in-person — Online listings already
+    // surface the chat-based confirmation and must NOT show the
+    // duplicate row-level fallback.
+    location: 'in-person',
   })
 
   // Owner returns to the detail page; the accepted handshake should now

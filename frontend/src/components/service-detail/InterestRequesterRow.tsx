@@ -21,17 +21,32 @@ function getInitials(name: string): string {
 type Props = {
   handshake: Handshake
   isOwner: boolean
+  /**
+   * Service location_type from the parent listing. Required so the
+   * row can apply the #300 / FR-13m eligibility gate (in-person only)
+   * without needing to fetch the service itself. Online exchanges have
+   * the chat-based dual-confirmation flow as their existing path.
+   */
+  serviceLocationType?: 'In-Person' | 'Online' | null
   onAccept?: () => void
   onReject?: () => void
   /**
    * #300 / FR-13m — owner-side manual Mark-as-Complete fallback. Wires
    * to `handshakeAPI.confirm` so the dual-confirmation flow can be
-   * driven from the interests panel without navigating to chat.
+   * driven from the interests panel without navigating to chat. Only
+   * surfaced for in-person exchanges per the SRS scope.
    */
   onMarkComplete?: () => void
 }
 
-const InterestRequesterRow = ({ handshake, isOwner, onAccept, onReject, onMarkComplete }: Props) => {
+const InterestRequesterRow = ({
+  handshake,
+  isOwner,
+  serviceLocationType,
+  onAccept,
+  onReject,
+  onMarkComplete,
+}: Props) => {
   // Defensive: only render for owners
   if (!isOwner) return null
 
@@ -53,14 +68,17 @@ const InterestRequesterRow = ({ handshake, isOwner, onAccept, onReject, onMarkCo
   const cfg = HS_BADGE[handshake.status] ?? { label: handshake.status, ...STATUS_FALLBACK }
   const isPending = handshake.status === 'pending'
   const isActive = ['pending', 'accepted'].includes(handshake.status)
-  // Owner can mark complete on an accepted exchange that the owner has
-  // not yet confirmed. The button simply records the owner's half of
-  // the dual-confirmation; the row stays "accepted" until the requester
-  // also confirms (or the action is repeated through chat). Hiding the
-  // button after the owner already confirmed prevents double-clicks.
+  // Owner can mark complete on an accepted in-person exchange that
+  // they have not yet confirmed. The button records the owner's half
+  // of the dual-confirmation; the row stays "accepted" until the
+  // requester also confirms (or the action is repeated through chat).
+  // Hiding it after the owner already confirmed prevents double-clicks.
+  // Per #300 / FR-13m the fallback is in-person only — online exchanges
+  // already have the chat-based confirmation surface as their path.
   const canMarkComplete =
     handshake.status === 'accepted'
     && !handshake.provider_confirmed_complete
+    && serviceLocationType === 'In-Person'
     && Boolean(onMarkComplete)
 
   const profileUrl = `/public-profile/${requesterId}`

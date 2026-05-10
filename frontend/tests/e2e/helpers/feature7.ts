@@ -265,6 +265,10 @@ export async function createAcceptedOfferExchange(page: Page, options: {
   requester: DemoUser
   title?: string
   duration?: number
+  /** Listing location_type. Defaults to online to preserve every legacy
+   * caller; FR-13m / #300 callers pass `'in-person'` so the manual
+   * Mark-as-Complete fallback's eligibility gate matches. */
+  location?: 'online' | 'in-person'
 }): Promise<{
   title: string
   detailUrl: string
@@ -277,7 +281,7 @@ export async function createAcceptedOfferExchange(page: Page, options: {
     title,
     description: `Playwright creates ${title} for Feature 7 verification.`,
     duration: options.duration ?? 1,
-    online: true,
+    online: options.location !== 'in-person',
   })
   const serviceId = extractServiceId(detailUrl)
 
