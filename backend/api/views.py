@@ -126,8 +126,43 @@ def get_cookie_settings(httponly: bool = True) -> dict:
     }
 
 
+def _is_jwt_shape(value: str) -> bool:
+    """Cheap structural check: a JWT is three base64url segments separated by '.'.
+
+    Used as the last-line guard in ``_set_auth_cookies``. The cookie writer
+    refuses anything that does not match the JWT grammar so attacker-supplied
+    cookie attributes (``HttpOnly=``, ``; Secure``, newlines, …) cannot be
+    smuggled in by abusing the value field. Real signature/blacklist
+    verification is handled upstream by SimpleJWT — this is the structural
+    fallback.
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    parts = value.split('.')
+    if len(parts) != 3:
+        return False
+    allowed = set(
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    )
+    return all(part and set(part).issubset(allowed) for part in parts)
+
+
 def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
-    """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS."""
+    """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS.
+
+    Both arguments must be server-issued JWTs. The structural ``_is_jwt_shape``
+    guard prevents attacker-supplied input from ever flowing into a
+    ``Set-Cookie`` header even if a caller forgets to validate upstream
+    (CodeQL ``py/cookie-injection``). Callers that originate the value from a
+    request payload must validate it through ``RefreshToken``/``AccessToken``
+    first and pass the re-serialised ``str()`` of the resulting object.
+    """
+    if not _is_jwt_shape(access_token) or not _is_jwt_shape(refresh_token):
+        # Refuse to write a malformed token to a cookie. Surfacing a 500 here
+        # is safer than emitting a tainted Set-Cookie; in practice the only
+        # call sites are server-controlled, so this branch is unreachable in
+        # normal flows.
+        raise ValueError('Refusing to set auth cookie from non-JWT value.')
     response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=True))
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
 
@@ -571,7 +606,13 @@ class CustomTokenRefreshView(TokenRefreshView):
 
         validated = serializer.validated_data
         new_access = validated.get('access', '')
-        new_refresh = validated.get('refresh', refresh_token_val)
+        # When SimpleJWT rotated, ``validated['refresh']`` is the freshly issued
+        # token; otherwise (ROTATE_REFRESH_TOKENS=False) we re-serialise the
+        # already-verified token through ``RefreshToken`` so the cookie value
+        # is constructed from the server-side token object instead of being
+        # piped straight from ``request.data`` / ``request.COOKIES``
+        # (CodeQL ``py/cookie-injection``).
+        new_refresh = validated.get('refresh') or str(RefreshToken(refresh_token_val))
 
         response = Response({'access': new_access, 'refresh': new_refresh}, status=status.HTTP_200_OK)
         _set_auth_cookies(response, new_access, new_refresh)
@@ -3846,6 +3887,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [UserRateThrottle]
     pagination_class = StandardResultsSetPagination
+    # Handshakes are never row-deleted via the API; lifecycle is driven by
+    # state-transition actions (cancel / deny / complete). Removing DELETE
+    # (and the unused PUT/PATCH on the detail route) keeps the
+    # CASCADE on ``Report.related_handshake`` unreachable from any HTTP
+    # path so the moderation trail cannot be wiped by a participant.
+    http_method_names = ['get', 'post', 'head', 'options']
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
