@@ -11,8 +11,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Asset } from "expo-asset";
-import { File } from "expo-file-system";
 import * as Location from "expo-location";
 import WebView from "react-native-webview";
 import type { WebViewMessageEvent } from "react-native-webview";
@@ -24,6 +22,7 @@ import { colors } from "../../constants/colors";
 import { listServices } from "../../api/services";
 import type { Service, ServiceType } from "../../api/types";
 import { getMapboxToken } from "../../constants/env";
+import { MAPBOX_HTML } from "../../../assets/mapboxHtml";
 
 type FilterType = "all" | ServiceType;
 
@@ -159,7 +158,6 @@ export default function MapScreen() {
   const navigation = useNavigation<any>();
 
   const webViewRef = useRef<WebView>(null);
-  const [webViewContent, setWebViewContent] = useState<string | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [userLocation, setUserLocation] = useState<{
     latitude: number;
@@ -184,37 +182,18 @@ export default function MapScreen() {
   const locationCheckedRef = useRef(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
 
-  // Load the HTML asset. Re-runs when mapAttempt bumps (Retry) so a transient
-  // asset-load failure does not leave the screen stuck on the placeholder.
-  useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        const path = require("../../../assets/mapbox.html");
-        const asset = Asset.fromModule(path);
-        await asset.downloadAsync();
-        const htmlContent = await new File(asset.localUri!).text();
-        if (!isMounted) return;
-        setWebViewContent(htmlContent);
-        setMapLoadFailed(false);
-      } catch (error) {
-        if (!isMounted) return;
-        // No alert: the placeholder UI surfaces the failure with a Retry CTA.
-        // eslint-disable-next-line no-console
-        console.warn("[MapScreen] failed to load map HTML asset", error);
-        setMapLoadFailed(true);
-      }
-    })();
-    return () => {
-      isMounted = false;
-    };
-  }, [mapAttempt]);
-
+  // The WebView HTML used to live in `assets/mapbox.html` and was loaded
+  // through Asset.downloadAsync + File.text(). That round-trip got cached
+  // by both Expo Asset and the iOS app sandbox, so a fresh build of the
+  // simulator app would still serve the previous HTML body until the user
+  // deleted the app — every time the bridge logic changed it looked like
+  // the fix had not landed. Inlining the HTML as a string constant keeps
+  // it in the JS bundle, so a Metro reload always serves the newest copy
+  // and there is no asynchronous load to fail.
   const retryMap = useCallback(() => {
     setMapLoadFailed(false);
     setMapReady(false);
     setMapInited(false);
-    setWebViewContent(null);
     setMapAttempt((value) => value + 1);
   }, []);
 
@@ -443,7 +422,7 @@ export default function MapScreen() {
     );
   }
 
-  if (!webViewContent || !locationResolved) {
+  if (!locationResolved) {
     return (
       <View style={[styles.loading, { paddingTop: insets.top }]}>
         <ActivityIndicator size="large" color={colors.GREEN} />
@@ -462,7 +441,7 @@ export default function MapScreen() {
         key={`mapbox-${mapAttempt}`}
         ref={webViewRef}
         originWhitelist={["*"]}
-        source={{ html: webViewContent, baseUrl: "https://localhost" }}
+        source={{ html: MAPBOX_HTML, baseUrl: "https://localhost" }}
         onMessage={handleMessage}
         onError={() => setMapLoadFailed(true)}
         onHttpError={() => setMapLoadFailed(true)}
