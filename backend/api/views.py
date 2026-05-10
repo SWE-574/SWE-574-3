@@ -7140,7 +7140,12 @@ class ForumCategoryViewSet(viewsets.ModelViewSet):
 
         # Annotate counts and last_activity inline so the serializer doesn't fan
         # out into per-category queries. Subqueries keep this O(1) total.
-        # Soft-deleted topics (and posts on them) are excluded from public counts.
+        # Soft-deleted topics (and posts on them) are excluded from these counts
+        # for every caller, including staff. Staff still see inactive categories
+        # (toggled above), but the counts here describe the public surface —
+        # admin moderation goes through AdminReportViewSet, which references the
+        # surviving Report rows directly, so surfacing soft-deleted topics in
+        # category aggregates would be misleading rather than useful.
         latest_post_at = (
             ForumPost.objects
             .filter(
