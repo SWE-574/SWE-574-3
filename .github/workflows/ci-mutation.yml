@@ -157,7 +157,7 @@ jobs:
       # comment would just be noise.
       - name: Comment mutation summary on PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -241,7 +241,7 @@ jobs:
       # fragile across Stryker versions.
       - name: Comment Stryker score on PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
