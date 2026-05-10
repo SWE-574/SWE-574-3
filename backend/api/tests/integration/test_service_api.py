@@ -995,3 +995,81 @@ class TestServiceRetrieveStatusVisibility:
         assert service.session_exact_location_lat == Decimal('40.987654')
         assert service.session_exact_location_lng == Decimal('29.123456')
         assert service.session_location_guide == 'Veterinerin olduğu bina'
+
+
+@pytest.mark.django_db
+class TestRecurrentSchedulingValidation:
+    """Recurrent scheduling is Event-only (#546).
+
+    Pre-fix the API silently coerced Offer/Need + Recurrent to One-Time;
+    the contract is now an explicit 400 with a field-error pinpointing
+    schedule_type so client bugs surface instead of being papered over.
+    """
+
+    def _payload(self, service_type, schedule_type):
+        return {
+            'title': f'{service_type} {schedule_type}',
+            'description': f'Test {service_type} with schedule_type={schedule_type}.',
+            'type': service_type,
+            'duration': 1.0,
+            'location_type': 'Online',
+            'max_participants': 1,
+            'schedule_type': schedule_type,
+        }
+
+    def test_post_offer_recurrent_returns_400_with_field_error(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', self._payload('Offer', 'Recurrent'))
+        assert response.status_code == 400, response.content
+        body = response.json()
+        assert 'field_errors' in body
+        assert 'schedule_type' in body['field_errors']
+        assert body['field_errors']['schedule_type'] == [
+            'Recurrent scheduling is only supported on Events.'
+        ]
+
+    def test_post_need_recurrent_returns_400_with_field_error(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', self._payload('Need', 'Recurrent'))
+        assert response.status_code == 400, response.content
+        body = response.json()
+        assert 'field_errors' in body
+        assert 'schedule_type' in body['field_errors']
+        assert body['field_errors']['schedule_type'] == [
+            'Recurrent scheduling is only supported on Events.'
+        ]
+
+    def test_post_offer_one_time_still_201(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', self._payload('Offer', 'One-Time'))
+        assert response.status_code == 201, response.content
+        assert response.json()['schedule_type'] == 'One-Time'
+
+    def test_patch_offer_to_recurrent_returns_400(self):
+        """Existing Offers cannot be flipped to Recurrent via PATCH either."""
+        user = UserFactory(is_verified=True)
+        service = ServiceFactory(user=user, type='Offer', schedule_type='One-Time')
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.patch(
+            f'/api/services/{service.id}/',
+            {'schedule_type': 'Recurrent'},
+        )
+        assert response.status_code == 400, response.content
+        body = response.json()
+        assert 'field_errors' in body
+        assert 'schedule_type' in body['field_errors']
+        # And the row must not have been coerced.
+        service.refresh_from_db()
+        assert service.schedule_type == 'One-Time'
+
