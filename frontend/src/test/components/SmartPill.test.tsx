@@ -169,4 +169,86 @@ describe('SmartPill', () => {
     renderPill(makeService({ explore_pool: 'cold_start' }))
     expect(screen.getByText('Fresh provider')).toBeInTheDocument()
   })
+
+  // ── capacity scarcity ("N spots left") ────────────────────────────────────
+
+  it('renders capacity-scarcity pill at 75-99% filled with the remaining count', () => {
+    // 8/10 = 80%, in the nearly-full band; 2 spots left.
+    renderPill(makeService({ max_participants: 10, participant_count: 8 }))
+    expect(screen.getByText('2 spots left')).toBeInTheDocument()
+  })
+
+  it('uses singular copy when exactly one spot remains', () => {
+    renderPill(makeService({ max_participants: 4, participant_count: 3 }))
+    expect(screen.getByText('1 spot left')).toBeInTheDocument()
+  })
+
+  it('does NOT render capacity pill below 75%', () => {
+    // 7/10 = 70%, below the band — the helper returns false; nothing renders.
+    const { container } = renderPill(
+      makeService({ max_participants: 10, participant_count: 7 }),
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('does NOT render capacity pill at 100%', () => {
+    // The helper deliberately excludes full services — at that point the
+    // CTA is "join the waitlist" not "act now". Nothing renders here.
+    const { container } = renderPill(
+      makeService({ max_participants: 10, participant_count: 10 }),
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('does NOT render capacity pill on single-seat services', () => {
+    // 1-seat services jump from 0% to 100% without crossing the 75-99 band;
+    // pin this so the chip never accidentally appears on Need handshakes.
+    const { container } = renderPill(
+      makeService({ max_participants: 1, participant_count: 0 }),
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('for_you signal beats capacity scarcity', () => {
+    // Personalization wins over the generic time-pressure cue so a card
+    // that matches the viewer's interests still gets the more informative
+    // pill even when the listing is filling up.
+    renderPill(
+      makeService({
+        max_participants: 10,
+        participant_count: 9,
+        for_you_signals: { tag: 0.6, follow: 0, cooccur: 0, recency_penalty: 0 },
+      }),
+    )
+    expect(screen.getByText('Matches your interests')).toBeInTheDocument()
+    expect(screen.queryByText(/spots? left/)).not.toBeInTheDocument()
+  })
+
+  it('newcomer beats capacity scarcity', () => {
+    // Discovery > scarcity. A newcomer event that's also filling up still
+    // surfaces "Rising newcomer" — the brand-new face is the headline.
+    renderPill(
+      makeService({
+        is_newcomer_owner: true,
+        max_participants: 10,
+        participant_count: 9,
+      }),
+    )
+    expect(screen.getByText('Rising newcomer')).toBeInTheDocument()
+    expect(screen.queryByText(/spots? left/)).not.toBeInTheDocument()
+  })
+
+  it('capacity scarcity beats explore_pool', () => {
+    // Time pressure wins over generic explore-pool fallbacks: a nearly-
+    // full cold_start event gets "spots left", not "Fresh provider".
+    renderPill(
+      makeService({
+        explore_pool: 'cold_start',
+        max_participants: 10,
+        participant_count: 9,
+      }),
+    )
+    expect(screen.getByText('1 spot left')).toBeInTheDocument()
+    expect(screen.queryByText('Fresh provider')).not.toBeInTheDocument()
+  })
 })

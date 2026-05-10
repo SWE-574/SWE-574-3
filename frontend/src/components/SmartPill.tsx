@@ -1,10 +1,11 @@
 import { Box, Flex, Text } from '@chakra-ui/react'
-import { FiBookmark, FiClock, FiCompass, FiStar, FiSunrise, FiUsers } from 'react-icons/fi'
+import { FiBookmark, FiClock, FiCompass, FiStar, FiSunrise, FiTrendingUp, FiUsers } from 'react-icons/fi'
 
 import { chipForSignals } from '@/utils/forYouChips'
+import { isNearlyFull, spotsLeft } from '@/utils/eventUtils'
 import type { Service } from '@/types'
 
-interface NewcomerFlavour {
+interface FallbackFlavour {
   label: string
   bg: string
   fg: string
@@ -18,12 +19,30 @@ interface NewcomerFlavour {
 // on the listing. When both apply, the newcomer pill takes priority
 // because it's a stronger discovery story (a brand-new face, not just an
 // under-shown listing).
-const NEWCOMER_FLAVOUR: NewcomerFlavour = {
+const NEWCOMER_FLAVOUR: FallbackFlavour = {
   label: 'Rising newcomer',
   bg: 'rgba(244, 114, 182, 0.92)',
   fg: 'white',
   border: 'transparent',
   Icon: FiSunrise,
+}
+
+// Capacity-scarcity pill for multi-seat services in the 75-99% filled
+// window. The `isNearlyFull` helper is reused as-is (already pinned by
+// `frontend/src/test/utils/eventUtils.test.ts`) — single-seat services
+// never trigger because they jump from 0% to 100% without crossing the
+// band. Beats `explore_pool` because scarcity is a time-sensitive
+// "act now" signal, but loses to a real for_you match and to the
+// (rarer) newcomer flag, since both of those are stronger discovery
+// stories than the generic "filling up" cue.
+function buildCapacityFlavour(remaining: number): FallbackFlavour {
+  return {
+    label: remaining === 1 ? '1 spot left' : `${remaining} spots left`,
+    bg: 'rgba(217, 119, 6, 0.95)',
+    fg: 'white',
+    border: 'transparent',
+    Icon: FiTrendingUp,
+  }
 }
 
 interface PoolFlavour {
@@ -55,7 +74,8 @@ interface SmartPillProps {
  * Pill priority:
  *   1. strongest for_you signal (tag / follow / cooccur / engagement)
  *   2. is_newcomer_owner — distinct discovery story for brand-new faces
- *   3. explore-pool flavour as the final fallback
+ *   3. capacity scarcity (`isNearlyFull` 75-99%) — time-sensitive "act now"
+ *   4. explore-pool flavour as the final fallback
  *
  * The earlier order put the pool first, but on demo data every card
  * qualifies as cold_start, which drowned out cards that DID have a real
@@ -80,6 +100,20 @@ export default function SmartPill({ service }: SmartPillProps) {
         fg={NEWCOMER_FLAVOUR.fg}
         border={NEWCOMER_FLAVOUR.border}
         Icon={NEWCOMER_FLAVOUR.Icon}
+      />
+    )
+  }
+  const max = service.max_participants ?? 0
+  const count = service.participant_count ?? 0
+  if (isNearlyFull(max, count)) {
+    const capacityFlavour = buildCapacityFlavour(spotsLeft(max, count))
+    return (
+      <PillBox
+        label={capacityFlavour.label}
+        bg={capacityFlavour.bg}
+        fg={capacityFlavour.fg}
+        border={capacityFlavour.border}
+        Icon={capacityFlavour.Icon}
       />
     )
   }
