@@ -78,7 +78,7 @@ jobs:
       #    Without this step, BuildKit only sees the empty local layer cache
       #    on a fresh runner and the gha cache exporter has nowhere to write.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # ── 4. Start Docker image build in background ───────────────────────
       #    Building images (pip install, apt-get, npm ci inside container)
