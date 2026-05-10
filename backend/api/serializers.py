@@ -755,18 +755,18 @@ class ServiceSerializer(serializers.ModelSerializer):
         schedule_type = data.get('schedule_type', getattr(instance, 'schedule_type', None))
         max_participants = data.get('max_participants', getattr(instance, 'max_participants', 1))
 
-        # Recurrence is Event-only. If the incoming patch tries to set
-        # schedule_type=Recurrent on an Offer/Need, force it to One-Time and
-        # strip any recurrence cadence. We deliberately only flip when the
-        # field is *in the incoming data* — partial updates that don't touch
-        # schedule_type should not silently mutate an existing instance's
-        # value, since the data migration in 0079 already coerced any legacy
-        # rows and that path would otherwise re-trigger fixed-group-offer
-        # validation on unrelated edits like lowering max_participants.
+        # Recurrence is Event-only (#546). Reject schedule_type=Recurrent on
+        # Offer/Need at the API layer with a 400 instead of silently coercing
+        # to One-Time — the previous coercion masked client bugs and shipped
+        # a value the user did not pick. Partial updates that don't touch
+        # schedule_type don't trigger the gate; the data migration in 0079
+        # already cleaned up any legacy rows, so the only path through here
+        # carrying Recurrent is a fresh request.
         if service_type in ('Offer', 'Need'):
             if data.get('schedule_type') == 'Recurrent':
-                data['schedule_type'] = 'One-Time'
-                schedule_type = 'One-Time'
+                raise serializers.ValidationError({
+                    'schedule_type': 'Recurrent scheduling is only supported on Events.',
+                })
             if 'recurrence_interval_days' in data:
                 data['recurrence_interval_days'] = None
         elif service_type == 'Event' and schedule_type != 'Recurrent':
