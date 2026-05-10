@@ -1273,7 +1273,13 @@ export default function ServiceWizard({
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      // The wizard always renders inside a SafeAreaView+topBar (PostOfferScreen
+      // / PostNeedScreen / PostEventScreen), so the KAV's reference frame is
+      // already below the header. A non-zero offset double-counted the header
+      // and pushed focused inputs UP into the keyboard rather than out from
+      // under it (#555). Keep the offset at 0 — the wrapping screen already
+      // paid for the safe area + top bar.
+      keyboardVerticalOffset={0}
     >
       <View style={styles.progressWrap}>
         {STEPS.map((item, index) => (
