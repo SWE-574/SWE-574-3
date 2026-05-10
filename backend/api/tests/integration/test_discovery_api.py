@@ -4,8 +4,8 @@ Integration tests for Discovery API — FR-19c, FR-19e, FR-19h (blur), NFR-19a.
 Test classes and their status:
   TestAdminPinEvent             — green  (pin endpoint is implemented)
   TestAdminShowcaseFeatured     — xfail  (FR-19c: no showcase/featured concept)
-  TestFollowSystem              — xfail  (FR-19e: no follow model or endpoints)
-  TestDiscoveryFeedPerformance  — xfail  (NFR-19a: no SLA test enforced)
+  TestFollowSystem              — green  (FR-19e: follow model + endpoints landed)
+  TestDiscoveryFeedPerformance  — green  (NFR-19a: 2s SLA holding on the test corpus)
   TestLocationBlurInFeed        — xfail  (FR-19h: feed distance values are not blurred)
 """
 import time
@@ -172,21 +172,15 @@ class TestAdminShowcaseFeatured:
 
 
 # ---------------------------------------------------------------------------
-# FR-19e — Follow system (xfail — not implemented)
+# FR-19e — Follow system (green — UserFollow + follow endpoints implemented)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason="FR-19e: no Follow model, no follow endpoints, no feed boost implemented",
-    strict=False,
-)
 class TestFollowSystem:
     """
-    FR-19e requires users to follow each other and for followed-user content to
-    receive a boost in the discovery feed.
-
-    These tests are xfail because no follow infrastructure exists in the codebase.
+    FR-19e: users can follow each other via POST /api/users/{id}/follow/.
+    The UserFollow model (migration 0051) and follow endpoints are wired up.
     """
 
     def test_user_can_follow_another_user(self):
@@ -234,6 +228,10 @@ class TestFollowSystem:
 
         assert resp.status_code in (400, 403)
 
+    @pytest.mark.xfail(
+        reason="Follow boost in ranking is not wired up; ranking stays as-is per #579 scope",
+        strict=False,
+    )
     def test_followed_user_listings_rank_higher_in_feed(self):
         """
         Services from a followed user should rank above equivalent-score services
@@ -282,17 +280,12 @@ class TestFollowSystem:
 
 @pytest.mark.django_db
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason="NFR-19a: no performance SLA test exists; 2s threshold not enforced",
-    strict=False,
-)
 class TestDiscoveryFeedPerformance:
     """
     The discovery feed (including serialization and pagination) must return
     the first page within 2 seconds for a catalogue of ~1 000 active services.
-
-    Xfail because no benchmark guard exists and the threshold has not been
-    validated under load.
+    Holds in the local test corpus; load testing under realistic data is
+    tracked separately in the perf track.
     """
 
     FEED_SLA_SECONDS = 2.0

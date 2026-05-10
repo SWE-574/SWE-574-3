@@ -87,13 +87,11 @@ class TestEventFeedAnonymousAccess:
 
 
 # ---------------------------------------------------------------------------
-# FR-12c — Date range filtering
-# (These tests will FAIL until DateRangeStrategy is implemented)
+# FR-12c — Date range filtering (green at the event-browse API surface)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 @pytest.mark.integration
-@pytest.mark.xfail(reason="FR-12c: date_from/date_to filter not yet implemented", strict=False)
 class TestEventDateRangeFilter:
     """FR-12c: users can filter events by date_from and date_to."""
 

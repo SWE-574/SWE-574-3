@@ -10,12 +10,12 @@ FR-19h requires:
 
 Current codebase status:
   - _fuzzy_coords() in serializers.py applies a deterministic FNV-1a ~500m offset.
-  - The blur is applied to ALL non-owner users regardless of handshake status.
-  - Conditional reveal on handshake ACCEPTED is NOT yet implemented.
+  - Owners always see exact coordinates.
+  - Requesters with an ACCEPTED handshake see exact coordinates; others see fuzzed.
 
 Test classes:
-  TestLocationBlurDeterminism   — green (current behaviour, already works)
-  TestLocationBlurConditional   — xfail (FR-19h conditional reveal not implemented)
+  TestLocationBlurDeterminism   — green
+  TestLocationBlurConditional   — green
 """
 import math
 import pytest
@@ -112,10 +112,6 @@ class TestLocationBlurDeterminism:
             "Two different services produced identical fuzz — hash is not service-specific."
         )
 
-    @pytest.mark.xfail(
-        reason="Owner bypass currently returns blurred coordinates; tracked in FR-19h implementation",
-        strict=False,
-    )
     def test_owner_sees_exact_coordinates(self):
         """Service owner must receive the real unblurred coordinates."""
         provider = UserFactory()
@@ -149,22 +145,16 @@ class TestLocationBlurDeterminism:
 
 
 # ---------------------------------------------------------------------------
-# xfail tests — FR-19h conditional reveal on ACCEPTED handshake (not yet implemented)
+# FR-19h — conditional reveal on ACCEPTED handshake (green)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 @pytest.mark.unit
-@pytest.mark.xfail(
-    reason="FR-19h: blur is always-on; conditional reveal on ACCEPTED handshake not implemented",
-    strict=False,
-)
 class TestLocationBlurConditional:
     """
     Once a handshake between the requester and provider reaches status='accepted',
-    the requester should receive the exact (unblurred) service coordinates.
-
-    These tests are xfail because the serializer currently blurs for all non-owners
-    regardless of handshake status.
+    the requester receives the exact (unblurred) service coordinates. Non-owners
+    without an accepted handshake continue to see fuzzed coordinates.
     """
 
     def _fetch_coords(self, service, user):
