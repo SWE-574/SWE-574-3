@@ -6,14 +6,7 @@ import {
   loginAsUserWithBalanceBelow,
 } from '../helpers'
 
-test.skip('FR-07i: failed Time Share operations do not partially commit balance or ledger changes', async ({ page }) => {
-  // Category C: loginAsUserWithBalanceBelow(page, 10) iterates seeded demo
-  // users until one has < 10 hours. After the demo seed was rebalanced the
-  // condition is never satisfied, so the helper throws "Could not find a
-  // demo user with balance below 10" before the spec body runs (every
-  // attempt fails in ~10s). Either re-seed a guaranteed low-balance user
-  // or rewrite the spec to call /api/e2e/set-balance/ before posting.
-
+test('FR-07i: failed Time Share operations do not partially commit balance or ledger changes', async ({ page }) => {
   // Pick a user who cannot afford the requested duration so the create flow must fail.
   const { balance: startingBalance } = await loginAsUserWithBalanceBelow(page, 10)
   const beforeTransactions = await listTransactions(page)

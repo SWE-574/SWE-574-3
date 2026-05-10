@@ -383,6 +383,89 @@ BLOCKED_ENTITY_QIDS = frozenset({
 })
 
 
+def fetch_wikidata_claims_batch(qids: List[str]) -> Dict[str, Optional[Dict]]:
+    """
+    Resolve P31 / P279 claims for many QIDs in a single ``wbgetentities``
+    call instead of one HTTP round-trip per id.
+
+    Issue #525: typing into the tag picker fanned out N upstream calls per
+    keystroke (one per autocomplete row) the first time a query was typed,
+    which compounded the wbsearchentities call and pushed total response
+    time well past the 1 s budget. The MediaWiki API accepts up to 50
+    pipe-separated ids on ``wbgetentities``, so the cold-cache cost is
+    one round-trip regardless of result count.
+
+    Returns a ``{qid: claims-dict-or-None}`` mapping. Only inputs that
+    normalise to a ``Q...`` identifier appear in the output — falsy and
+    non-``Q`` inputs are dropped before the upstream call. Already-cached
+    entries are taken from the local cache and the cache is populated for
+    any QID resolved through the upstream call. Resolved QIDs that the
+    upstream call cannot answer map to ``None`` so callers can fail-open
+    the same way the per-id helper does.
+    """
+    if not qids:
+        return {}
+
+    # Keep insertion order while removing dupes; normalise upper-case so
+    # the cache key matches the per-id helper.
+    seen: Dict[str, None] = {}
+    for raw in qids:
+        if not raw:
+            continue
+        norm = str(raw).strip().upper()
+        if norm.startswith('Q') and norm not in seen:
+            seen[norm] = None
+
+    out: Dict[str, Optional[Dict]] = {q: None for q in seen}
+
+    # Pull from cache first. Anything still missing goes upstream in one
+    # shot, batched up to the wbgetentities 50-id ceiling.
+    missing: List[str] = []
+    for qid in seen:
+        cached = cache.get(f'wikidata:claims:{qid}')
+        if cached is not None:
+            out[qid] = cached
+        else:
+            missing.append(qid)
+
+    BATCH_SIZE = 50
+    for chunk_start in range(0, len(missing), BATCH_SIZE):
+        chunk = missing[chunk_start:chunk_start + BATCH_SIZE]
+        data = _wikidata_get({
+            'action': 'wbgetentities',
+            'ids': '|'.join(chunk),
+            'props': 'claims',
+            'format': 'json',
+        })
+        if data is None:
+            # Upstream failed for this chunk -- caller will get None for
+            # each id and fail-open downstream.
+            continue
+
+        entities = data.get('entities', {}) or {}
+        for qid in chunk:
+            entity = entities.get(qid)
+            if not entity:
+                continue
+            claims = entity.get('claims', {}) or {}
+            result: Dict[str, List] = {'instance_of': [], 'subclass_of': []}
+            for prop, key in [('P31', 'instance_of'), ('P279', 'subclass_of')]:
+                for claim in claims.get(prop, []):
+                    try:
+                        value = claim['mainsnak']['datavalue']['value']
+                        target_id = value.get('id')
+                        if target_id:
+                            result[key].append(target_id)
+                    except (KeyError, TypeError):
+                        continue
+            cache.set(
+                f'wikidata:claims:{qid}', result, _CLAIMS_CACHE_TTL_SECONDS
+            )
+            out[qid] = result
+
+    return out
+
+
 def classify_and_filter_results(results: List[Dict]) -> List[Dict]:
     """
     Classify WikiData search results by entity type and filter out
@@ -394,6 +477,19 @@ def classify_and_filter_results(results: List[Dict]) -> List[Dict]:
     Returns:
         Filtered list with 'entity_type' added to each result.
     """
+    # #525: warm the per-QID claim cache in a single round-trip so the
+    # per-row fetch_wikidata_claims calls below collapse to cache hits.
+    # Done as a side-effect (rather than swapping out the per-id helper)
+    # so existing callers and tests that mock fetch_wikidata_claims keep
+    # observing the same surface.
+    qids = [item.get('id') for item in results if item.get('id')]
+    if qids:
+        try:
+            fetch_wikidata_claims_batch(qids)
+        except Exception:
+            # Batched warm-up is an optimisation, not a correctness path.
+            pass
+
     filtered = []
     for item in results:
         qid = item.get('id')
