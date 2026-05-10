@@ -3869,6 +3869,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [UserRateThrottle]
     pagination_class = StandardResultsSetPagination
+    # Handshakes are never row-deleted via the API; lifecycle is driven by
+    # state-transition actions (cancel / deny / complete). Removing DELETE
+    # (and the unused PUT/PATCH on the detail route) keeps the
+    # CASCADE on ``Report.related_handshake`` unreachable from any HTTP
+    # path so the moderation trail cannot be wiped by a participant.
+    http_method_names = ['get', 'post', 'head', 'options']
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())

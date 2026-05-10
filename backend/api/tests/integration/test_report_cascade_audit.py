@@ -96,16 +96,29 @@ class TestReportCascadeAudit:
         Handshakes are never row-deleted via the API; the DELETE method is
         not even allowed on the detail route. The CASCADE on
         ``related_handshake`` is therefore unreachable through normal flows.
-        """
-        reporter = UserFactory()
-        handshake = HandshakeFactory()
-        report = _make_report(reporter=reporter, related_handshake=handshake)
 
-        client = AuthenticatedAPIClient().authenticate_user(reporter)
+        Authenticate as a *handshake party* (the requester, who passes the
+        ``get_queryset`` participant filter) so the response cannot be a
+        404 from the queryset narrowing — 405 is the only signal that
+        proves DELETE itself is not routed on the detail endpoint.
+        """
+        # ``requester`` is a handshake participant: they survive
+        # ``HandshakeViewSet.get_queryset``'s ``Q(requester=user)`` filter
+        # and therefore reach the method-dispatch step. A non-participant
+        # would 404 first and the test would not actually probe DELETE.
+        handshake = HandshakeFactory()
+        participant = handshake.requester
+        report = _make_report(reporter=participant, related_handshake=handshake)
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
         response = client.delete(f"/api/handshakes/{handshake.id}/")
-        # DRF returns 405 (Method Not Allowed) for unsupported HTTP verbs.
-        # 403 / 404 are equally valid "no destructive operation here" replies.
-        assert response.status_code in (405, 403, 404)
+        # DRF returns 405 (Method Not Allowed) when the verb is not in
+        # ``http_method_names``. Anything else (204 success, 403, 404)
+        # would mean DELETE is reachable for a participant and the
+        # CASCADE on ``Report.related_handshake`` is exposed.
+        assert response.status_code == 405, (
+            f"DELETE on handshake detail must return 405; got {response.status_code}"
+        )
 
         handshake.refresh_from_db()
         report.refresh_from_db()
