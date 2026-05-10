@@ -2700,7 +2700,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         """Return a single service regardless of status so owners and participants
-        can view Agreed/Completed/Cancelled services from their history."""
+        can view Agreed/Completed/Cancelled services from their history.
+
+        NFR-13a: the detail page hit a 2 s budget on Docker CI because the
+        serializer was issuing a per-card query for `comment_count`,
+        `is_saved`, and `is_dismissed` even on the single-row detail route.
+        Annotate those alongside the prefetches so the request is constant
+        in the number of related objects rather than O(comments + saves +
+        dismissals)."""
         user_badges_prefetch = Prefetch(
             'user__badges',
             queryset=UserBadge.objects.select_related('badge')
@@ -2714,6 +2721,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         )
         queryset = (
             Service.objects
+            .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
             .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
                 'tags',
@@ -2722,6 +2730,25 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 capacity_handshakes_prefetch,
             )
         )
+
+        # Per-viewer annotations match the list path so the serializer's
+        # is_saved / is_dismissed methods read an annotation instead of
+        # firing one query per service.
+        from .models import SavedService, ServiceDismissal
+        if request.user.is_authenticated:
+            queryset = queryset.annotate(
+                is_saved_anno=Exists(
+                    SavedService.objects.filter(
+                        user=request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_dismissed_anno=Exists(
+                    ServiceDismissal.objects.filter(
+                        viewer=request.user, service=OuterRef('pk'),
+                    ),
+                ),
+            )
+
         instance = get_object_or_404(queryset, pk=kwargs['pk'])
 
         # For You click attribution (#481): when the detail page is reached
