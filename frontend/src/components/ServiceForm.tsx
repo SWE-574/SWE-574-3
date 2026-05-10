@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useForm, Controller, type Resolver } from 'react-hook-form'
+import { useForm, Controller, type Resolver, type SubmitErrorHandler } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
@@ -1053,8 +1053,26 @@ export default function ServiceForm({
 
   // ── Render ───────────────────────────────────────────────────────────────
 
+  // When zod rejects a field, surface the failure and scroll the first
+  // offending input into view so the user (and the test harness) gets a
+  // visible signal instead of a silent stay-on-page.
+  const onInvalid: SubmitErrorHandler<FormValues> = (fieldErrors) => {
+    const firstField = Object.keys(fieldErrors)[0]
+    if (firstField) {
+      const el = document.querySelector<HTMLElement>(`[name="${firstField}"]`)
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+      const focusable = el as HTMLInputElement | null
+      if (focusable && typeof focusable.focus === 'function') {
+        focusable.focus({ preventScroll: true })
+      }
+    }
+    toast.error('Please check the highlighted fields and try again.')
+  }
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate>
+    <form onSubmit={handleSubmit(onSubmit, onInvalid)} noValidate>
       <Stack gap={7}>
 
         {/* ── Basic Info ─────────────────────────────────────────────────── */}
@@ -1158,113 +1176,121 @@ export default function ServiceForm({
               <ErrTxt msg={errors.location_type?.message} />
             </Box>
 
-            {locType === 'In-Person' && (
-              <Stack gap={4}>
-                <Box>
-                  <Flex align="center" justify="space-between" mb="6px">
-                    <Label required>
-                      <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
-                      {isFixedGroupOffer ? 'Public district / area' : 'Address'}
-                    </Label>
-                    <UseMyLocationButton
-                      accent={accent}
-                      onLocated={(v) => {
-                        setLocationValue(v)
-                        setLocationError(undefined)
-                        if (isFixedGroupOffer) {
-                          syncExactFromLocation(v)
-                        }
-                      }}
-                    />
-                  </Flex>
-                  <LocationSearch
+            {locType === 'In-Person' && !isFixedGroupOffer && (
+              <Box>
+                <Flex align="center" justify="space-between" mb="6px">
+                  <Label required>
+                    <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
+                    Address
+                  </Label>
+                  <UseMyLocationButton
                     accent={accent}
-                    value={locationValue}
-                    onChange={(v) => {
+                    onLocated={(v) => {
                       setLocationValue(v)
-                      if (v) {
-                        setLocationError(undefined)
-                        if (isFixedGroupOffer) {
-                          syncExactFromLocation(v)
-                        }
-                      }
+                      setLocationError(undefined)
                     }}
-                    error={locationError}
                   />
-                  {isFixedGroupOffer && (
-                    <Text fontSize="11px" color={GRAY400} mt="5px">
-                      This public area is shown on the listing and service detail before approval.
-                    </Text>
-                  )}
-                </Box>
+                </Flex>
+                <LocationSearch
+                  accent={accent}
+                  value={locationValue}
+                  onChange={(v) => {
+                    setLocationValue(v)
+                    if (v) setLocationError(undefined)
+                  }}
+                  error={locationError}
+                />
+              </Box>
+            )}
 
-                {isFixedGroupOffer && (
-                  <Box>
-                    <Label required>
-                      <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
-                      Exact address for session details
-                    </Label>
-                    <LocationSearch
-                      accent={accent}
-                      value={sessionExactLocationCoords ? {
-                        label: sessionExactLocation,
-                        fullAddress: sessionExactLocation,
-                        district: locationValue?.label,
-                        lat: sessionExactLocationCoords.lat,
-                        lng: sessionExactLocationCoords.lng,
-                      } : null}
-                      onChange={(v) => {
-                        if (v) {
-                          setSessionExactLocation(v.fullAddress ?? v.label)
-                          setSessionExactLocationCoords({ lat: v.lat, lng: v.lng })
-                          setSessionExactLocationError(undefined)
-                          syncPublicFromExact({
-                            district: v.district,
-                            fullAddress: v.fullAddress ?? v.label,
-                            lat: v.lat,
-                            lng: v.lng,
-                          })
-                        } else {
-                          setSessionExactLocationCoords(null)
-                        }
-                      }}
-                      error={sessionExactLocationError}
-                      mode="full"
-                      placeholder="Search the exact meeting address — e.g. Moda Sahili No: 12, Kadıköy"
-                    />
-                    <Text fontSize="11px" color={GRAY400} mt="5px" mb="8px">
-                      You can also fine-tune it on the map below.
-                    </Text>
-                    <LocationPickerMap
-                      value={sessionExactLocation}
-                      coords={sessionExactLocationCoords}
-                      showSearchInput={false}
-                      onChange={(value, coords, meta) => {
-                        setSessionExactLocation(value)
-                        setSessionExactLocationCoords(coords ?? null)
-                        if (coords) {
-                          syncPublicFromExact({
-                            district: meta?.district ?? null,
-                            fullAddress: meta?.fullAddress ?? value,
-                            lat: coords.lat,
-                            lng: coords.lng,
-                          })
-                        }
-                        if (value.trim() && coords) setSessionExactLocationError(undefined)
-                      }}
-                      height="220px"
-                      auxiliaryLabel="Location guide (optional)"
-                      auxiliaryValue={sessionLocationGuide}
-                      auxiliaryPlaceholder="Near of the park"
-                      onAuxiliaryChange={setSessionLocationGuide}
-                    />
-                    <ErrTxt msg={sessionExactLocationError} />
-                    <Text fontSize="11px" color={AMBER} mt="5px">
-                      This exact address will be shared when you send the fixed session details to interested participants.
-                    </Text>
-                  </Box>
-                )}
-              </Stack>
+            {/*
+              Fixed group offer: collect the meeting address in a single
+              canonical control. Issue #506 — the form previously rendered a
+              separate "public district" input alongside the exact address,
+              which left users with two location inputs to fill in. We now
+              render only the exact address picker and derive the public
+              district from it via syncPublicFromExact.
+            */}
+            {locType === 'In-Person' && isFixedGroupOffer && (
+              <Box>
+                <Flex align="center" justify="space-between" mb="6px">
+                  <Label required>
+                    <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
+                    Meeting address
+                  </Label>
+                  <UseMyLocationButton
+                    accent={accent}
+                    onLocated={(v) => {
+                      setLocationValue(v)
+                      setLocationError(undefined)
+                      syncExactFromLocation(v)
+                    }}
+                  />
+                </Flex>
+                <LocationSearch
+                  accent={accent}
+                  value={sessionExactLocationCoords ? {
+                    label: sessionExactLocation,
+                    fullAddress: sessionExactLocation,
+                    district: locationValue?.label,
+                    lat: sessionExactLocationCoords.lat,
+                    lng: sessionExactLocationCoords.lng,
+                  } : null}
+                  onChange={(v) => {
+                    if (v) {
+                      setSessionExactLocation(v.fullAddress ?? v.label)
+                      setSessionExactLocationCoords({ lat: v.lat, lng: v.lng })
+                      setSessionExactLocationError(undefined)
+                      setLocationError(undefined)
+                      syncPublicFromExact({
+                        district: v.district,
+                        fullAddress: v.fullAddress ?? v.label,
+                        lat: v.lat,
+                        lng: v.lng,
+                      })
+                    } else {
+                      setSessionExactLocationCoords(null)
+                    }
+                  }}
+                  error={sessionExactLocationError ?? locationError}
+                  mode="full"
+                  placeholder="Search the exact meeting address — e.g. Moda Sahili No: 12, Kadıköy"
+                />
+                <Text fontSize="11px" color={GRAY400} mt="5px" mb="8px">
+                  You can also fine-tune it on the map below.
+                </Text>
+                <LocationPickerMap
+                  value={sessionExactLocation}
+                  coords={sessionExactLocationCoords}
+                  showSearchInput={false}
+                  onChange={(value, coords, meta) => {
+                    setSessionExactLocation(value)
+                    setSessionExactLocationCoords(coords ?? null)
+                    if (coords) {
+                      syncPublicFromExact({
+                        district: meta?.district ?? null,
+                        fullAddress: meta?.fullAddress ?? value,
+                        lat: coords.lat,
+                        lng: coords.lng,
+                      })
+                    }
+                    if (value.trim() && coords) {
+                      setSessionExactLocationError(undefined)
+                      setLocationError(undefined)
+                    }
+                  }}
+                  height="220px"
+                  auxiliaryLabel="Location guide (optional)"
+                  auxiliaryValue={sessionLocationGuide}
+                  auxiliaryPlaceholder="Near of the park"
+                  onAuxiliaryChange={setSessionLocationGuide}
+                />
+                <ErrTxt msg={sessionExactLocationError} />
+                <Text fontSize="11px" color={AMBER} mt="5px">
+                  This exact address is shared with approved participants. The
+                  surrounding district appears on the public listing.
+                </Text>
+              </Box>
             )}
 
             {locType === 'Online' && isFixedGroupOffer && (

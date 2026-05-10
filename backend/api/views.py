@@ -23,7 +23,7 @@ from datetime import timedelta
 import logging
 import os
 import bleach
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +126,43 @@ def get_cookie_settings(httponly: bool = True) -> dict:
     }
 
 
+def _is_jwt_shape(value: str) -> bool:
+    """Cheap structural check: a JWT is three base64url segments separated by '.'.
+
+    Used as the last-line guard in ``_set_auth_cookies``. The cookie writer
+    refuses anything that does not match the JWT grammar so attacker-supplied
+    cookie attributes (``HttpOnly=``, ``; Secure``, newlines, …) cannot be
+    smuggled in by abusing the value field. Real signature/blacklist
+    verification is handled upstream by SimpleJWT — this is the structural
+    fallback.
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    parts = value.split('.')
+    if len(parts) != 3:
+        return False
+    allowed = set(
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    )
+    return all(part and set(part).issubset(allowed) for part in parts)
+
+
 def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
-    """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS."""
+    """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS.
+
+    Both arguments must be server-issued JWTs. The structural ``_is_jwt_shape``
+    guard prevents attacker-supplied input from ever flowing into a
+    ``Set-Cookie`` header even if a caller forgets to validate upstream
+    (CodeQL ``py/cookie-injection``). Callers that originate the value from a
+    request payload must validate it through ``RefreshToken``/``AccessToken``
+    first and pass the re-serialised ``str()`` of the resulting object.
+    """
+    if not _is_jwt_shape(access_token) or not _is_jwt_shape(refresh_token):
+        # Refuse to write a malformed token to a cookie. Surfacing a 500 here
+        # is safer than emitting a tainted Set-Cookie; in practice the only
+        # call sites are server-controlled, so this branch is unreachable in
+        # normal flows.
+        raise ValueError('Refusing to set auth cookie from non-JWT value.')
     response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=True))
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
 
@@ -166,10 +201,19 @@ def _require_verified_email(request, action_clause: str = 'to continue'):
 ADMIN_ROLES = frozenset(('admin', 'super_admin', 'moderator'))
 
 
-def log_admin_action(admin_user, action_type: str, target_entity: str, target_obj, reason: str = '') -> None:
-    """Best-effort admin audit logging for moderation actions."""
+def log_admin_action(admin_user, action_type: str, target_entity: str, target_obj, reason: str = '') -> Optional['AdminAuditLog']:
+    """Best-effort admin audit logging for moderation actions.
+
+    Returns the persisted ``AdminAuditLog`` row so the caller can surface
+    the new entry inline in the action response (NFR-03b: spares the
+    moderation UI a follow-up GET /api/admin/audit-logs/, which previously
+    raced the writer in setups where the audit list reads from a follower
+    replica). Returns ``None`` only when the persistence step itself
+    raised — moderation actions still succeed in that case, but the
+    response simply won't carry the inline log row.
+    """
     try:
-        AdminAuditLog.objects.create(
+        return AdminAuditLog.objects.create(
             admin=admin_user,
             action_type=action_type,
             target_entity=target_entity,
@@ -178,6 +222,7 @@ def log_admin_action(admin_user, action_type: str, target_entity: str, target_ob
         )
     except Exception as exc:
         logger.warning('Admin audit log failed for %s (%s): %s', action_type, target_entity, exc)
+        return None
 
 
 def _send_email_async(to_email: str, subject: str, html: str) -> None:
@@ -571,7 +616,13 @@ class CustomTokenRefreshView(TokenRefreshView):
 
         validated = serializer.validated_data
         new_access = validated.get('access', '')
-        new_refresh = validated.get('refresh', refresh_token_val)
+        # When SimpleJWT rotated, ``validated['refresh']`` is the freshly issued
+        # token; otherwise (ROTATE_REFRESH_TOKENS=False) we re-serialise the
+        # already-verified token through ``RefreshToken`` so the cookie value
+        # is constructed from the server-side token object instead of being
+        # piped straight from ``request.data`` / ``request.COOKIES``
+        # (CodeQL ``py/cookie-injection``).
+        new_refresh = validated.get('refresh') or str(RefreshToken(refresh_token_val))
 
         response = Response({'access': new_access, 'refresh': new_refresh}, status=status.HTTP_200_OK)
         _set_auth_cookies(response, new_access, new_refresh)
@@ -2370,6 +2421,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     @track_performance
     def get_queryset(self):
+        # Owner edits/deletes must work for services in any status
+        # (Agreed/Completed/Cancelled/hidden). The list-time visibility filter
+        # below would otherwise hide them and produce a misleading 404.
+        # Authorization is enforced in perform_update / destroy.
+        if self.action in ('update', 'partial_update', 'destroy'):
+            return (
+                Service.objects
+                .select_related('user', 'event_evaluation_summary')
+                .prefetch_related('tags')
+            )
         user_param = self.request.query_params.get('user')
         # Use Prefetch object to optimize nested user badges query
         user_badges_prefetch = Prefetch(
@@ -2700,7 +2761,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         """Return a single service regardless of status so owners and participants
-        can view Agreed/Completed/Cancelled services from their history."""
+        can view Agreed/Completed/Cancelled services from their history.
+
+        NFR-13a: the detail page hit a 2 s budget on Docker CI because the
+        serializer was issuing a per-card query for `comment_count`,
+        `is_saved`, and `is_dismissed` even on the single-row detail route.
+        Annotate those alongside the prefetches so the request is constant
+        in the number of related objects rather than O(comments + saves +
+        dismissals)."""
         user_badges_prefetch = Prefetch(
             'user__badges',
             queryset=UserBadge.objects.select_related('badge')
@@ -2714,6 +2782,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         )
         queryset = (
             Service.objects
+            .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
             .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
                 'tags',
@@ -2722,6 +2791,25 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 capacity_handshakes_prefetch,
             )
         )
+
+        # Per-viewer annotations match the list path so the serializer's
+        # is_saved / is_dismissed methods read an annotation instead of
+        # firing one query per service.
+        from .models import SavedService, ServiceDismissal
+        if request.user.is_authenticated:
+            queryset = queryset.annotate(
+                is_saved_anno=Exists(
+                    SavedService.objects.filter(
+                        user=request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_dismissed_anno=Exists(
+                    ServiceDismissal.objects.filter(
+                        viewer=request.user, service=OuterRef('pk'),
+                    ),
+                ),
+            )
+
         instance = get_object_or_404(queryset, pk=kwargs['pk'])
 
         # For You click attribution (#481): when the detail page is reached
@@ -2899,6 +2987,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
             raise PermissionDenied('Attempting to modify another user\'s service')
 
         is_admin = getattr(self.request.user, 'role', None) == 'admin'
+
+        # Only Active services are editable. Once a service is Agreed, Completed,
+        # Cancelled or otherwise locked, surface a clear 403 instead of the
+        # misleading 404 that the list-time visibility filter used to produce.
+        if service.status != 'Active' and not is_admin:
+            raise PermissionDenied(
+                f'This service can no longer be edited (status: {service.status}).'
+            )
 
         if service.type == 'Event' and not is_admin:
             if service.is_in_lockdown_window:
@@ -3897,6 +3993,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [UserRateThrottle]
     pagination_class = StandardResultsSetPagination
+    # Handshakes are never row-deleted via the API; lifecycle is driven by
+    # state-transition actions (cancel / deny / complete). Removing DELETE
+    # (and the unused PUT/PATCH on the detail route) keeps the
+    # CASCADE on ``Report.related_handshake`` unreachable from any HTTP
+    # path so the moderation trail cannot be wiped by a participant.
+    http_method_names = ['get', 'post', 'head', 'options']
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -5821,7 +5923,7 @@ class AdminUserViewSet(viewsets.ViewSet):
             message=request.data.get('message', 'You have received a formal warning from an administrator.'),
         )
 
-        log_admin_action(
+        audit_entry = log_admin_action(
             request.user,
             'warn_user',
             'user',
@@ -5829,7 +5931,13 @@ class AdminUserViewSet(viewsets.ViewSet):
             request.data.get('message', ''),
         )
 
-        return Response({'status': 'success', 'message': 'Warning issued'})
+        # NFR-03b: surface the appended audit-log row inline so moderation
+        # consoles don't have to chase a follow-up GET that may race the
+        # writer behind a follower replica.
+        payload = {'status': 'success', 'message': 'Warning issued'}
+        if audit_entry is not None:
+            payload['audit_log'] = AdminAuditLogSerializer(audit_entry).data
+        return Response(payload)
 
     @action(detail=True, methods=['post'], url_path='ban', throttle_classes=[ConfirmationThrottle])
     def ban_user(self, request, pk=None):
@@ -7209,21 +7317,37 @@ class ForumCategoryViewSet(viewsets.ModelViewSet):
 
         # Annotate counts and last_activity inline so the serializer doesn't fan
         # out into per-category queries. Subqueries keep this O(1) total.
+        # Soft-deleted topics (and posts on them) are excluded from these counts
+        # for every caller, including staff. Staff still see inactive categories
+        # (toggled above), but the counts here describe the public surface —
+        # admin moderation goes through AdminReportViewSet, which references the
+        # surviving Report rows directly, so surfacing soft-deleted topics in
+        # category aggregates would be misleading rather than useful.
         latest_post_at = (
             ForumPost.objects
-            .filter(topic__category=OuterRef('pk'), is_deleted=False)
+            .filter(
+                topic__category=OuterRef('pk'),
+                topic__is_deleted=False,
+                is_deleted=False,
+            )
             .order_by('-created_at')
             .values('created_at')[:1]
         )
         latest_topic_at = (
             ForumTopic.objects
-            .filter(category=OuterRef('pk'))
+            .filter(category=OuterRef('pk'), is_deleted=False)
             .order_by('-created_at')
             .values('created_at')[:1]
         )
         queryset = queryset.annotate(
-            topic_count_annotated=Count('topics', distinct=True),
-            post_count_annotated=Count('topics__posts', filter=Q(topics__posts__is_deleted=False), distinct=True),
+            topic_count_annotated=Count(
+                'topics', filter=Q(topics__is_deleted=False), distinct=True
+            ),
+            post_count_annotated=Count(
+                'topics__posts',
+                filter=Q(topics__posts__is_deleted=False, topics__is_deleted=False),
+                distinct=True,
+            ),
             last_activity_annotated=Coalesce(
                 Greatest(Subquery(latest_post_at), Subquery(latest_topic_at)),
                 Subquery(latest_post_at),
@@ -7331,7 +7455,15 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
     
     def get_queryset(self):
+        # Hide soft-deleted topics from the public list/retrieve. Reports filed
+        # against them still reference the row in the database; only the public
+        # surface is suppressed. Staff/admin callers see soft-deleted topics so
+        # they can navigate to a specific deleted topic and review its content
+        # for moderation (the destroy/edit/pin/lock/report paths still 404 on
+        # soft-deleted rows because they query is_deleted=False directly).
         queryset = ForumTopic.objects.select_related('author', 'category')
+        if not self.request.user.is_staff:
+            queryset = queryset.filter(is_deleted=False)
 
         # Filter by category if provided
         category_slug = self.request.query_params.get('category')
@@ -7419,14 +7551,14 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, pk=None):
         """Update a forum topic (author or admin only)"""
         try:
-            topic = ForumTopic.objects.get(pk=pk)
+            topic = ForumTopic.objects.get(pk=pk, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Check permissions
         if topic.author != request.user and not request.user.is_staff:
             return create_error_response(
@@ -7434,28 +7566,35 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
-        
+
         # Only allow editing title and body
         allowed_fields = {'title', 'body'}
         update_data = {k: v for k, v in request.data.items() if k in allowed_fields}
-        
+
         serializer = self.get_serializer(topic, data=update_data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
-    
+
     @track_performance
     def destroy(self, request, pk=None):
-        """Delete a forum topic (author or admin only)"""
+        """Soft-delete a forum topic (author or admin only).
+
+        The topic row is preserved (with is_deleted=True) so that any
+        Report.reported_forum_topic rows pointing at it survive — the
+        FK uses on_delete=CASCADE, so a hard delete would wipe the
+        moderation trail. The topic is hidden from public list/detail
+        querysets via the is_deleted=False filter.
+        """
         try:
-            topic = ForumTopic.objects.get(pk=pk)
+            topic = ForumTopic.objects.get(pk=pk, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Check permissions
         if topic.author != request.user and not request.user.is_staff:
             return create_error_response(
@@ -7463,8 +7602,11 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
-        
-        topic.delete()
+
+        # Soft delete — preserve reports filed against this topic.
+        topic.is_deleted = True
+        topic.deleted_at = timezone.now()
+        topic.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
         return Response(status=status.HTTP_204_NO_CONTENT)
     
     @action(detail=True, methods=['post'])
@@ -7472,30 +7614,30 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     def pin(self, request, pk=None):
         """Pin or unpin a topic (admin only)"""
         try:
-            topic = ForumTopic.objects.get(pk=pk)
+            topic = ForumTopic.objects.get(pk=pk, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
-        
+
         topic.is_pinned = not topic.is_pinned
         topic.save(update_fields=['is_pinned'])
 
         if request.user.role in ADMIN_ROLES:
             state = 'Pinned' if topic.is_pinned else 'Unpinned'
             log_admin_action(request.user, 'pin_topic', 'forum_topic', topic, state)
-        
+
         serializer = self.get_serializer(topic)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
     @track_performance
     def lock(self, request, pk=None):
         """Lock or unlock a topic (admin only)"""
         try:
-            topic = ForumTopic.objects.get(pk=pk)
+            topic = ForumTopic.objects.get(pk=pk, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
@@ -7518,7 +7660,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     def report(self, request, pk=None):
         """Report a forum topic for moderation."""
         try:
-            topic = ForumTopic.objects.get(pk=pk, category__is_active=True)
+            topic = ForumTopic.objects.get(pk=pk, category__is_active=True, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
@@ -7595,6 +7737,7 @@ class ForumActivityView(APIView):
         topic_queryset = ForumTopic.objects.filter(
             author=request.user,
             category__is_active=True,
+            is_deleted=False,
         )
         open_topic_queryset = (
             topic_queryset
@@ -7609,6 +7752,7 @@ class ForumActivityView(APIView):
                 'my_replies': ForumPost.objects.filter(
                     topic__author=request.user,
                     topic__category__is_active=True,
+                    topic__is_deleted=False,
                     is_deleted=False,
                 ).count(),
                 'open_topics': topic_queryset.filter(is_locked=False).count(),
@@ -7647,7 +7791,11 @@ class ForumPostViewSet(viewsets.ViewSet):
         from .serializers import ForumRecentPostSerializer
 
         posts = (
-            ForumPost.objects.filter(is_deleted=False, topic__category__is_active=True)
+            ForumPost.objects.filter(
+                is_deleted=False,
+                topic__category__is_active=True,
+                topic__is_deleted=False,
+            )
             .select_related('author', 'topic', 'topic__category')
             .order_by('-created_at')
         )
@@ -7666,7 +7814,7 @@ class ForumPostViewSet(viewsets.ViewSet):
     def list(self, request, topic_id=None):
         """List posts in a forum topic"""
         try:
-            topic = ForumTopic.objects.get(pk=topic_id, category__is_active=True)
+            topic = ForumTopic.objects.get(pk=topic_id, category__is_active=True, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
@@ -7692,7 +7840,7 @@ class ForumPostViewSet(viewsets.ViewSet):
     def create(self, request, topic_id=None):
         """Create a new post in a forum topic"""
         try:
-            topic = ForumTopic.objects.get(pk=topic_id, category__is_active=True)
+            topic = ForumTopic.objects.get(pk=topic_id, category__is_active=True, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
@@ -7795,7 +7943,11 @@ class ForumPostViewSet(viewsets.ViewSet):
     def report(self, request, pk=None):
         """Report a forum post/reply for moderation."""
         try:
-            post = ForumPost.objects.select_related('topic', 'author').get(pk=pk, topic__category__is_active=True)
+            post = ForumPost.objects.select_related('topic', 'author').get(
+                pk=pk,
+                topic__category__is_active=True,
+                topic__is_deleted=False,
+            )
         except ForumPost.DoesNotExist:
             return create_error_response(
                 'Post not found',

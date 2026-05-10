@@ -94,13 +94,7 @@ test.describe('Owner edit locks', () => {
     await expect(page.getByText(new RegExp(updatedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).first()).toBeVisible({ timeout: 10_000 })
   })
 
-  // Category C: the lockdown banner reads off the server-canonical
-  // service.edit_locked field which only flips after the create response
-  // settles; immediately after Post Event the SPA may render before the
-  // server-derived flag is populated. Needs an explicit wait on the
-  // refreshed service detail (or a server-side fixture that stamps the
-  // event with a near-term scheduled_time).
-  test.skip('Event owner sees 24-hour edit lock for near-term events', async ({ page }) => {
+  test('Event owner sees 24-hour edit lock for near-term events', async ({ page }) => {
     const title = uniqueTitle('PW Event Lock 24h')
 
     await loginAs(page, USERS.zeynep)

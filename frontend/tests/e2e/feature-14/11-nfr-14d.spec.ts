@@ -13,14 +13,7 @@ import {
  * separately (warning toast), then close the modal.
  */
 
-// Category C: ServiceEvaluationModal does not close or fire the
-// "Evaluation submitted" success toast when the image upload step fails;
-// it surfaces an error toast and keeps the modal open so the user can
-// retry. The spec asserts a fire-and-forget recovery flow that is not the
-// product's behavior — coverage of "evaluation persisted, photo failed
-// separately" should sit in a backend/integration test once the desired
-// UX is settled.
-test.skip('NFR-14d: evaluation is saved even when image upload fails', async ({ page }) => {
+test('NFR-14d: evaluation is saved even when image upload fails', async ({ page }) => {
   const title = uniqueTitle('NFR-14d Upload Fail')
   const provider = USERS.elif
   const requester = USERS.ayse
@@ -76,10 +69,7 @@ test.skip('NFR-14d: evaluation is saved even when image upload fails', async ({ 
   expect(repExists, 'Reputation record must exist even when image upload failed').toBeTruthy()
 })
 
-// Category C: same modal-flow mismatch as the test above — when the photo
-// upload errors out the modal intentionally stays open with the Submit
-// Evaluation button visible so the user can fix and retry.
-test.skip('NFR-14d: evaluation modal closes after submission regardless of image upload outcome', async ({ page }) => {
+test('NFR-14d: evaluation modal closes after submission regardless of image upload outcome', async ({ page }) => {
   const title = uniqueTitle('NFR-14d Modal Close')
   const provider = USERS.elif
   const requester = USERS.ayse

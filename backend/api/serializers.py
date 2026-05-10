@@ -1022,6 +1022,111 @@ class ServiceSerializer(serializers.ModelSerializer):
             )
         return data
 
+    # ── Tag upsert helpers (issue #575) ──────────────────────────────────────
+    # These exist so `create()` and `update()` never surface an IntegrityError
+    # to the caller when:
+    #   * a Wikidata-resolved label collides with an existing Tag.name (which
+    #     is unique at the DB level), or
+    #   * a `tag_names` insert races another concurrent insert on the same
+    #     name (rare but observable under load).
+    # The fallback behaviour matches the platform's tag policy: prefer the
+    # already-stored row (by name, case-insensitive), falling back to the QID
+    # row when the QID itself already exists. Returns (tag, created) so the
+    # caller can drive post-create enrichment for genuinely new rows only.
+
+    @staticmethod
+    def _upsert_qid_tag(normalized_qid, tag_name):
+        """Resolve or create a Tag for a Wikidata QID without ever raising
+        IntegrityError on the unique-name index.
+
+        Resolution order:
+          1. Existing Tag with id == QID -> reuse (no rename — caller already
+             handled the stale-name case).
+          2. Existing Tag with name iexact == tag_name -> reuse (this is the
+             #575 collision path; pre-fix we tried INSERT and 500'd).
+          3. Otherwise INSERT a fresh Tag(id=QID, name=tag_name). If the
+             INSERT still races on the unique index, fall back to (2)'s
+             lookup.
+
+        Truncates ``tag_name`` to ``Tag.name.max_length`` so a long
+        upstream label cannot 500 the request via a column-length
+        violation when Wikidata returns >100 chars.
+        """
+        from django.db import IntegrityError, transaction as _t
+
+        if tag_name:
+            max_name_len = Tag._meta.get_field('name').max_length or 100
+            tag_name = tag_name.strip()[:max_name_len] or None
+
+        existing = Tag.objects.filter(id=normalized_qid).first()
+        if existing is not None:
+            return existing, False
+
+        if tag_name:
+            collision = Tag.objects.filter(name__iexact=tag_name).first()
+            if collision is not None:
+                return collision, False
+
+        try:
+            with _t.atomic():
+                return Tag.objects.create(id=normalized_qid, name=tag_name), True
+        except IntegrityError:
+            # Lost a race. Re-resolve.
+            existing = Tag.objects.filter(id=normalized_qid).first()
+            if existing is not None:
+                return existing, False
+            if tag_name:
+                collision = Tag.objects.filter(name__iexact=tag_name).first()
+                if collision is not None:
+                    return collision, False
+            return None, False
+
+    @staticmethod
+    def _upsert_named_tag(tag_name_clean):
+        """Resolve or create a Tag from a free-text name without surfacing
+        an IntegrityError when the unique-name index races.
+
+        Falls back to a slugified id, with a uuid suffix when the slug is
+        already taken. On INSERT IntegrityError (either id or name unique
+        index), re-resolves the row that won the race — first by id (so
+        a slug-collision with a different name is recoverable), then by
+        name. Truncates ``tag_name_clean`` to ``Tag.name.max_length`` so
+        a long input cannot 500 the request via a column-length violation.
+        """
+        import uuid as _uuid
+        from django.db import IntegrityError, transaction as _t
+
+        # Tag.name has max_length=100 at the DB level; longer free-text
+        # input would otherwise raise DataError on insert and 500.
+        max_name_len = Tag._meta.get_field('name').max_length or 100
+        tag_name_clean = (tag_name_clean or '').strip()[:max_name_len]
+        if not tag_name_clean:
+            return None
+
+        # Use filter().first() not get() — the DB unique index on name is
+        # case-sensitive in Postgres, so two tags differing only by case
+        # would otherwise raise MultipleObjectsReturned and 500.
+        existing = Tag.objects.filter(name__iexact=tag_name_clean).first()
+        if existing is not None:
+            return existing
+
+        tag_id = tag_name_clean.lower().replace(' ', '_').replace('-', '_')[:200]
+        if Tag.objects.filter(id=tag_id).exists():
+            tag_id = f"{tag_id}_{str(_uuid.uuid4())[:8]}"
+
+        try:
+            with _t.atomic():
+                return Tag.objects.create(id=tag_id, name=tag_name_clean)
+        except IntegrityError:
+            # Race recovery — id-collision can land here when the slug
+            # we generated coincided with a row created mid-flight under
+            # a different name; re-resolve by both keys before falling
+            # back to None.
+            recovered = Tag.objects.filter(name__iexact=tag_name_clean).first()
+            if recovered is not None:
+                return recovered
+            return Tag.objects.filter(id=tag_id).first()
+
     def create(self, validated_data):
         # Description is already sanitized in validate_description
         # No need to sanitize again here
@@ -1167,7 +1272,19 @@ class ServiceSerializer(serializers.ModelSerializer):
                     for stale_tag in stale_qid_tags:
                         label = wikidata_labels.get(stale_tag.id.upper())
                         if not label:
-                            wikidata_info = fetch_wikidata_item(stale_tag.id.upper())
+                            # Best-effort enrichment. A failed Wikidata round-trip
+                            # (HTTP error, JSON decode error, transient socket
+                            # error) must not 500 the create call — the QID is
+                            # still attached, just without a friendly label.
+                            try:
+                                wikidata_info = fetch_wikidata_item(stale_tag.id.upper())
+                            except Exception as exc:
+                                wikidata_info = None
+                                logger.warning(
+                                    "Wikidata lookup failed during stale-QID "
+                                    "rename; keeping placeholder name (%s)",
+                                    type(exc).__name__,
+                                )
                             label = (wikidata_info or {}).get('label')
                         if not label:
                             continue
@@ -1193,15 +1310,24 @@ class ServiceSerializer(serializers.ModelSerializer):
                         if label_from_form:
                             tag_name = label_from_form
                         else:
-                            wikidata_info = fetch_wikidata_item(normalized_qid)
+                            wikidata_info = None
+                            try:
+                                wikidata_info = fetch_wikidata_item(normalized_qid)
+                            except Exception as exc:
+                                # Log only the exception type to keep
+                                # user-supplied QIDs out of the log line.
+                                logger.warning(
+                                    "Wikidata lookup failed (%s); using "
+                                    "QID as placeholder name",
+                                    type(exc).__name__,
+                                )
                             if wikidata_info and wikidata_info.get('label'):
                                 tag_name = wikidata_info['label']
                             else:
                                 tag_name = normalized_qid
-                                logger.warning(f"Could not fetch Wikidata info for {normalized_qid}, using QID as name")
-                        tag, created = Tag.objects.get_or_create(
-                            id=normalized_qid, defaults={'name': tag_name}
-                        )
+                        tag, created = self._upsert_qid_tag(normalized_qid, tag_name)
+                        if tag is None:
+                            continue
                         if tag not in tags_to_add:
                             tags_to_add.append(tag)
                         if created:
@@ -1222,16 +1348,8 @@ class ServiceSerializer(serializers.ModelSerializer):
             if tag_names:
                 for tag_name in tag_names:
                     if tag_name and tag_name.strip():
-                        tag_name_clean = tag_name.strip()
-                        try:
-                            tag = Tag.objects.get(name__iexact=tag_name_clean)
-                        except Tag.DoesNotExist:
-                            import uuid as _uuid
-                            tag_id = tag_name_clean.lower().replace(' ', '_').replace('-', '_')[:200]
-                            if Tag.objects.filter(id=tag_id).exists():
-                                tag_id = f"{tag_id}_{str(_uuid.uuid4())[:8]}"
-                            tag = Tag.objects.create(id=tag_id, name=tag_name_clean)
-                        if tag not in tags_to_add:
+                        tag = self._upsert_named_tag(tag_name.strip())
+                        if tag is not None and tag not in tags_to_add:
                             tags_to_add.append(tag)
 
             if tags_to_add:
@@ -1367,16 +1485,8 @@ class ServiceSerializer(serializers.ModelSerializer):
                 for tag_name in tag_names:
                     if not tag_name or not tag_name.strip():
                         continue
-                    tag_name_clean = tag_name.strip()
-                    try:
-                        tag = Tag.objects.get(name__iexact=tag_name_clean)
-                    except Tag.DoesNotExist:
-                        import uuid as _uuid
-                        tag_id = tag_name_clean.lower().replace(' ', '_').replace('-', '_')[:200]
-                        if Tag.objects.filter(id=tag_id).exists():
-                            tag_id = f"{tag_id}_{str(_uuid.uuid4())[:8]}"
-                        tag = Tag.objects.create(id=tag_id, name=tag_name_clean)
-                    if tag not in tags_to_set:
+                    tag = self._upsert_named_tag(tag_name.strip())
+                    if tag is not None and tag not in tags_to_set:
                         tags_to_set.append(tag)
             service.tags.set(tags_to_set)
 
@@ -3304,31 +3414,35 @@ class ForumCategorySerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_topic_count(self, obj):
-        """Return count of topics in this category"""
+        """Return count of non-deleted topics in this category"""
         if hasattr(obj, 'topic_count_annotated'):
             return obj.topic_count_annotated
-        return obj.topics.count()
+        return obj.topics.filter(is_deleted=False).count()
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_post_count(self, obj):
-        """Return count of all posts across topics in this category"""
+        """Return count of all posts across non-deleted topics in this category"""
         if hasattr(obj, 'post_count_annotated'):
             return obj.post_count_annotated
-        return ForumPost.objects.filter(topic__category=obj, is_deleted=False).count()
+        return ForumPost.objects.filter(
+            topic__category=obj,
+            topic__is_deleted=False,
+            is_deleted=False,
+        ).count()
 
     @extend_schema_field(OpenApiTypes.DATETIME)
     def get_last_activity(self, obj):
         """Return timestamp of most recent activity in this category"""
         if hasattr(obj, 'last_activity_annotated'):
             return obj.last_activity_annotated
-        
-        # Check most recent post
+
+        # Check most recent post (only on non-deleted topics)
         latest_post = ForumPost.objects.filter(
-            topic__category=obj, is_deleted=False
+            topic__category=obj, topic__is_deleted=False, is_deleted=False
         ).order_by('-created_at').first()
-        
-        # Check most recent topic
-        latest_topic = obj.topics.order_by('-created_at').first()
+
+        # Check most recent (non-deleted) topic
+        latest_topic = obj.topics.filter(is_deleted=False).order_by('-created_at').first()
         
         if latest_post and latest_topic:
             return max(latest_post.created_at, latest_topic.created_at)
@@ -3387,11 +3501,12 @@ class ForumTopicSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'category', 'category_name', 'category_slug',
             'author_id', 'author_name', 'author_avatar_url',
-            'title', 'body', 'is_pinned', 'is_locked', 'view_count',
+            'title', 'body', 'is_pinned', 'is_locked', 'is_deleted',
+            'view_count',
             'reply_count', 'last_activity', 'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'id', 'author_id', 'is_pinned', 'is_locked', 
+            'id', 'author_id', 'is_pinned', 'is_locked', 'is_deleted',
             'view_count', 'created_at', 'updated_at'
         ]
 

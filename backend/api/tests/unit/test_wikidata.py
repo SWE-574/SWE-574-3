@@ -14,6 +14,12 @@ from api.serializers import TagSerializer
 from api.wikidata import fetch_wikidata_item, search_wikidata_items
 
 
+# CI splits the suite by marker (`-m unit` / `-m integration`); without a
+# module-level marker every test in this file is silently deselected and
+# wikidata.py drops out of the unit-suite coverage.
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def search_env():
     return SimpleNamespace(client=APIClient(), url=reverse('wikidata-search'))
@@ -350,3 +356,306 @@ def test_wikidata_search_allows_normal_usage(mock_search, search_env):
     for _ in range(5):
         response = search_env.client.get(search_env.url, {'q': 'test'})
         assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# #525 — Wikidata tag search performance: cache + batched claim lookups
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_search_wikidata_items_returns_cached_payload_without_upstream_call(mock_get):
+    """A repeated query must hit the Django cache, not the wbsearchentities API."""
+    from django.core.cache import cache
+
+    cache.clear()
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        'search': [
+            {'id': 'Q28865', 'label': 'Python', 'description': 'high-level programming language'},
+        ]
+    }
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    first = search_wikidata_items('cachehit-python', limit=5)
+    second = search_wikidata_items('cachehit-python', limit=5)
+
+    assert first == second
+    # The upstream wbsearchentities endpoint should fire exactly once
+    # across the two calls -- the second one is served from the cache.
+    assert mock_get.call_count == 1
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_fetch_wikidata_claims_batch_uses_single_upstream_call(mock_get):
+    """Batched claim resolution issues one wbgetentities request, not N."""
+    from django.core.cache import cache
+    from api.wikidata import fetch_wikidata_claims_batch
+
+    cache.clear()
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        'entities': {
+            'Q28865': {'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q9143'}}}}]}},
+            'Q2005': {'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q9143'}}}}]}},
+            'Q17195715': {'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q1914636'}}}}]}},
+        },
+    }
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    result = fetch_wikidata_claims_batch(['Q28865', 'Q2005', 'Q17195715'])
+
+    assert mock_get.call_count == 1
+    assert set(result.keys()) == {'Q28865', 'Q2005', 'Q17195715'}
+    assert result['Q28865']['instance_of'] == ['Q9143']
+    assert result['Q2005']['instance_of'] == ['Q9143']
+    assert result['Q17195715']['instance_of'] == ['Q1914636']
+
+    # A second batch call for the same QIDs is satisfied entirely from
+    # the cache populated above.
+    cached = fetch_wikidata_claims_batch(['Q28865', 'Q2005', 'Q17195715'])
+    assert cached == result
+    assert mock_get.call_count == 1
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_classify_and_filter_results_does_not_fan_out_per_qid(mock_get):
+    """The classification step must not fan out one HTTP call per result."""
+    from django.core.cache import cache
+    from api.wikidata import classify_and_filter_results
+
+    cache.clear()
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        'entities': {
+            f'Q{1000 + i}': {
+                'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q9143'}}}}]}
+            }
+            for i in range(5)
+        },
+    }
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    raw = [{'id': f'Q{1000 + i}', 'label': f'Item {i}'} for i in range(5)]
+    classified = classify_and_filter_results(raw)
+
+    # One batched wbgetentities call covers all five rows.
+    assert mock_get.call_count == 1
+    assert len(classified) == 5
+    assert all(item['entity_type'] == 'technology' for item in classified)
+
+
+# ── fetch_wikidata_claims_batch — branch coverage ────────────────────────────
+# The following cases exercise the input-normalisation and fail-open branches
+# in fetch_wikidata_claims_batch + classify_and_filter_results that the happy
+# path tests above don't reach. Each case isolates one branch so a regression
+# breaks exactly one assertion.
+
+
+def test_fetch_wikidata_claims_batch_empty_input_returns_empty_dict():
+    """No QIDs in → no upstream call, empty mapping out."""
+    from api.wikidata import fetch_wikidata_claims_batch
+    assert fetch_wikidata_claims_batch([]) == {}
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_fetch_wikidata_claims_batch_skips_falsy_and_non_qid_input(mock_get):
+    """Empty strings, None, and labels that don't look like QIDs are dropped."""
+    from django.core.cache import cache
+    from api.wikidata import fetch_wikidata_claims_batch
+    cache.clear()
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {'entities': {
+        'Q42': {'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q5'}}}}]}},
+    }}
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    result = fetch_wikidata_claims_batch(['', None, 'not-a-qid', 'Q42', 'q42'])
+
+    # Only the de-duped, normalised QID makes it into the result mapping.
+    assert set(result.keys()) == {'Q42'}
+    assert result['Q42']['instance_of'] == ['Q5']
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_fetch_wikidata_claims_batch_upstream_failure_returns_none_per_qid(mock_get):
+    """When the upstream call returns None, every requested QID maps to None."""
+    import requests as _requests
+    from django.core.cache import cache
+    from api.wikidata import fetch_wikidata_claims_batch
+    cache.clear()
+
+    # _wikidata_get catches RequestException + ValueError and returns None;
+    # the batch helper must then leave every input QID mapped to None.
+    mock_get.side_effect = _requests.RequestException('upstream is down')
+
+    result = fetch_wikidata_claims_batch(['Q1', 'Q2'])
+
+    assert result == {'Q1': None, 'Q2': None}
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_fetch_wikidata_claims_batch_handles_partial_response(mock_get):
+    """When wbgetentities omits a requested entity, that QID stays None."""
+    from django.core.cache import cache
+    from api.wikidata import fetch_wikidata_claims_batch
+    cache.clear()
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {'entities': {
+        'Q1': {'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q5'}}}}]}},
+        # Q2 is missing entirely
+    }}
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    result = fetch_wikidata_claims_batch(['Q1', 'Q2'])
+
+    assert result['Q1'] is not None
+    assert result['Q1']['instance_of'] == ['Q5']
+    assert result['Q2'] is None
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_fetch_wikidata_claims_batch_skips_malformed_claim_payload(mock_get):
+    """Claims with missing mainsnak / datavalue / value are skipped, not raised."""
+    from django.core.cache import cache
+    from api.wikidata import fetch_wikidata_claims_batch
+    cache.clear()
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {'entities': {
+        'Q1': {'claims': {'P31': [
+            {'mainsnak': {'datavalue': {'value': {'id': 'Q5'}}}},   # well-formed
+            {'mainsnak': {}},                                        # missing datavalue (KeyError)
+            {'no_mainsnak': True},                                   # missing mainsnak entirely (KeyError)
+        ]}},
+    }}
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    result = fetch_wikidata_claims_batch(['Q1'])
+
+    # Only the well-formed claim contributes a target id.
+    assert result['Q1']['instance_of'] == ['Q5']
+
+
+# ── classify_and_filter_results — branch coverage ────────────────────────────
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.fetch_wikidata_claims')
+@patch('api.wikidata.fetch_wikidata_claims_batch')
+def test_classify_and_filter_results_skips_items_without_qid(_mock_batch, mock_fetch):
+    """Result rows with no `id` field are dropped before any upstream call."""
+    from api.wikidata import classify_and_filter_results
+    classified = classify_and_filter_results([{'label': 'no qid here'}])
+    assert classified == []
+    mock_fetch.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.fetch_wikidata_claims_batch')
+@patch('api.wikidata.fetch_wikidata_claims')
+def test_classify_and_filter_results_fails_open_when_claims_unavailable(
+    mock_fetch, _mock_batch,
+):
+    """Fail-open: if claims can't be fetched, the row is kept without entity_type."""
+    from api.wikidata import classify_and_filter_results
+    mock_fetch.return_value = None
+
+    classified = classify_and_filter_results([{'id': 'Q123', 'label': 'Mystery'}])
+
+    assert len(classified) == 1
+    assert classified[0]['id'] == 'Q123'
+    assert 'entity_type' not in classified[0]
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.fetch_wikidata_claims_batch')
+@patch('api.wikidata.fetch_wikidata_claims')
+def test_classify_and_filter_results_drops_blocked_entity_types(
+    mock_fetch, _mock_batch,
+):
+    """A QID with a blocked P31 (e.g. country / human) is filtered out."""
+    from api.wikidata import classify_and_filter_results, BLOCKED_ENTITY_QIDS
+    blocked_qid = next(iter(BLOCKED_ENTITY_QIDS))
+    mock_fetch.return_value = {'instance_of': [blocked_qid], 'subclass_of': []}
+
+    classified = classify_and_filter_results([{'id': 'Q999', 'label': 'Blocked'}])
+
+    assert classified == []
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.fetch_wikidata_claims_batch')
+@patch('api.wikidata.fetch_wikidata_claims')
+def test_classify_and_filter_results_falls_back_to_p279_when_p31_not_mapped(
+    mock_fetch, _mock_batch,
+):
+    """If P31 doesn't match the entity-type map, P279 (subclass_of) is consulted."""
+    from api.wikidata import classify_and_filter_results, ENTITY_TYPE_MAP
+    mapped_qid = next(iter(ENTITY_TYPE_MAP))
+    expected_type = ENTITY_TYPE_MAP[mapped_qid]
+    mock_fetch.return_value = {
+        'instance_of': ['Q9999999'],   # not in ENTITY_TYPE_MAP, not blocked
+        'subclass_of': [mapped_qid],
+    }
+
+    classified = classify_and_filter_results([{'id': 'Q42', 'label': 'P279 fallback'}])
+
+    assert len(classified) == 1
+    assert classified[0]['entity_type'] == expected_type
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.fetch_wikidata_claims_batch')
+@patch('api.wikidata.fetch_wikidata_claims')
+def test_classify_and_filter_results_emits_none_entity_type_when_unmapped(
+    mock_fetch, _mock_batch,
+):
+    """No P31 / P279 match → row keeps `entity_type=None`, still included."""
+    from api.wikidata import classify_and_filter_results
+    mock_fetch.return_value = {
+        'instance_of': ['Q9999999'],
+        'subclass_of': ['Q9999998'],
+    }
+
+    classified = classify_and_filter_results([{'id': 'Q777', 'label': 'Mystery'}])
+
+    assert len(classified) == 1
+    assert classified[0]['entity_type'] is None
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.fetch_wikidata_claims')
+@patch('api.wikidata.fetch_wikidata_claims_batch')
+def test_classify_and_filter_results_swallows_batch_warmer_failure(
+    mock_batch, mock_fetch,
+):
+    """The batch warm-up is an optimisation; raising must not break classification."""
+    from api.wikidata import classify_and_filter_results
+    mock_batch.side_effect = RuntimeError('redis fell over')
+    mock_fetch.return_value = {
+        'instance_of': [],
+        'subclass_of': [],
+    }
+
+    classified = classify_and_filter_results([{'id': 'Q1', 'label': 'Will it crash?'}])
+
+    # Classification still ran via the per-id helper; row passes through with
+    # entity_type=None because nothing matched the type map.
+    assert len(classified) == 1
+    assert classified[0]['entity_type'] is None
