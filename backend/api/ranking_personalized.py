@@ -55,7 +55,13 @@ def tag_overlap(service, viewer) -> float:
     """Jaccard similarity of viewer skills and service tags, with parent_qid
     lifted into the membership set so hierarchical matches count.
     """
-    viewer_qids = _viewer_skill_qids(viewer)
+    return tag_overlap_with_viewer_qids(service, _viewer_skill_qids(viewer))
+
+
+def tag_overlap_with_viewer_qids(service, viewer_qids: set[str]) -> float:
+    """Same as tag_overlap but accepts precomputed viewer QIDs so callers
+    (e.g. score_for_you) issue a single skills query per request, not one per
+    candidate service."""
     if not viewer_qids:
         return 0.0
     tag_qids = _service_tag_qids(service)
@@ -372,9 +378,13 @@ def score_for_you(services, viewer) -> list[tuple]:
     )
     now = time.time()
 
+    # One viewer.skills scan per request — tag_overlap used to call this inside
+    # the loop (N list queries on Browse when smart-pill signals attach).
+    cached_viewer_qids = _viewer_skill_qids(viewer)
+
     scored: list = []
     for svc in services:
-        tag = tag_overlap(svc, viewer)
+        tag = tag_overlap_with_viewer_qids(svc, cached_viewer_qids)
         follow = follow_affinity(svc, boosts)
         cooccur = cooccurrence_signal(svc, viewer_history_ids, cooccur_lookup)
 

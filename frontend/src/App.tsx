@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { Box } from '@chakra-ui/react'
+import { Box, Spinner } from '@chakra-ui/react'
 import { useAuthStore } from '@/store/useAuthStore'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import AdminProtectedRoute from '@/components/AdminProtectedRoute'
@@ -40,11 +40,11 @@ const ForumCreateTopic       = lazy(() => import('@/pages/ForumCreateTopic'))
 const AchievementView        = lazy(() => import('@/pages/AchievementView'))
 const NotFoundPage           = lazy(() => import('@/pages/NotFoundPage'))
 
-// ─── Page-level Loading Fallback ──────────────────────────────────────────────
+// ─── Page-level Loading Fallback (lazy route chunks) ─────────────────────────
 const PageFallback = () => (
-  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-    <div>Loading…</div>
-  </div>
+  <Box display="flex" justifyContent="center" alignItems="center" minH="60vh" bg="gray.50">
+    <Spinner color="green.600" size="lg" />
+  </Box>
 )
 
 // ─── Email Verification Banner ────────────────────────────────────────────────
@@ -169,11 +169,19 @@ const FULL_SCREEN_PREFIXES = [
 // ─── Public pages where we skip the full-page spinner ─────────────────────────
 const PUBLIC_AUTH_PATHS = ['/login', '/register', '/', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
 
+/** Shell may render before session restore finishes — avoids a blank white flash on browsable routes (especially /public-profile/). */
+function pathAllowsShellWhileAuthPending(pathname: string): boolean {
+  if (PUBLIC_AUTH_PATHS.includes(pathname)) return true
+  if (pathname.startsWith('/public-profile/')) return true
+  if (pathname.startsWith('/service-detail/')) return true
+  if (pathname === '/forum' || pathname.startsWith('/forum/')) return true
+  if (pathname === '/dashboard' || pathname.startsWith('/dashboard/')) return true
+  return false
+}
+
 function App() {
   const { checkAuth, refreshUser, isLoading, user } = useAuthStore()
   const location = useLocation()
-
-  const isPublicAuthPage = PUBLIC_AUTH_PATHS.includes(location.pathname)
   const showNavbar = !PAGES_WITHOUT_NAVBAR.some((p) =>
     p === location.pathname || location.pathname.startsWith(p + '/')
   )
@@ -225,11 +233,11 @@ function App() {
   // ── Notification WebSocket (fires only when authenticated) ──────────────
   useNotificationSocket()
 
-  if (isLoading && !user && !isPublicAuthPage) {
+  if (isLoading && !user && !pathAllowsShellWhileAuthPending(location.pathname)) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <div>Loading…</div>
-      </div>
+      <Box display="flex" justifyContent="center" alignItems="center" minH="100vh" bg="gray.50">
+        <Spinner color="green.600" size="lg" />
+      </Box>
     )
   }
 

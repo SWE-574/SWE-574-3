@@ -30,6 +30,12 @@ vi.mock('@/services/api', () => ({
   getErrorMessage: (_err: unknown, fallback: string) => fallback,
 }))
 
+vi.mock('@/store/useAuthStore', () => ({
+  useAuthStore: vi.fn((selector: (s: { user: null }) => unknown) =>
+    selector({ user: null }),
+  ),
+}))
+
 function renderModal(props: Partial<Parameters<typeof FollowListModal>[0]> = {}) {
   return render(
     <ChakraProvider value={system}>

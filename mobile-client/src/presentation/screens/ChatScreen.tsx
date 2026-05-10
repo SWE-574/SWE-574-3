@@ -187,7 +187,7 @@ export default function ChatScreen() {
   const openOtherUserPublicProfile = useCallback(() => {
     if (!chatParticipant.userId) return;
     // Navigate within the Messages stack so a proper back button is rendered
-    navigation.navigate("UserPublicProfile", { userId: chatParticipant.userId });
+    navigation.navigate("PublicProfile", { userId: chatParticipant.userId });
   }, [chatParticipant.userId, navigation]);
 
   const openServiceDetail = useCallback(() => {

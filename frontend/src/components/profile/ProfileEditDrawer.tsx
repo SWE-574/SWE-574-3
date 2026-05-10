@@ -5,7 +5,7 @@ import {
 import { FiX, FiUser, FiAlertCircle, FiTag, FiImage } from 'react-icons/fi'
 import { toast } from 'sonner'
 import type { User, BadgeProgress, Tag } from '@/types'
-import { userAPI, dataURLtoBlob } from '@/services/userAPI'
+import { userAPI, dataURLtoBlob, type UserUpdateData } from '@/services/userAPI'
 import { tagAPI } from '@/services/tagAPI'
 import { getErrorMessage } from '@/services/api'
 import ImageCropModal from '@/components/ImageCropModal'
@@ -231,51 +231,80 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
         form.skills.map((tag) => (isUuid(tag.id) ? tag : tagAPI.ensureInDb(tag))),
       )
 
-      // Build diff — only include changed fields
-      const fd = new FormData()
-      if (form.first_name !== (user.first_name || '')) fd.append('first_name', form.first_name)
-      if (form.last_name !== (user.last_name || '')) fd.append('last_name', form.last_name)
-      if (form.bio !== (user.bio || '')) fd.append('bio', form.bio)
-      if (form.location !== (user.location || '')) fd.append('location', form.location)
-      if (form.show_history !== (user.show_history ?? false)) fd.append('show_history', String(form.show_history))
-
-      // Skills
       const origSkillIds = (user.skills ?? []).map((t) => t.id).sort()
       const currSkillIds = resolvedSkills.map((t) => t.id).sort()
-      if (JSON.stringify(currSkillIds) !== JSON.stringify(origSkillIds)) {
-        resolvedSkills.forEach((t) => fd.append('skill_ids', t.id))
-      }
+      const skillsChanged = JSON.stringify(currSkillIds) !== JSON.stringify(origSkillIds)
 
-      // Featured badges
       const origBadges = user.featured_badges ?? []
-      if (JSON.stringify(form.featured_badges) !== JSON.stringify(origBadges)) {
-        form.featured_badges.forEach((id) => fd.append('featured_badges', id))
-        if (form.featured_badges.length === 0) {
-          // Explicit empty — send the field to clear it
-          fd.append('featured_badges', '')
+      const badgesChanged = JSON.stringify(form.featured_badges) !== JSON.stringify(origBadges)
+
+      const hasFiles = Boolean(avatarPreview || bannerPreview)
+
+      const appendScalarDiff = (fd: FormData) => {
+        if (form.first_name !== (user.first_name || '')) fd.append('first_name', form.first_name)
+        if (form.last_name !== (user.last_name || '')) fd.append('last_name', form.last_name)
+        if (form.bio !== (user.bio || '')) fd.append('bio', form.bio)
+        if (form.location !== (user.location || '')) fd.append('location', form.location)
+        if (form.show_history !== (user.show_history ?? false)) fd.append('show_history', String(form.show_history))
+      }
+
+      let updated: User
+
+      if (!hasFiles) {
+        const body: UserUpdateData = {}
+        if (form.first_name !== (user.first_name || '')) body.first_name = form.first_name
+        if (form.last_name !== (user.last_name || '')) body.last_name = form.last_name
+        if (form.bio !== (user.bio || '')) body.bio = form.bio
+        if (form.location !== (user.location || '')) body.location = form.location
+        if (form.show_history !== (user.show_history ?? false)) body.show_history = form.show_history
+        if (skillsChanged) body.skill_ids = resolvedSkills.map((t) => t.id)
+        if (badgesChanged) body.featured_badges = form.featured_badges
+        updated = await userAPI.updateMe(body)
+      } else {
+        const fd = new FormData()
+        appendScalarDiff(fd)
+        if (skillsChanged) {
+          if (resolvedSkills.length > 0) {
+            resolvedSkills.forEach((t) => fd.append('skill_ids', t.id))
+          } else {
+            // Same semantics as JSON [] — serializer skips blanks and clears skills
+            fd.append('skill_ids', '')
+          }
         }
+        if (badgesChanged) {
+          if (form.featured_badges.length > 0) {
+            form.featured_badges.forEach((id) => fd.append('featured_badges', id))
+          } else {
+            // Matches web FormData clear — '' normalizes to [] in validate_featured_badges
+            fd.append('featured_badges', '')
+          }
+        }
+        if (avatarPreview) {
+          const blob = dataURLtoBlob(avatarPreview)
+          fd.append('avatar', blob, 'avatar.jpg')
+        }
+        if (bannerPreview) {
+          const blob = dataURLtoBlob(bannerPreview)
+          fd.append('banner', blob, 'banner.jpg')
+        }
+        updated = await userAPI.updateMe(fd)
       }
 
-      // Avatar
-      if (avatarPreview) {
-        const blob = dataURLtoBlob(avatarPreview)
-        fd.append('avatar', blob, 'avatar.jpg')
-      }
-
-      // Banner / cover photo
-      if (bannerPreview) {
-        const blob = dataURLtoBlob(bannerPreview)
-        fd.append('banner', blob, 'banner.jpg')
-      }
-
-      const updated = await userAPI.updateMe(fd)
       onSaved(updated)
       toast.success('Profile updated')
       onClose()
     } catch (err) {
-      // Surface featured_badges validation errors
-      const raw = err as { response?: { data?: { featured_badges?: string[] } } }
-      const badgeErrors = raw?.response?.data?.featured_badges
+      // Surface featured_badges validation errors (top-level or field_errors)
+      const raw = err as {
+        response?: {
+          data?: {
+            featured_badges?: string[]
+            field_errors?: { featured_badges?: string[] }
+          }
+        }
+      }
+      const d = raw?.response?.data
+      const badgeErrors = d?.featured_badges ?? d?.field_errors?.featured_badges
       if (badgeErrors && badgeErrors.length > 0) {
         setActiveTab('showcase')
         setFeaturedBadgesError(badgeErrors.join(' '))

@@ -28,9 +28,9 @@ export function navigateToNotificationTarget(
 ): void {
   const { type, related_handshake, related_service, related_service_type, related_user } = notification;
 
-  // New follower → follower's public profile
+  // New follower → follower's public profile (lives on Profile stack, not Home)
   if (type === 'user_followed' && related_user) {
-    navigation.navigate('Home', {
+    navigation.navigate('Profile', {
       screen: 'PublicProfile',
       params: { userId: related_user },
     });

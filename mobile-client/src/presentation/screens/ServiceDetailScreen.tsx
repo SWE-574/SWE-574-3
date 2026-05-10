@@ -723,7 +723,7 @@ export default function ServiceDetailScreen() {
           try {
             await deleteService(service.id);
             if (service.type === "Need") {
-              await refreshUser();
+              await refreshUser({ force: true });
             }
             Alert.alert("Removed", "The listing has been removed.");
             navigation.navigate("Home", { screen: "HomeFeed" } as never);

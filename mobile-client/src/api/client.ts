@@ -79,7 +79,12 @@ export function getRefreshToken(): string | null {
 export async function clearAuth(): Promise<void> {
   authToken = null;
   refreshToken = null;
-  await clearStoredTokens();
+  try {
+    await clearStoredTokens();
+  } catch {
+    // Tokens are already cleared in memory; SecureStore may fail on some devices.
+    // Callers must still clear React/session state — do not throw here.
+  }
 }
 
 export interface RequestConfig extends Omit<RequestInit, "body"> {

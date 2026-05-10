@@ -712,7 +712,7 @@ export default function ServiceWizard({
         ? await patchService(serviceId, buildFormData())
         : await createService(buildFormData());
       if (type === "Need") {
-        await refreshUser();
+        await refreshUser({ force: true });
       }
       Alert.alert(
         "Success",

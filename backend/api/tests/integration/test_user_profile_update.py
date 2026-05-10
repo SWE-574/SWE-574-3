@@ -95,6 +95,30 @@ class TestFeaturedBadgesPatch:
         resp = client.patch(ME_URL, {'featured_badges': []}, format='json')
         assert_api_response(resp, 200, schema={'featured_badges': []})
 
+    def test_patch_empty_string_entry_clears_featured_badges(self):
+        """Web profile edit sends FormData featured_badges='' → ['']; must clear, not 400."""
+        user = UserFactory()
+        b1 = _create_badge('b1', 'Badge One')
+        _earn_badge(user, b1)
+        user.featured_badges = ['b1']
+        user.save(update_fields=['featured_badges'])
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        resp = client.patch(ME_URL, {'featured_badges': ['']}, format='json')
+        assert_api_response(resp, 200)
+        assert resp.json()['featured_badges'] == []
+
+    def test_multipart_empty_featured_badges_field_clears(self):
+        """Web multipart PATCH sends featured_badges='' — must clear without a JSON follow-up."""
+        user = UserFactory()
+        b1 = _create_badge('b1', 'Badge One')
+        _earn_badge(user, b1)
+        user.featured_badges = ['b1']
+        user.save(update_fields=['featured_badges'])
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        resp = client.patch(ME_URL, {'featured_badges': ''}, format='multipart')
+        assert_api_response(resp, 200)
+        assert resp.json()['featured_badges'] == []
+
 
 @pytest.mark.django_db
 @pytest.mark.integration

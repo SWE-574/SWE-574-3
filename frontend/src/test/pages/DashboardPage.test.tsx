@@ -158,7 +158,8 @@ describe('DashboardPage (Browse)', () => {
   it('renders the TagChipsRow "All" chip below the map', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByTestId('map-view')).toBeInTheDocument())
-    const allChip = screen.getByText('All')
+    // TagChipsRow stays empty until featuredAPI.getChips resolves — wait for the chip.
+    const allChip = await screen.findByText('All')
     expect(allChip).toBeInTheDocument()
     const map = screen.getByTestId('map-view')
     const order = map.compareDocumentPosition(allChip)

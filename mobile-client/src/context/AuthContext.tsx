@@ -10,7 +10,14 @@
  *    HTTP 401 from `/auth/refresh/` clears the session.
  */
 
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { UserSummary } from "../api/types";
 import * as authApi from "../api/auth";
 import { useNotificationStore } from "../store/useNotificationStore";
@@ -20,8 +27,8 @@ import { getMe } from "../api/users";
 import { getStoredTokens } from "../api/storage";
 import {
   setAuthTokens,
+  getAuthToken,
   getRefreshToken,
-  ApiHttpError,
   ApiNetworkError,
 } from "../api/client";
 import {
@@ -66,10 +73,6 @@ async function getMeSingleFlight(): Promise<UserSummary> {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function isAuthFailure(err: unknown): boolean {
-  return err instanceof ApiHttpError && (err.status === 401 || err.status === 403);
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -77,6 +80,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const sessionGenerationRef = useRef(0);
 
   const persistUser = useCallback((u: UserSummary) => {
+    // Drop stale API results if the session was cleared while getMe was in flight
+    // (e.g. user logged out during ProfileScreen useFocusEffect → refreshUser).
+    if (!getAuthToken()) return;
     setUser(u);
     setIsStale(false);
     lastConfirmedUserAt = Date.now();
@@ -104,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshUser = useCallback(async (options?: { force?: boolean }) => {
-    const force = options?.force ?? true;
+    const force = options?.force ?? false;
     const startedSessionGeneration = sessionGenerationRef.current;
     if (
       shouldSkipSoftUserRefresh({
@@ -154,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(
     async (body: LoginRequest) => {
       await authApi.login(body);
-      await refreshUser();
+      await refreshUser({ force: true });
     },
     [refreshUser],
   );
@@ -162,7 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(
     async (body: RegisterRequest) => {
       await authApi.register(body);
-      await refreshUser();
+      await refreshUser({ force: true });
     },
     [refreshUser],
   );
@@ -173,23 +179,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // logged-out tree even if downstream cleanup hits an exception (e.g. a
     // SecureStore error or a notification-store reset that throws). The
     // earlier order awaited token storage and the notification reset before
-    // touching `user`; if either threw the screen stayed on the cached
-    // profile and the viewer appeared to be still signed in.
+    // touching `user`; if either threw, the screen stayed on the cached
+    // profile and the viewer appeared still signed in.
     // clearSessionLocal also bumps sessionGenerationRef synchronously, so any
-    // in-flight refreshUser race becomes a no-op the same as origin/dev's
-    // explicit pre-bump did.
+    // in-flight refreshUser race becomes a no-op (same effect as a separate
+    // pre-bump).
     await clearSessionLocal(prevId);
     try {
       await authApi.logout();
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn('logout token clear failed', err);
+      console.warn('[AuthContext] logout token clear failed', err);
     }
     try {
       useNotificationStore.getState().reset();
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn('notification store reset failed', err);
+      console.warn('[AuthContext] notification store reset failed', err);
     }
   }, [user, clearSessionLocal]);
 

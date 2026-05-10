@@ -156,7 +156,12 @@ function AgendaItemCard({
 }
 
 
-export default function UpcomingScheduleCard() {
+type Props = {
+  /** Nested inside ProfileAccordionSection — no outer card chrome / margins */
+  embedded?: boolean;
+};
+
+export default function UpcomingScheduleCard({ embedded = false }: Props) {
   const navigation = useNavigation<ScheduleNavigation>();
   const { user } = useAuth();
 
@@ -229,11 +234,13 @@ export default function UpcomingScheduleCard() {
   };
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>UPCOMING</Text>
-      </View>
+    <View style={[styles.container, embedded && styles.containerEmbedded]}>
+      {/* Header — hidden when embedded (accordion supplies title) */}
+      {!embedded ? (
+        <View style={styles.header}>
+          <Text style={styles.eyebrow}>UPCOMING</Text>
+        </View>
+      ) : null}
 
       <View style={styles.monthHeader}>
         <View style={styles.monthNav}>
@@ -433,6 +440,20 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 2,
+  },
+  containerEmbedded: {
+    marginHorizontal: 0,
+    marginTop: 0,
+    marginBottom: 0,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    padding: 12,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+    backgroundColor: colors.WHITE,
   },
   header: {
     flexDirection: "row",

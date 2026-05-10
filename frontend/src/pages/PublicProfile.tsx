@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Box, Button, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
+import { Box, Flex, Text, Spinner, Stack } from '@chakra-ui/react'
 import {
-  FiArrowLeft, FiClock,
-  FiStar, FiCheckCircle, FiThumbsUp, FiUser, FiAlertCircle,
-  FiUserPlus, FiMessageSquare,
+  FiArrowLeft,
+  FiStar, FiCheckCircle, FiUser, FiAlertCircle,
+  FiMessageSquare,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -31,6 +31,19 @@ import { ServiceCard } from '@/components/profile/ServiceCard'
 import { ProfileReviewRow } from '@/components/profile/ProfileReviewRow'
 
 type PublicProfileTab = 'services' | 'history' | 'reviews'
+
+/** Axios / fetch abort — do not surface as profile load failure (Strict Mode + effect re-runs). */
+function isAbortLikeError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const e = err as { name?: string; code?: string; message?: string }
+  return (
+    e.name === 'AbortError' ||
+    e.name === 'CanceledError' ||
+    e.code === 'ERR_CANCELED' ||
+    e.message === 'canceled' ||
+    e.message === 'Canceled'
+  )
+}
 
 const AVATAR_PALETTE = [GREEN, BLUE, TEAL, AMBER, '#0D9488', ORANGE]
 const AVATAR_IMAGE_BG = `linear-gradient(180deg, ${WHITE} 0%, ${GRAY100} 100%)`
@@ -98,18 +111,6 @@ function BadgeChip({ badge }: { badge: BadgeProgress }) {
       <Text fontSize="11px" fontWeight={600} color={badge.earned ? GREEN : GRAY600} flex={1}
         style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{badge.name}</Text>
       {badge.earned && <FiCheckCircle size={11} color={GREEN} />}
-    </Flex>
-  )
-}
-
-// ── Reputation row ────────────────────────────────────────────────────────────
-function RepRow({ icon, label, count, color, bg }: { icon: React.ReactNode; label: string; count: number; color: string; bg: string }) {
-  return (
-    <Flex align="center" gap={3} py="8px" borderBottom={`1px solid ${GRAY100}`}>
-      <Flex w="28px" h="28px" borderRadius="7px" align="center" justify="center" flexShrink={0}
-        style={{ background: bg, color }}>{icon}</Flex>
-      <Text fontSize="12px" color={GRAY600} flex={1}>{label}</Text>
-      <Text fontSize="14px" fontWeight={700} color={count > 0 ? color : GRAY400}>{count}</Text>
     </Flex>
   )
 }
@@ -282,6 +283,7 @@ const PublicProfile = () => {
   const { userId } = useParams<{ userId: string }>()
   const navigate   = useNavigate()
   const currentUser = useAuthStore((s) => s.user)
+  const viewerId = currentUser?.id ?? null
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
   const [profileUser, setProfileUser] = useState<User | null>(null)
@@ -299,15 +301,15 @@ const PublicProfile = () => {
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<GroupedHistoryEntry | null>(null)
   const [followActionLoading, setFollowActionLoading] = useState(false)
   const [followListModal, setFollowListModal] = useState<'followers' | 'following' | null>(null)
-  const [, setReportModalOpen] = useState(false)
   const [activePublicTab, setActivePublicTab] = useState<PublicProfileTab>('services')
 
   useEffect(() => {
     if (!userId) return
-    if (currentUser && currentUser.id === userId) {
+    if (viewerId && viewerId === userId) {
       navigate('/profile', { replace: true })
       return
     }
+    let active = true
     const ac = new AbortController()
 
     const loadProfile = async () => {
@@ -318,22 +320,32 @@ const PublicProfile = () => {
 
       try {
         const u = await userAPI.getUser(userId, ac.signal)
+        if (!active) return
         setProfileUser(u)
         serviceAPI.list({ user_id: userId, page_size: 50 }, ac.signal)
-          .then((items) => setServices(items.filter(isOngoingProfileService))).catch(() => {})
+          .then((items) => {
+            if (active) setServices(items.filter(isOngoingProfileService))
+          })
+          .catch(() => {})
         if (u.show_history) {
-          userAPI.getHistory(userId, ac.signal).then(setHistory).catch(() => {})
+          userAPI.getHistory(userId, ac.signal).then((h) => active && setHistory(h)).catch(() => {})
         }
-        userAPI.getBadgeProgress(userId, ac.signal).then(setBadges).catch(() => {})
+        userAPI.getBadgeProgress(userId, ac.signal).then((b) => active && setBadges(b)).catch(() => {})
         setReviewsLoading(true)
         Promise.all([
           userAPI.getVerifiedReviews(userId, { role: 'provider', signal: ac.signal }),
           userAPI.getVerifiedReviews(userId, { role: 'receiver', signal: ac.signal }),
-        ]).then(([rProvider, rTaker]) => {
-          setReviewsAsProvider(rProvider.results)
-          setReviewsAsTaker(rTaker.results)
-        }).catch(() => {}).finally(() => setReviewsLoading(false))
+        ])
+          .then(([rProvider, rTaker]) => {
+            if (!active) return
+            setReviewsAsProvider(rProvider.results)
+            setReviewsAsTaker(rTaker.results)
+          })
+          .catch(() => {})
+          .finally(() => active && setReviewsLoading(false))
       } catch (err) {
+        if (!active) return
+        if (isAbortLikeError(err)) return
         const status = (err as { response?: { status?: number } })?.response?.status
         if (status === 404) setNotFound(true)
         else if (status === 401 || status === 403) {
@@ -343,14 +355,19 @@ const PublicProfile = () => {
           setProfileLoadError(getErrorMessage(err, 'Profile is temporarily unavailable.'))
         }
       } finally {
-        setLoading(false)
+        if (active) setLoading(false)
       }
     }
 
     void loadProfile()
 
-    return () => ac.abort()
-  }, [userId, currentUser, navigate, retryKey])
+    return () => {
+      active = false
+      ac.abort()
+    }
+    // Use viewer id only — full `user` object identity changes on Zustand updates and would
+    // abort in-flight requests when opening a profile from the follow list.
+  }, [userId, viewerId, navigate, retryKey])
 
   const ownHistory = history.filter(isOwnHistoryItem)
   const groupedOwnHistory = useMemo(() => groupHistoryItems(ownHistory), [ownHistory])
@@ -395,10 +412,6 @@ const PublicProfile = () => {
   if (notFound || !profileUser) return <NotFoundState onBack={() => navigate(-1)} />
 
   const earnedBadges  = badges.filter(b => b.earned)
-  const punctual      = profileUser.punctual_count ?? 0
-  const helpful       = profileUser.helpful_count  ?? 0
-  const kind          = profileUser.kind_count     ?? 0
-  const hasRep        = punctual + helpful + kind > 0
 
   return (
     <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto" className="no-scrollbar"
@@ -431,14 +444,6 @@ const PublicProfile = () => {
           user={profileUser}
           mode="public"
           featuredBadges={profileUser.featured_badges_detail ?? []}
-          onMessageClick={() => {
-            if (!isAuthenticated) {
-              toast.info('Sign in to message this user.')
-              return
-            }
-            toast.info('Messaging coming soon.')
-          }}
-          onReportClick={() => setReportModalOpen(true)}
           onFollowersClick={() => {
             if (!isAuthenticated) { toast.info('Sign in to see followers.'); return }
             setFollowListModal('followers')
@@ -448,46 +453,10 @@ const PublicProfile = () => {
             setFollowListModal('following')
           }}
           completedExchanges={groupedOwnHistory.length}
-          reputationScore={hasRep ? Math.round(((punctual + helpful + kind) / 3) * 10) / 10 : undefined}
+          onFollowPress={showFollowButton ? handleFollowToggle : undefined}
+          isFollowing={Boolean(profileUser.is_following)}
+          followActionLoading={followActionLoading}
         />
-
-        {/* Follow button (separate from hero action row) */}
-        {showFollowButton && (
-          <Flex mb={4}>
-            {profileUser.is_following ? (
-              <Button
-                size="sm"
-                variant="outline"
-                borderRadius="10px"
-                borderColor={GRAY300}
-                color={GRAY700}
-                loading={followActionLoading}
-                disabled={followActionLoading}
-                onClick={handleFollowToggle}
-              >
-                <Flex as="span" align="center" gap={2}>
-                  <FiCheckCircle size={14} />
-                  Unfollow
-                </Flex>
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                bg={GREEN}
-                color={WHITE}
-                borderRadius="10px"
-                loading={followActionLoading}
-                disabled={followActionLoading}
-                onClick={handleFollowToggle}
-              >
-                <Flex as="span" align="center" gap={2}>
-                  <FiUserPlus size={14} />
-                  Follow
-                </Flex>
-              </Button>
-            )}
-          </Flex>
-        )}
 
         {/* ── About (identity-level, above tabs) ───────────────────────────── */}
         {profileUser.bio && (
@@ -615,37 +584,16 @@ const PublicProfile = () => {
             </Box>
           </Box>
 
-          {/* Right column */}
-          <Box w={{ base: '100%', lg: '260px' }} flexShrink={0}>
-            {hasRep && (
-              <SectionCard label="Community Reputation" mb={4}>
-                <Box>
-                  <RepRow icon={<FiClock size={13} />}      label="Punctual" count={punctual} color={GREEN} bg={GREEN_LT} />
-                  <RepRow icon={<FiThumbsUp size={13} />}   label="Helpful"  count={helpful}  color={BLUE}  bg={BLUE_LT} />
-                  <RepRow icon={<FiAlertCircle size={13} />} label="Kind"    count={kind}     color={AMBER} bg={AMBER_LT} />
-                </Box>
-              </SectionCard>
-            )}
-
-            {earnedBadges.length > 0 && (
+          {/* Right column — badges only (no empty placeholder) */}
+          {earnedBadges.length > 0 && (
+            <Box w={{ base: '100%', lg: '260px' }} flexShrink={0}>
               <SectionCard label="Badges" mb={0}>
                 <Stack gap={2}>
                   {earnedBadges.slice(0, 6).map(b => <BadgeChip key={b.badge_type} badge={b} />)}
                 </Stack>
               </SectionCard>
-            )}
-
-            {!hasRep && earnedBadges.length === 0 && (
-              <SectionCard mb={0}>
-                <Flex direction="column" align="center" py={4} gap={2}>
-                  <FiUser size={24} color={GRAY300} />
-                  <Text fontSize="12px" color={GRAY400} textAlign="center">
-                    Reputation and badges will appear here as this user completes exchanges.
-                  </Text>
-                </Flex>
-              </SectionCard>
-            )}
-          </Box>
+            </Box>
+          )}
         </Flex>
       </Box>
 

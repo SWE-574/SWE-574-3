@@ -134,11 +134,15 @@ class User(AbstractUser):
         ids = self.featured_badges
         if not isinstance(ids, list):
             raise ValidationError({'featured_badges': ['Must be a list.']})
-        if len(ids) > 2:
-            raise ValidationError({'featured_badges': ['At most 2 featured badges are allowed.']})
         for entry in ids:
             if not isinstance(entry, str):
                 raise ValidationError({'featured_badges': ['All entries must be strings.']})
+        # Normalize multipart noise: FormData may submit '' as a list item; strip empties
+        # before max-count / uniqueness checks (matches serializer validate_featured_badges).
+        ids = [e.strip() for e in ids if e.strip()]
+        self.featured_badges = ids
+        if len(ids) > 2:
+            raise ValidationError({'featured_badges': ['At most 2 featured badges are allowed.']})
         if len(ids) != len(set(ids)):
             raise ValidationError({'featured_badges': ['Duplicate badge IDs are not allowed.']})
         if ids:
