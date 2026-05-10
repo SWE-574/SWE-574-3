@@ -300,9 +300,22 @@ export function MainSidebar({
                 )
               })}
               {myServices.length > 4 && (
-                <Text fontSize="11px" color={GRAY400} textAlign="center">
-                  +{myServices.length - 4} more
-                </Text>
+                <Box
+                  as="button"
+                  w="full"
+                  py="6px"
+                  borderRadius="9px"
+                  bg="transparent"
+                  border={`1px dashed ${GRAY200}`}
+                  onClick={() => navigate('/profile?tab=offers')}
+                  aria-label="View all my listings"
+                  data-testid="my-listings-show-all"
+                  _hover={{ bg: GRAY50, borderColor: GRAY100 }}
+                >
+                  <Text fontSize="11px" fontWeight={600} color={GRAY500} textAlign="center">
+                    +{myServices.length - 4} more
+                  </Text>
+                </Box>
               )}
             </VStack>
           </Box>

@@ -21,6 +21,8 @@ import {
   FiMenu,
   FiX,
   FiCheck,
+  FiMap,
+  FiChevronUp,
 } from 'react-icons/fi'
 
 // Lazy-load the Mapbox-backed MapView. mapbox-gl is ~1.79 MB / 492 KB gzipped
@@ -445,6 +447,12 @@ const DashboardPage = () => {
   const [distanceKm, setDistanceKm]                 = useState(20)
   const [debouncedDistance, setDebouncedDistance]   = useState(20)
   const [locationEnabled, setLocationEnabled]       = useState(() => localStorage.getItem('locationEnabled') !== 'false')
+  // Discovery feed gets cramped on smaller MacBooks because the 280px-tall
+  // Mapbox panel pushes the first card row well below the fold. Persist the
+  // collapse choice so power users who never look at the map don't have to
+  // dismiss it on every visit. Defaults to expanded so first-time users
+  // still see the location preview.
+  const [mapCollapsed, setMapCollapsed]             = useState(() => localStorage.getItem('dashboardMapCollapsed') === 'true')
   const [locationLoading, setLocationLoading]       = useState(false)
   const [locationError, setLocationError]           = useState<string | null>(null)
   const locationAutoRequested                       = useRef(false)
@@ -890,32 +898,87 @@ const DashboardPage = () => {
 
           </Box>
 
-          {/* Map panel — always visible, fixed height. Lazy-loaded. */}
-          <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3}>
-            <Suspense
-              fallback={
+          {/* Map panel — responsive height, collapsible to recover the
+              280px above-the-fold cost on smaller MacBook displays. The
+              collapsed banner skips the Mapbox load entirely so the
+              network/CPU savings stack on top of the layout one. */}
+          <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} p={3} position="relative">
+            {mapCollapsed ? (
+              <Box
+                as="button"
+                w="full"
+                px={3}
+                py="8px"
+                borderRadius="12px"
+                bg={GRAY50}
+                border={`1px solid ${GRAY200}`}
+                onClick={() => {
+                  setMapCollapsed(false)
+                  localStorage.setItem('dashboardMapCollapsed', 'false')
+                }}
+                aria-label="Show map"
+                data-testid="dashboard-map-show"
+                _hover={{ bg: GRAY100 }}
+              >
+                <Flex align="center" justify="center" gap={2} color={GRAY600}>
+                  <FiMap size={14} />
+                  <Text fontSize="12px" fontWeight={600}>Show map</Text>
+                </Flex>
+              </Box>
+            ) : (
+              <>
+                <Box h={{ base: '200px', md: '240px', lg: '280px' }}>
+                  <Suspense
+                    fallback={
+                      <Box
+                        bg={GRAY100}
+                        h="100%"
+                        borderRadius="12px"
+                        border={`1px solid ${GRAY200}`}
+                      />
+                    }
+                  >
+                    <MapView
+                      services={displayServices}
+                      height="100%"
+                      onServiceClick={(id) => navigate(`/service-detail/${id}`)}
+                      userLocation={userLocation}
+                      isRefreshing={isLoading && services.length > 0}
+                    />
+                  </Suspense>
+                </Box>
                 <Box
-                  bg={GRAY100}
-                  h="280px"
-                  borderRadius="12px"
+                  as="button"
+                  position="absolute"
+                  top="14px"
+                  right="14px"
+                  zIndex={2}
+                  px="8px"
+                  py="4px"
+                  borderRadius="9px"
+                  bg="rgba(255,255,255,0.9)"
                   border={`1px solid ${GRAY200}`}
-                />
-              }
-            >
-              <MapView
-                services={displayServices}
-                height="280px"
-                onServiceClick={(id) => navigate(`/service-detail/${id}`)}
-                userLocation={userLocation}
-                isRefreshing={isLoading && services.length > 0}
-              />
-            </Suspense>
+                  onClick={() => {
+                    setMapCollapsed(true)
+                    localStorage.setItem('dashboardMapCollapsed', 'true')
+                  }}
+                  aria-label="Hide map"
+                  data-testid="dashboard-map-hide"
+                  _hover={{ bg: WHITE }}
+                >
+                  <Flex align="center" gap="4px" color={GRAY600}>
+                    <FiChevronUp size={12} />
+                    <Text fontSize="11px" fontWeight={700}>Hide map</Text>
+                  </Flex>
+                </Box>
+              </>
+            )}
           </Box>
 
           {/* YouTube-style filter chips. Click a chip to narrow the feed
               to that Wikidata tag, "All" resets. Chips are derived from
               the viewer's interaction history (skills + handshakes + saved). */}
-          <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} px={{ base: 3, md: 5 }} py="10px">
+          <Box bg={WHITE} borderBottom={`1px solid ${GRAY200}`} flexShrink={0} px={{ base: 3, md: 5 }} py="6px">
             <TagChipsRow activeQid={activeTagQid} onSelect={setActiveTagQid} />
           </Box>
 
