@@ -269,8 +269,8 @@ describe('DashboardPage (Browse)', () => {
     // Wait for the cards to render and read their DOM order. The grid
     // renders services in array order, so without diversification the
     // tag card sits last — `f1, f2, f3, t1`. After the wired pass, the
-    // helper swaps t1 into position 1 (lookahead 3), giving `f1, t1, f2, f3`,
-    // which breaks the consecutive-follow run.
+    // helper finds the tag card within the lookahead window and swaps
+    // it into position 1, breaking the consecutive-follow run.
     await waitFor(() => expect(screen.getByText('Follow card 1')).toBeInTheDocument())
 
     const titles = ['Follow card 1', 'Follow card 2', 'Follow card 3', 'Tag card 1']

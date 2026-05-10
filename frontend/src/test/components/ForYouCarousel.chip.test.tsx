@@ -124,6 +124,36 @@ describe('diversifyByChip', () => {
     expect(out.map(s => s.id)).toEqual(['0', '1', '2', '3', '4'])
   })
 
+  it('does not perturb ranking to break a run of invisible (none-identity) pills', () => {
+    // pillIdentity returns 'none' for vanilla cards: no for_you_signals,
+    // no explore_pool, no newcomer flag, not capacity-near-full. SmartPill
+    // renders nothing for these. Two consecutive 'none' cards are not a
+    // user-visible cluster, so the diversifier must NOT bump a higher-
+    // ranked 'none' card down just to lift a single 'follow' card up
+    // through the lookahead window — that perturbs ranking order to
+    // resolve a collision the user can't see.
+    const vanilla = (id: string): Service =>
+      ({ id, title: `Service ${id}`, type: 'Offer' } as unknown as Service)
+    const followCard = (id: string) =>
+      svc(id, { tag: 0, follow: 1, cooccur: 0, recency_penalty: 0 })
+    const cards = [
+      vanilla('a'),
+      vanilla('b'),
+      vanilla('c'),
+      followCard('d'),
+    ]
+
+    const out = diversifyByChip(cards)
+    // Sanity: every vanilla card is identity 'none' and the follow card is
+    // identity 'follow' — the precondition that triggered the spurious swap.
+    expect(pillIdentity(cards[0])).toBe('none')
+    expect(pillIdentity(cards[1])).toBe('none')
+    expect(pillIdentity(cards[3])).toBe('follow')
+    // Order is preserved: the follow card stays at the bottom even though
+    // pulling it up would technically "diversify" the none-none collision.
+    expect(out.map(s => s.id)).toEqual(['a', 'b', 'c', 'd'])
+  })
+
   it('breaks up follow-saturated runs across the first two visible rows of a 15-card grid', () => {
     // Mirrors Elif's account on the demo seed, where ~80% of cards win
     // the chip on `follow` (everyone-follows-everyone) and only 3 of 15

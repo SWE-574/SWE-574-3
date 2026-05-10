@@ -167,10 +167,15 @@ export function diversifyByChip(services: Service[], lookahead = 7): Service[] {
   const maxSwaps = Math.floor(out.length / 2)
   let swaps = 0
   for (let i = 1; i < out.length && swaps < maxSwaps; i++) {
-    if (pillIdentity(out[i]) !== pillIdentity(out[i - 1])) continue
+    const prev = pillIdentity(out[i - 1])
+    // 'none' cards render no pill at all, so a "run" of them is invisible.
+    // Lifting a chipped neighbour up to break it just reorders ranking for
+    // a collision the user can't see.
+    if (prev === 'none') continue
+    if (pillIdentity(out[i]) !== prev) continue
     const limit = Math.min(out.length, i + 1 + lookahead)
     for (let j = i + 1; j < limit; j++) {
-      if (pillIdentity(out[j]) !== pillIdentity(out[i - 1])) {
+      if (pillIdentity(out[j]) !== prev) {
         ;[out[i], out[j]] = [out[j], out[i]]
         swaps += 1
         break
