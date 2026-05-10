@@ -555,6 +555,11 @@ class ServiceSerializer(serializers.ModelSerializer):
     is_newcomer_owner = serializers.SerializerMethodField()
     edit_locked = serializers.BooleanField(read_only=True)
     edit_lock_reason = serializers.CharField(read_only=True, allow_null=True)
+    # Optimistic-lock counter (NFR-05d). Read-only on the wire — clients
+    # echo the GET value back in the PATCH body and ServiceViewSet.partial_update
+    # treats a mismatch as a 409. The actual increment happens server-side
+    # under SELECT FOR UPDATE inside the same transaction.
+    version = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Service
@@ -569,6 +574,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             'is_saved', 'is_dismissed',
             'is_newcomer_owner', 'source', 'for_you_signals', 'explore_pool',
             'edit_locked', 'edit_lock_reason',
+            'version',
         ]
         read_only_fields = [
             'user', 'hot_score', 'is_visible', 'is_pinned',
@@ -576,6 +582,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             'is_newcomer_owner',
             'source', 'for_you_signals', 'explore_pool',
             'edit_locked', 'edit_lock_reason',
+            'version',
         ]
 
     def get_is_saved(self, obj):
