@@ -1,6 +1,7 @@
 .PHONY: help env env-local env-prod env-status \
         setup setup-demo dev dev-all stop reset install migrate makemigrations lint build clean \
-        mobile mobile-setup mobile-build-android mobile-build-ios \
+        mobile mobile-setup \
+        mobile-build-android mobile-build-android-local mobile-build-ios mobile-build-preview \
         db-shell db-time db-time-reset \
         infra-up infra-down infra-reset infra-demo \
         docker-up docker-down docker-logs docker-build docker-reset docker-demo \
@@ -68,35 +69,35 @@ help: ## Show this help message
 	@echo ''
 	@printf '\033[1mUsage:\033[0m make [target] [MODE=local|prod]\n'
 	@echo ''
-	@echo '\033[1;4mGetting Started:\033[0m'
-	@grep -E '^(env|setup|setup-demo):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mGetting Started:\033[0m\n'
+	@grep -E '^(env|setup|setup-demo):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mEnvironment Profiles:\033[0m'
-	@grep -E '^env-(local|prod|status):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mEnvironment Profiles:\033[0m\n'
+	@grep -E '^env-(local|prod|status):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mLocal Development:\033[0m'
-	@grep -E '^(dev|dev-all|stop|reset|install|migrate|makemigrations|lint|build|clean):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mLocal Development:\033[0m\n'
+	@grep -E '^(dev|dev-all|stop|reset|install|migrate|makemigrations|lint|build|clean):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mMobile:\033[0m'
-	@grep -E '^mobile[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mMobile:\033[0m\n'
+	@grep -E '^mobile[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mDatabase:\033[0m'
-	@grep -E '^db-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mDatabase:\033[0m\n'
+	@grep -E '^db-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mInfra Only (PostGIS + Redis + MinIO):\033[0m'
-	@grep -E '^infra-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mInfra Only (PostGIS + Redis + MinIO):\033[0m\n'
+	@grep -E '^infra-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mDocker Dev (full stack in containers):\033[0m'
-	@grep -E '^docker-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mDocker Dev (full stack in containers):\033[0m\n'
+	@grep -E '^docker-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mDocker Prod (production stack):\033[0m'
-	@grep -E '^prod-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mDocker Prod (production stack):\033[0m\n'
+	@grep -E '^prod-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mShells:\033[0m'
-	@grep -E '^shell-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mShells:\033[0m\n'
+	@grep -E '^shell-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mTesting:\033[0m'
-	@grep -E '^(test|test-unit|test-integration|test-docker|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mTesting:\033[0m\n'
+	@grep -E '^(test|test-unit|test-integration|test-docker|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 
 
@@ -290,11 +291,17 @@ mobile-setup: ## Install mobile dependencies
 	@cd mobile-client && npm install
 	$(call _ok,"Mobile setup complete.")
 
-mobile-build-android: ## EAS build for Android
-	@cd mobile-client && npx eas build --platform android
+mobile-build-android: ## EAS production build for Android (APK)
+	@cd mobile-client && npm run build:android
 
-mobile-build-ios: ## EAS build for iOS
-	@cd mobile-client && npx eas build --platform ios
+mobile-build-android-local: ## Local gradle release build (APK in android/app/build/outputs/apk/release/)
+	@cd mobile-client && npm run build:android:local
+
+mobile-build-ios: ## EAS production build for iOS
+	@cd mobile-client && npm run build:ios
+
+mobile-build-preview: ## EAS preview build for Android + iOS (internal distribution)
+	@cd mobile-client && npm run build:preview
 
 
 # ─────────────────────────────────────────────────────────────────────────────
