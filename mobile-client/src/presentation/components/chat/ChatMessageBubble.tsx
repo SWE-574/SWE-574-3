@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Linking,
   TouchableOpacity,
+  Platform,
 } from "react-native";
 import { Image } from "react-native";
 import type { ChatMessageWithMeta } from "../../../types/chatTypes";
@@ -119,7 +120,7 @@ export function ChatMessageBubble({
 export const styles = StyleSheet.create({
   messageRow: {
     flexDirection: "row",
-    marginBottom: 10,
+    marginBottom: 12,
     alignItems: "flex-end",
   },
   ownMessageRow: {
@@ -168,19 +169,37 @@ export const styles = StyleSheet.create({
     marginLeft: 2,
   },
   messageBubble: {
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
   },
   ownBubble: {
     backgroundColor: colors.GREEN,
     borderBottomRightRadius: 6,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.12,
+        shadowRadius: 2,
+      },
+      android: { elevation: 2 },
+    }),
   },
   otherBubble: {
     backgroundColor: colors.WHITE,
     borderBottomLeftRadius: 6,
     borderWidth: 1,
     borderColor: colors.GRAY200,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 2,
+      },
+      android: { elevation: 1 },
+    }),
   },
   pendingBubble: {
     opacity: 0.8,

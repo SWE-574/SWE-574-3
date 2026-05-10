@@ -92,10 +92,10 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "flex-start",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     backgroundColor: colors.GRAY50,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.GRAY200,
   },
   step: {
@@ -144,9 +144,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.GRAY200,
   },
   label: {
-    fontSize: 8,
+    fontSize: 9,
     textAlign: "center",
-    letterSpacing: 0.2,
+    letterSpacing: 0.15,
   },
   labelDone: {
     color: colors.GREEN,

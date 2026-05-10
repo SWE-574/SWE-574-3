@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   RefreshControl,
   StyleSheet,
@@ -26,6 +25,7 @@ import {
 import { buildEventChatWsUrl, withAuthToken } from "../../api/websocketUrls";
 import { normalizeMessage } from "../../api/chatMessages";
 import { useAuth } from "../../context/AuthContext";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { colors } from "../../constants/colors";
 import type { ChatMessageWithMeta } from "../../types/chatTypes";
 import type { MessagesStackParamList } from "../../navigation/MessagesStack";
@@ -49,6 +49,7 @@ type NavProps = NativeStackScreenProps<
 export default function PublicChatScreen() {
   const { params } = useRoute<NavProps["route"]>();
   const navigation = useNavigation<NativeStackNavigationProp<MessagesStackParamList>>();
+  const keyboardHeight = useKeyboardHeight() + 2;
   const { user } = useAuth();
   const { roomId: serviceId, roomTitle } = params ?? { roomId: "" };
 
@@ -443,12 +444,8 @@ export default function PublicChatScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
-      >
+    <View style={styles.container}>
+      <View style={[styles.keyboardView, { paddingBottom: keyboardHeight }]}>
         <View style={styles.headerRow}>
           <View style={styles.headerIconWrap}>
             <Ionicons name="calendar" size={18} color={colors.AMBER} />
@@ -478,15 +475,17 @@ export default function PublicChatScreen() {
               <Ionicons name="people-outline" size={16} color={colors.AMBER} />
               <Text style={styles.participantsButtonText}>People</Text>
             </TouchableOpacity>
-            <View
-              style={[
-                styles.connectionDot,
-                { backgroundColor: connected ? "#10B981" : colors.GRAY400 },
-              ]}
-            />
-            <Text style={styles.connectionText}>
-              {connected ? "Live" : "Connecting"}
-            </Text>
+            <View style={styles.liveStatusPill}>
+              <View
+                style={[
+                  styles.connectionDot,
+                  { backgroundColor: connected ? "#10B981" : colors.GRAY400 },
+                ]}
+              />
+              <Text style={styles.connectionText}>
+                {connected ? "Live" : "Connecting"}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -496,46 +495,49 @@ export default function PublicChatScreen() {
           </View>
         ) : null}
 
-        {loading && messages.length === 0 ? (
-          <View style={styles.centerState}>
-            <ActivityIndicator size="large" color={colors.AMBER} />
-            <Text style={styles.centerStateText}>Loading event chat...</Text>
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={[
-              styles.listContent,
-              messages.length === 0 && styles.emptyListContent,
-            ]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            onContentSizeChange={() => scrollToBottom(false)}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={() => loadHistory(true)}
-                tintColor={colors.AMBER}
-              />
-            }
-            ListEmptyComponent={
-              <View style={styles.centerState}>
-                <Ionicons
-                  name="chatbubble-ellipses-outline"
-                  size={34}
-                  color={colors.GRAY400}
+        <View style={styles.messagesPane}>
+          {loading && messages.length === 0 ? (
+            <View style={styles.centerState}>
+              <ActivityIndicator size="large" color={colors.AMBER} />
+              <Text style={styles.centerStateText}>Loading event chat...</Text>
+            </View>
+          ) : (
+            <FlatList
+              ref={listRef}
+              data={messages}
+              renderItem={renderMessage}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={[
+                styles.listContent,
+                messages.length === 0 && styles.emptyListContent,
+                { paddingBottom: keyboardHeight + 100 },
+              ]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={() => scrollToBottom(false)}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => loadHistory(true)}
+                  tintColor={colors.AMBER}
                 />
-                <Text style={styles.emptyTitle}>No messages yet</Text>
-                <Text style={styles.centerStateText}>
-                  Start the event conversation by sending a message.
-                </Text>
-              </View>
-            }
-          />
-        )}
+              }
+              ListEmptyComponent={
+                <View style={styles.centerState}>
+                  <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={34}
+                    color={colors.GRAY400}
+                  />
+                  <Text style={styles.emptyTitle}>No messages yet</Text>
+                  <Text style={styles.centerStateText}>
+                    Start the event conversation by sending a message.
+                  </Text>
+                </View>
+              }
+            />
+          )}
+        </View>
 
         <ChatInputBar
           value={inputText}
@@ -558,8 +560,8 @@ export default function PublicChatScreen() {
           onClose={() => setShowParticipantsSheet(false)}
           onParticipantPress={openParticipantProfile}
         />
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </View>
+    </View>
   );
 }
 
@@ -570,25 +572,40 @@ const styles = StyleSheet.create({
   },
   keyboardView: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: colors.GRAY50,
+  },
+  messagesPane: {
+    flex: 1,
+    minHeight: 0,
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.GRAY200,
     backgroundColor: colors.WHITE,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+      },
+      android: { elevation: 2 },
+    }),
   },
   headerIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#FFF7ED",
+    backgroundColor: colors.AMBER_LT,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
   },
   headerInfo: {
     flex: 1,
@@ -603,10 +620,11 @@ const styles = StyleSheet.create({
     color: colors.GRAY900,
   },
   headerTitleLink: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "700",
-    color: colors.BLUE,
+    color: colors.AMBER,
     textDecorationLine: "underline",
+    letterSpacing: -0.2,
   },
   headerSubtitle: {
     marginTop: 1,
@@ -616,16 +634,30 @@ const styles = StyleSheet.create({
   connectionIndicator: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: 8,
+    flexShrink: 0,
+  },
+  liveStatusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.GRAY50,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
   },
   connectionDot: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
   },
   connectionText: {
-    fontSize: 12,
-    color: colors.GRAY500,
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.GRAY600,
+    letterSpacing: 0.2,
   },
   participantsButton: {
     flexDirection: "row",
@@ -643,18 +675,19 @@ const styles = StyleSheet.create({
   },
   errorBar: {
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#FEF2F2",
-    borderBottomWidth: 1,
-    borderBottomColor: "#FECACA",
+    paddingVertical: 11,
+    backgroundColor: colors.RED_LT,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.GRAY200,
   },
   errorText: {
     color: colors.RED,
     fontSize: 13,
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 20,
   },
   emptyListContent: {
     flexGrow: 1,

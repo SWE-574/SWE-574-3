@@ -4,8 +4,6 @@ import {
   Alert,
   FlatList,
   Image,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -35,6 +33,7 @@ import { colors } from "../../constants/colors";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import { getInitials } from "../../utils/getInitials";
 import { useAuth } from "../../context/AuthContext";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { ChatInputBar } from "../components/chat/ChatInputBar";
 import type { ForumStackParamList } from "../../navigation/ForumStack";
 import type { UserSummary } from "../../api/types";
@@ -371,6 +370,7 @@ function PostItem({
 
 export default function TopicDetailScreen() {
   const navigation = useNavigation<NavProp>();
+  const keyboardHeight = useKeyboardHeight() + 2;
   const { id } = useRoute<RouteParam>().params;
   const { isAuthenticated, user } = useAuth();
 
@@ -726,7 +726,10 @@ export default function TopicDetailScreen() {
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
       <View style={styles.topBar}>
-        <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
+        <Pressable
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
           <Ionicons name="arrow-back" size={22} color={colors.GRAY900} />
         </Pressable>
         <View style={styles.topBarTextWrap}>
@@ -738,42 +741,46 @@ export default function TopicDetailScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator size="large" color={colors.GREEN} style={styles.fullScreenSpinner} />
+        <ActivityIndicator
+          size="large"
+          color={colors.GREEN}
+          style={styles.fullScreenSpinner}
+        />
       ) : (
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <FlatList
-            ref={listRef}
-            data={posts}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <PostItem
-                post={item}
-                user={user}
-                topicAuthorId={topic?.author_id ?? ""}
-                tone={topicTone}
-                isEditing={editingPostId === item.id}
-                editingPostBody={editingPostBody}
-                savingPost={savingPost}
-                onEditBodyChange={setEditingPostBody}
-                onMenu={handlePostMenu}
-                onReport={(post) => setReportTarget({ kind: "post", post })}
-                onSave={handleSavePost}
-                onCancel={handleCancelPostEdit}
-              />
-            )}
-            ListHeaderComponent={renderListHeader}
-            ListEmptyComponent={renderEmpty}
-            ListFooterComponent={renderFooter}
-            onEndReached={handleLoadMore}
-            onEndReachedThreshold={0.3}
-            contentContainerStyle={styles.listContent}
-            ItemSeparatorComponent={() => <View style={styles.cardGap} />}
-          />
+        <View style={[styles.flex, { paddingBottom: keyboardHeight }]}>
+          <View style={styles.messagesPane}>
+            <FlatList
+              ref={listRef}
+              data={posts}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <PostItem
+                  post={item}
+                  user={user}
+                  topicAuthorId={topic?.author_id ?? ""}
+                  tone={topicTone}
+                  isEditing={editingPostId === item.id}
+                  editingPostBody={editingPostBody}
+                  savingPost={savingPost}
+                  onEditBodyChange={setEditingPostBody}
+                  onMenu={handlePostMenu}
+                  onReport={(post) => setReportTarget({ kind: "post", post })}
+                  onSave={handleSavePost}
+                  onCancel={handleCancelPostEdit}
+                />
+              )}
+              ListHeaderComponent={renderListHeader}
+              ListEmptyComponent={renderEmpty}
+              ListFooterComponent={renderFooter}
+              onEndReached={handleLoadMore}
+              onEndReachedThreshold={0.3}
+              contentContainerStyle={styles.listContent}
+              ItemSeparatorComponent={() => <View style={styles.cardGap} />}
+              keyboardShouldPersistTaps="handled"
+            />
+          </View>
           {renderComposer()}
-        </KeyboardAvoidingView>
+        </View>
       )}
 
       <ReportModal
@@ -794,6 +801,10 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  messagesPane: {
+    flex: 1,
+    minHeight: 0,
   },
   topBar: {
     flexDirection: "row",
