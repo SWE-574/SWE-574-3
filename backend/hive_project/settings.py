@@ -437,6 +437,19 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
+# Cookie security defaults — pinned for both dev and prod so a future
+# Django version change cannot silently downgrade them. ``Secure`` is only
+# enabled in production because the dev server runs over plain HTTP and
+# browsers would otherwise drop the cookie. SameSite=Lax matches the
+# auth-cookie helper in ``api/views.py`` and is compatible with the
+# top-level navigations the SPA relies on.
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+
 # Security settings for production
 #
 # Geolocation encryption posture (NFR-19c, #326): user coordinates rely on
