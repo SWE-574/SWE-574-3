@@ -4,7 +4,6 @@ import { createOffer, expectToast, loginAs, requestOfferFromDetail, switchUser, 
 test('FR-05g: owner can remove an offer with no related exchanges', async ({ page }) => {
   const removableTitle = uniqueTitle('FR-05g Removable Offer')
 
-  // Create a clean offer with no related exchanges.
   await loginAs(page, USERS.cem)
   await createOffer(page, {
     title: removableTitle,

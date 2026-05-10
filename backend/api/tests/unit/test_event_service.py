@@ -451,6 +451,24 @@ class TestGenerateQRToken:
         with pytest.raises(ValueError, match='does not require'):
             EventHandshakeService.generate_qr_token(service, organizer)
 
+    def test_cannot_generate_outside_lockdown_window(self):
+        """Pin the 24-hour lockdown gate.
+
+        Generation must raise ``ValueError`` with the user-readable message
+        when the event is more than 24h away. The frontend depends on this
+        exact message to surface "Could not generate the attendance QR" via
+        the ServerError toast (EventRosterModal); silently swallowing the
+        error in the FE used to leave the button stuck on "Generating...".
+        """
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer, hours_until_start=48)
+        assert not service.is_in_lockdown_window
+        with pytest.raises(
+            ValueError,
+            match='QR token can only be generated within 24 hours',
+        ):
+            EventHandshakeService.generate_qr_token(service, organizer)
+
 
 @pytest.mark.django_db
 @pytest.mark.unit

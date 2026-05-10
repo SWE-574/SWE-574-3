@@ -588,6 +588,9 @@ export default function ProfileScreen() {
           completedExchanges={exchangesCount}
           onEditPress={() => navigation.navigate("ProfileEdit", { initialTab: "identity" })}
           onAvatarPress={() => navigation.navigate("ProfileEdit", { initialTab: "photos" })}
+          onShowcaseBadgesPress={() =>
+            navigation.navigate("ProfileEdit", { initialTab: "showcase" })
+          }
           onFollowersPress={() => {
             if (!user?.id) return;
             navigation.navigate("FollowList", {
