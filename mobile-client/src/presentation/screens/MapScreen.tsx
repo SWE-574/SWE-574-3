@@ -397,11 +397,17 @@ export default function MapScreen() {
       }
       if (!parsed) return;
       switch (parsed.type) {
-        case "ready":
-          setMapReady(true);
-          break;
         case "loaded":
-          // HTML is parsed but mapboxgl may still be loading — ignore.
+        case "ready":
+          // mapbox.html sends "loaded" once the IIFE runs (which is right
+          // after the synchronous mapbox-gl.js script tag finishes), and
+          // sends "ready" later from inside map.on("load"). The init post
+          // is gated on mapReady, so if we only flipped the flag on "ready"
+          // we'd deadlock — "ready" can never fire because it lives
+          // inside init(), which never runs because we never post init.
+          // Either signal is sufficient evidence that mapboxgl is alive
+          // and we can safely send the init payload across the bridge.
+          setMapReady(true);
           break;
         case "markerPress": {
           const service = services.find((s) => s.id === parsed!.id);
