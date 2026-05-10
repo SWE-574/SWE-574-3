@@ -49,7 +49,7 @@ type NavProps = NativeStackScreenProps<
 export default function PublicChatScreen() {
   const { params } = useRoute<NavProps["route"]>();
   const navigation = useNavigation<NativeStackNavigationProp<MessagesStackParamList>>();
-  const keyboardHeight = useKeyboardHeight() + 2;
+  const keyboardHeight = useKeyboardHeight();
   const { user } = useAuth();
   const { roomId: serviceId, roomTitle } = params ?? { roomId: "" };
 
@@ -445,7 +445,7 @@ export default function PublicChatScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.keyboardView, { paddingBottom: keyboardHeight }]}>
+      <View style={styles.keyboardView}>
         <View style={styles.headerRow}>
           <View style={styles.headerIconWrap}>
             <Ionicons name="calendar" size={18} color={colors.AMBER} />
@@ -510,7 +510,7 @@ export default function PublicChatScreen() {
               contentContainerStyle={[
                 styles.listContent,
                 messages.length === 0 && styles.emptyListContent,
-                { paddingBottom: keyboardHeight + 100 },
+                { paddingBottom: keyboardHeight + 76 },
               ]}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
@@ -540,6 +540,7 @@ export default function PublicChatScreen() {
         </View>
 
         <ChatInputBar
+          keyboardHeight={keyboardHeight}
           value={inputText}
           onChangeText={setInputText}
           onSend={sendMessage}

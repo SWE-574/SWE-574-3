@@ -61,6 +61,7 @@ type ChatScreenNavigation = CompositeNavigationProp<
 >;
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
 import { useHandshake } from "../../hooks/useHandshake";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { ChatMessageBubble } from "../components/chat/ChatMessageBubble";
 import { ChatHandshakeBanner } from "../components/chat/ChatHandshakeBanner";
 import type { SessionDetails } from "../components/chat/ChatHandshakeBanner";
@@ -77,6 +78,7 @@ export default function ChatScreen() {
   const navigation = useNavigation<ChatScreenNavigation>();
   const { width: windowWidth } = useWindowDimensions();
   const { user } = useAuth();
+  const keyboardHeight = useKeyboardHeight();
 
   const {
     handshakeId,
@@ -852,10 +854,14 @@ export default function ChatScreen() {
                   </Text>
                 </View>
               }
+              ListFooterComponent={() => (
+                <View style={{ height: keyboardHeight + 76 }} />
+              )}
             />
           )}
         </View>
         <ChatInputBar
+          keyboardHeight={keyboardHeight}
           value={inputText}
           onChangeText={setInputText}
           onSend={sendMessage}

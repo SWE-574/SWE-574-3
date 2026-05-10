@@ -49,6 +49,7 @@ export default function GroupChatScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<MessagesStackParamList>>();
   const { groupId, groupTitle = "Group chat" } = params ?? { groupId: "" };
   const { user } = useAuth();
+  const keyboardHeight = useKeyboardHeight();
 
   const [messages, setMessages] = useState<ChatMessageWithMeta[]>([]);
   const [inputText, setInputText] = useState("");
@@ -402,11 +403,16 @@ export default function GroupChatScreen() {
                   </Text>
                 </View>
               }
+              ListFooterComponent={() => (
+                // 46 = bar min-height, 30 = gap between bar bottom and keyboard/screen edge
+                <View style={{ height: keyboardHeight + 76 }} />
+              )}
             />
           )}
         </View>
 
         <ChatInputBar
+          keyboardHeight={keyboardHeight}
           value={inputText}
           onChangeText={setInputText}
           onSend={sendMessage}

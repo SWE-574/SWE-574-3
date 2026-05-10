@@ -1,18 +1,11 @@
 import React from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  Platform,
-} from "react-native";
+import { View, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../../constants/colors";
-import { useKeyboardHeight } from "../../../hooks/useKeyboardHeight";
 import { EdgeInsets, useSafeAreaInsets } from "react-native-safe-area-context";
 
 export type ChatInputBarProps = {
+  keyboardHeight: number;
   value: string;
   onChangeText: (text: string) => void;
   onSend: () => void;
@@ -22,6 +15,7 @@ export type ChatInputBarProps = {
 };
 
 export function ChatInputBar({
+  keyboardHeight,
   value,
   onChangeText,
   onSend,
@@ -30,7 +24,6 @@ export function ChatInputBar({
   sendDisabled,
 }: ChatInputBarProps) {
   const insets = useSafeAreaInsets();
-  const keyboardHeight = useKeyboardHeight();
   const styles = getStyles(insets, keyboardHeight);
   return (
     <View style={styles.inputRow}>
@@ -67,7 +60,7 @@ export const getStyles = (insets: EdgeInsets, keyboardHeight: number) =>
       paddingHorizontal: 12,
       backgroundColor: "transparent",
       position: "absolute",
-      bottom: keyboardHeight + 30,
+      bottom: keyboardHeight + Math.max(insets.bottom, 30),
       left: 0,
       right: 0,
     },
