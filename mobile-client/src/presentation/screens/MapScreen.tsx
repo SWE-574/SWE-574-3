@@ -34,7 +34,6 @@ import MapSearchResults, {
   type MapSearchResult,
 } from "../components/MapSearchResults";
 
-type FilterType = "all" | ServiceType;
 type SignalFilter = Exclude<PillIdentity, "default">;
 
 // Istanbul city center — used when location permission is denied
@@ -135,17 +134,6 @@ const unavailableStyles = StyleSheet.create({
   },
 });
 
-const FILTER_CONFIG: {
-  label: string;
-  value: FilterType;
-  activeColor: string;
-}[] = [
-  { label: "All", value: "all", activeColor: colors.GRAY700 },
-  { label: "Offers", value: "Offer", activeColor: colors.GREEN },
-  { label: "Needs", value: "Need", activeColor: colors.BLUE },
-  { label: "Events", value: "Event", activeColor: colors.AMBER },
-];
-
 type MapPayload = {
   id: string;
   type: ServiceType;
@@ -177,7 +165,6 @@ export default function MapScreen() {
   } | null>(null);
   const [locationResolved, setLocationResolved] = useState(false);
   const [isLoadingServices, setIsLoadingServices] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [activeSignals, setActiveSignals] = useState<Set<SignalFilter>>(
     () => new Set(),
   );
@@ -241,31 +228,37 @@ export default function MapScreen() {
 
     (async () => {
       try {
-        let coords: { latitude: number; longitude: number } | null = null;
+        // Fast path: last-known position returns immediately without warming
+        // up GPS. Seeds the map with a real origin while the fresh fix is
+        // still pending, so the camera doesn't sit on Istanbul for 5+ seconds
+        // on cold start.
+        const last = await Location.getLastKnownPositionAsync().catch(
+          () => null,
+        );
+        if (last) {
+          setUserLocation({
+            latitude: last.coords.latitude,
+            longitude: last.coords.longitude,
+          });
+        }
+
         const { granted } = await Location.getForegroundPermissionsAsync();
-        if (granted) {
+        let permission = granted;
+        if (!permission) {
+          const request = await Location.requestForegroundPermissionsAsync();
+          permission = request.granted;
+        }
+        if (permission) {
           const pos = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
-          coords = {
+          setUserLocation({
             latitude: pos.coords.latitude,
             longitude: pos.coords.longitude,
-          };
-        } else {
-          const permission = await Location.requestForegroundPermissionsAsync();
-          if (permission.granted) {
-            const pos = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            coords = {
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-            };
-          }
+          });
         }
-        if (coords) setUserLocation(coords);
       } catch {
-        // fall back to Istanbul
+        // fall back to Istanbul / last-known
       } finally {
         setLocationResolved(true);
       }
@@ -279,11 +272,16 @@ export default function MapScreen() {
     webViewRef.current?.postMessage(JSON.stringify(payload));
   }, []);
 
-  // Send the init payload as soon as the WebView and the location resolution
-  // are both ready. Keep this firing only once.
+  // Init the map as soon as the WebView is ready. We deliberately do NOT
+  // wait on the GPS fix — iOS getCurrentPositionAsync can take 5–8s on a cold
+  // start, and blocking the map behind that is the dominant load-time cost.
+  // If no user location is known yet, fall back to Istanbul and fly to the
+  // real fix when it arrives (see effect below).
+  const initWithUserRef = useRef(false);
   useEffect(() => {
     if (mapInited) return;
-    if (!mapReady || !locationResolved) return;
+    if (!mapReady) return;
+    const haveUser = !!userLocation;
     const center = userLocation
       ? { lat: userLocation.latitude, lng: userLocation.longitude }
       : { lat: DEFAULT_LOCATION.latitude, lng: DEFAULT_LOCATION.longitude };
@@ -298,8 +296,28 @@ export default function MapScreen() {
         ? { lat: userLocation.latitude, lng: userLocation.longitude }
         : null,
     });
+    if (haveUser) initWithUserRef.current = true;
     setMapInited(true);
-  }, [mapReady, locationResolved, userLocation, services, post, mapInited, mapboxToken]);
+  }, [mapReady, userLocation, services, post, mapInited, mapboxToken]);
+
+  // If init ran before GPS resolved, fly to the user once the fresh fix
+  // arrives so they don't have to tap "find me" themselves.
+  useEffect(() => {
+    if (!mapInited) return;
+    if (!userLocation) return;
+    if (initWithUserRef.current) return;
+    initWithUserRef.current = true;
+    post({
+      type: "setUser",
+      lat: userLocation.latitude,
+      lng: userLocation.longitude,
+    });
+    post({
+      type: "flyTo",
+      lat: userLocation.latitude,
+      lng: userLocation.longitude,
+    });
+  }, [mapInited, userLocation, post]);
 
   const recenterOnUser = useCallback(async () => {
     try {
@@ -331,18 +349,26 @@ export default function MapScreen() {
     }
   }, [post]);
 
-  // Fetch services whenever location or distance changes.
+  // Hold the latest location in a ref so fetchServices can read it without
+  // re-firing when GPS refines from last-known to a fresh fix. Pre-fix we
+  // re-fetched listServices twice on every cold start.
+  const userLocationRef = useRef(userLocation);
+  useEffect(() => {
+    userLocationRef.current = userLocation;
+  }, [userLocation]);
+
   const fetchServices = useCallback(async () => {
     try {
       setIsLoadingServices(true);
-      const params = userLocation
+      const loc = userLocationRef.current;
+      const params = loc
         ? {
-            page_size: 500,
-            lat: userLocation.latitude,
-            lng: userLocation.longitude,
+            page_size: 200,
+            lat: loc.latitude,
+            lng: loc.longitude,
             distance: distanceKm,
           }
-        : { page_size: 500 };
+        : { page_size: 200 };
 
       const { results } = await listServices(params);
       setServices(
@@ -359,11 +385,14 @@ export default function MapScreen() {
     } finally {
       setIsLoadingServices(false);
     }
-  }, [userLocation, distanceKm]);
+  }, [distanceKm]);
 
+  // Wait for the location resolution to settle before the first fetch so we
+  // make one call, not two — once with no coords, once with coords.
   useEffect(() => {
+    if (!locationResolved) return;
     fetchServices();
-  }, [fetchServices]);
+  }, [locationResolved, fetchServices]);
 
   // 250ms is the same debounce used by the web Browse search; tighter feels
   // jittery while typing, looser delays the dropdown long enough that users
@@ -373,22 +402,16 @@ export default function MapScreen() {
     return () => clearTimeout(id);
   }, [searchQuery]);
 
-  // Markers reflect type + signal selection but ignore the search query — the
+  // Markers reflect signal selection but ignore the search query — the
   // search box drives the dropdown surface, not the pin set. Pre-fix, typing
   // "yoga" made every other pin disappear with no list to back it up.
   const visibleServices = useMemo(() => {
-    let list = services;
-    if (activeFilter !== "all") {
-      list = list.filter((s) => s.type === activeFilter);
-    }
-    if (activeSignals.size > 0) {
-      list = list.filter((s) => {
-        const id = pillIdentity(s);
-        return id !== "default" && activeSignals.has(id);
-      });
-    }
-    return list;
-  }, [services, activeFilter, activeSignals]);
+    if (activeSignals.size === 0) return services;
+    return services.filter((s) => {
+      const id = pillIdentity(s);
+      return id !== "default" && activeSignals.has(id);
+    });
+  }, [services, activeSignals]);
 
   const lowerQuery = debouncedQuery.toLowerCase();
   const searchResults = useMemo<MapSearchResult[]>(() => {
@@ -509,7 +532,7 @@ export default function MapScreen() {
     );
   }
 
-  if (!webViewContent || !locationResolved) {
+  if (!webViewContent) {
     return (
       <View style={[styles.loading, { paddingTop: insets.top }]}>
         <ActivityIndicator size="large" color={colors.GREEN} />
@@ -601,25 +624,29 @@ export default function MapScreen() {
           contentContainerStyle={styles.pillsContent}
           style={styles.pillsScroll}
         >
-          {FILTER_CONFIG.map((f) => {
-            const active = activeFilter === f.value;
+          {SIGNAL_CHIPS.map((chip) => {
+            const active = activeSignals.has(chip.id);
             return (
               <TouchableOpacity
-                key={f.value}
-                onPress={() => setActiveFilter(f.value)}
+                key={chip.id}
+                onPress={() => toggleSignal(chip.id)}
                 activeOpacity={0.8}
                 style={[
                   styles.pill,
                   active && {
-                    backgroundColor: f.activeColor,
-                    borderColor: f.activeColor,
+                    backgroundColor: chip.color,
+                    borderColor: chip.color,
                   },
                 ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={chip.label}
+                testID={`map-signal-${chip.id}`}
               >
                 <Text
                   style={[styles.pillText, active && styles.pillTextActive]}
                 >
-                  {f.label}
+                  {chip.label}
                 </Text>
               </TouchableOpacity>
             );
@@ -651,41 +678,6 @@ export default function MapScreen() {
               style={styles.spinner}
             />
           )}
-        </ScrollView>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.pillsContent}
-          style={styles.pillsScroll}
-        >
-          {SIGNAL_CHIPS.map((chip) => {
-            const active = activeSignals.has(chip.id);
-            return (
-              <TouchableOpacity
-                key={chip.id}
-                onPress={() => toggleSignal(chip.id)}
-                activeOpacity={0.8}
-                style={[
-                  styles.pill,
-                  active && {
-                    backgroundColor: chip.color,
-                    borderColor: chip.color,
-                  },
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={chip.label}
-                testID={`map-signal-${chip.id}`}
-              >
-                <Text
-                  style={[styles.pillText, active && styles.pillTextActive]}
-                >
-                  {chip.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
         </ScrollView>
 
         {showRangeSlider ? (
