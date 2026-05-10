@@ -326,13 +326,7 @@ class TestServiceViewSet:
             response = client.patch(
                 f'/api/services/{service.id}/', {'title': f'Renamed {status_value}'},
             )
-            assert response.status_code == 403, (
-                f'PATCH on {status_value} service expected 403, got {response.status_code}.'
-            )
-            detail = str(response.data.get('detail') or response.data)
-            assert 'no longer be edited' in detail.lower() or status_value.lower() in detail.lower(), (
-                f'Expected status-aware error message for {status_value}, got: {detail}'
-            )
+            assert_problem_detail(response, 403, contains_text='no longer be edited')
             service.refresh_from_db()
             assert service.title == 'Original', (
                 f'{status_value} service title was mutated despite 403 response.'
@@ -346,7 +340,7 @@ class TestServiceViewSet:
         client = AuthenticatedAPIClient().authenticate_user(owner)
 
         response = client.patch(f'/api/services/{service.id}/', {'title': 'Renamed hidden'})
-        assert response.status_code == 200, response.data
+        assert_api_response(response, 200, schema={'title': 'Renamed hidden'})
         service.refresh_from_db()
         assert service.title == 'Renamed hidden'
 
