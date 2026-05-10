@@ -156,8 +156,21 @@
           loaded = true;
           send({ type: "ready" });
           if (cfg.user) setUserMarker(cfg.user.lat, cfg.user.lng);
-          if (cfg.services) applyServices(cfg.services);
-          else if (pendingServices) applyServices(pendingServices);
+          // RN posts `init` once mapReady flips, but at that moment the
+          // services state on the RN side is usually still the empty
+          // initial array because fetchServices is async. The populated
+          // list arrives via a later `updateServices` message. If that
+          // message lands before `map.on("load")` fires, applyServices
+          // sees `loaded=false` and stashes the payload in
+          // pendingServices. Previously this branch picked cfg.services
+          // unconditionally because `[]` is truthy, dropping the real
+          // data on the floor and rendering an empty map. Prefer
+          // pendingServices when present so the freshest payload wins.
+          var initialServices = pendingServices != null
+            ? pendingServices
+            : (cfg.services || []);
+          pendingServices = null;
+          applyServices(initialServices);
         });
         map.on("error", function (e) {
           send({ type: "error", message: (e && e.error && e.error.message) || "map error" });
