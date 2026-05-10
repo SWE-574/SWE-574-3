@@ -17,7 +17,6 @@ import type { WebViewMessageEvent } from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
-import Slider from "@react-native-community/slider";
 import { colors } from "../../constants/colors";
 import { listServices } from "../../api/services";
 import type { Service, ServiceType } from "../../api/types";
@@ -170,8 +169,6 @@ export default function MapScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
-  const [distanceKm, setDistanceKm] = useState(15);
-  const [showRangeSlider, setShowRangeSlider] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapInited, setMapInited] = useState(false);
   // Bumped on Retry to force the WebView and the asset-load effect to remount.
@@ -336,23 +333,22 @@ export default function MapScreen() {
     userLocationRef.current = userLocation;
   }, [userLocation]);
 
-  // The distance param is only forwarded when the viewer has opened the
-  // range slider -- without that gate, the iOS simulator default location
-  // (San Francisco) sits ~10,000 km from the demo seed and a 15 km cutoff
-  // silently filters every row out of the response. Mirrors
-  // `radiusFilterEnabled` on the web dashboard.
+  // Pull every service the backend will return (capped at 100 by
+  // StandardResultsSetPagination.max_page_size in backend/api/views.py).
+  // We pass lat/lng when known so the backend orders by proximity, but never
+  // a distance cutoff — the map is meant to show all available listings, not
+  // a radius slice.
   const fetchServices = useCallback(async () => {
     try {
       setIsLoadingServices(true);
       const loc = userLocationRef.current;
       const params = loc
         ? {
-            page_size: 200,
+            page_size: 100,
             lat: loc.latitude,
             lng: loc.longitude,
-            ...(showRangeSlider ? { distance: distanceKm } : {}),
           }
-        : { page_size: 200 };
+        : { page_size: 100 };
 
       const { results } = await listServices(params);
       setServices(
@@ -369,7 +365,7 @@ export default function MapScreen() {
     } finally {
       setIsLoadingServices(false);
     }
-  }, [distanceKm, showRangeSlider]);
+  }, []);
 
   // Wait for the location resolution to settle before the first fetch so we
   // make one call, not two — once with no coords, once with coords.
@@ -633,26 +629,6 @@ export default function MapScreen() {
               </TouchableOpacity>
             );
           })}
-          <TouchableOpacity
-            onPress={() => setShowRangeSlider((v) => !v)}
-            activeOpacity={0.8}
-            style={[
-              styles.pill,
-              showRangeSlider && {
-                backgroundColor: colors.GREEN,
-                borderColor: colors.GREEN,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.pillText,
-                showRangeSlider && styles.pillTextActive,
-              ]}
-            >
-              Range · {distanceKm}km
-            </Text>
-          </TouchableOpacity>
           {isLoadingServices && (
             <ActivityIndicator
               size="small"
@@ -661,24 +637,6 @@ export default function MapScreen() {
             />
           )}
         </ScrollView>
-
-        {showRangeSlider ? (
-          <View style={styles.rangeRow}>
-            <Text style={styles.rangeLabel}>1km</Text>
-            <Slider
-              style={styles.rangeSlider}
-              minimumValue={1}
-              maximumValue={50}
-              step={1}
-              value={distanceKm}
-              onSlidingComplete={(v) => setDistanceKm(Math.round(v))}
-              minimumTrackTintColor={colors.GREEN}
-              maximumTrackTintColor={colors.GRAY300}
-              thumbTintColor={colors.GREEN}
-            />
-            <Text style={styles.rangeLabel}>50km</Text>
-          </View>
-        ) : null}
       </View>
 
       {/* Find-me FAB */}
@@ -959,31 +917,6 @@ const styles = StyleSheet.create({
   },
   spinner: {
     marginLeft: 4,
-  },
-  rangeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 14,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.WHITE,
-    borderWidth: 1,
-    borderColor: colors.GRAY200,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  rangeLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.GRAY500,
-  },
-  rangeSlider: {
-    flex: 1,
-    height: 28,
   },
   findMeFab: {
     position: "absolute",
