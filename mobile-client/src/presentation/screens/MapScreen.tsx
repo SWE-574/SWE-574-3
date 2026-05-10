@@ -24,8 +24,18 @@ import { colors } from "../../constants/colors";
 import { listServices } from "../../api/services";
 import type { Service, ServiceType } from "../../api/types";
 import { getMapboxToken } from "../../constants/env";
+import {
+  pillIdentity,
+  SIGNAL_CHIPS,
+  type PillIdentity,
+} from "../../utils/pillIdentity";
+import { getServiceDistanceKm } from "../../utils/discovery";
+import MapSearchResults, {
+  type MapSearchResult,
+} from "../components/MapSearchResults";
 
 type FilterType = "all" | ServiceType;
+type SignalFilter = Exclude<PillIdentity, "default">;
 
 // Istanbul city center — used when location permission is denied
 const DEFAULT_LOCATION = { latitude: 41.0082, longitude: 28.9784 };
@@ -168,8 +178,13 @@ export default function MapScreen() {
   const [locationResolved, setLocationResolved] = useState(false);
   const [isLoadingServices, setIsLoadingServices] = useState(false);
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
+  const [activeSignals, setActiveSignals] = useState<Set<SignalFilter>>(
+    () => new Set(),
+  );
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const [distanceKm, setDistanceKm] = useState(15);
   const [showRangeSlider, setShowRangeSlider] = useState(false);
   const [mapReady, setMapReady] = useState(false);
@@ -350,14 +365,35 @@ export default function MapScreen() {
     fetchServices();
   }, [fetchServices]);
 
-  const trimmedSearch = searchQuery.trim().toLowerCase();
+  // 250ms is the same debounce used by the web Browse search; tighter feels
+  // jittery while typing, looser delays the dropdown long enough that users
+  // start to wonder whether the query took.
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 250);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
+
+  // Markers reflect type + signal selection but ignore the search query — the
+  // search box drives the dropdown surface, not the pin set. Pre-fix, typing
+  // "yoga" made every other pin disappear with no list to back it up.
   const visibleServices = useMemo(() => {
     let list = services;
     if (activeFilter !== "all") {
       list = list.filter((s) => s.type === activeFilter);
     }
-    if (trimmedSearch) {
-      list = list.filter((s) => {
+    if (activeSignals.size > 0) {
+      list = list.filter((s) =>
+        activeSignals.has(pillIdentity(s) as SignalFilter),
+      );
+    }
+    return list;
+  }, [services, activeFilter, activeSignals]);
+
+  const lowerQuery = debouncedQuery.toLowerCase();
+  const searchResults = useMemo<MapSearchResult[]>(() => {
+    if (!lowerQuery) return [];
+    return visibleServices
+      .filter((s) => {
         const haystack = [
           s.title,
           s.description,
@@ -366,11 +402,23 @@ export default function MapScreen() {
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
-        return haystack.includes(trimmedSearch);
-      });
-    }
-    return list;
-  }, [services, activeFilter, trimmedSearch]);
+        return haystack.includes(lowerQuery);
+      })
+      .map((service) => ({
+        service,
+        distanceKm: getServiceDistanceKm(
+          service,
+          userLocation
+            ? {
+                latitude: userLocation.latitude,
+                longitude: userLocation.longitude,
+              }
+            : null,
+        ),
+      }));
+  }, [visibleServices, lowerQuery, userLocation]);
+
+  const showResultsDropdown = debouncedQuery.length > 0 && searchFocused;
 
   // Push the visible service set to the WebView whenever it changes (after init).
   useEffect(() => {
@@ -415,6 +463,29 @@ export default function MapScreen() {
     },
     [services],
   );
+
+  const handleSelectResult = useCallback(
+    (service: Service) => {
+      const lat = Number(service.location_lat);
+      const lng = Number(service.location_lng);
+      if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+        post({ type: "flyTo", lat, lng, zoom: 14 });
+      }
+      setSelectedService(service);
+      setSearchFocused(false);
+      setSearchQuery("");
+    },
+    [post],
+  );
+
+  const toggleSignal = useCallback((id: SignalFilter) => {
+    setActiveSignals((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const handleViewDetail = useCallback(() => {
     if (!selectedService) return;
@@ -490,19 +561,37 @@ export default function MapScreen() {
             />
             <TextInput
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={(value) => {
+                setSearchQuery(value);
+                if (value.length > 0) setSearchFocused(true);
+              }}
+              onFocus={() => setSearchFocused(true)}
               placeholder="Search title, description, tags…"
               placeholderTextColor={colors.GRAY400}
               style={styles.searchInput}
               returnKeyType="search"
             />
             {searchQuery.length > 0 ? (
-              <Pressable hitSlop={8} onPress={() => setSearchQuery("")}>
+              <Pressable
+                hitSlop={8}
+                onPress={() => {
+                  setSearchQuery("");
+                  setSearchFocused(false);
+                }}
+              >
                 <Ionicons name="close-circle" size={16} color={colors.GRAY400} />
               </Pressable>
             ) : null}
           </View>
         </View>
+
+        {showResultsDropdown ? (
+          <MapSearchResults
+            results={searchResults}
+            onSelect={handleSelectResult}
+            emptyLabel={`No matches for "${debouncedQuery}"`}
+          />
+        ) : null}
 
         <ScrollView
           horizontal
@@ -560,6 +649,41 @@ export default function MapScreen() {
               style={styles.spinner}
             />
           )}
+        </ScrollView>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.pillsContent}
+          style={styles.pillsScroll}
+        >
+          {SIGNAL_CHIPS.map((chip) => {
+            const active = activeSignals.has(chip.id);
+            return (
+              <TouchableOpacity
+                key={chip.id}
+                onPress={() => toggleSignal(chip.id)}
+                activeOpacity={0.8}
+                style={[
+                  styles.pill,
+                  active && {
+                    backgroundColor: chip.color,
+                    borderColor: chip.color,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={chip.label}
+                testID={`map-signal-${chip.id}`}
+              >
+                <Text
+                  style={[styles.pillText, active && styles.pillTextActive]}
+                >
+                  {chip.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
         {showRangeSlider ? (
