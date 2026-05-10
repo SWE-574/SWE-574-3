@@ -14,6 +14,12 @@ from api.serializers import TagSerializer
 from api.wikidata import fetch_wikidata_item, search_wikidata_items
 
 
+# CI splits the suite by marker (`-m unit` / `-m integration`); without a
+# module-level marker every test in this file is silently deselected and
+# wikidata.py drops out of the unit-suite coverage.
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def search_env():
     return SimpleNamespace(client=APIClient(), url=reverse('wikidata-search'))
