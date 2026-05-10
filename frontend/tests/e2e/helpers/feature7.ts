@@ -9,7 +9,7 @@ import {
   extractServiceId,
   requestOfferFromDetail,
 } from './feature5'
-import { switchUser } from './session'
+import { loginAsApi, switchUserApi } from './loginAsApi'
 
 const BALANCE_CANDIDATES: DemoUser[] = [
   USERS.elif,
@@ -239,11 +239,15 @@ export async function pickUsersWithBalanceAtLeast(
   for (const user of BALANCE_CANDIDATES) {
     if (blocked.has(user.email)) continue
 
+    // API-fixture login: this loop touches up to 9 demo users in sequence
+    // and the form-login navigation cost dominates. The balance read uses
+    // the live backend either way, so the cached /users/me/ stub does not
+    // affect the assertion.
     if (firstLogin) {
-      await loginAs(page, user)
+      await loginAsApi(page, user)
       firstLogin = false
     } else {
-      await switchUser(page, user)
+      await switchUserApi(page, user)
     }
 
     const balance = await getCurrentBalance(page)
@@ -281,11 +285,11 @@ export async function createAcceptedOfferExchange(page: Page, options: {
   })
   const serviceId = extractServiceId(detailUrl)
 
-  await switchUser(page, options.requester)
+  await switchUserApi(page, options.requester)
   await page.goto(detailUrl)
   await requestOfferFromDetail(page)
 
-  await switchUser(page, options.owner)
+  await switchUserApi(page, options.owner)
   await acceptPendingHandshakeViaApi(page, {
     serviceId,
     requesterName: options.requester.name,
@@ -320,13 +324,13 @@ export async function createAcceptedGroupOfferExchanges(page: Page, options: {
   const serviceId = extractServiceId(detailUrl)
 
   for (const requester of options.requesters) {
-    await switchUser(page, requester)
+    await switchUserApi(page, requester)
     await page.goto(detailUrl)
     await requestOfferFromDetail(page)
   }
 
   for (const requester of options.requesters) {
-    await switchUser(page, options.owner)
+    await switchUserApi(page, options.owner)
     await acceptPendingHandshakeViaApi(page, {
       serviceId,
       requesterName: requester.name,
@@ -402,7 +406,7 @@ export async function completeOfferExchange(page: Page, options: {
   requester: DemoUser
   serviceTitle: string
 }): Promise<void> {
-  await switchUser(page, options.owner)
+  await switchUserApi(page, options.owner)
   const handshakeId = await findHandshakeId(page, {
     serviceTitle: options.serviceTitle,
     requesterName: options.requester.name,
@@ -410,7 +414,7 @@ export async function completeOfferExchange(page: Page, options: {
   })
   await confirmHandshakeViaApi(page, handshakeId)
 
-  await switchUser(page, options.requester)
+  await switchUserApi(page, options.requester)
   await confirmHandshakeViaApi(page, handshakeId)
 }
 

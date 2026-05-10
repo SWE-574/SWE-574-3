@@ -3,7 +3,7 @@ import { expect, type Page } from '@playwright/test'
 import { type DemoUser, loginAs } from './auth'
 import { uniqueTitle } from './common'
 import { createServiceViaApi } from './feature13'
-import { switchUser } from './session'
+import { switchUserApi } from './loginAsApi'
 
 export interface Feature15Event {
   id: string
@@ -177,19 +177,20 @@ export async function setupAttendedEventHandshake(
 ): Promise<{ event: Feature15Event; handshakeId: string }> {
   // Schedule 30 minutes ahead so the 24-hour check-in window is already open,
   // which allows checkin → mark-attended to succeed.
+  // Note: createEventViaApi performs the initial loginAs(organizer). The
+  // subsequent identity hops use loginAsApi/switchUserApi to skip the
+  // /login → /dashboard navigation cost (~1.5s per hop) so this 5-hop
+  // setup fits inside the spec timeout on cold CI workers.
   const event = await createEventViaApi(page, options.organizer, { title: options.title, minutesAhead: 30 })
 
-  await switchUser(page, options.participant)
+  await switchUserApi(page, options.participant)
   const handshakeId = await joinEventViaApi(page, event.id)
 
-  // Organizer session needed for mark-attended, but first set checked_in as participant.
-  await switchUser(page, options.organizer)
-
   // Force into checked_in as participant, then organizer marks attended.
-  await switchUser(page, options.participant)
+  await switchUserApi(page, options.participant)
   await checkinViaApi(page, handshakeId)
 
-  await switchUser(page, options.organizer)
+  await switchUserApi(page, options.organizer)
   await markAttendedViaApi(page, handshakeId)
 
   // Complete the event so event_completed_at is set and the evaluation window opens.
@@ -197,7 +198,7 @@ export async function setupAttendedEventHandshake(
   await completeEventViaApi(page, event.id)
 
   // Leave page session as participant, ready for evaluation assertions.
-  await switchUser(page, options.participant)
+  await switchUserApi(page, options.participant)
 
   return { event, handshakeId }
 }
