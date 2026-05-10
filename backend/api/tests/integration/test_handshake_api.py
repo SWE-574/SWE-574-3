@@ -457,15 +457,15 @@ class TestHandshakeViewSet:
         provider.refresh_from_db()
         assert provider.timebank_balance > Decimal('5.00')
 
-    def test_group_offer_settles_provider_after_each_receiver_completes(self):
+    def test_group_offer_settles_provider_after_all_receivers_complete(self):
         """End-to-end coverage for the asymmetric group-offer settlement.
 
         The provider earns ``service.duration`` exactly once. Each receiver
         pays per seat (escrowed at acceptance) and is not refunded when their
         own handshake completes — the surplus is the documented system sink.
-        Regression for #557: confirms the payout fires reliably across
-        per-handshake completion, even when other participants are still
-        in-flight.
+        Regression for #557: confirms the payout fires reliably only after
+        all participant handshakes complete, not while other participants are
+        still in-flight.
         """
         provider = UserFactory(timebank_balance=Decimal('0.00'))
         receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
