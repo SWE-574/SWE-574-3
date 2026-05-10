@@ -128,8 +128,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 20,
+    paddingTop: 18,
+    paddingBottom: 28,
   },
   handle: {
     alignSelf: "center",
@@ -169,13 +169,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8FAFC",
   },
   listContent: {
-    paddingBottom: 8,
+    paddingBottom: 12,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    paddingVertical: 12,
+    paddingVertical: 15,
     borderBottomWidth: 1,
     borderBottomColor: colors.GRAY100,
   },
@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 32,
+    paddingVertical: 38,
     paddingHorizontal: 20,
   },
   emptyTitle: {

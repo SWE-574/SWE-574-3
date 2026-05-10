@@ -10,11 +10,10 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   RefreshControl,
   StyleSheet,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -62,6 +61,7 @@ type ChatScreenNavigation = CompositeNavigationProp<
 >;
 import { useChatWebSocket } from "../../hooks/useChatWebSocket";
 import { useHandshake } from "../../hooks/useHandshake";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { ChatMessageBubble } from "../components/chat/ChatMessageBubble";
 import { ChatHandshakeBanner } from "../components/chat/ChatHandshakeBanner";
 import type { SessionDetails } from "../components/chat/ChatHandshakeBanner";
@@ -76,7 +76,9 @@ import { ChatStepBar } from "../components/chat/ChatStepBar";
 export default function ChatScreen() {
   const { params } = useRoute<NavProps["route"]>();
   const navigation = useNavigation<ChatScreenNavigation>();
+  const { width: windowWidth } = useWindowDimensions();
   const { user } = useAuth();
+  const keyboardHeight = useKeyboardHeight();
 
   const {
     handshakeId,
@@ -363,15 +365,18 @@ export default function ChatScreen() {
 
   useEffect(() => {
     const isRootScreen = navigation.getState().index === 0;
+    const headerMaxWidth = Math.max(200, windowWidth - 112);
     navigation.setOptions({
       headerTitle: () => (
-        <View style={styles.headerTitleWrap}>
+        <View style={[styles.headerTitleWrap, { maxWidth: headerMaxWidth }]}>
           <Text style={styles.headerTitleText} numberOfLines={1}>
             {title}
           </Text>
           {!!effectiveServiceType ? (
             <View style={styles.headerTypeBadge}>
-              <Text style={styles.headerTypeBadgeText}>{effectiveServiceType}</Text>
+              <Text style={styles.headerTypeBadgeText} numberOfLines={1}>
+                {effectiveServiceType}
+              </Text>
             </View>
           ) : null}
         </View>
@@ -380,21 +385,26 @@ export default function ChatScreen() {
       // When opened directly from a notification the screen may be the stack
       // root (no MessagesList below it). Render an explicit back button so the
       // user can always return to the messages list.
-      headerLeft: isRootScreen ? () => (
-        <TouchableOpacity
-          onPress={() => navigation.dispatch(StackActions.replace("MessagesList"))}
-          hitSlop={8}
-          style={{ paddingRight: 8 }}
-        >
-          <Ionicons name="chevron-back" size={28} color="#007AFF" />
-        </TouchableOpacity>
-      ) : undefined,
+      headerLeft: isRootScreen
+        ? () => (
+            <TouchableOpacity
+              onPress={() =>
+                navigation.dispatch(StackActions.replace("MessagesList"))
+              }
+              hitSlop={8}
+              style={{ paddingRight: 8 }}
+            >
+              <Ionicons name="chevron-back" size={28} color="#007AFF" />
+            </TouchableOpacity>
+          )
+        : undefined,
     });
-  }, [navigation, effectiveServiceType, title]);
+  }, [navigation, effectiveServiceType, title, windowWidth]);
 
   const sessionDetails = useMemo<SessionDetails | null>(() => {
     if (!handshake) return null;
-    const shouldShowDetails = isAcceptedLike || (isPendingLike && providerInitiated);
+    const shouldShowDetails =
+      isAcceptedLike || (isPendingLike && providerInitiated);
     if (!shouldShowDetails) return null;
     const h = handshake as Record<string, unknown>;
     return {
@@ -404,8 +414,7 @@ export default function ChatScreen() {
       provisioned_hours: (h.provisioned_hours as number | null) ?? null,
       exact_location_maps_url:
         (h.exact_location_maps_url as string | null) ?? null,
-      exact_location_guide:
-        (h.exact_location_guide as string | null) ?? null,
+      exact_location_guide: (h.exact_location_guide as string | null) ?? null,
       is_online: (h.service_location_type as string | null) === "Online",
     };
   }, [handshake, isAcceptedLike, isPendingLike, providerInitiated]);
@@ -415,7 +424,7 @@ export default function ChatScreen() {
       return {
         myConfirmed: false,
         otherConfirmed: false,
-      counterpartName: chatParticipant.name,
+        counterpartName: chatParticipant.name,
       };
     }
 
@@ -440,8 +449,12 @@ export default function ChatScreen() {
       chatParticipant.name;
 
     return {
-      myConfirmed: isCurrentUserProvider ? providerConfirmed : receiverConfirmed,
-      otherConfirmed: isCurrentUserProvider ? receiverConfirmed : providerConfirmed,
+      myConfirmed: isCurrentUserProvider
+        ? providerConfirmed
+        : receiverConfirmed,
+      otherConfirmed: isCurrentUserProvider
+        ? receiverConfirmed
+        : providerConfirmed,
       counterpartName,
     };
   }, [chatParticipant.name, handshake, isProvider]);
@@ -482,8 +495,10 @@ export default function ChatScreen() {
     const userHasReviewed = Boolean(h?.user_has_reviewed);
     const liveServiceType =
       typeof h?.service_type === "string" ? h.service_type : serviceType;
-    const isEventEvaluation = String(liveServiceType ?? "").toLowerCase() === "event";
-    const statusValue = typeof h?.status === "string" ? h.status.toLowerCase() : "";
+    const isEventEvaluation =
+      String(liveServiceType ?? "").toLowerCase() === "event";
+    const statusValue =
+      typeof h?.status === "string" ? h.status.toLowerCase() : "";
     const eligibleStatus = statusValue === "completed";
 
     if (!eligibleStatus || userHasReviewed) {
@@ -496,7 +511,10 @@ export default function ChatScreen() {
     }
 
     let deadlineMs: number | null = null;
-    if (typeof h?.evaluation_window_ends_at === "string" && h.evaluation_window_ends_at) {
+    if (
+      typeof h?.evaluation_window_ends_at === "string" &&
+      h.evaluation_window_ends_at
+    ) {
       const parsed = new Date(h.evaluation_window_ends_at).getTime();
       if (!Number.isNaN(parsed)) deadlineMs = parsed;
     } else if (
@@ -507,7 +525,10 @@ export default function ChatScreen() {
       if (!Number.isNaN(start)) deadlineMs = start + 48 * 60 * 60 * 1000;
     }
 
-    if (typeof h?.evaluation_window_closed_at === "string" && h.evaluation_window_closed_at) {
+    if (
+      typeof h?.evaluation_window_closed_at === "string" &&
+      h.evaluation_window_closed_at
+    ) {
       return {
         isOpen: false,
         label: "Evaluation window closed",
@@ -689,10 +710,13 @@ export default function ChatScreen() {
       const own = isOwnMessage(item);
       const previous = messages[index - 1];
       const previousOwn = previous ? isOwnMessage(previous) : false;
-      const previousSenderKey = String(previous?.sender_id ?? previous?.sender ?? "");
+      const previousSenderKey = String(
+        previous?.sender_id ?? previous?.sender ?? "",
+      );
       const currentSenderKey = String(item.sender_id ?? item.sender ?? "");
       const showAvatar =
-        !own && (!previous || previousOwn || previousSenderKey !== currentSenderKey);
+        !own &&
+        (!previous || previousOwn || previousSenderKey !== currentSenderKey);
       const senderName = item.sender_name ?? chatParticipant.name;
       const avatarUrl = item.sender_avatar_url;
 
@@ -711,12 +735,8 @@ export default function ChatScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
-      >
+    <View style={styles.container}>
+      <View style={styles.keyboardView}>
         <ChatTopMeta
           otherUserName={chatParticipant.name}
           otherUserAvatarUrl={chatParticipant.avatarUrl}
@@ -765,8 +785,12 @@ export default function ChatScreen() {
           onOpenSessionDetails={() => setShowSessionDetailsModal(true)}
           onCancel={() => runHandshakeAction("cancel")}
           onConfirm={() => runHandshakeAction("confirm")}
-          onRequestCancellation={() => runHandshakeAction("requestCancellation")}
-          onApproveCancellation={() => runHandshakeAction("approveCancellation")}
+          onRequestCancellation={() =>
+            runHandshakeAction("requestCancellation")
+          }
+          onApproveCancellation={() =>
+            runHandshakeAction("approveCancellation")
+          }
           onRejectCancellation={() => runHandshakeAction("rejectCancellation")}
           onReportNoShow={handleReportParticipant}
           onOpenEvaluation={() => setShowEvaluationModal(true)}
@@ -790,46 +814,54 @@ export default function ChatScreen() {
           </View>
         ) : null}
 
-        {loadingMessages && messages.length === 0 ? (
-          <View style={styles.centerState}>
-            <ActivityIndicator size="large" color={colors.BLUE} />
-            <Text style={styles.centerStateText}>Loading messages...</Text>
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={[
-              styles.listContent,
-              messages.length === 0 && styles.emptyListContent,
-            ]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            onContentSizeChange={() => scrollToBottom(false)}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={refreshAll} />
-            }
-            ListEmptyComponent={
-              <View style={styles.centerState}>
-                <Ionicons
-                  name="chatbubble-ellipses-outline"
-                  size={34}
-                  color={colors.GRAY400}
+        <View style={styles.messagesPane}>
+          {loadingMessages && messages.length === 0 ? (
+            <View style={styles.centerState}>
+              <ActivityIndicator size="large" color={colors.BLUE} />
+              <Text style={styles.centerStateText}>Loading messages...</Text>
+            </View>
+          ) : (
+            <FlatList
+              ref={listRef}
+              data={messages}
+              renderItem={renderMessage}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={[
+                styles.listContent,
+                messages.length === 0 && styles.emptyListContent,
+              ]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={() => scrollToBottom(false)}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={refreshAll}
                 />
-                <Text style={styles.emptyTitle}>No messages yet</Text>
-                <Text style={styles.centerStateText}>
-                  {canSendMessages
-                    ? "Start the conversation by sending a message."
-                    : "This conversation is read-only now, but the history remains accessible."}
-                </Text>
-              </View>
-            }
-          />
-        )}
-
+              }
+              ListEmptyComponent={
+                <View style={styles.centerState}>
+                  <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={34}
+                    color={colors.GRAY400}
+                  />
+                  <Text style={styles.emptyTitle}>No messages yet</Text>
+                  <Text style={styles.centerStateText}>
+                    {canSendMessages
+                      ? "Start the conversation by sending a message."
+                      : "This conversation is read-only now, but the history remains accessible."}
+                  </Text>
+                </View>
+              }
+              ListFooterComponent={() => (
+                <View style={{ height: keyboardHeight + 76 }} />
+              )}
+            />
+          )}
+        </View>
         <ChatInputBar
+          keyboardHeight={keyboardHeight}
           value={inputText}
           onChangeText={setInputText}
           onSend={sendMessage}
@@ -853,9 +885,8 @@ export default function ChatScreen() {
           maxParticipants={maxParticipants}
           serviceLocationType={
             serviceLocationType ??
-            ((handshake as Record<string, unknown> | null)?.service_location_type as
-              | string
-              | undefined)
+            ((handshake as Record<string, unknown> | null)
+              ?.service_location_type as string | undefined)
           }
           serviceLocationArea={serviceLocationArea}
           serviceExactLocation={serviceExactLocation}
@@ -863,9 +894,8 @@ export default function ChatScreen() {
           serviceScheduledTime={serviceScheduledTime}
           provisionedHours={
             provisionedHours ??
-            ((handshake as Record<string, unknown> | null)?.provisioned_hours as
-              | number
-              | undefined)
+            ((handshake as Record<string, unknown> | null)
+              ?.provisioned_hours as number | undefined)
           }
         />
 
@@ -905,7 +935,9 @@ export default function ChatScreen() {
           cancellationRequestedByName={cancellationRequestedByName}
           canRequestCancellation={canRequestCancellation}
           canRespondToCancellation={canRespondToCancellation}
-          canReportParticipant={isAcceptedLike || isAwaitingSecondConfirmationLike}
+          canReportParticipant={
+            isAcceptedLike || isAwaitingSecondConfirmationLike
+          }
           canLeaveEvaluation={evaluationWindow.isOpen}
           evaluationLabel={evaluationWindow.label}
           actionLoading={actionLoading}
@@ -957,8 +989,8 @@ export default function ChatScreen() {
           onClose={() => setShowEvaluationModal(false)}
           onSubmitted={refreshAll}
         />
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </View>
+    </View>
   );
 }
 
@@ -967,17 +999,22 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    maxWidth: 240,
+    flex: 1,
+    minWidth: 0,
   },
   headerTitleText: {
+    flexGrow: 1,
     flexShrink: 1,
+    minWidth: 0,
     fontSize: 17,
     fontWeight: "700",
     color: colors.GRAY900,
   },
   headerTypeBadge: {
-    minHeight: 22,
-    paddingHorizontal: 8,
+    flexShrink: 0,
+    minHeight: 24,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "#BFDBFE",
@@ -996,14 +1033,18 @@ const styles = StyleSheet.create({
   },
   keyboardView: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: colors.GRAY50,
+  },
+  messagesPane: {
+    flex: 1,
+    minHeight: 0,
   },
   errorBar: {
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#FEF2F2",
-    borderBottomWidth: 1,
-    borderBottomColor: "#FECACA",
+    paddingVertical: 11,
+    backgroundColor: colors.RED_LT,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.GRAY200,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1020,8 +1061,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 20,
   },
   emptyListContent: {
     flexGrow: 1,

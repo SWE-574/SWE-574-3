@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  Platform,
 } from "react-native";
 import { colors } from "../../../constants/colors";
 import {
@@ -58,9 +59,7 @@ export function ChatTopMeta({
           <Image source={{ uri: otherUserAvatarUrl }} style={styles.avatar} />
         ) : (
           <View style={styles.avatarFallback}>
-            <Text style={styles.avatarFallbackText}>
-              {participantInitial}
-            </Text>
+            <Text style={styles.avatarFallbackText}>{participantInitial}</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -68,6 +67,7 @@ export function ChatTopMeta({
       <View style={styles.topMetaTextWrap}>
         <View style={styles.titleRow}>
           <TouchableOpacity
+            style={styles.titleCell}
             onPress={onViewProfile}
             disabled={!onViewProfile}
             hitSlop={{ top: 6, bottom: 6, left: 0, right: 6 }}
@@ -79,53 +79,57 @@ export function ChatTopMeta({
               ]}
               numberOfLines={1}
             >
-              {isParticipantLoading ? "Loading conversation..." : participantName}
+              {isParticipantLoading
+                ? "Loading conversation..."
+                : participantName}
             </Text>
           </TouchableOpacity>
-        </View>
-        <View style={styles.badgesRow}>
-          {!!handshakeStatus && (
-            <View style={[styles.metaBadge, styles.statusBadge]}>
-              <Text style={[styles.metaBadgeText, styles.statusBadgeText]}>
-                {formatStatusLabel(handshakeStatus)}
-              </Text>
-            </View>
-          )}
+          <View style={styles.statusWrap}>
+            <View
+              style={[
+                styles.statusDot,
+                { backgroundColor: connected ? "#10B981" : colors.GRAY400 },
+              ]}
+            />
+            <Text style={styles.statusText}>
+              {connected
+                ? "Live"
+                : reconnectAttempts > 0
+                  ? "Reconnecting"
+                  : "Connecting"}
+            </Text>
+          </View>
         </View>
         {serviceTitle ? (
-          <TouchableOpacity
-            onPress={onOpenService}
-            disabled={!onOpenService}
-            activeOpacity={onOpenService ? 0.7 : 1}
-            style={styles.serviceLinkWrap}
-          >
-            <Text
-              style={[
-                styles.serviceLinkText,
-                onOpenService && styles.serviceLinkTextActive,
-              ]}
-              numberOfLines={1}
+          <View style={styles.serviceLinkWrapRow}>
+            <TouchableOpacity
+              onPress={onOpenService}
+              disabled={!onOpenService}
+              activeOpacity={onOpenService ? 0.7 : 1}
+              style={styles.serviceLinkWrap}
             >
-              {serviceTitle}
-            </Text>
-          </TouchableOpacity>
+              <Text
+                style={[
+                  styles.serviceLinkText,
+                  onOpenService && styles.serviceLinkTextActive,
+                ]}
+                numberOfLines={1}
+              >
+                {serviceTitle}
+              </Text>
+            </TouchableOpacity>
+            {!!handshakeStatus && (
+              <View style={[styles.metaBadge, styles.statusBadge]}>
+                <Text
+                  style={[styles.metaBadgeText, styles.statusBadgeText]}
+                  numberOfLines={1}
+                >
+                  {formatStatusLabel(handshakeStatus)}
+                </Text>
+              </View>
+            )}
+          </View>
         ) : null}
-      </View>
-
-      <View style={styles.statusWrap}>
-        <View
-          style={[
-            styles.statusDot,
-            { backgroundColor: connected ? "#10B981" : colors.GRAY400 },
-          ]}
-        />
-        <Text style={styles.statusText}>
-          {connected
-            ? "Live"
-            : reconnectAttempts > 0
-              ? "Reconnecting"
-              : "Connecting"}
-        </Text>
       </View>
     </View>
   );
@@ -133,31 +137,63 @@ export function ChatTopMeta({
 
 export const styles = StyleSheet.create({
   topMeta: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.GRAY200,
     backgroundColor: colors.WHITE,
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+    alignItems: "flex-start",
+    gap: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+      },
+      android: { elevation: 2 },
+    }),
   },
   avatarWrap: {
     flexShrink: 0,
+    marginTop: 2,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: colors.GRAY200,
+    borderWidth: 2,
+    borderColor: colors.WHITE,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 2,
+      },
+      android: { elevation: 1 },
+    }),
   },
   avatarFallback: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: colors.GREEN_MD,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 2,
+    borderColor: colors.WHITE,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 2,
+      },
+      android: { elevation: 1 },
+    }),
   },
   avatarFallbackText: {
     fontSize: 16,
@@ -171,38 +207,51 @@ export const styles = StyleSheet.create({
   titleRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    minHeight: 28,
+  },
+  titleCell: {
+    flex: 1,
+    minWidth: 0,
   },
   topMetaTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "700",
     color: colors.GRAY900 ?? "#111827",
+    letterSpacing: -0.2,
   },
   titleTappable: {
     color: colors.GREEN,
-    textDecorationLine: "underline",
+    fontWeight: "700",
   },
-  badgesRow: {
-    marginTop: 5,
+  serviceLinkWrapRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 2,
   },
   serviceLinkWrap: {
-    marginTop: 6,
-    alignSelf: "flex-start",
+    flex: 1,
+    minWidth: 0,
   },
   serviceLinkText: {
     fontSize: 12,
     fontWeight: "600",
-    color: colors.GRAY500,
+    color: colors.GRAY600,
+    marginTop: 4,
+    lineHeight: 16,
   },
   serviceLinkTextActive: {
     color: colors.BLUE,
     textDecorationLine: "underline",
   },
   metaBadge: {
-    minHeight: 22,
-    paddingHorizontal: 8,
+    flexShrink: 0,
+    minHeight: 24,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     borderRadius: 999,
     borderWidth: 1,
     alignItems: "center",
@@ -215,23 +264,35 @@ export const styles = StyleSheet.create({
   statusBadge: {
     backgroundColor: colors.AMBER_LT,
     borderColor: "#FDE68A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   statusBadgeText: {
     color: colors.AMBER,
+    fontSize: 12,
+    fontWeight: "700",
   },
   statusWrap: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: 6,
     flexShrink: 0,
+    backgroundColor: colors.GRAY50,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
   },
   statusDot: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
   },
   statusText: {
-    fontSize: 11,
-    color: colors.GRAY500,
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.GRAY600,
+    letterSpacing: 0.2,
   },
 });

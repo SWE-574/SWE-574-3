@@ -6,6 +6,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
+  KeyboardAvoidingView,
   Modal,
   View,
   Text,
@@ -67,6 +68,11 @@ export function QRScannerModal({ visible, onClose, onSubmit, loading }: Particip
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={s.keyboardRoot}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
       <View style={s.container}>
         {/* Header */}
         <View style={s.header}>
@@ -150,6 +156,7 @@ export function QRScannerModal({ visible, onClose, onSubmit, loading }: Particip
           </View>
         )}
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -232,17 +239,20 @@ export function QRDisplayModal({ visible, onClose, serviceId }: OrganizerProps) 
 
 
 const s = StyleSheet.create({
+  keyboardRoot: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.WHITE,
-    paddingTop: Platform.OS === "ios" ? 56 : 24,
+    paddingTop: Platform.OS === "ios" ? 60 : 28,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingBottom: 22,
   },
   headerTitle: {
     fontSize: 18,
@@ -265,7 +275,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 10,
+    paddingVertical: 13,
     borderRadius: 10,
   },
   tabActive: {
@@ -324,7 +334,7 @@ const s = StyleSheet.create({
   permissionBtn: {
     backgroundColor: colors.GREEN,
     paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingVertical: 15,
     borderRadius: 10,
   },
   permissionBtnText: {
@@ -337,7 +347,7 @@ const s = StyleSheet.create({
   manualContainer: {
     flex: 1,
     paddingHorizontal: 20,
-    paddingTop: 40,
+    paddingTop: 44,
     alignItems: "center",
   },
   manualLabel: {
@@ -353,7 +363,7 @@ const s = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 8,
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    paddingVertical: 16,
+    paddingVertical: 18,
     borderWidth: 2,
     borderColor: colors.GRAY200,
     borderRadius: 14,
@@ -363,7 +373,7 @@ const s = StyleSheet.create({
     width: "100%",
     marginTop: 20,
     backgroundColor: colors.GREEN,
-    paddingVertical: 14,
+    paddingVertical: 17,
     borderRadius: 12,
     alignItems: "center",
   },
@@ -416,7 +426,7 @@ const s = StyleSheet.create({
     gap: 6,
     backgroundColor: colors.GREEN,
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingVertical: 15,
     borderRadius: 10,
   },
   regenerateBtnText: {

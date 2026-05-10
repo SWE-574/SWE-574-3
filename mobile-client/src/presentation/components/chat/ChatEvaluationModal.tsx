@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -187,6 +189,11 @@ export function ChatEvaluationModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
+      <KeyboardAvoidingView
+        style={styles.keyboardRoot}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+      >
       <Pressable style={styles.backdrop} onPress={handleClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.header}>
@@ -206,7 +213,10 @@ export function ChatEvaluationModal({
               <Text style={styles.infoText}>You already reviewed this {isEventEvaluation ? 'event' : 'exchange'}.</Text>
             </View>
           ) : (
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
               <Text style={styles.sectionTitle}>Nice Traits</Text>
               <View style={styles.traitsWrap}>
                 {positiveTraits.map((trait) => {
@@ -326,11 +336,15 @@ export function ChatEvaluationModal({
           </View>
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardRoot: {
+    flex: 1,
+  },
   backdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
@@ -342,8 +356,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 20,
+    paddingTop: 24,
+    paddingBottom: 28,
   },
   header: {
     flexDirection: "row",
@@ -374,7 +388,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.GRAY100,
   },
   infoCard: {
-    padding: 14,
+    padding: 16,
     borderRadius: 14,
     backgroundColor: colors.GREEN_LT,
     borderWidth: 1,
@@ -405,7 +419,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.GRAY200,
@@ -433,7 +447,7 @@ const styles = StyleSheet.create({
   commentInput: {
     minHeight: 96,
     marginTop: 16,
-    padding: 12,
+    padding: 14,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.GRAY200,
@@ -491,7 +505,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     justifyContent: "flex-end",
-    marginTop: 16,
+    marginTop: 22,
   },
   secondaryBtn: {
     paddingHorizontal: 16,

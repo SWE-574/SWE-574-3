@@ -1,5 +1,11 @@
 import React, { useMemo } from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+} from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../../constants/colors";
 import type { ActionType } from "../../../types/chatTypes";
@@ -124,35 +130,44 @@ export function ChatHandshakeBanner({
 
 export const styles = StyleSheet.create({
   bannerBase: {
-    marginHorizontal: 12,
-    marginTop: 8,
-    marginBottom: 6,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    marginHorizontal: 14,
+    marginTop: 10,
+    marginBottom: 8,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderWidth: 1,
     minHeight: 56,
     justifyContent: "center",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+      },
+      android: { elevation: 1 },
+    }),
   },
   bannerNeutral: {
-    backgroundColor: "#F8FAFC",
+    backgroundColor: colors.GRAY50,
     borderColor: colors.GRAY200,
   },
   bannerInfo: {
-    backgroundColor: "#EFF6FF",
-    borderColor: "#BFDBFE",
+    backgroundColor: colors.BLUE_LT,
+    borderColor: colors.GRAY200,
   },
   bannerSuccess: {
-    backgroundColor: "#F0FDF4",
-    borderColor: "#BBF7D0",
+    backgroundColor: colors.GREEN_LT,
+    borderColor: colors.GREEN_MD,
   },
   bannerWarning: {
-    backgroundColor: "#FFFBEB",
+    backgroundColor: colors.AMBER_LT,
     borderColor: "#FDE68A",
   },
   bannerDanger: {
-    backgroundColor: "#FEF2F2",
-    borderColor: "#FECACA",
+    backgroundColor: colors.RED_LT,
+    borderColor: colors.GRAY200,
   },
   bannerHeader: {
     flexDirection: "row",
@@ -164,12 +179,13 @@ export const styles = StyleSheet.create({
     minWidth: 0,
   },
   bannerTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "700",
     color: colors.GRAY900,
+    letterSpacing: -0.1,
   },
   bannerDescription: {
-    marginTop: 1,
+    marginTop: 2,
     fontSize: 12,
     lineHeight: 17,
     color: colors.GRAY600,

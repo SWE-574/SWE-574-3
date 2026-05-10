@@ -4,13 +4,11 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
+  Platform,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation, StackActions } from "@react-navigation/native";
 import type {
   NativeStackNavigationProp,
@@ -25,6 +23,7 @@ import {
   type GroupChatParticipant,
 } from "../../api/chats";
 import { useAuth } from "../../context/AuthContext";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { colors } from "../../constants/colors";
 import { ChatMessageBubble } from "../components/chat/ChatMessageBubble";
 import { ChatInputBar } from "../components/chat/ChatInputBar";
@@ -50,6 +49,7 @@ export default function GroupChatScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<MessagesStackParamList>>();
   const { groupId, groupTitle = "Group chat" } = params ?? { groupId: "" };
   const { user } = useAuth();
+  const keyboardHeight = useKeyboardHeight();
 
   const [messages, setMessages] = useState<ChatMessageWithMeta[]>([]);
   const [inputText, setInputText] = useState("");
@@ -319,12 +319,8 @@ export default function GroupChatScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
-      >
+    <View style={styles.container}>
+      <View style={styles.keyboardView}>
         {/* Group header */}
         <View style={styles.groupHeader}>
           <View style={styles.groupIconWrap}>
@@ -353,15 +349,17 @@ export default function GroupChatScreen() {
               <Ionicons name="people-outline" size={16} color={colors.BLUE} />
               <Text style={styles.participantsButtonText}>People</Text>
             </TouchableOpacity>
-            <View
-              style={[
-                styles.connDot,
-                { backgroundColor: connected ? "#10B981" : colors.GRAY400 },
-              ]}
-            />
-            <Text style={styles.connText}>
-              {connected ? "Live" : "Connecting"}
-            </Text>
+            <View style={styles.liveStatusPill}>
+              <View
+                style={[
+                  styles.connDot,
+                  { backgroundColor: connected ? "#10B981" : colors.GRAY400 },
+                ]}
+              />
+              <Text style={styles.connText}>
+                {connected ? "Live" : "Connecting"}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -371,43 +369,50 @@ export default function GroupChatScreen() {
           </View>
         ) : null}
 
-        {loading && messages.length === 0 ? (
-          <View style={styles.centerState}>
-            <ActivityIndicator size="large" color={colors.GREEN} />
-            <Text style={styles.centerStateText}>Loading messages...</Text>
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={[
-              styles.listContent,
-              messages.length === 0 && styles.emptyListContent,
-            ]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            onContentSizeChange={() => scrollToBottom(false)}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={() => loadHistory(true)}
-                tintColor={colors.GREEN}
-              />
-            }
-            ListEmptyComponent={
-              <View style={styles.centerState}>
-                <Text style={styles.emptyTitle}>No messages yet</Text>
-                <Text style={styles.centerStateText}>
-                  Start the group conversation.
-                </Text>
-              </View>
-            }
-          />
-        )}
+        <View style={styles.messagesPane}>
+          {loading && messages.length === 0 ? (
+            <View style={styles.centerState}>
+              <ActivityIndicator size="large" color={colors.GREEN} />
+              <Text style={styles.centerStateText}>Loading messages...</Text>
+            </View>
+          ) : (
+            <FlatList
+              ref={listRef}
+              data={messages}
+              renderItem={renderMessage}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={[
+                styles.listContent,
+                messages.length === 0 && styles.emptyListContent,
+              ]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={() => scrollToBottom(false)}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => loadHistory(true)}
+                  tintColor={colors.GREEN}
+                />
+              }
+              ListEmptyComponent={
+                <View style={styles.centerState}>
+                  <Text style={styles.emptyTitle}>No messages yet</Text>
+                  <Text style={styles.centerStateText}>
+                    Start the group conversation.
+                  </Text>
+                </View>
+              }
+              ListFooterComponent={() => (
+                // 46 = bar min-height, 30 = gap between bar bottom and keyboard/screen edge
+                <View style={{ height: keyboardHeight + 76 }} />
+              )}
+            />
+          )}
+        </View>
 
         <ChatInputBar
+          keyboardHeight={keyboardHeight}
           value={inputText}
           onChangeText={setInputText}
           onSend={sendMessage}
@@ -428,8 +433,8 @@ export default function GroupChatScreen() {
           onClose={() => setShowParticipantsSheet(false)}
           onParticipantPress={openParticipantProfile}
         />
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </View>
+    </View>
   );
 }
 
@@ -440,26 +445,41 @@ const styles = StyleSheet.create({
   },
   keyboardView: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: colors.GRAY50,
+  },
+  messagesPane: {
+    flex: 1,
+    minHeight: 0,
   },
   groupHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     backgroundColor: colors.WHITE,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.GRAY200,
-    gap: 10,
+    gap: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+      },
+      android: { elevation: 2 },
+    }),
   },
   groupIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.BLUE_LT,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
   },
   groupIconText: {
     fontSize: 16,
@@ -471,9 +491,10 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   groupHeaderTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "700",
     color: colors.GRAY900,
+    letterSpacing: -0.2,
   },
   groupHeaderSub: {
     fontSize: 12,
@@ -483,17 +504,30 @@ const styles = StyleSheet.create({
   connectionIndicator: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: 8,
     flexShrink: 0,
   },
+  liveStatusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.GRAY50,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+  },
   connDot: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
   },
   connText: {
-    fontSize: 12,
-    color: colors.GRAY500,
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.GRAY600,
+    letterSpacing: 0.2,
   },
   participantsButton: {
     flexDirection: "row",
@@ -511,18 +545,19 @@ const styles = StyleSheet.create({
   },
   errorBar: {
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#FEF2F2",
-    borderBottomWidth: 1,
-    borderBottomColor: "#FECACA",
+    paddingVertical: 11,
+    backgroundColor: colors.RED_LT,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.GRAY200,
   },
   errorText: {
     color: colors.RED,
     fontSize: 13,
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 20,
   },
   emptyListContent: {
     flexGrow: 1,
