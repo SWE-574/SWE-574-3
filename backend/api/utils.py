@@ -347,7 +347,7 @@ def _settle_group_offer_provider_payout(service: Service, handshake: Handshake) 
         handshake=handshake,
         description=(
             f"Group service completed: '{service.title}' "
-            f"({hours} hours transferred after all participants completed)"
+            f"({hours} hours transferred after all participants settled)"
         ),
     )
 
