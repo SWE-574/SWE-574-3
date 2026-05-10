@@ -41,6 +41,6 @@ test.describe('Self-profile (FR-02c)', () => {
     const meAfterRes = await page.context().request.get('/api/users/me/')
     expect(meAfterRes.ok()).toBeTruthy()
     const meAfter = await meAfterRes.json()
-    expect(String(meAfter.bio || '').length).toBe(280)
+    expect(String(meAfter.bio || '')).toBe(storedValue)
   })
 })
