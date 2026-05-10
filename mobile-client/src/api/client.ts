@@ -89,6 +89,16 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 let authToken: string | null = null;
 let refreshToken: string | null = null;
 
+/**
+ * Single-flight guard for the unrecoverable-401 path. When a shared refresh
+ * attempt fails, multiple concurrent callers all observe `null` and would
+ * otherwise each call `clearAuth()` + emit `auth:logout`, causing duplicate
+ * notification-store resets and navigation transitions. The flag gates the
+ * teardown so it runs exactly once per logout, and is re-armed the next
+ * time a fresh session is installed via `setAuthTokens`.
+ */
+let loggingOut = false;
+
 export function setAuthToken(token: string | null): void {
   authToken = token;
 }
@@ -96,6 +106,9 @@ export function setAuthToken(token: string | null): void {
 export function setAuthTokens(access: string, refresh: string): void {
   authToken = access;
   refreshToken = refresh;
+  // A new session means any prior logout cycle is over; re-arm the guard so
+  // the next unrecoverable 401 can fire `auth:logout` again.
+  loggingOut = false;
 }
 
 export function getAuthToken(): string | null {
@@ -284,10 +297,15 @@ export async function apiRequest<T>(
           err,
         );
       }
-    } else {
+    } else if (!loggingOut) {
       // Refresh failed. The session is unrecoverable from the API client's
       // point of view — clear in-memory + persisted tokens and let the
       // navigator reset to the auth stack via the auth:logout event.
+      // Concurrent 401s share a single refresh promise, so they all observe
+      // `null` here; gate the teardown on `loggingOut` so subsequent callers
+      // short-circuit instead of repeating clearAuth + emit. The flag is set
+      // before any await so the next microtask-resumed caller sees it.
+      loggingOut = true;
       await clearAuth();
       emitAuthEvent("auth:logout");
     }
