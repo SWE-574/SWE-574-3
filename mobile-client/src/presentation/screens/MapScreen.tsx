@@ -251,20 +251,13 @@ export default function MapScreen() {
     const center = userLocation
       ? { lat: userLocation.latitude, lng: userLocation.longitude }
       : { lat: DEFAULT_LOCATION.latitude, lng: DEFAULT_LOCATION.longitude };
-    const initServices = toPayload(services);
-    if (__DEV__) {
-      // eslint-disable-next-line no-console
-      console.log(
-        `[MapScreen] posting init: ${initServices.length} services, center=${JSON.stringify(center)}, hasUser=${!!userLocation}`,
-      );
-    }
     post({
       type: "init",
       token: mapboxToken,
       style: MAPBOX_STYLE,
       center,
       zoom: 11,
-      services: initServices,
+      services: toPayload(services),
       user: userLocation
         ? { lat: userLocation.latitude, lng: userLocation.longitude }
         : null,
@@ -302,7 +295,15 @@ export default function MapScreen() {
     }
   }, [post]);
 
-  // Fetch services whenever location or distance changes.
+  // Fetch services whenever location or the explicitly-chosen radius changes.
+  // The distance param is only forwarded when the viewer has opened the range
+  // slider -- without that gate, fetchServices would re-run the moment iOS
+  // location permission resolves and apply a 15 km hard cutoff around the
+  // viewer's coordinates. On the iOS simulator that is the Apple default
+  // (San Francisco, 37.7858/-122.4064), which sits ~10,000 km from the demo
+  // seed and silently filters every Istanbul row out of the response, so
+  // the map paints zero markers. Mirrors `radiusFilterEnabled` on the web
+  // dashboard.
   const fetchServices = useCallback(async () => {
     try {
       setIsLoadingServices(true);
@@ -311,31 +312,26 @@ export default function MapScreen() {
             page_size: 500,
             lat: userLocation.latitude,
             lng: userLocation.longitude,
-            distance: distanceKm,
+            ...(showRangeSlider ? { distance: distanceKm } : {}),
           }
         : { page_size: 500 };
 
       const { results } = await listServices(params);
-      const filteredResults = (results ?? []).filter(
-        (s) =>
-          s.location_lat &&
-          s.location_lng &&
-          !Number.isNaN(Number(s.location_lat)) &&
-          !Number.isNaN(Number(s.location_lng)),
+      setServices(
+        (results ?? []).filter(
+          (s) =>
+            s.location_lat &&
+            s.location_lng &&
+            !Number.isNaN(Number(s.location_lat)) &&
+            !Number.isNaN(Number(s.location_lng)),
+        ),
       );
-      if (__DEV__) {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[MapScreen] fetchServices: api returned ${(results ?? []).length}, ${filteredResults.length} have valid coords (params=${JSON.stringify(params)})`,
-        );
-      }
-      setServices(filteredResults);
     } catch (error) {
       console.error("Error fetching services for map:", error);
     } finally {
       setIsLoadingServices(false);
     }
-  }, [userLocation, distanceKm]);
+  }, [userLocation, distanceKm, showRangeSlider]);
 
   useEffect(() => {
     fetchServices();
@@ -366,12 +362,7 @@ export default function MapScreen() {
   // Push the visible service set to the WebView whenever it changes (after init).
   useEffect(() => {
     if (!mapInited) return;
-    const payload = toPayload(visibleServices);
-    if (__DEV__) {
-      // eslint-disable-next-line no-console
-      console.log(`[MapScreen] posting updateServices: ${payload.length} features`);
-    }
-    post({ type: "updateServices", services: payload });
+    post({ type: "updateServices", services: toPayload(visibleServices) });
   }, [visibleServices, mapInited, post]);
 
   useEffect(() => {
@@ -392,10 +383,6 @@ export default function MapScreen() {
         return;
       }
       if (!parsed) return;
-      if (__DEV__) {
-        // eslint-disable-next-line no-console
-        console.log(`[MapScreen] WebView msg: ${parsed.type ?? '?'} ${parsed.message ?? ''}`);
-      }
       switch (parsed.type) {
         case "loaded":
         case "ready":

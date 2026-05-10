@@ -53,7 +53,6 @@ export const MAPBOX_HTML = `<!DOCTYPE html>
 
       function applyServices(services) {
         if (!map || !loaded) {
-          send({ type: "debug", message: "applyServices deferred (loaded=" + loaded + ", incoming=" + (services || []).length + ")" });
           pendingServices = services;
           return;
         }
@@ -80,8 +79,6 @@ export const MAPBOX_HTML = `<!DOCTYPE html>
               };
             }),
         };
-
-        send({ type: "debug", message: "applyServices painting " + fc.features.length + " features" });
 
         var src = map.getSource("services");
         if (src) {
