@@ -350,3 +350,96 @@ def test_wikidata_search_allows_normal_usage(mock_search, search_env):
     for _ in range(5):
         response = search_env.client.get(search_env.url, {'q': 'test'})
         assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# #525 — Wikidata tag search performance: cache + batched claim lookups
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_search_wikidata_items_returns_cached_payload_without_upstream_call(mock_get):
+    """A repeated query must hit the Django cache, not the wbsearchentities API."""
+    from django.core.cache import cache
+
+    cache.clear()
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        'search': [
+            {'id': 'Q28865', 'label': 'Python', 'description': 'high-level programming language'},
+        ]
+    }
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    first = search_wikidata_items('cachehit-python', limit=5)
+    second = search_wikidata_items('cachehit-python', limit=5)
+
+    assert first == second
+    # The upstream wbsearchentities endpoint should fire exactly once
+    # across the two calls -- the second one is served from the cache.
+    assert mock_get.call_count == 1
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_fetch_wikidata_claims_batch_uses_single_upstream_call(mock_get):
+    """Batched claim resolution issues one wbgetentities request, not N."""
+    from django.core.cache import cache
+    from api.wikidata import fetch_wikidata_claims_batch
+
+    cache.clear()
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        'entities': {
+            'Q28865': {'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q9143'}}}}]}},
+            'Q2005': {'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q9143'}}}}]}},
+            'Q17195715': {'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q1914636'}}}}]}},
+        },
+    }
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    result = fetch_wikidata_claims_batch(['Q28865', 'Q2005', 'Q17195715'])
+
+    assert mock_get.call_count == 1
+    assert set(result.keys()) == {'Q28865', 'Q2005', 'Q17195715'}
+    assert result['Q28865']['instance_of'] == ['Q9143']
+    assert result['Q2005']['instance_of'] == ['Q9143']
+    assert result['Q17195715']['instance_of'] == ['Q1914636']
+
+    # A second batch call for the same QIDs is satisfied entirely from
+    # the cache populated above.
+    cached = fetch_wikidata_claims_batch(['Q28865', 'Q2005', 'Q17195715'])
+    assert cached == result
+    assert mock_get.call_count == 1
+
+
+@pytest.mark.django_db
+@patch('api.wikidata.requests.get')
+def test_classify_and_filter_results_does_not_fan_out_per_qid(mock_get):
+    """The classification step must not fan out one HTTP call per result."""
+    from django.core.cache import cache
+    from api.wikidata import classify_and_filter_results
+
+    cache.clear()
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        'entities': {
+            f'Q{1000 + i}': {
+                'claims': {'P31': [{'mainsnak': {'datavalue': {'value': {'id': 'Q9143'}}}}]}
+            }
+            for i in range(5)
+        },
+    }
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    raw = [{'id': f'Q{1000 + i}', 'label': f'Item {i}'} for i in range(5)]
+    classified = classify_and_filter_results(raw)
+
+    # One batched wbgetentities call covers all five rows.
+    assert mock_get.call_count == 1
+    assert len(classified) == 5
+    assert all(item['entity_type'] == 'technology' for item in classified)
