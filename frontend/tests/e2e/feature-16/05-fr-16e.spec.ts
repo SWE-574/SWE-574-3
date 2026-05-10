@@ -10,8 +10,7 @@ import {
 // and event evaluations update both karma_score (synchronously in the view)
 // and organizer_event_hot_score (via EventEvaluationService.refresh_summary).
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16e: submitting an event evaluation updates the organizer karma_score', async ({ page }) => {
+test('FR-16e: submitting an event evaluation updates the organizer karma_score', async ({ page }) => {
   const title = uniqueTitle('FR-16e Karma')
   const organizer = USERS.deniz
   const participant = USERS.burak
@@ -55,8 +54,7 @@ test.skip('FR-16e: submitting an event evaluation updates the organizer karma_sc
   expect(karmaAfter).toBeGreaterThan(karmaBefore)
 })
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-16e: event evaluation updates organizer_event_hot_score in event summary', async ({ page }) => {
+test('FR-16e: event evaluation updates organizer_event_hot_score in event summary', async ({ page }) => {
   const title = uniqueTitle('FR-16e Event Score')
   const organizer = USERS.yasemin
   const participant = USERS.ayse
