@@ -605,6 +605,7 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
                 label="City / Location"
                 placeholder="Search city, district, or address"
                 helperText="Choose a Mapbox result so your public location stays consistent."
+                isInvalid={!!identityFieldErrors.location}
               />
               {identityFieldErrors.location && (
                 <Text fontSize="11px" color={RED} mt="4px" data-testid="profile-error-location">
