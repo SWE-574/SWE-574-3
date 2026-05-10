@@ -964,3 +964,61 @@ class TestServiceSerializerTagUpsertHelpers:
             tag, created = ServiceSerializer._upsert_qid_tag('Q99999', 'Race Pottery')
         assert created is False
         assert tag is race_winner
+
+    def test_upsert_qid_truncates_long_label_to_column_length(self):
+        """Wikidata can return labels longer than ``Tag.name.max_length``;
+        the helper must clamp them so a fresh INSERT doesn't raise
+        DataError on the column-length check."""
+        max_len = Tag._meta.get_field('name').max_length or 100
+        long_label = 'a' * (max_len + 50)
+        tag, created = ServiceSerializer._upsert_qid_tag('Qlongq', long_label)
+        assert created is True
+        assert len(tag.name) == max_len
+
+    def test_upsert_named_truncates_long_name_to_column_length(self):
+        """Same column-length guarantee for the free-text name path."""
+        max_len = Tag._meta.get_field('name').max_length or 100
+        tag = ServiceSerializer._upsert_named_tag('b' * (max_len + 50))
+        assert tag is not None
+        assert len(tag.name) == max_len
+
+    def test_upsert_named_returns_none_for_blank_input(self):
+        """Whitespace-only input cannot become a tag — a row with
+        ``name=''`` would also collide with future blank submissions on
+        the unique-name index."""
+        assert ServiceSerializer._upsert_named_tag('   ') is None
+        assert ServiceSerializer._upsert_named_tag('') is None
+
+    def test_upsert_named_handles_case_variants_via_filter_not_get(self):
+        """Postgres unique-name index is case-sensitive, so two tags
+        differing only by case are legal at the DB level. The helper
+        must use ``filter(...).first()`` rather than ``.get(...)`` so
+        ``MultipleObjectsReturned`` cannot 500 the request — pick the
+        first matching row deterministically."""
+        Tag.objects.create(id='cooking_a', name='cooking')
+        Tag.objects.create(id='cooking_b', name='Cooking')
+        # Either match is acceptable; the contract is "no 500".
+        tag = ServiceSerializer._upsert_named_tag('COOKING')
+        assert tag is not None
+        assert tag.name.lower() == 'cooking'
+
+    def test_upsert_named_recovery_falls_through_to_id_lookup(self):
+        """When the IntegrityError was raised by an id-collision rather
+        than a name-collision, the recovery filter(name) misses but
+        filter(id) finds the racing row — the helper must return that
+        instead of None."""
+        from django.db import IntegrityError
+        from unittest.mock import MagicMock
+        race_by_id = Tag(id='knit_id', name='Different Name')
+        # filter() call sequence under a blank DB:
+        #   1. entry filter(name).first() -> None
+        #   2. entry filter(id).exists()  -> False
+        #   3. recovery filter(name).first() -> None
+        #   4. recovery filter(id).first()   -> race_by_id
+        qs = MagicMock()
+        qs.first.side_effect = [None, None, race_by_id]
+        qs.exists.return_value = False
+        with patch('api.serializers.Tag.objects.filter', return_value=qs), \
+             patch('api.serializers.Tag.objects.create', side_effect=IntegrityError('uniq')):
+            tag = ServiceSerializer._upsert_named_tag('Knit')
+        assert tag is race_by_id

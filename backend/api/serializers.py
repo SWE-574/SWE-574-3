@@ -1034,8 +1034,16 @@ class ServiceSerializer(serializers.ModelSerializer):
           3. Otherwise INSERT a fresh Tag(id=QID, name=tag_name). If the
              INSERT still races on the unique index, fall back to (2)'s
              lookup.
+
+        Truncates ``tag_name`` to ``Tag.name.max_length`` so a long
+        upstream label cannot 500 the request via a column-length
+        violation when Wikidata returns >100 chars.
         """
         from django.db import IntegrityError, transaction as _t
+
+        if tag_name:
+            max_name_len = Tag._meta.get_field('name').max_length or 100
+            tag_name = tag_name.strip()[:max_name_len] or None
 
         existing = Tag.objects.filter(id=normalized_qid).first()
         if existing is not None:
@@ -1067,15 +1075,27 @@ class ServiceSerializer(serializers.ModelSerializer):
 
         Falls back to a slugified id, with a uuid suffix when the slug is
         already taken. On INSERT IntegrityError (either id or name unique
-        index), re-resolves to the row that won the race.
+        index), re-resolves the row that won the race — first by id (so
+        a slug-collision with a different name is recoverable), then by
+        name. Truncates ``tag_name_clean`` to ``Tag.name.max_length`` so
+        a long input cannot 500 the request via a column-length violation.
         """
         import uuid as _uuid
         from django.db import IntegrityError, transaction as _t
 
-        try:
-            return Tag.objects.get(name__iexact=tag_name_clean)
-        except Tag.DoesNotExist:
-            pass
+        # Tag.name has max_length=100 at the DB level; longer free-text
+        # input would otherwise raise DataError on insert and 500.
+        max_name_len = Tag._meta.get_field('name').max_length or 100
+        tag_name_clean = (tag_name_clean or '').strip()[:max_name_len]
+        if not tag_name_clean:
+            return None
+
+        # Use filter().first() not get() — the DB unique index on name is
+        # case-sensitive in Postgres, so two tags differing only by case
+        # would otherwise raise MultipleObjectsReturned and 500.
+        existing = Tag.objects.filter(name__iexact=tag_name_clean).first()
+        if existing is not None:
+            return existing
 
         tag_id = tag_name_clean.lower().replace(' ', '_').replace('-', '_')[:200]
         if Tag.objects.filter(id=tag_id).exists():
@@ -1085,7 +1105,14 @@ class ServiceSerializer(serializers.ModelSerializer):
             with _t.atomic():
                 return Tag.objects.create(id=tag_id, name=tag_name_clean)
         except IntegrityError:
-            return Tag.objects.filter(name__iexact=tag_name_clean).first()
+            # Race recovery — id-collision can land here when the slug
+            # we generated coincided with a row created mid-flight under
+            # a different name; re-resolve by both keys before falling
+            # back to None.
+            recovered = Tag.objects.filter(name__iexact=tag_name_clean).first()
+            if recovered is not None:
+                return recovered
+            return Tag.objects.filter(id=tag_id).first()
 
     def create(self, validated_data):
         # Description is already sanitized in validate_description
@@ -1270,20 +1297,21 @@ class ServiceSerializer(serializers.ModelSerializer):
                         if label_from_form:
                             tag_name = label_from_form
                         else:
+                            wikidata_info = None
                             try:
                                 wikidata_info = fetch_wikidata_item(normalized_qid)
                             except Exception as exc:
-                                wikidata_info = None
+                                # Log only the exception type to keep
+                                # user-supplied QIDs out of the log line.
                                 logger.warning(
-                                    "Wikidata lookup failed for %s; using QID "
-                                    "as placeholder name (%s)",
-                                    normalized_qid, type(exc).__name__,
+                                    "Wikidata lookup failed (%s); using "
+                                    "QID as placeholder name",
+                                    type(exc).__name__,
                                 )
                             if wikidata_info and wikidata_info.get('label'):
                                 tag_name = wikidata_info['label']
                             else:
                                 tag_name = normalized_qid
-                                logger.warning(f"Could not fetch Wikidata info for {normalized_qid}, using QID as name")
                         tag, created = self._upsert_qid_tag(normalized_qid, tag_name)
                         if tag is None:
                             continue

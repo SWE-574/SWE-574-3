@@ -1058,10 +1058,14 @@ class TestOfferCreateTagPayloads:
 
         assert_api_response(response, 201)
         attached_ids = {t['id'] for t in response.data.get('tags', [])}
-        assert attached_ids, 'expected the offer to surface at least one tag'
         # The fix must reuse the existing row by name rather than create
-        # a new row with the same name and 500 on the unique index.
-        assert (existing.id in attached_ids) or ('Q9888' in attached_ids)
+        # a new row with the same name and 500 on the unique index. Pin
+        # to the stored row's id so a regression that resurrects the
+        # parallel-INSERT path is caught — 'Q9888' showing up here would
+        # mean the helper bypassed the name-collision lookup.
+        assert existing.id in attached_ids
+        assert 'Q9888' not in attached_ids
+        assert not Tag.objects.filter(id='Q9888').exists()
 
     @patch('api.wikidata.fetch_wikidata_claims', return_value=None)
     @patch('api.wikidata.fetch_wikidata_item', return_value=None)
