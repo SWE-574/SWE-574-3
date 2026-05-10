@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { getFeaturedChips, type FeaturedChip } from "../../api/featured";
+import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 
 interface TagChipsRowProps {
@@ -10,6 +11,13 @@ interface TagChipsRowProps {
 
 export default function TagChipsRow({ activeQid, onSelect }: TagChipsRowProps) {
   const [chips, setChips] = useState<FeaturedChip[]>([]);
+  // HomeScreen is reachable without auth (Login lives inside ProfileStack),
+  // so the first fetch can land before the token is installed and the
+  // backend serves its anonymous global-tag fallback. Without re-running
+  // on identity flips the user keeps seeing those global chips after they
+  // log in instead of the personalized set the web Browse grid shows.
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -27,7 +35,7 @@ export default function TagChipsRow({ activeQid, onSelect }: TagChipsRowProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [userId]);
 
   return (
     <ScrollView

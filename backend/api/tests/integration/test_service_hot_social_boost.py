@@ -101,3 +101,77 @@ class TestServiceHotSocialBoost:
         ordered_ids = self._service_ids_in_order(response.data)
         assert str(second_degree_service.id) == ordered_ids[0]
         assert str(disconnected_service.id) == ordered_ids[1]
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestServiceHotProximityWithOnline:
+    """Online services must rank by hot_score alone when proximity is active.
+
+    Regression: the Phase 2 ranking annotates `distance = Distance(location,
+    viewer_point)`, which is NULL for Online services because they have no
+    `location` PointField. The proximity expression `1.0 / (1.0 + distance /
+    half_life)` then evaluates to NULL, propagates into `composite_score`,
+    and Postgres' default for `ORDER BY composite_score DESC` is NULLS
+    FIRST -- so every Online service piled to the top of every
+    location-aware feed regardless of its hot_score. Treat NULL distance as
+    a neutral 0 m so Online services compete on hot_score with the closest
+    in-person rows instead of jumping the queue.
+    """
+
+    def _service_ids_in_order(self, response_data):
+        results = response_data.get('results', response_data)
+        ours = [item for item in results if item['title'].startswith('[HPO]')]
+        return [item['id'] for item in ours]
+
+    def test_low_score_online_does_not_outrank_high_score_inperson_under_location(self):
+        viewer = UserFactory()
+
+        # Online row with the lowest hot_score in the matched set. Pre-fix it
+        # still landed at the top because its NULL composite_score sorted
+        # before any concrete float in `ORDER BY ... DESC NULLS FIRST`.
+        online_low = ServiceFactory(
+            user=UserFactory(),
+            type='Offer',
+            schedule_type='One-Time',
+            max_participants=1,
+            title='[HPO] Online Low Score',
+            duration=Decimal('1.00'),
+            location_type='Online',
+            location_lat=None,
+            location_lng=None,
+            status='Active',
+        )
+        # In-Person row sitting right at the viewer's location with a
+        # clearly higher hot_score. With Online treated neutrally this row
+        # must sort first.
+        in_person_high = ServiceFactory(
+            user=UserFactory(),
+            type='Offer',
+            schedule_type='One-Time',
+            max_participants=1,
+            title='[HPO] In-Person High Score Nearby',
+            duration=Decimal('1.00'),
+            location_type='In-Person',
+            location_lat=Decimal('41.0082'),
+            location_lng=Decimal('29.0500'),
+            status='Active',
+        )
+
+        Service.objects.filter(pk=online_low.pk).update(hot_score=1.0)
+        Service.objects.filter(pk=in_person_high.pk).update(hot_score=10.0)
+
+        client = AuthenticatedAPIClient().authenticate_user(viewer)
+        response = client.get(
+            '/api/services/?sort=hot&search=[HPO]&lat=41.0082&lng=29.0500'
+        )
+
+        assert_api_response(response, 200)
+        ordered_ids = self._service_ids_in_order(response.data)
+        assert str(in_person_high.id) == ordered_ids[0], (
+            'High-score in-person row at the viewer location must outrank a '
+            'low-score Online row when proximity is active. Pre-fix the '
+            'Online row landed first because NULL composite_score sorted '
+            'before all floats.'
+        )
+        assert str(online_low.id) == ordered_ids[1]

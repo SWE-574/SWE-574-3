@@ -81,9 +81,37 @@ interface SmartPillProps {
  * qualifies as cold_start, which drowned out cards that DID have a real
  * for_you signal. cold_start specifically renders as an outline pill so
  * it never dominates over a saturated for_you pill.
+ *
+ * IMPORTANT: this priority chain is also encoded in `pillIdentity` in
+ * forYouChips.ts so the Browse-grid diversifier sees the same chip
+ * identities the user does. If you reorder branches here, mirror the
+ * change there or runs of identical pills will resurface.
  */
 export default function SmartPill({ service }: SmartPillProps) {
   const chip = chipForSignals(service.for_you_signals)
+  // Newcomer-over-follow promotion: when the for-you chip resolves to
+  // `follow`, the owner is a newcomer, AND the follow signal is from an
+  // indirect (friend-of-friend, raw signal < 1.0) connection, render
+  // the newcomer story instead. Direct follows keep "From your network"
+  // because that IS the actual discovery insight -- the viewer chose to
+  // follow this person. Mirrors the same branch in `pillIdentity` so
+  // the diversifier and the renderer agree on the chip identity.
+  const followSignal = service.for_you_signals?.follow ?? 0
+  if (
+    chip.name === 'follow'
+    && service.is_newcomer_owner
+    && followSignal < 1
+  ) {
+    return (
+      <PillBox
+        label={NEWCOMER_FLAVOUR.label}
+        bg={NEWCOMER_FLAVOUR.bg}
+        fg={NEWCOMER_FLAVOUR.fg}
+        border={NEWCOMER_FLAVOUR.border}
+        Icon={NEWCOMER_FLAVOUR.Icon}
+      />
+    )
+  }
   if (chip.name !== 'default') {
     const Icon =
       chip.name === 'follow' ? FiUsers

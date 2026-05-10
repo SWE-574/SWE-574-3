@@ -4,8 +4,6 @@ import {
   Alert,
   FlatList,
   Image,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -35,6 +33,7 @@ import { colors } from "../../constants/colors";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import { getInitials } from "../../utils/getInitials";
 import { useAuth } from "../../context/AuthContext";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { ChatInputBar } from "../components/chat/ChatInputBar";
 import type { ForumStackParamList } from "../../navigation/ForumStack";
 import type { UserSummary } from "../../api/types";
@@ -130,7 +129,11 @@ function EditActionButtons({
   return (
     <View style={styles.editActions}>
       <Pressable
-        style={[styles.editBtn, styles.editBtnSave, saving && styles.editBtnDisabled]}
+        style={[
+          styles.editBtn,
+          styles.editBtnSave,
+          saving && styles.editBtnDisabled,
+        ]}
         onPress={onSave}
         disabled={saving}
       >
@@ -140,13 +143,15 @@ function EditActionButtons({
           <Text style={styles.editBtnSaveText}>Save</Text>
         )}
       </Pressable>
-      <Pressable style={[styles.editBtn, styles.editBtnCancel]} onPress={onCancel}>
+      <Pressable
+        style={[styles.editBtn, styles.editBtnCancel]}
+        onPress={onCancel}
+      >
         <Text style={styles.editBtnCancelText}>Cancel</Text>
       </Pressable>
     </View>
   );
 }
-
 
 interface TopicHeaderProps {
   topic: ForumTopic;
@@ -189,7 +194,10 @@ function TopicHeader({
       <View style={styles.topicHeaderTop}>
         <View style={styles.topicBadgeRow}>
           <View style={[styles.categoryChip, { backgroundColor: tone.light }]}>
-            <Text style={[styles.categoryText, { color: tone.bg }]} numberOfLines={1}>
+            <Text
+              style={[styles.categoryText, { color: tone.bg }]}
+              numberOfLines={1}
+            >
               {topic.category_name}
             </Text>
           </View>
@@ -209,7 +217,11 @@ function TopicHeader({
 
         {isOwner && !isEditing && (
           <Pressable style={styles.menuButton} onPress={onMenu} hitSlop={8}>
-            <Ionicons name="ellipsis-vertical" size={18} color={colors.GRAY500} />
+            <Ionicons
+              name="ellipsis-vertical"
+              size={18}
+              color={colors.GRAY500}
+            />
           </Pressable>
         )}
         {canReport && !isEditing && (
@@ -239,7 +251,11 @@ function TopicHeader({
             maxLength={10000}
             textAlignVertical="top"
           />
-          <EditActionButtons saving={saving} onSave={onSave} onCancel={onCancel} />
+          <EditActionButtons
+            saving={saving}
+            onSave={onSave}
+            onCancel={onCancel}
+          />
         </>
       ) : (
         <>
@@ -253,7 +269,9 @@ function TopicHeader({
             />
             <Text style={styles.authorName}>{topic.author_name}</Text>
             <Text style={styles.dot}>·</Text>
-            <Text style={styles.timeAgo}>{formatTimeAgo(topic.created_at)}</Text>
+            <Text style={styles.timeAgo}>
+              {formatTimeAgo(topic.created_at)}
+            </Text>
           </View>
           <Text style={styles.topicBody}>{topic.body}</Text>
         </>
@@ -261,9 +279,15 @@ function TopicHeader({
 
       <View style={styles.topicMetaRow}>
         <View style={styles.metaPill}>
-          <Ionicons name="chatbubble-outline" size={14} color={colors.GRAY500} />
+          <Ionicons
+            name="chatbubble-outline"
+            size={14}
+            color={colors.GRAY500}
+          />
           <Text style={styles.metaPillText}>
-            {topic.reply_count === 1 ? "1 reply" : `${topic.reply_count} replies`}
+            {topic.reply_count === 1
+              ? "1 reply"
+              : `${topic.reply_count} replies`}
           </Text>
         </View>
         <View style={styles.metaPill}>
@@ -276,7 +300,6 @@ function TopicHeader({
     </View>
   );
 }
-
 
 interface PostItemProps {
   post: ForumPost;
@@ -324,19 +347,33 @@ function PostItem({
           <Text style={styles.authorName}>{post.author_name}</Text>
           {isTopicAuthor && (
             <View style={[styles.authorBadge, { backgroundColor: tone.light }]}>
-              <Text style={[styles.authorBadgeText, { color: tone.bg }]}>Author</Text>
+              <Text style={[styles.authorBadgeText, { color: tone.bg }]}>
+                Author
+              </Text>
             </View>
           )}
           <Text style={styles.dot}>·</Text>
           <Text style={styles.timeAgo}>{formatTimeAgo(post.created_at)}</Text>
         </View>
         {isOwner && !isEditing && (
-          <Pressable style={styles.menuButton} onPress={() => onMenu(post)} hitSlop={8}>
-            <Ionicons name="ellipsis-vertical" size={16} color={colors.GRAY500} />
+          <Pressable
+            style={styles.menuButton}
+            onPress={() => onMenu(post)}
+            hitSlop={8}
+          >
+            <Ionicons
+              name="ellipsis-vertical"
+              size={16}
+              color={colors.GRAY500}
+            />
           </Pressable>
         )}
         {canReport && !isEditing && (
-          <Pressable style={styles.menuButton} onPress={() => onReport(post)} hitSlop={8}>
+          <Pressable
+            style={styles.menuButton}
+            onPress={() => onReport(post)}
+            hitSlop={8}
+          >
             <Ionicons name="flag-outline" size={16} color={colors.GRAY500} />
           </Pressable>
         )}
@@ -368,9 +405,9 @@ function PostItem({
   );
 }
 
-
 export default function TopicDetailScreen() {
   const navigation = useNavigation<NavProp>();
+  const keyboardHeight = useKeyboardHeight();
   const { id } = useRoute<RouteParam>().params;
   const { isAuthenticated, user } = useAuth();
 
@@ -395,9 +432,7 @@ export default function TopicDetailScreen() {
   const [savingPost, setSavingPost] = useState(false);
 
   const [reportTarget, setReportTarget] = useState<
-    | { kind: "topic" }
-    | { kind: "post"; post: ForumPost }
-    | null
+    { kind: "topic" } | { kind: "post"; post: ForumPost } | null
   >(null);
   const [topicTone, setTopicTone] = useState<TopicTone>(TOPIC_TONE);
 
@@ -426,7 +461,8 @@ export default function TopicDetailScreen() {
         setHasMore(postsData.next !== null);
         setPage(1);
         const matchedCategory = categoryData.find(
-          (category) => category.slug === (topicData as ForumTopic).category_slug
+          (category) =>
+            category.slug === (topicData as ForumTopic).category_slug,
         );
         setTopicTone(getCategoryTone(matchedCategory?.color));
       } catch {
@@ -436,7 +472,9 @@ export default function TopicDetailScreen() {
       }
     }
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [id, retryKey]);
 
   const handleRetry = useCallback(() => setRetryKey((k) => k + 1), []);
@@ -446,7 +484,10 @@ export default function TopicDetailScreen() {
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      const data = await listTopicPosts(id, { page: page + 1, page_size: PAGE_SIZE });
+      const data = await listTopicPosts(id, {
+        page: page + 1,
+        page_size: PAGE_SIZE,
+      });
       setPosts((prev) => [...prev, ...data.results]);
       setHasMore(data.next !== null);
       setPage((p) => p + 1);
@@ -472,7 +513,7 @@ export default function TopicDetailScreen() {
               ...prev,
               reply_count: prev.reply_count + 1,
             }
-          : prev
+          : prev,
       );
       requestAnimationFrame(() => {
         listRef.current?.scrollToEnd({ animated: true });
@@ -573,7 +614,7 @@ export default function TopicDetailScreen() {
                           ...prev,
                           reply_count: Math.max(0, prev.reply_count - 1),
                         }
-                      : prev
+                      : prev,
                   );
                 } catch (err) {
                   Alert.alert("Error", parseApiError(err));
@@ -586,26 +627,29 @@ export default function TopicDetailScreen() {
     ]);
   }, []);
 
-  const handleSavePost = useCallback(async (postId: string) => {
-    const body = editingPostBody.trim();
-    if (!body) {
-      Alert.alert("Error", "Reply cannot be empty.");
-      return;
-    }
-    setSavingPost(true);
-    try {
-      const updated = await patchPost(postId, { body });
-      setPosts((prev) =>
-        prev.map((p) => (p.id === postId ? (updated as ForumPost) : p))
-      );
-      setEditingPostId(null);
-      setEditingPostBody("");
-    } catch (err) {
-      Alert.alert("Error", parseApiError(err));
-    } finally {
-      setSavingPost(false);
-    }
-  }, [editingPostBody]);
+  const handleSavePost = useCallback(
+    async (postId: string) => {
+      const body = editingPostBody.trim();
+      if (!body) {
+        Alert.alert("Error", "Reply cannot be empty.");
+        return;
+      }
+      setSavingPost(true);
+      try {
+        const updated = await patchPost(postId, { body });
+        setPosts((prev) =>
+          prev.map((p) => (p.id === postId ? (updated as ForumPost) : p)),
+        );
+        setEditingPostId(null);
+        setEditingPostBody("");
+      } catch (err) {
+        Alert.alert("Error", parseApiError(err));
+      } finally {
+        setSavingPost(false);
+      }
+    },
+    [editingPostBody],
+  );
 
   const handleCancelPostEdit = useCallback(() => {
     setEditingPostId(null);
@@ -617,7 +661,10 @@ export default function TopicDetailScreen() {
       if (!reportTarget) return;
       try {
         const payload = {
-          type: req.type === "service_issue" || req.type === "no_show" ? "other" : req.type,
+          type:
+            req.type === "service_issue" || req.type === "no_show"
+              ? "other"
+              : req.type,
           description: req.description,
         } satisfies import("../../api/forum").ReportRequest;
         if (reportTarget.kind === "topic") {
@@ -626,18 +673,25 @@ export default function TopicDetailScreen() {
           await reportPost(reportTarget.post.id, payload);
         }
         setReportTarget(null);
-        Alert.alert("Report Submitted", "Thank you. Our moderators will review this report.");
+        Alert.alert(
+          "Report Submitted",
+          "Thank you. Our moderators will review this report.",
+        );
       } catch (err) {
         Alert.alert("Error", parseApiError(err));
       }
     },
-    [id, reportTarget]
+    [id, reportTarget],
   );
 
   const renderFooter = () => {
     if (!loadingMore) return null;
     return (
-      <ActivityIndicator size="small" color={colors.GREEN} style={styles.footerSpinner} />
+      <ActivityIndicator
+        size="small"
+        color={colors.GREEN}
+        style={styles.footerSpinner}
+      />
     );
   };
 
@@ -655,7 +709,11 @@ export default function TopicDetailScreen() {
     if (topic && posts.length === 0) {
       return (
         <View style={styles.emptyContainer}>
-          <Ionicons name="chatbubble-outline" size={36} color={colors.GRAY300} />
+          <Ionicons
+            name="chatbubble-outline"
+            size={36}
+            color={colors.GRAY300}
+          />
           <Text style={styles.emptyText}>No replies yet. Be the first!</Text>
         </View>
       );
@@ -686,7 +744,9 @@ export default function TopicDetailScreen() {
         <View style={styles.repliesSectionHeader}>
           <Text style={styles.sectionHeadingTitle}>Replies</Text>
           <Text style={styles.sectionHeadingMeta}>
-            {topic.reply_count === 1 ? "1 message" : `${topic.reply_count} messages`}
+            {topic.reply_count === 1
+              ? "1 message"
+              : `${topic.reply_count} messages`}
           </Text>
         </View>
       </>
@@ -713,6 +773,7 @@ export default function TopicDetailScreen() {
     }
     return (
       <ChatInputBar
+        keyboardHeight={keyboardHeight}
         value={replyText}
         onChangeText={setReplyText}
         onSend={handleSubmit}
@@ -726,7 +787,10 @@ export default function TopicDetailScreen() {
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
       <View style={styles.topBar}>
-        <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
+        <Pressable
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
           <Ionicons name="arrow-back" size={22} color={colors.GRAY900} />
         </Pressable>
         <View style={styles.topBarTextWrap}>
@@ -738,42 +802,49 @@ export default function TopicDetailScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator size="large" color={colors.GREEN} style={styles.fullScreenSpinner} />
+        <ActivityIndicator
+          size="large"
+          color={colors.GREEN}
+          style={styles.fullScreenSpinner}
+        />
       ) : (
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <FlatList
-            ref={listRef}
-            data={posts}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <PostItem
-                post={item}
-                user={user}
-                topicAuthorId={topic?.author_id ?? ""}
-                tone={topicTone}
-                isEditing={editingPostId === item.id}
-                editingPostBody={editingPostBody}
-                savingPost={savingPost}
-                onEditBodyChange={setEditingPostBody}
-                onMenu={handlePostMenu}
-                onReport={(post) => setReportTarget({ kind: "post", post })}
-                onSave={handleSavePost}
-                onCancel={handleCancelPostEdit}
-              />
-            )}
-            ListHeaderComponent={renderListHeader}
-            ListEmptyComponent={renderEmpty}
-            ListFooterComponent={renderFooter}
-            onEndReached={handleLoadMore}
-            onEndReachedThreshold={0.3}
-            contentContainerStyle={styles.listContent}
-            ItemSeparatorComponent={() => <View style={styles.cardGap} />}
-          />
+        <View style={styles.flex}>
+          <View style={styles.messagesPane}>
+            <FlatList
+              ref={listRef}
+              data={posts}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <PostItem
+                  post={item}
+                  user={user}
+                  topicAuthorId={topic?.author_id ?? ""}
+                  tone={topicTone}
+                  isEditing={editingPostId === item.id}
+                  editingPostBody={editingPostBody}
+                  savingPost={savingPost}
+                  onEditBodyChange={setEditingPostBody}
+                  onMenu={handlePostMenu}
+                  onReport={(post) => setReportTarget({ kind: "post", post })}
+                  onSave={handleSavePost}
+                  onCancel={handleCancelPostEdit}
+                />
+              )}
+              ListHeaderComponent={renderListHeader}
+              ListEmptyComponent={renderEmpty}
+              ListFooterComponent={renderFooter}
+              onEndReached={handleLoadMore}
+              onEndReachedThreshold={0.3}
+              contentContainerStyle={[
+                styles.listContent,
+                { paddingBottom: keyboardHeight + 76 },
+              ]}
+              ItemSeparatorComponent={() => <View style={styles.cardGap} />}
+              keyboardShouldPersistTaps="handled"
+            />
+          </View>
           {renderComposer()}
-        </KeyboardAvoidingView>
+        </View>
       )}
 
       <ReportModal
@@ -786,7 +857,6 @@ export default function TopicDetailScreen() {
   );
 }
 
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -794,6 +864,10 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  messagesPane: {
+    flex: 1,
+    minHeight: 0,
   },
   topBar: {
     flexDirection: "row",

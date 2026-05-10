@@ -64,7 +64,7 @@ export default function ImagePreviewModal({
       statusBarTranslucent={Platform.OS === "android"}
     >
       <View style={styles.container}>
-        <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+        <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
           <TouchableOpacity
             style={styles.closeButton}
             onPress={onClose}

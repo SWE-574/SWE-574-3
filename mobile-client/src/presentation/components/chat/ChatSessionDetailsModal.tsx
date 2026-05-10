@@ -399,14 +399,14 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     maxHeight: "88%",
-    paddingTop: 10,
+    paddingTop: 18,
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 12,
     paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingBottom: 14,
   },
   headerTextWrap: {
     flex: 1,
@@ -431,7 +431,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.GRAY100,
   },
   content: {
-    padding: 14,
+    padding: 18,
     gap: 8,
   },
   detailsPanel: {
@@ -445,8 +445,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     backgroundColor: "transparent",
     borderBottomWidth: 1,
     borderBottomColor: colors.GRAY200,
@@ -500,7 +500,7 @@ const styles = StyleSheet.create({
     color: colors.GRAY500,
   },
   statusCard: {
-    padding: 10,
+    padding: 14,
     borderRadius: 12,
     borderWidth: 1,
   },
@@ -529,7 +529,7 @@ const styles = StyleSheet.create({
     color: colors.GRAY600,
   },
   noticeCard: {
-    padding: 10,
+    padding: 14,
     borderRadius: 12,
     backgroundColor: "#FEF2F2",
     borderWidth: 1.5,
@@ -560,9 +560,10 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   actionButton: {
-    minHeight: 36,
+    minHeight: 40,
     borderRadius: 11,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center",
   },

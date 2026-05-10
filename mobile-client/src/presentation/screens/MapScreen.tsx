@@ -11,8 +11,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Asset } from "expo-asset";
-import { File } from "expo-file-system";
 import * as Location from "expo-location";
 import WebView from "react-native-webview";
 import type { WebViewMessageEvent } from "react-native-webview";
@@ -33,6 +31,7 @@ import { getServiceDistanceKm } from "../../utils/discovery";
 import MapSearchResults, {
   type MapSearchResult,
 } from "../components/MapSearchResults";
+import { MAPBOX_HTML } from "../../../assets/mapboxHtml";
 
 type SignalFilter = Exclude<PillIdentity, "default">;
 
@@ -157,7 +156,6 @@ export default function MapScreen() {
   const navigation = useNavigation<any>();
 
   const webViewRef = useRef<WebView>(null);
-  const [webViewContent, setWebViewContent] = useState<string | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [userLocation, setUserLocation] = useState<{
     latitude: number;
@@ -186,37 +184,18 @@ export default function MapScreen() {
   const locationCheckedRef = useRef(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
 
-  // Load the HTML asset. Re-runs when mapAttempt bumps (Retry) so a transient
-  // asset-load failure does not leave the screen stuck on the placeholder.
-  useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        const path = require("../../../assets/mapbox.html");
-        const asset = Asset.fromModule(path);
-        await asset.downloadAsync();
-        const htmlContent = await new File(asset.localUri!).text();
-        if (!isMounted) return;
-        setWebViewContent(htmlContent);
-        setMapLoadFailed(false);
-      } catch (error) {
-        if (!isMounted) return;
-        // No alert: the placeholder UI surfaces the failure with a Retry CTA.
-        // eslint-disable-next-line no-console
-        console.warn("[MapScreen] failed to load map HTML asset", error);
-        setMapLoadFailed(true);
-      }
-    })();
-    return () => {
-      isMounted = false;
-    };
-  }, [mapAttempt]);
-
+  // The WebView HTML used to live in `assets/mapbox.html` and was loaded
+  // through Asset.downloadAsync + File.text(). That round-trip got cached
+  // by both Expo Asset and the iOS app sandbox, so a fresh build of the
+  // simulator app would still serve the previous HTML body until the user
+  // deleted the app — every time the bridge logic changed it looked like
+  // the fix had not landed. Inlining the HTML as a string constant keeps
+  // it in the JS bundle, so a Metro reload always serves the newest copy
+  // and there is no asynchronous load to fail.
   const retryMap = useCallback(() => {
     setMapLoadFailed(false);
     setMapReady(false);
     setMapInited(false);
-    setWebViewContent(null);
     setMapAttempt((value) => value + 1);
   }, []);
 
@@ -357,6 +336,11 @@ export default function MapScreen() {
     userLocationRef.current = userLocation;
   }, [userLocation]);
 
+  // The distance param is only forwarded when the viewer has opened the
+  // range slider -- without that gate, the iOS simulator default location
+  // (San Francisco) sits ~10,000 km from the demo seed and a 15 km cutoff
+  // silently filters every row out of the response. Mirrors
+  // `radiusFilterEnabled` on the web dashboard.
   const fetchServices = useCallback(async () => {
     try {
       setIsLoadingServices(true);
@@ -366,7 +350,7 @@ export default function MapScreen() {
             page_size: 200,
             lat: loc.latitude,
             lng: loc.longitude,
-            distance: distanceKm,
+            ...(showRangeSlider ? { distance: distanceKm } : {}),
           }
         : { page_size: 200 };
 
@@ -385,7 +369,7 @@ export default function MapScreen() {
     } finally {
       setIsLoadingServices(false);
     }
-  }, [distanceKm]);
+  }, [distanceKm, showRangeSlider]);
 
   // Wait for the location resolution to settle before the first fetch so we
   // make one call, not two — once with no coords, once with coords.
@@ -469,11 +453,17 @@ export default function MapScreen() {
       }
       if (!parsed) return;
       switch (parsed.type) {
-        case "ready":
-          setMapReady(true);
-          break;
         case "loaded":
-          // HTML is parsed but mapboxgl may still be loading — ignore.
+        case "ready":
+          // mapbox.html sends "loaded" once the IIFE runs (which is right
+          // after the synchronous mapbox-gl.js script tag finishes), and
+          // sends "ready" later from inside map.on("load"). The init post
+          // is gated on mapReady, so if we only flipped the flag on "ready"
+          // we'd deadlock — "ready" can never fire because it lives
+          // inside init(), which never runs because we never post init.
+          // Either signal is sufficient evidence that mapboxgl is alive
+          // and we can safely send the init payload across the bridge.
+          setMapReady(true);
           break;
         case "markerPress": {
           const service = services.find((s) => s.id === parsed!.id);
@@ -532,14 +522,6 @@ export default function MapScreen() {
     );
   }
 
-  if (!webViewContent) {
-    return (
-      <View style={[styles.loading, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={colors.GREEN} />
-      </View>
-    );
-  }
-
   const drawerTranslate = drawerAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [DRAWER_HEIGHT, 0],
@@ -551,7 +533,7 @@ export default function MapScreen() {
         key={`mapbox-${mapAttempt}`}
         ref={webViewRef}
         originWhitelist={["*"]}
-        source={{ html: webViewContent, baseUrl: "https://localhost" }}
+        source={{ html: MAPBOX_HTML, baseUrl: "https://localhost" }}
         onMessage={handleMessage}
         onError={() => setMapLoadFailed(true)}
         onHttpError={() => setMapLoadFailed(true)}

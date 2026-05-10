@@ -1,4 +1,15 @@
-<!DOCTYPE html>
+// Inlined as a TS string instead of a separate `.html` asset so Metro hot
+// reloads pick up edits immediately and there is no Asset.downloadAsync
+// cache to invalidate between dev rebuilds. The previous `.html` asset
+// would survive a code change in mapbox.html if the simulator app was
+// not deleted between runs, which made every fix to the WebView bridge
+// look like a no-op until the user wiped the app.
+//
+// Sister file `mapbox.html` is kept around for editor syntax highlighting
+// during local prototyping. Whenever you edit it, paste the body back
+// into the template literal below — the `.html` is no longer loaded at
+// runtime.
+export const MAPBOX_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -35,6 +46,9 @@
         //   GREEN  = #2D5C4E (Offer)
         //   BLUE   = #1D4ED8 (Need)
         //   AMBER  = #D97706 (Event)
+        // The previous lighter hex values disagreed with the type pill
+        // colours used on the rest of the app, so an Offer marker on the
+        // map didn't match the green Offer pill on a service card.
         switch (type) {
           case "Offer": return "#2D5C4E";
           case "Need":  return "#1D4ED8";
@@ -152,19 +166,23 @@
           logoPosition: "bottom-left",
         });
         // No NavigationControl on mobile: the +/- buttons collide with
-        // the find-me FAB and pinch-to-zoom is enabled by default.
+        // the find-me FAB (also bottom-right) and duplicate gestures
+        // Mapbox GL already binds — pinch-to-zoom and double-tap-to-zoom
+        // are enabled by default on touch, so the buttons are redundant.
+        // Apple Maps and Google Maps both omit them on mobile for the
+        // same reason.
         map.on("load", function () {
           loaded = true;
           send({ type: "ready" });
           if (cfg.user) setUserMarker(cfg.user.lat, cfg.user.lng);
-          // RN posts `init` once mapReady flips, but at that moment the
+          // RN posts \`init\` once mapReady flips, but at that moment the
           // services state on the RN side is usually still the empty
           // initial array because fetchServices is async. The populated
-          // list arrives via a later `updateServices` message. If that
-          // message lands before `map.on("load")` fires, applyServices
-          // sees `loaded=false` and stashes the payload in
+          // list arrives via a later \`updateServices\` message. If that
+          // message lands before \`map.on("load")\` fires, applyServices
+          // sees \`loaded=false\` and stashes the payload in
           // pendingServices. Previously this branch picked cfg.services
-          // unconditionally because `[]` is truthy, dropping the real
+          // unconditionally because \`[]\` is truthy, dropping the real
           // data on the floor and rendering an empty map. Prefer
           // pendingServices when present so the freshest payload wins.
           var initialServices = pendingServices != null
@@ -199,4 +217,4 @@
     })();
   </script>
 </body>
-</html>
+</html>`
