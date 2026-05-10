@@ -20,6 +20,27 @@ function svc(id: string, signals: ForYouSignals): Service {
   } as unknown as Service
 }
 
+// Cards without for_you_signals still render distinct pills in SmartPill
+// based on explore_pool / is_newcomer_owner / capacity. The diversifier
+// must see the same identities or runs of e.g. "Fresh provider" survive.
+function exploreSvc(id: string, pool: NonNullable<Service['explore_pool']>): Service {
+  return {
+    id,
+    title: `Service ${id}`,
+    type: 'Offer',
+    explore_pool: pool,
+  } as unknown as Service
+}
+
+function newcomerSvc(id: string): Service {
+  return {
+    id,
+    title: `Service ${id}`,
+    type: 'Offer',
+    is_newcomer_owner: true,
+  } as unknown as Service
+}
+
 describe('diversifyByChip', () => {
   it('breaks runs of same-chip cards by swapping in a different-chip card within lookahead', () => {
     // Three follow-strongest cards in a row, then a tag-strongest card.
@@ -52,6 +73,51 @@ describe('diversifyByChip', () => {
     // All five cards are follow-strongest; nothing to swap with.
     const cards = Array.from({ length: 5 }, (_, i) =>
       svc(String(i), { tag: 0, follow: 1, cooccur: 0, recency_penalty: 0 }),
+    )
+
+    const out = diversifyByChip(cards)
+    expect(out.map(s => s.id)).toEqual(['0', '1', '2', '3', '4'])
+  })
+
+  it('breaks runs of same-explore_pool cards even when for_you_signals are absent', () => {
+    // Demo data: most cards are cold_start with no for_you_signals. Before
+    // the fix, every such card mapped to 'default' for the diversifier,
+    // so clusters of "Fresh provider" survived untouched. With pillIdentity
+    // mirroring SmartPill, cold_start ≠ undershown_quality and the
+    // duplicate at index 1 should be swapped with the differing card
+    // at index 3.
+    const cards = [
+      exploreSvc('a', 'cold_start'),
+      exploreSvc('b', 'cold_start'),
+      exploreSvc('c', 'cold_start'),
+      exploreSvc('d', 'undershown_quality'),
+    ]
+
+    const out = diversifyByChip(cards)
+    expect(out[0].id).toBe('a')
+    expect(out[1].id).not.toBe('b')
+  })
+
+  it('treats newcomer and explore_pool as distinct identities', () => {
+    // SmartPill renders "Rising newcomer" for is_newcomer_owner and
+    // "Fresh provider" for cold_start. The diversifier must see them as
+    // different so a newcomer adjacent to two cold_starts breaks the run.
+    const cards = [
+      exploreSvc('a', 'cold_start'),
+      exploreSvc('b', 'cold_start'),
+      newcomerSvc('c'),
+    ]
+
+    const out = diversifyByChip(cards)
+    expect(out[0].id).toBe('a')
+    expect(out[1].id).toBe('c')
+  })
+
+  it('still leaves runs alone when every card shares the same pill identity', () => {
+    // Five cold_start cards in a row; nothing to swap with — diversifier
+    // must not invent variance that does not exist in the source.
+    const cards = Array.from({ length: 5 }, (_, i) =>
+      exploreSvc(String(i), 'cold_start'),
     )
 
     const out = diversifyByChip(cards)

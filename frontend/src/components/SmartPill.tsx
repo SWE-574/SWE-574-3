@@ -81,6 +81,11 @@ interface SmartPillProps {
  * qualifies as cold_start, which drowned out cards that DID have a real
  * for_you signal. cold_start specifically renders as an outline pill so
  * it never dominates over a saturated for_you pill.
+ *
+ * IMPORTANT: this priority chain is also encoded in `pillIdentity` in
+ * forYouChips.ts so the Browse-grid diversifier sees the same chip
+ * identities the user does. If you reorder branches here, mirror the
+ * change there or runs of identical pills will resurface.
  */
 export default function SmartPill({ service }: SmartPillProps) {
   const chip = chipForSignals(service.for_you_signals)
