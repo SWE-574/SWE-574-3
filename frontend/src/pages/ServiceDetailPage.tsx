@@ -522,6 +522,11 @@ export default function ServiceDetailPage() {
   const [eventDetailModalTab, setEventDetailModalTab] = useState<EventDetailModalTab>('details')
   const [completing, setCompleting]         = useState(false)
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null)
+  // #300 / FR-13m — owner-side manual Mark-as-Complete fallback. The
+  // pending-id pins which interest row's modal is open so we can
+  // confirm + dispatch + clear in one place.
+  const [markCompleteHandshakeId, setMarkCompleteHandshakeId] = useState<string | null>(null)
+  const [markingCompleteLoading, setMarkingCompleteLoading] = useState(false)
   const [reportingEventIssue, setReportingEventIssue] = useState(false)
   const [showEvaluationModal, setShowEvaluationModal] = useState(false)
 
@@ -1000,6 +1005,31 @@ export default function ServiceDetailPage() {
       const err = e as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail ?? 'Could not cancel event.')
     } finally { setCancelLoading(false) }
+  }
+
+  // #300 / FR-13m — owner-side fallback that records the owner's half of
+  // the dual-confirmation flow without forcing the owner to navigate to
+  // chat. Reuses the existing `handshakeAPI.confirm` endpoint, so no
+  // backend change is needed; the requester still has to confirm on their
+  // side before the time-credit transfer fires.
+  const handleMarkCompleteHandshake = async () => {
+    if (!markCompleteHandshakeId) return
+    setMarkingCompleteLoading(true)
+    try {
+      const updated = await handshakeAPI.confirm(markCompleteHandshakeId)
+      setHandshakes((prev) => prev.map((h) => (h.id === updated.id ? updated : h)))
+      if (updated.status === 'completed') {
+        toast.success('Exchange marked as complete.')
+      } else {
+        toast.info("Marked complete on your side. Awaiting the requester's confirmation.")
+      }
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail ?? 'Could not mark as complete. Please try again.')
+    } finally {
+      setMarkingCompleteLoading(false)
+      setMarkCompleteHandshakeId(null)
+    }
   }
 
   const handleRemoveListing = async () => {
@@ -2039,6 +2069,7 @@ export default function ServiceDetailPage() {
                               key={h.id}
                               handshake={h}
                               isOwner={isOwn}
+                              serviceLocationType={service.location_type}
                               onAccept={canDirectlyAcceptHandshake(h.status, service.type)
                                 ? async () => {
                                     try {
@@ -2055,6 +2086,13 @@ export default function ServiceDetailPage() {
                                     } catch { /* errors handled via toast elsewhere */ }
                                   }
                                 : undefined}
+                              onMarkComplete={
+                                h.status === 'accepted'
+                                && !h.provider_confirmed_complete
+                                && service.location_type === 'In-Person'
+                                  ? () => setMarkCompleteHandshakeId(h.id)
+                                  : undefined
+                              }
                             />
                           ))}
                         </Stack>
@@ -2545,6 +2583,18 @@ export default function ServiceDetailPage() {
       loading={removeLoading}
       onConfirm={handleRemoveListing}
       onClose={() => setShowRemoveModal(false)}
+    />
+
+    {/* ── Manual Mark-as-Complete fallback modal (#300 / FR-13m) ──────────── */}
+    <AdminConfirmModal
+      isOpen={markCompleteHandshakeId !== null}
+      title="Mark as Complete"
+      description="Mark this exchange as complete? The requester will still need to confirm on their side before the time credits transfer."
+      confirmLabel="Mark Complete"
+      accent={GREEN} accentLt={GREEN_LT}
+      loading={markingCompleteLoading}
+      onConfirm={handleMarkCompleteHandshake}
+      onClose={() => setMarkCompleteHandshakeId(null)}
     />
 
     {/* ── Cancel Event modal with required reason (BUG-03) ───────────────── */}
