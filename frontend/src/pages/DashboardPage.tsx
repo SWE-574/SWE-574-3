@@ -53,6 +53,7 @@ import {
 } from '@/theme/tokens'
 import { formatGroupOfferDateTime, isNearlyFull } from '@/utils/eventUtils'
 import { isEventRecurrent } from '@/utils/eventRecurrence'
+import { diversifyByChip } from '@/utils/forYouChips'
 
 const DEBOUNCE_SEARCH   = 400
 const DEBOUNCE_DISTANCE = 250
@@ -694,7 +695,7 @@ const DashboardPage = () => {
           return hs?.status !== 'cancelled'
         })
       : services
-    return base
+    const filtered = base
       .filter((s) => {
         if (s.type === 'Event' && s.scheduled_time && new Date(s.scheduled_time).getTime() <= Date.now()) return false
         return true
@@ -705,6 +706,14 @@ const DashboardPage = () => {
         if (aInactive === bInactive) return 0
         return aInactive ? 1 : -1
       })
+    // Anti-clustering: when the viewer has many connections, the `follow`
+    // signal dominates and the grid renders runs of identical "From your
+    // network" pills. `diversifyByChip` walks the result and swaps in a
+    // different-chip neighbour from the next 3 cards whenever a duplicate
+    // would land. Caps total swaps at floor(N/2) so the underlying ranking
+    // signal is preserved — the helper rotates within a window, not across
+    // the whole page.
+    return diversifyByChip(filtered)
   }, [services, isAuthenticated, handshakeMap])
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))

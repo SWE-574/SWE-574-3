@@ -196,4 +196,60 @@ describe('DashboardPage (Browse)', () => {
       expect(last?.types).toEqual(expect.arrayContaining(['Offer', 'Need']))
     })
   })
+
+  // ── Chip diversification on the live grid ─────────────────────────────────
+  // The `diversifyByChip` helper has its own unit suite, but it had no
+  // production caller — the Browse grid rendered in raw backend order so
+  // viewers with many connections saw long runs of "From your network"
+  // pills. Pin the wiring here so a future regression that drops the call
+  // fails the suite instead of shipping silently.
+
+  it('rotates chip-clustered cards out of consecutive positions on the live grid', async () => {
+    // Three follow-strong cards then a tag-strong card. Without
+    // diversification the grid renders s1, s2, s3, s4 in that order and
+    // the first three cards all show "From your network". With the wired
+    // helper, s4 (tag) gets swapped in to break the run.
+    const followStrong = (id: string, title: string): Service => ({
+      ...makeService(id, title),
+      for_you_signals: { tag: 0, follow: 1, cooccur: 0, recency_penalty: 0 },
+    } as Service)
+    const tagStrong = (id: string, title: string): Service => ({
+      ...makeService(id, title),
+      for_you_signals: { tag: 0.6, follow: 0, cooccur: 0, recency_penalty: 0 },
+    } as Service)
+
+    listPagedMock.mockResolvedValue({
+      results: [
+        followStrong('f1', 'Follow card 1'),
+        followStrong('f2', 'Follow card 2'),
+        followStrong('f3', 'Follow card 3'),
+        tagStrong('t1', 'Tag card 1'),
+      ],
+      count: 4,
+    })
+
+    renderPage()
+
+    // Wait for the cards to render and read their DOM order. The grid
+    // renders services in array order, so without diversification the
+    // tag card sits last — `f1, f2, f3, t1`. After the wired pass, the
+    // helper swaps t1 into position 1 (lookahead 3), giving `f1, t1, f2, f3`,
+    // which breaks the consecutive-follow run.
+    await waitFor(() => expect(screen.getByText('Follow card 1')).toBeInTheDocument())
+
+    const titles = ['Follow card 1', 'Follow card 2', 'Follow card 3', 'Tag card 1']
+    const elements = titles.map((t) => screen.getByText(t))
+    // sort the elements by document order (compareDocumentPosition returns
+    // a bitmask: 4 = "is following", so a follows b means a is later).
+    const ordered = [...elements].sort((a, b) => {
+      // eslint-disable-next-line no-bitwise
+      return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+    })
+    const orderedTitles = ordered.map((el) => el.textContent)
+    // The pre-fix order was strictly `Follow card 1/2/3, Tag card 1`.
+    // Post-fix the tag card must NOT be last — the diversify pass lifts
+    // it forward to break the cluster.
+    expect(orderedTitles[3]).not.toBe('Tag card 1')
+    expect(orderedTitles).toContain('Tag card 1')
+  })
 })
