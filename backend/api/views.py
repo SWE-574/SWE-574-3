@@ -7278,10 +7278,15 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
     
     def get_queryset(self):
-        # Hide soft-deleted topics from public list/retrieve. Reports filed
-        # against them still reference the row in the database; only the
-        # public surface is suppressed.
-        queryset = ForumTopic.objects.select_related('author', 'category').filter(is_deleted=False)
+        # Hide soft-deleted topics from the public list/retrieve. Reports filed
+        # against them still reference the row in the database; only the public
+        # surface is suppressed. Staff/admin callers see soft-deleted topics so
+        # they can navigate to a specific deleted topic and review its content
+        # for moderation (the destroy/edit/pin/lock/report paths still 404 on
+        # soft-deleted rows because they query is_deleted=False directly).
+        queryset = ForumTopic.objects.select_related('author', 'category')
+        if not self.request.user.is_staff:
+            queryset = queryset.filter(is_deleted=False)
 
         # Filter by category if provided
         category_slug = self.request.query_params.get('category')

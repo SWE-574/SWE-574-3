@@ -1438,3 +1438,39 @@ class TestForumTopicSoftDelete:
 
         response = client.delete(self._delete_url(topic.id))
         assert_problem_detail(response, 404)
+
+    def test_staff_can_retrieve_soft_deleted_topic(self):
+        """Staff can GET /api/forum/topics/<pk>/ on a soft-deleted topic.
+
+        Soft-deleted topics are hidden from the public surface, but moderators
+        need a way to inspect the original content of a deleted topic when
+        triaging the surviving Report.reported_forum_topic rows. Staff bypass
+        the is_deleted filter on list/retrieve.
+        """
+        admin = AdminUserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, title='Removed', is_deleted=True)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+
+        response = client.get(f'/api/forum/topics/{topic.id}/')
+        assert_api_response(response, 200)
+        assert response.data['id'] == str(topic.id)
+        assert response.data['is_deleted'] is True
+
+    def test_staff_list_includes_soft_deleted_topics(self):
+        """Staff list response surfaces soft-deleted topics for moderation review."""
+        admin = AdminUserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        live = ForumTopicFactory(category=category, title='Live')
+        removed = ForumTopicFactory(category=category, title='Removed', is_deleted=True)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        response = client.get('/api/forum/topics/')
+        assert_api_response(response, 200)
+
+        ids = {t['id'] for t in response.data['results']}
+        assert str(live.id) in ids
+        assert str(removed.id) in ids
