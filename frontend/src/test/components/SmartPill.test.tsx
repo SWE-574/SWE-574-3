@@ -83,4 +83,90 @@ describe('SmartPill', () => {
     )
     expect(screen.getByText('From your network')).toBeInTheDocument()
   })
+
+  // ── engagement signal ("Saved by others") ─────────────────────────────────
+
+  it('renders the engagement chip when it is the strongest for_you signal', () => {
+    renderPill(
+      makeService({
+        for_you_signals: {
+          tag: 0,
+          follow: 0,
+          cooccur: 0,
+          recency_penalty: 0,
+          engagement: 0.6,
+        },
+      }),
+    )
+    expect(screen.getByText('Saved by others')).toBeInTheDocument()
+  })
+
+  it('engagement loses to a stronger weighted tag overlap', () => {
+    // tag * 0.5 = 0.3 beats engagement * 0.15 = 0.075 even though engagement
+    // is the larger raw value. Pin the weighting so a future weights tweak
+    // that flips this ordering is caught.
+    renderPill(
+      makeService({
+        for_you_signals: {
+          tag: 0.6,
+          follow: 0,
+          cooccur: 0,
+          recency_penalty: 0,
+          engagement: 0.5,
+        },
+      }),
+    )
+    expect(screen.getByText('Matches your interests')).toBeInTheDocument()
+    expect(screen.queryByText('Saved by others')).not.toBeInTheDocument()
+  })
+
+  it('treats missing engagement as zero (back-compat with older payloads)', () => {
+    // Older backend responses do not carry the engagement key. Picker must
+    // not crash on `undefined` and must not emit "Saved by others" for them.
+    renderPill(
+      makeService({
+        for_you_signals: { tag: 0.4, follow: 0, cooccur: 0, recency_penalty: 0 },
+      }),
+    )
+    expect(screen.getByText('Matches your interests')).toBeInTheDocument()
+  })
+
+  // ── is_newcomer_owner fallback ("Rising newcomer") ────────────────────────
+
+  it('renders the Rising newcomer pill when the owner is a newcomer and no for_you signal applies', () => {
+    renderPill(makeService({ is_newcomer_owner: true }))
+    expect(screen.getByText('Rising newcomer')).toBeInTheDocument()
+  })
+
+  it('newcomer pill takes priority over the cold_start explore pool', () => {
+    // Both signals frequently coexist on demo data. Newcomer is the
+    // stronger discovery story (a new face) so it wins over the generic
+    // "Fresh provider" pool flavour.
+    renderPill(
+      makeService({ is_newcomer_owner: true, explore_pool: 'cold_start' }),
+    )
+    expect(screen.getByText('Rising newcomer')).toBeInTheDocument()
+    expect(screen.queryByText('Fresh provider')).not.toBeInTheDocument()
+  })
+
+  it('for_you signal still beats is_newcomer_owner', () => {
+    // The pillar of the priority order: a real for_you signal trumps
+    // every fallback, including newcomer. Otherwise newcomers would
+    // never get credit for their tag matches.
+    renderPill(
+      makeService({
+        is_newcomer_owner: true,
+        for_you_signals: { tag: 0.6, follow: 0, cooccur: 0, recency_penalty: 0 },
+      }),
+    )
+    expect(screen.getByText('Matches your interests')).toBeInTheDocument()
+    expect(screen.queryByText('Rising newcomer')).not.toBeInTheDocument()
+  })
+
+  it('cold_start still renders Fresh provider when owner is not a newcomer', () => {
+    // Sanity: removing the newcomer flag must not regress the existing
+    // cold_start pill — both flavours coexist, just at different priority.
+    renderPill(makeService({ explore_pool: 'cold_start' }))
+    expect(screen.getByText('Fresh provider')).toBeInTheDocument()
+  })
 })
