@@ -2616,10 +2616,21 @@ class ServiceViewSet(viewsets.ModelViewSet):
             half_life_km = getattr(settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0)
             if proximity_active and half_life_km > 0:
                 # PostGIS Distance annotation is in metres (srid=4326).
+                # Online services have `location IS NULL`, which makes the
+                # Distance annotation NULL and would propagate NULL all the
+                # way into composite_score. Postgres' default for `ORDER BY
+                # ... DESC` is NULLS FIRST, so every Online row used to land
+                # at the top of every location-aware feed regardless of
+                # hot_score. Coalesce a missing distance to 0 m so Online
+                # cards collapse to proximity_factor=1.0 and compete on
+                # hot_score with the closest in-person rows.
+                distance_metres = Coalesce(
+                    F('distance'), Value(0.0, output_field=FloatField())
+                )
                 proximity_expr = ExpressionWrapper(
                     Value(1.0, output_field=FloatField()) / (
                         Value(1.0, output_field=FloatField())
-                        + F('distance') / Value(
+                        + distance_metres / Value(
                             1000.0 * half_life_km, output_field=FloatField()
                         )
                     ),
