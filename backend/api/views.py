@@ -23,7 +23,7 @@ from datetime import timedelta
 import logging
 import os
 import bleach
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -166,10 +166,19 @@ def _require_verified_email(request, action_clause: str = 'to continue'):
 ADMIN_ROLES = frozenset(('admin', 'super_admin', 'moderator'))
 
 
-def log_admin_action(admin_user, action_type: str, target_entity: str, target_obj, reason: str = '') -> None:
-    """Best-effort admin audit logging for moderation actions."""
+def log_admin_action(admin_user, action_type: str, target_entity: str, target_obj, reason: str = '') -> Optional['AdminAuditLog']:
+    """Best-effort admin audit logging for moderation actions.
+
+    Returns the persisted ``AdminAuditLog`` row so the caller can surface
+    the new entry inline in the action response (NFR-03b: spares the
+    moderation UI a follow-up GET /api/admin/audit-logs/, which previously
+    raced the writer in setups where the audit list reads from a follower
+    replica). Returns ``None`` only when the persistence step itself
+    raised — moderation actions still succeed in that case, but the
+    response simply won't carry the inline log row.
+    """
     try:
-        AdminAuditLog.objects.create(
+        return AdminAuditLog.objects.create(
             admin=admin_user,
             action_type=action_type,
             target_entity=target_entity,
@@ -178,6 +187,7 @@ def log_admin_action(admin_user, action_type: str, target_entity: str, target_ob
         )
     except Exception as exc:
         logger.warning('Admin audit log failed for %s (%s): %s', action_type, target_entity, exc)
+        return None
 
 
 def _send_email_async(to_email: str, subject: str, html: str) -> None:
@@ -5779,7 +5789,7 @@ class AdminUserViewSet(viewsets.ViewSet):
             message=request.data.get('message', 'You have received a formal warning from an administrator.'),
         )
 
-        log_admin_action(
+        audit_entry = log_admin_action(
             request.user,
             'warn_user',
             'user',
@@ -5787,7 +5797,13 @@ class AdminUserViewSet(viewsets.ViewSet):
             request.data.get('message', ''),
         )
 
-        return Response({'status': 'success', 'message': 'Warning issued'})
+        # NFR-03b: surface the appended audit-log row inline so moderation
+        # consoles don't have to chase a follow-up GET that may race the
+        # writer behind a follower replica.
+        payload = {'status': 'success', 'message': 'Warning issued'}
+        if audit_entry is not None:
+            payload['audit_log'] = AdminAuditLogSerializer(audit_entry).data
+        return Response(payload)
 
     @action(detail=True, methods=['post'], url_path='ban', throttle_classes=[ConfirmationThrottle])
     def ban_user(self, request, pk=None):
