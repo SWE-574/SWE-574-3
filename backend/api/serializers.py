@@ -3291,31 +3291,35 @@ class ForumCategorySerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_topic_count(self, obj):
-        """Return count of topics in this category"""
+        """Return count of non-deleted topics in this category"""
         if hasattr(obj, 'topic_count_annotated'):
             return obj.topic_count_annotated
-        return obj.topics.count()
+        return obj.topics.filter(is_deleted=False).count()
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_post_count(self, obj):
-        """Return count of all posts across topics in this category"""
+        """Return count of all posts across non-deleted topics in this category"""
         if hasattr(obj, 'post_count_annotated'):
             return obj.post_count_annotated
-        return ForumPost.objects.filter(topic__category=obj, is_deleted=False).count()
+        return ForumPost.objects.filter(
+            topic__category=obj,
+            topic__is_deleted=False,
+            is_deleted=False,
+        ).count()
 
     @extend_schema_field(OpenApiTypes.DATETIME)
     def get_last_activity(self, obj):
         """Return timestamp of most recent activity in this category"""
         if hasattr(obj, 'last_activity_annotated'):
             return obj.last_activity_annotated
-        
-        # Check most recent post
+
+        # Check most recent post (only on non-deleted topics)
         latest_post = ForumPost.objects.filter(
-            topic__category=obj, is_deleted=False
+            topic__category=obj, topic__is_deleted=False, is_deleted=False
         ).order_by('-created_at').first()
-        
-        # Check most recent topic
-        latest_topic = obj.topics.order_by('-created_at').first()
+
+        # Check most recent (non-deleted) topic
+        latest_topic = obj.topics.filter(is_deleted=False).order_by('-created_at').first()
         
         if latest_post and latest_topic:
             return max(latest_post.created_at, latest_topic.created_at)
@@ -3374,11 +3378,12 @@ class ForumTopicSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'category', 'category_name', 'category_slug',
             'author_id', 'author_name', 'author_avatar_url',
-            'title', 'body', 'is_pinned', 'is_locked', 'view_count',
+            'title', 'body', 'is_pinned', 'is_locked', 'is_deleted',
+            'view_count',
             'reply_count', 'last_activity', 'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'id', 'author_id', 'is_pinned', 'is_locked', 
+            'id', 'author_id', 'is_pinned', 'is_locked', 'is_deleted',
             'view_count', 'created_at', 'updated_at'
         ]
 
