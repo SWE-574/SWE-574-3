@@ -23,9 +23,15 @@ type Props = {
   isOwner: boolean
   onAccept?: () => void
   onReject?: () => void
+  /**
+   * #300 / FR-13m — owner-side manual Mark-as-Complete fallback. Wires
+   * to `handshakeAPI.confirm` so the dual-confirmation flow can be
+   * driven from the interests panel without navigating to chat.
+   */
+  onMarkComplete?: () => void
 }
 
-const InterestRequesterRow = ({ handshake, isOwner, onAccept, onReject }: Props) => {
+const InterestRequesterRow = ({ handshake, isOwner, onAccept, onReject, onMarkComplete }: Props) => {
   // Defensive: only render for owners
   if (!isOwner) return null
 
@@ -47,6 +53,15 @@ const InterestRequesterRow = ({ handshake, isOwner, onAccept, onReject }: Props)
   const cfg = HS_BADGE[handshake.status] ?? { label: handshake.status, ...STATUS_FALLBACK }
   const isPending = handshake.status === 'pending'
   const isActive = ['pending', 'accepted'].includes(handshake.status)
+  // Owner can mark complete on an accepted exchange that the owner has
+  // not yet confirmed. The button simply records the owner's half of
+  // the dual-confirmation; the row stays "accepted" until the requester
+  // also confirms (or the action is repeated through chat). Hiding the
+  // button after the owner already confirmed prevents double-clicks.
+  const canMarkComplete =
+    handshake.status === 'accepted'
+    && !handshake.provider_confirmed_complete
+    && Boolean(onMarkComplete)
 
   const profileUrl = `/public-profile/${requesterId}`
 
@@ -178,6 +193,23 @@ const InterestRequesterRow = ({ handshake, isOwner, onAccept, onReject }: Props)
             onClick={onReject}
           >
             Decline
+          </Box>
+        )}
+        {/* Mark as Complete — only for accepted status, owner not yet confirmed (#300 / FR-13m) */}
+        {canMarkComplete && (
+          <Box
+            as="button"
+            px="10px"
+            py="5px"
+            borderRadius="7px"
+            fontSize="11px"
+            fontWeight={700}
+            data-testid="mark-as-complete-button"
+            aria-label={`Mark exchange with ${displayName} as complete`}
+            style={{ background: GREEN_LT, border: 'none', cursor: 'pointer', color: GREEN }}
+            onClick={onMarkComplete}
+          >
+            Mark as Complete
           </Box>
         )}
       </Flex>

@@ -186,6 +186,78 @@ describe('InterestRequesterRow', () => {
     expect(screen.queryByText('Decline')).not.toBeInTheDocument()
   })
 
+  // ── #300 / FR-13m: owner-side manual Mark-as-Complete fallback ──────────
+
+  it('shows Mark as Complete on accepted handshakes when owner has not yet confirmed', () => {
+    const onMarkComplete = vi.fn()
+    render(
+      <Wrapper>
+        <InterestRequesterRow
+          handshake={makeHandshake({ status: 'accepted', provider_confirmed_complete: false })}
+          isOwner
+          onMarkComplete={onMarkComplete}
+        />
+      </Wrapper>,
+    )
+    expect(screen.getByTestId('mark-as-complete-button')).toBeInTheDocument()
+  })
+
+  it('hides Mark as Complete after the owner has already confirmed', () => {
+    render(
+      <Wrapper>
+        <InterestRequesterRow
+          handshake={makeHandshake({ status: 'accepted', provider_confirmed_complete: true })}
+          isOwner
+          onMarkComplete={vi.fn()}
+        />
+      </Wrapper>,
+    )
+    expect(screen.queryByTestId('mark-as-complete-button')).not.toBeInTheDocument()
+  })
+
+  it('hides Mark as Complete when status is not accepted', () => {
+    render(
+      <Wrapper>
+        <InterestRequesterRow
+          handshake={makeHandshake({ status: 'pending' })}
+          isOwner
+          onMarkComplete={vi.fn()}
+        />
+      </Wrapper>,
+    )
+    expect(screen.queryByTestId('mark-as-complete-button')).not.toBeInTheDocument()
+  })
+
+  it('hides Mark as Complete when no onMarkComplete handler is provided', () => {
+    // Defensive: avoids rendering a dead button when the parent hasn't
+    // wired the fallback (e.g. event surfaces that route through a
+    // different completion flow).
+    render(
+      <Wrapper>
+        <InterestRequesterRow
+          handshake={makeHandshake({ status: 'accepted', provider_confirmed_complete: false })}
+          isOwner
+        />
+      </Wrapper>,
+    )
+    expect(screen.queryByTestId('mark-as-complete-button')).not.toBeInTheDocument()
+  })
+
+  it('calls onMarkComplete when the button is clicked', () => {
+    const onMarkComplete = vi.fn()
+    render(
+      <Wrapper>
+        <InterestRequesterRow
+          handshake={makeHandshake({ status: 'accepted', provider_confirmed_complete: false })}
+          isOwner
+          onMarkComplete={onMarkComplete}
+        />
+      </Wrapper>,
+    )
+    fireEvent.click(screen.getByTestId('mark-as-complete-button'))
+    expect(onMarkComplete).toHaveBeenCalledTimes(1)
+  })
+
   it('falls back to requester.id when requester_detail is absent', () => {
     const handshake = makeHandshake({
       requester: 'user-fallback',
