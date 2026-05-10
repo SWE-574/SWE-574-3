@@ -34,11 +34,20 @@ export function usePushNotifications(
   const tokenRef = useRef<string | null>(null);
   const notificationListenerRef = useRef<Notifications.Subscription | null>(null);
   const responseListenerRef = useRef<Notifications.Subscription | null>(null);
+  // Mirror navigationRef into a ref so the response-listener effect does NOT
+  // depend on navigationRef's identity. Pre-fix the effect re-fired when the
+  // ref changed (cold-start init / hot reload), and the cleanup → re-attach
+  // sequence stacked listeners — one push then fired N navigations (#453).
+  const navigationRefHolder = useRef(navigationRef);
+  useEffect(() => {
+    navigationRefHolder.current = navigationRef;
+  }, [navigationRef]);
 
   const handleNotificationResponse = useCallback(
     (response: Notifications.NotificationResponse) => {
       const data = response.notification.request.content.data;
-      if (!data?.type || !navigationRef) return;
+      const currentNav = navigationRefHolder.current;
+      if (!data?.type || !currentNav) return;
 
       useNotificationStore.getState().fetchUnreadCount();
 
@@ -57,13 +66,13 @@ export function usePushNotifications(
             related_user: (data.related_user as string) ?? null,
             created_at: '',
           },
-          navigationRef,
+          currentNav,
         );
       } catch (e) {
         console.warn('[usePushNotifications] navigate from notification failed', e);
       }
     },
-    [navigationRef],
+    [],
   );
 
   const registerForPushNotifications = useCallback(async () => {
@@ -135,8 +144,12 @@ export function usePushNotifications(
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    notificationListenerRef.current =
-      Notifications.addNotificationReceivedListener((received) => {
+    // Defensive: if a previous subscription survived a hot reload or a
+    // double-mount, tear it down before attaching a new one.
+    notificationListenerRef.current?.remove();
+
+    const subscription = Notifications.addNotificationReceivedListener(
+      (received) => {
         // Sync unread count when a push arrives while app is open.
         useNotificationStore.getState().fetchUnreadCount();
 
@@ -156,26 +169,44 @@ export function usePushNotifications(
               }
             : undefined,
         });
-      });
+      },
+    );
+    notificationListenerRef.current = subscription;
 
     return () => {
-      notificationListenerRef.current?.remove();
+      subscription.remove();
+      if (notificationListenerRef.current === subscription) {
+        notificationListenerRef.current = null;
+      }
     };
   }, [isAuthenticated]);
 
-  // Listen for notification taps (user interacted with a notification — app in foreground or background)
+  // Listen for notification taps (user interacted with a notification — app in
+  // foreground or background). Effect keyed only on isAuthenticated; the
+  // listener reads navigationRef out of navigationRefHolder so a navigationRef
+  // identity change does not stack a second subscription on top of the first.
+  // handleNotificationResponse is intentionally captured by closure, NOT in
+  // the dep array — its stable identity (useCallback([])) is the contract.
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    responseListenerRef.current =
-      Notifications.addNotificationResponseReceivedListener((response) => {
+    responseListenerRef.current?.remove();
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      (response) => {
         handleNotificationResponse(response);
-      });
+      },
+    );
+    responseListenerRef.current = subscription;
 
     return () => {
-      responseListenerRef.current?.remove();
+      subscription.remove();
+      if (responseListenerRef.current === subscription) {
+        responseListenerRef.current = null;
+      }
     };
-  }, [isAuthenticated, navigationRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   // Handle cold-start: app was killed and user tapped a notification to open it.
   // addNotificationResponseReceivedListener fires too late in this case, so we

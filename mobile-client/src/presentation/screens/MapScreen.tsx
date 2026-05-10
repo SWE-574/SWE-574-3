@@ -31,6 +31,100 @@ type FilterType = "all" | ServiceType;
 const DEFAULT_LOCATION = { latitude: 41.0082, longitude: 28.9784 };
 const MAPBOX_STYLE = "mapbox://styles/sgunes16/cmmc96rwc00c701qz7v0g8h9k";
 
+/**
+ * Rendered in place of the WebView when Mapbox is unavailable — token
+ * missing in the build, network down, or the WebView itself errored.
+ * Pre-fix the screen rendered an empty WebView and the user saw a blank
+ * surface with no explanation (#453b).
+ */
+function MapUnavailable({
+  onRetry,
+  insetTop,
+  reason,
+}: {
+  onRetry: () => void;
+  insetTop: number;
+  reason: "no-token" | "load-failed";
+}) {
+  const body =
+    reason === "no-token"
+      ? "Map service is not configured for this build. Check your connection or try a different build."
+      : "Could not load the map. Check your connection and try again.";
+  return (
+    <View
+      style={[unavailableStyles.container, { paddingTop: insetTop + 24 }]}
+      accessibilityRole="alert"
+      accessibilityLabel="Map unavailable"
+    >
+      <View style={unavailableStyles.iconWrap}>
+        <Ionicons name="map-outline" size={36} color={colors.GREEN} />
+      </View>
+      <Text style={unavailableStyles.title}>Map unavailable</Text>
+      <Text style={unavailableStyles.body}>{body}</Text>
+      <Pressable
+        onPress={onRetry}
+        accessibilityRole="button"
+        accessibilityLabel="Retry loading the map"
+        style={({ pressed }) => [
+          unavailableStyles.retryBtn,
+          pressed && { opacity: 0.85 },
+        ]}
+        testID="map-retry-button"
+      >
+        <Ionicons name="refresh" size={16} color={colors.WHITE} />
+        <Text style={unavailableStyles.retryBtnText}>Retry</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const unavailableStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    backgroundColor: colors.GRAY50,
+  },
+  iconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.GREEN_LT,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.GRAY900,
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  body: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.GRAY600,
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  retryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.GREEN,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+  },
+  retryBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.WHITE,
+  },
+});
+
 const FILTER_CONFIG: {
   label: string;
   value: FilterType;
@@ -80,11 +174,18 @@ export default function MapScreen() {
   const [showRangeSlider, setShowRangeSlider] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapInited, setMapInited] = useState(false);
+  // Bumped on Retry to force the WebView and the asset-load effect to remount.
+  // WebViews don't expose a clean reload-on-error API, so a key change is the
+  // most reliable reset path.
+  const [mapAttempt, setMapAttempt] = useState(0);
+  const [mapLoadFailed, setMapLoadFailed] = useState(false);
+  const mapboxToken = getMapboxToken();
 
   const locationCheckedRef = useRef(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
 
-  // Load the HTML asset once.
+  // Load the HTML asset. Re-runs when mapAttempt bumps (Retry) so a transient
+  // asset-load failure does not leave the screen stuck on the placeholder.
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -93,15 +194,28 @@ export default function MapScreen() {
         const asset = Asset.fromModule(path);
         await asset.downloadAsync();
         const htmlContent = await new File(asset.localUri!).text();
-        if (isMounted) setWebViewContent(htmlContent);
+        if (!isMounted) return;
+        setWebViewContent(htmlContent);
+        setMapLoadFailed(false);
       } catch (error) {
-        Alert.alert("Error loading map", JSON.stringify(error));
-        console.error("Error loading map HTML:", error);
+        if (!isMounted) return;
+        // No alert: the placeholder UI surfaces the failure with a Retry CTA.
+        // eslint-disable-next-line no-console
+        console.warn("[MapScreen] failed to load map HTML asset", error);
+        setMapLoadFailed(true);
       }
     })();
     return () => {
       isMounted = false;
     };
+  }, [mapAttempt]);
+
+  const retryMap = useCallback(() => {
+    setMapLoadFailed(false);
+    setMapReady(false);
+    setMapInited(false);
+    setWebViewContent(null);
+    setMapAttempt((value) => value + 1);
   }, []);
 
   // Resolve user location once. When permission is denied or unavailable, fall
@@ -155,13 +269,12 @@ export default function MapScreen() {
   useEffect(() => {
     if (mapInited) return;
     if (!mapReady || !locationResolved) return;
-    const token = getMapboxToken();
     const center = userLocation
       ? { lat: userLocation.latitude, lng: userLocation.longitude }
       : { lat: DEFAULT_LOCATION.latitude, lng: DEFAULT_LOCATION.longitude };
     post({
       type: "init",
-      token,
+      token: mapboxToken,
       style: MAPBOX_STYLE,
       center,
       zoom: 11,
@@ -171,7 +284,7 @@ export default function MapScreen() {
         : null,
     });
     setMapInited(true);
-  }, [mapReady, locationResolved, userLocation, services, post, mapInited]);
+  }, [mapReady, locationResolved, userLocation, services, post, mapInited, mapboxToken]);
 
   const recenterOnUser = useCallback(async () => {
     try {
@@ -310,6 +423,20 @@ export default function MapScreen() {
     navigation.navigate("ServiceDetail", { id });
   }, [selectedService, navigation]);
 
+  // Mapbox unavailable surfaces — replaces the silent empty WebView pre-fix
+  // (#453b). Two paths reach this branch:
+  //   - no token configured for the build (server / env mis-config), OR
+  //   - the HTML asset failed to load (typical sign of being offline).
+  if (!mapboxToken || mapLoadFailed) {
+    return (
+      <MapUnavailable
+        onRetry={retryMap}
+        insetTop={insets.top}
+        reason={!mapboxToken ? "no-token" : "load-failed"}
+      />
+    );
+  }
+
   if (!webViewContent || !locationResolved) {
     return (
       <View style={[styles.loading, { paddingTop: insets.top }]}>
@@ -326,10 +453,13 @@ export default function MapScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <WebView
+        key={`mapbox-${mapAttempt}`}
         ref={webViewRef}
         originWhitelist={["*"]}
         source={{ html: webViewContent, baseUrl: "https://localhost" }}
         onMessage={handleMessage}
+        onError={() => setMapLoadFailed(true)}
+        onHttpError={() => setMapLoadFailed(true)}
         javaScriptEnabled
         domStorageEnabled
         allowsInlineMediaPlayback

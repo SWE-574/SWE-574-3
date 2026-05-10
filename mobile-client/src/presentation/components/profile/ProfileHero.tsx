@@ -77,6 +77,14 @@ export interface ProfileHeroProps {
   isFollowing?: boolean;
   followActionLoading?: boolean;
   onFollowPress?: () => void;
+
+  /**
+   * Own profile only: tapping the badge slot when the user has no featured
+   * badges should jump straight into the Showcase tab of the profile editor.
+   * Without this hook the user would have to discover the path via
+   * Settings → Edit Profile → Showcase, which #554 reports as broken UX.
+   */
+  onShowcaseBadgesPress?: () => void;
 }
 
 
@@ -161,6 +169,7 @@ export default function ProfileHero({
   isFollowing = false,
   followActionLoading = false,
   onFollowPress,
+  onShowcaseBadgesPress,
 }: ProfileHeroProps) {
   const fullName = [user.first_name, user.last_name]
     .filter(Boolean)
@@ -211,7 +220,22 @@ export default function ProfileHero({
           <View style={[styles.gradientBase, bannerUrl ? styles.gradientWithCover : null]} />
           <View style={[styles.gradientOverlayTop, bannerUrl ? styles.gradientWithCover : null]} />
           <View style={styles.badgeOverlay}>
-            <BadgeShowcase variant="compact" badges={badgesDetail} />
+            {badgesDetail.length === 0 && mode === "own" && onShowcaseBadgesPress ? (
+              <Pressable
+                onPress={onShowcaseBadgesPress}
+                accessibilityRole="button"
+                accessibilityLabel="Showcase a badge"
+                style={({ pressed }) => [
+                  styles.showcaseEmptyCta,
+                  pressed && { opacity: 0.85 },
+                ]}
+              >
+                <Ionicons name="ribbon-outline" size={14} color={colors.WHITE} />
+                <Text style={styles.showcaseEmptyCtaText}>Showcase a badge</Text>
+              </Pressable>
+            ) : (
+              <BadgeShowcase variant="compact" badges={badgesDetail} />
+            )}
           </View>
 
           <View style={styles.content}>
@@ -659,5 +683,21 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.15)",
     paddingTop: 8,
+  },
+  showcaseEmptyCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.32)",
+  },
+  showcaseEmptyCtaText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.WHITE,
   },
 });
