@@ -237,8 +237,8 @@ export default function ServiceEvaluationModal({
     toast.success('Evaluation submitted. Thank you for your feedback!')
     await onSubmitted?.()
     reset()
-    onClose()
     setSubmitting(false)
+    onClose()
     // Reset evaluationSubmitted explicitly so a future open of the same modal
     // doesn't skip the create call. (reset() above already covers this, but
     // photoUploadFailed kept here for future telemetry hooks.)
