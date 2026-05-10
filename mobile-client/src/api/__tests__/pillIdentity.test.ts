@@ -74,11 +74,19 @@ describe("pillIdentity", () => {
     expect(pillIdentity(s)).toBe("tag");
   });
 
-  it("treats all-zero signals as default (falls through to newcomer if set)", () => {
+  it("treats all-zero signals as default when newcomer flag is unset", () => {
     const zero = makeService({
       for_you_signals: { tag: 0, follow: 0, cooccur: 0, recency_penalty: 0 },
     });
     expect(pillIdentity(zero)).toBe("default");
+  });
+
+  it("falls through to newcomer when all signals are zero but newcomer flag is set", () => {
+    const zero = makeService({
+      is_newcomer_owner: true,
+      for_you_signals: { tag: 0, follow: 0, cooccur: 0, recency_penalty: 0 },
+    });
+    expect(pillIdentity(zero)).toBe("newcomer");
   });
 });
 

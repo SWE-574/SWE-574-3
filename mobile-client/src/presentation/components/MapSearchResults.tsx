@@ -44,7 +44,7 @@ export default function MapSearchResults({
   if (results.length === 0) {
     return (
       <View
-        style={[styles.container, styles.emptyContainer]}
+        style={[styles.container, styles.emptyContainer, { height: containerHeight }]}
         testID="map-search-results-empty"
       >
         <Ionicons name="search-outline" size={14} color={colors.GRAY500} />

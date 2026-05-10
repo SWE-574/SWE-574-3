@@ -382,9 +382,10 @@ export default function MapScreen() {
       list = list.filter((s) => s.type === activeFilter);
     }
     if (activeSignals.size > 0) {
-      list = list.filter((s) =>
-        activeSignals.has(pillIdentity(s) as SignalFilter),
-      );
+      list = list.filter((s) => {
+        const id = pillIdentity(s);
+        return id !== "default" && activeSignals.has(id);
+      });
     }
     return list;
   }, [services, activeFilter, activeSignals]);
@@ -566,6 +567,7 @@ export default function MapScreen() {
                 if (value.length > 0) setSearchFocused(true);
               }}
               onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
               placeholder="Search title, description, tags…"
               placeholderTextColor={colors.GRAY400}
               style={styles.searchInput}
