@@ -440,9 +440,13 @@ SIMPLE_JWT = {
 # Cookie security defaults — pinned for both dev and prod so a future
 # Django version change cannot silently downgrade them. ``Secure`` is only
 # enabled in production because the dev server runs over plain HTTP and
-# browsers would otherwise drop the cookie. SameSite=Lax matches the
-# auth-cookie helper in ``api/views.py`` and is compatible with the
-# top-level navigations the SPA relies on.
+# browsers would otherwise drop the cookie. SameSite is ``Lax`` here so
+# top-level navigations the SPA relies on still attach the session and
+# CSRF cookies; note that the JWT auth cookies written by
+# ``get_cookie_settings`` in ``api/views.py`` deliberately diverge to
+# ``Strict`` under ``IS_PRODUCTION=True`` (``Lax`` in dev) — those cookies
+# are only ever needed on first-party XHR/fetch, so the stricter posture
+# costs nothing while shrinking the CSRF surface.
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
