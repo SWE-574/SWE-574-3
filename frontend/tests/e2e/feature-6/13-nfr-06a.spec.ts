@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 import { loginAsUserWithBalanceAtLeast, uniqueTitle } from '../helpers'
 
-test.skip('Category C: Save Changes on /edit-service for a fresh online Need stays on the edit route instead of returning to /service-detail — likely frontend/src/components/ServiceForm.tsx:875 update() rejected by silent client-side validation when only the title changes (NFR-06a)', async ({ page }) => {
+test('NFR-06a: request create / update / cancel each complete under 2s', async ({ page }) => {
   const title = uniqueTitle('NFR-06a Need')
   const updatedTitle = `${title} Updated`
 
