@@ -1,4 +1,5 @@
 export * from './auth'
+export * from './loginAsApi'
 export * from './e2e-api'
 export * from './feature4'
 export * from './common'

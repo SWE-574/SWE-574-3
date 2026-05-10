@@ -2917,6 +2917,70 @@ class ServiceViewSet(viewsets.ModelViewSet):
         
         return response
     
+    def partial_update(self, request, *args, **kwargs):
+        # Optimistic locking gate (NFR-05d). Two owner sessions editing
+        # different fields would otherwise last-write-wins. Clients echo
+        # the `version` they read on GET; we compare it to the persisted
+        # value under SELECT FOR UPDATE so a concurrent writer that
+        # already incremented the row produces a 409 instead of silently
+        # overwriting their changes.
+        client_version = request.data.get('version', None) if hasattr(request, 'data') else None
+        if client_version is not None:
+            try:
+                client_version_int = int(client_version)
+            except (TypeError, ValueError):
+                return create_error_response(
+                    'version must be an integer.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            with transaction.atomic():
+                instance = self.get_object()
+                # Re-read under FOR UPDATE so concurrent writers serialize
+                # on this row for the duration of the patch.
+                locked = (
+                    Service.objects.select_for_update()
+                    .filter(pk=instance.pk)
+                    .values_list('version', flat=True)
+                    .first()
+                )
+                if locked is None:
+                    return create_error_response(
+                        'Service was removed.',
+                        code=ErrorCodes.NOT_FOUND,
+                        status_code=status.HTTP_404_NOT_FOUND,
+                    )
+                if locked != client_version_int:
+                    return Response(
+                        {
+                            'detail': (
+                                'This listing was updated elsewhere — reload to see '
+                                'the latest changes.'
+                            ),
+                            'code': ErrorCodes.VERSION_CONFLICT,
+                            'current_version': locked,
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                # Strip `version` from the payload so it doesn't appear in
+                # the serializer's input (it's read-only on the wire and
+                # the increment happens in perform_update).
+                if hasattr(request.data, '_mutable'):
+                    was_mutable = request.data._mutable
+                    request.data._mutable = True
+                    request.data.pop('version', None)
+                    request.data._mutable = was_mutable
+                else:
+                    try:
+                        request.data.pop('version', None)
+                    except (AttributeError, KeyError, TypeError):
+                        pass
+                return super().partial_update(request, *args, **kwargs)
+        # No version supplied — preserve the legacy last-write-wins
+        # contract for older clients (and admin tooling) that don't
+        # round-trip the field.
+        return super().partial_update(request, *args, **kwargs)
+
     def perform_update(self, serializer):
         service = serializer.instance
         if service.user != self.request.user and getattr(self.request.user, 'role', None) != 'admin':
@@ -2952,6 +3016,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
         changed_fields = self._changed_service_fields(service, serializer)
         super().perform_update(serializer)
+        # Bump the optimistic-lock counter (NFR-05d). F() expression keeps
+        # the increment atomic even if two writers slip past the FOR UPDATE
+        # gate (e.g. legacy clients that don't send `version`).
+        Service.objects.filter(pk=service.pk).update(version=F('version') + 1)
+        service.refresh_from_db(fields=['version'])
         if changed_fields:
             self._notify_service_edit_subscribers(service, changed_fields)
         invalidate_service_lists()

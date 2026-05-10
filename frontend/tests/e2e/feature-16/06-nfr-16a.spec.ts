@@ -7,8 +7,7 @@ import {
   submitPositiveServiceEvalViaApi,
 } from '../helpers'
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('NFR-16a: duplicate service evaluation from same party is rejected — exactly-once enforced', async ({ page }) => {
+test('NFR-16a: duplicate service evaluation from same party is rejected — exactly-once enforced', async ({ page }) => {
   const title = uniqueTitle('NFR-16a Service')
   const provider = USERS.elif
   const requester = USERS.cem
@@ -25,8 +24,7 @@ test.skip('NFR-16a: duplicate service evaluation from same party is rejected —
   expect(second.status).toBe(400)
 })
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('NFR-16a: duplicate event evaluation from same attendee is rejected — exactly-once enforced', async ({ page }) => {
+test('NFR-16a: duplicate event evaluation from same attendee is rejected — exactly-once enforced', async ({ page }) => {
   const title = uniqueTitle('NFR-16a Event')
   const organizer = USERS.ayse
   const participant = USERS.mehmet
@@ -59,8 +57,7 @@ test.skip('NFR-16a: duplicate event evaluation from same attendee is rejected �
   expect(second.status).toBe(400)
 })
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('NFR-16a: user_has_reviewed flag is set after first submission — UI prevents re-entry', async ({ page }) => {
+test('NFR-16a: user_has_reviewed flag is set after first submission — UI prevents re-entry', async ({ page }) => {
   const title = uniqueTitle('NFR-16a Flag Event')
   const organizer = USERS.zeynep
   const participant = USERS.can

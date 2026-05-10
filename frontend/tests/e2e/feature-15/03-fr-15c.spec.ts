@@ -9,8 +9,7 @@ import {
   completeEventViaApi,
 } from '../helpers'
 
-// Category C: multi-user setup hits login throttle; needs API-fixture refactor.
-test.skip('FR-15c: organizer can manually override CHECK-IN to ATTENDED as fallback when QR fails', async ({ page }) => {
+test('FR-15c: organizer can manually override CHECK-IN to ATTENDED as fallback when QR fails', async ({ page }) => {
   const title = uniqueTitle('FR-15c Event')
   const organizer = USERS.zeynep
   const participant = USERS.can

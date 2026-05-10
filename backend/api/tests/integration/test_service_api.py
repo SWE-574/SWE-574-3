@@ -581,6 +581,86 @@ class TestServiceViewSet:
             'title': 'Hacked Title'
         })
         assert_problem_detail(response, 403)
+
+    def test_update_service_increments_version_on_success(self):
+        """Successful PATCH bumps Service.version atomically (NFR-05d)."""
+        user = UserFactory()
+        service = ServiceFactory(user=user)
+        assert service.version == 0
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.patch(
+            f'/api/services/{service.id}/',
+            {'title': 'First save', 'version': 0},
+        )
+        assert_api_response(response, 200)
+        service.refresh_from_db()
+        assert service.version == 1
+        assert response.json()['version'] == 1
+
+    def test_update_service_stale_version_returns_409(self):
+        """A second PATCH carrying the original version is rejected (NFR-05d).
+
+        The first writer's payload survives, the second writer is told
+        VERSION_CONFLICT and the row's title reflects the first save.
+        """
+        user = UserFactory()
+        # Pin the initial description so the post-409 assertion has a
+        # known reference value. Without this the factory generates a
+        # random description and the rejected-write check has nothing
+        # specific to compare against.
+        service = ServiceFactory(
+            user=user, title='Original', description='Original description'
+        )
+        assert service.version == 0
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        # Both clients GET version=0 in the same browser tab simulation.
+        first = client.patch(
+            f'/api/services/{service.id}/',
+            {'title': 'First writer', 'version': 0},
+        )
+        assert_api_response(first, 200)
+
+        second = client.patch(
+            f'/api/services/{service.id}/',
+            {'description': 'Second writer wanted to change description', 'version': 0},
+        )
+        assert_problem_detail(second, 409)
+        body = second.json()
+        assert body['code'] == 'VERSION_CONFLICT'
+        assert body['current_version'] == 1
+
+        service.refresh_from_db()
+        # First writer's title survives — the row was not silently overwritten.
+        assert service.title == 'First writer'
+        # Second writer's description was rejected — original survives.
+        assert service.description == 'Original description'
+        assert service.version == 1
+
+    def test_update_service_without_version_keeps_legacy_contract(self):
+        """PATCH without `version` falls through to last-write-wins (#NFR-05d-compat).
+
+        Legacy clients and admin tooling that don't round-trip version still
+        succeed and trigger the same atomic version bump.
+        """
+        user = UserFactory()
+        service = ServiceFactory(user=user)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.patch(
+            f'/api/services/{service.id}/',
+            {'title': 'Legacy client save'},
+        )
+        assert_api_response(response, 200)
+        service.refresh_from_db()
+        assert service.title == 'Legacy client save'
+        assert service.version == 1
+
     
     def test_delete_service(self):
         """Test soft-deleting a service (sets status to Cancelled)"""
@@ -954,7 +1034,102 @@ class TestServiceRetrieveStatusVisibility:
         assert service.session_exact_location_lng == Decimal('29.123456')
         assert service.session_location_guide == 'Veterinerin olduğu bina'
 
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestRecurrentSchedulingValidation:
+    """Recurrent scheduling is Event-only (#546).
 
+    Pre-fix the API silently coerced Offer/Need + Recurrent to One-Time;
+    the contract is now an explicit 400 with a field-error pinpointing
+    schedule_type so client bugs surface instead of being papered over.
+    """
+
+    def _payload(self, service_type, schedule_type):
+        return {
+            'title': f'{service_type} {schedule_type}',
+            'description': f'Test {service_type} with schedule_type={schedule_type}.',
+            'type': service_type,
+            'duration': 1.0,
+            'location_type': 'Online',
+            'max_participants': 1,
+            'schedule_type': schedule_type,
+        }
+
+    def test_post_offer_recurrent_returns_400_with_field_error(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', self._payload('Offer', 'Recurrent'))
+        assert_problem_detail(response, 400)
+        body = response.json()
+        assert 'field_errors' in body
+        assert 'schedule_type' in body['field_errors']
+        assert body['field_errors']['schedule_type'] == [
+            'Recurrent scheduling is only supported on Events.'
+        ]
+
+    def test_post_need_recurrent_returns_400_with_field_error(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', self._payload('Need', 'Recurrent'))
+        assert_problem_detail(response, 400)
+        body = response.json()
+        assert 'field_errors' in body
+        assert 'schedule_type' in body['field_errors']
+        assert body['field_errors']['schedule_type'] == [
+            'Recurrent scheduling is only supported on Events.'
+        ]
+
+    def test_post_offer_one_time_still_201(self):
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.post('/api/services/', self._payload('Offer', 'One-Time'))
+        assert_api_response(response, 201)
+        assert response.json()['schedule_type'] == 'One-Time'
+
+    def test_patch_offer_to_recurrent_returns_400(self):
+        """Existing Offers cannot be flipped to Recurrent via PATCH either."""
+        user = UserFactory(is_verified=True)
+        service = ServiceFactory(user=user, type='Offer', schedule_type='One-Time')
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        response = client.patch(
+            f'/api/services/{service.id}/',
+            {'schedule_type': 'Recurrent'},
+        )
+        assert_problem_detail(response, 400)
+        body = response.json()
+        assert 'field_errors' in body
+        assert 'schedule_type' in body['field_errors']
+        # And the row must not have been coerced.
+        service.refresh_from_db()
+        assert service.schedule_type == 'One-Time'
+
+    def test_post_offer_with_recurrence_interval_returns_400(self):
+        """#546 also covers `recurrence_interval_days` as a non-Event input.
+
+        Pre-fix, an Offer/Need request that accidentally carried a
+        non-null cadence was silently zeroed; that masked client bugs in
+        exactly the same way as the schedule_type coercion. The endpoint
+        now rejects the cadence with a 400 + field-pinpointed error.
+        """
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        payload = self._payload('Offer', 'One-Time')
+        payload['recurrence_interval_days'] = 7
+
+        response = client.post('/api/services/', payload)
+        assert_problem_detail(response, 400)
+        body = response.json()
+        assert 'recurrence_interval_days' in body.get('field_errors', {})
 @pytest.mark.django_db
 @pytest.mark.integration
 class TestServiceDetailQueryCount:

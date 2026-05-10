@@ -328,6 +328,16 @@ class Service(models.Model):
         default=False,
         help_text='Require QR code scan or attendance code for attendance verification (Events only)',
     )
+    version = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            'Optimistic-lock counter (NFR-05d). Incremented atomically inside '
+            'ServiceViewSet.partial_update on every successful PATCH. Clients '
+            'echo the value they read on GET back in the PATCH body; a '
+            'mismatch returns 409 instead of silently overwriting a concurrent '
+            'edit.'
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

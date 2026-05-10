@@ -221,6 +221,10 @@ export interface Service {
   // consume these directly instead of re-deriving the date math (#267).
   edit_locked?: boolean
   edit_lock_reason?: string | null
+  // NFR-05d: optimistic-lock counter. Echo this back in the PATCH body so
+  // the server can reject stale-version writes with 409 instead of
+  // silently overwriting a concurrent owner edit.
+  version?: number
 }
 
 export interface ForYouSignals {
