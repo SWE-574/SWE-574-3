@@ -1276,3 +1276,165 @@ class TestDeletedAuthorTraceability:
 
         assert results[deleted_topic_id]['author_name'] == '[Deleted User]'
         assert results[deleted_topic_id]['author_id'] is None
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestForumTopicSoftDelete:
+    """DELETE /api/forum/topics/<pk>/ soft-deletes the topic.
+
+    Reports filed against the topic (and its posts) must survive so the
+    moderation trail is not lost. Public list/detail/post views must hide
+    the topic.
+    """
+
+    def _delete_url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/'
+
+    def test_delete_topic_is_soft_delete(self):
+        """DELETE marks is_deleted=True instead of removing the row."""
+        author = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.delete(self._delete_url(topic.id))
+        assert_api_response(response, 204)
+
+        topic.refresh_from_db()
+        assert topic.is_deleted is True
+        assert topic.deleted_at is not None
+        # Row still exists
+        assert ForumTopic.objects.filter(pk=topic.pk).exists()
+
+    def test_report_against_topic_survives_topic_deletion(self):
+        """Regression for #542: deleting a topic must NOT cascade-delete reports.
+
+        Before the fix, ForumTopicViewSet.destroy hard-deleted the row and
+        Report.reported_forum_topic (on_delete=CASCADE) wiped the report.
+        """
+        author = UserFactory()
+        reporter = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category, title='Bad Topic')
+
+        # File a report against the topic and a report against a post in it.
+        post = ForumPostFactory(topic=topic, author=author)
+        topic_report = Report.objects.create(
+            reporter=reporter,
+            reported_user=author,
+            reported_forum_topic=topic,
+            type='spam',
+            description='Spammy topic',
+        )
+        post_report = Report.objects.create(
+            reporter=reporter,
+            reported_user=author,
+            reported_forum_topic=topic,
+            reported_forum_post=post,
+            type='harassment',
+            description='Abusive reply',
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+        response = client.delete(self._delete_url(topic.id))
+        assert_api_response(response, 204)
+
+        # Both reports remain queryable and still reference the topic row.
+        topic_report.refresh_from_db()
+        post_report.refresh_from_db()
+        assert Report.objects.filter(pk=topic_report.pk).exists()
+        assert Report.objects.filter(pk=post_report.pk).exists()
+        assert topic_report.reported_forum_topic_id == topic.id
+        assert post_report.reported_forum_topic_id == topic.id
+
+    def test_soft_deleted_topic_hidden_from_list(self):
+        """Public list must not return soft-deleted topics."""
+        category = ForumCategoryFactory(is_active=True)
+        live = ForumTopicFactory(category=category, title='Live topic')
+        ForumTopicFactory(category=category, title='Removed topic', is_deleted=True)
+
+        response = APIClient().get('/api/forum/topics/')
+        assert_api_response(response, 200)
+
+        ids = [t['id'] for t in response.data['results']]
+        assert str(live.id) in ids
+        # Removed topic is hidden
+        for entry in response.data['results']:
+            assert entry['title'] != 'Removed topic'
+
+    def test_soft_deleted_topic_returns_404_on_detail(self):
+        """GET /api/forum/topics/<pk>/ on a soft-deleted topic returns 404."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_deleted=True)
+
+        response = APIClient().get(f'/api/forum/topics/{topic.id}/')
+        assert_problem_detail(response, 404)
+
+    def test_soft_deleted_topic_blocks_post_creation(self):
+        """POST /api/forum/topics/<pk>/posts/ on a soft-deleted topic returns 404."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_deleted=True)
+        user = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+        response = client.post(f'/api/forum/topics/{topic.id}/posts/', {'body': 'Hi'})
+
+        assert_problem_detail(response, 404)
+
+    def test_soft_deleted_topic_hides_posts_from_listing(self):
+        """GET posts on a soft-deleted topic returns 404 (topic not visible)."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_deleted=True)
+        ForumPostFactory(topic=topic)
+
+        response = APIClient().get(f'/api/forum/topics/{topic.id}/posts/')
+        assert_problem_detail(response, 404)
+
+    def test_unauthorized_delete_does_not_soft_delete(self):
+        """A non-author/non-admin DELETE returns 403 and the topic stays live."""
+        author = UserFactory()
+        other = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(other)
+
+        response = client.delete(self._delete_url(topic.id))
+        assert_problem_detail(response, 403)
+
+        topic.refresh_from_db()
+        assert topic.is_deleted is False
+
+    def test_admin_can_soft_delete_any_topic(self):
+        """Admins can soft-delete topics they did not author."""
+        author = UserFactory()
+        admin = AdminUserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+
+        response = client.delete(self._delete_url(topic.id))
+        assert_api_response(response, 204)
+
+        topic.refresh_from_db()
+        assert topic.is_deleted is True
+
+    def test_double_delete_returns_404(self):
+        """Re-deleting an already soft-deleted topic returns 404 (not visible)."""
+        author = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category, is_deleted=True)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.delete(self._delete_url(topic.id))
+        assert_problem_detail(response, 404)
