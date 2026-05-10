@@ -310,10 +310,17 @@ def _settle_group_offer_provider_payout(service: Service, handshake: Handshake) 
     provider, _ = get_provider_and_receiver(handshake)
     provider = User.objects.select_for_update().get(id=provider.id)
 
+    # Idempotency: filter on the direct ``service`` FK rather than chaining
+    # through ``handshake``. ``TransactionHistory.handshake`` is SET_NULL, so
+    # a later handshake deletion (e.g. demo-data cleanup) would otherwise
+    # hide the prior payout row from this guard and the provider could be
+    # paid a second time. ``TransactionHistory.service`` is also SET_NULL,
+    # but if the service itself were deleted there is no caller to re-enter
+    # this branch in the first place.
     already_paid = TransactionHistory.objects.filter(
         user=provider,
         transaction_type='transfer',
-        handshake__service=service,
+        service=service,
     ).exists()
     if already_paid:
         return False
