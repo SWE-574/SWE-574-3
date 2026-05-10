@@ -575,7 +575,13 @@ class TestServiceViewSet:
         VERSION_CONFLICT and the row's title reflects the first save.
         """
         user = UserFactory()
-        service = ServiceFactory(user=user, title='Original')
+        # Pin the initial description so the post-409 assertion has a
+        # known reference value. Without this the factory generates a
+        # random description and the rejected-write check has nothing
+        # specific to compare against.
+        service = ServiceFactory(
+            user=user, title='Original', description='Original description'
+        )
         assert service.version == 0
 
         client = AuthenticatedAPIClient()
@@ -600,7 +606,8 @@ class TestServiceViewSet:
         service.refresh_from_db()
         # First writer's title survives — the row was not silently overwritten.
         assert service.title == 'First writer'
-        assert service.description == 'Original'.replace('Original', service.description) or True  # no-op safety
+        # Second writer's description was rejected — original survives.
+        assert service.description == 'Original description'
         assert service.version == 1
 
     def test_update_service_without_version_keeps_legacy_contract(self):
@@ -1072,4 +1079,24 @@ class TestRecurrentSchedulingValidation:
         # And the row must not have been coerced.
         service.refresh_from_db()
         assert service.schedule_type == 'One-Time'
+
+    def test_post_offer_with_recurrence_interval_returns_400(self):
+        """#546 also covers `recurrence_interval_days` as a non-Event input.
+
+        Pre-fix, an Offer/Need request that accidentally carried a
+        non-null cadence was silently zeroed; that masked client bugs in
+        exactly the same way as the schedule_type coercion. The endpoint
+        now rejects the cadence with a 400 + field-pinpointed error.
+        """
+        user = UserFactory(is_verified=True)
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+
+        payload = self._payload('Offer', 'One-Time')
+        payload['recurrence_interval_days'] = 7
+
+        response = client.post('/api/services/', payload)
+        assert_problem_detail(response, 400)
+        body = response.json()
+        assert 'recurrence_interval_days' in body.get('field_errors', {})
 

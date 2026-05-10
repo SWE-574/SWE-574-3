@@ -37,6 +37,11 @@ def _resolve_user_id_from_token(token: str):
     validation failure. Cache stores only the user_id; the actual User
     row is fetched separately so the cached entry can never tunnel a
     deactivated account back online.
+
+    The cache TTL is clamped to ``min(_WS_AUTH_CACHE_TTL_SECONDS,
+    exp - now)`` so a token that expires in less than the default TTL
+    cannot keep authenticating after its own ``exp`` claim — the cache
+    never lengthens the token's effective lifetime.
     """
     cache_key = _ws_auth_cache_key(token)
     cached = cache.get(cache_key)
@@ -48,7 +53,24 @@ def _resolve_user_id_from_token(token: str):
         user_id = access_token['user_id']
     except (InvalidToken, TokenError, KeyError):
         return None
-    cache.set(cache_key, user_id, _WS_AUTH_CACHE_TTL_SECONDS)
+
+    # Clamp the cache TTL to the token's remaining lifetime so an
+    # expiring token cannot stay authenticated past its own exp.
+    ttl = _WS_AUTH_CACHE_TTL_SECONDS
+    try:
+        import time
+        exp = int(access_token.payload.get('exp', 0))
+        remaining = exp - int(time.time())
+        if remaining > 0:
+            ttl = min(ttl, remaining)
+        else:
+            # No remaining time — don't cache at all.
+            return user_id
+    except (TypeError, ValueError, AttributeError):
+        # If exp is missing/malformed we already passed AccessToken
+        # validation, so fall back to the default TTL.
+        pass
+    cache.set(cache_key, user_id, ttl)
     return user_id
 
 

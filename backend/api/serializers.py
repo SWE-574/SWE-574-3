@@ -767,8 +767,14 @@ class ServiceSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'schedule_type': 'Recurrent scheduling is only supported on Events.',
                 })
-            if 'recurrence_interval_days' in data:
-                data['recurrence_interval_days'] = None
+            # #546 acceptance: a non-null `recurrence_interval_days` on
+            # Offer/Need is also a client bug — reject it instead of
+            # silently zeroing, so the masked-coercion class of issue is
+            # closed off at every input shape.
+            if data.get('recurrence_interval_days') is not None:
+                raise serializers.ValidationError({
+                    'recurrence_interval_days': 'Recurrence cadence is only supported on Events.',
+                })
         elif service_type == 'Event' and schedule_type != 'Recurrent':
             # One-time Events never have a recurrence cadence.
             data['recurrence_interval_days'] = None

@@ -61,14 +61,16 @@ test('NFR-08a: accepted-state propagation reaches the other party within two sec
     // Pre-warm the watcher's WS subscription: send a chat message from the
     // requester and wait for it to round-trip to the watcher. Once that
     // lands, both sides' WS are confirmed live and the NFR-08a measurement
-    // below times only the steady-state state-propagation cost.
+    // below times only the steady-state state-propagation cost. We assert
+    // the composer is visible (rather than skipping the warm-up when it
+    // isn't) so a regression in the chat surface fails fast here instead
+    // of silently regressing the test back to measuring cold-subscribe time.
     const requesterInput = requesterPage.getByPlaceholder(/Write a message/i)
-    if (await requesterInput.isVisible().catch(() => false)) {
-      const warmup = `NFR-08a warmup ${Date.now()}`
-      await requesterInput.fill(warmup)
-      await requesterInput.press('Enter')
-      await expect(ownerWatcherPage.getByText(warmup).first()).toBeVisible({ timeout: 10_000 })
-    }
+    await expect(requesterInput).toBeVisible({ timeout: 10_000 })
+    const warmup = `NFR-08a warmup ${Date.now()}`
+    await requesterInput.fill(warmup)
+    await requesterInput.press('Enter')
+    await expect(ownerWatcherPage.getByText(warmup).first()).toBeVisible({ timeout: 10_000 })
 
     const startedAt = Date.now()
     await requesterPage.getByRole('button', { name: 'Approve & Confirm' }).click()

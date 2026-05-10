@@ -48,6 +48,18 @@ function parseSetCookie(rawHeader: string | undefined, cookieName: string): stri
   return null
 }
 
+// Resolve the configured Playwright baseURL without touching private
+// internals. ``PLAYWRIGHT_BASE_URL`` is the same env var the test
+// runner reads in playwright.config.ts (use.baseURL), and the page's
+// current origin is a fallback for specs that have already navigated.
+function resolveBaseUrl(page: Page): string {
+  const fromEnv = process.env.PLAYWRIGHT_BASE_URL
+  if (fromEnv) return fromEnv.replace(/\/+$/, '')
+  const fromPage = page.url().match(/^https?:\/\/[^/]+/)?.[0]
+  if (fromPage) return fromPage
+  return 'http://localhost'
+}
+
 async function authenticate(
   page: Page,
   user: DemoUser,
@@ -55,13 +67,10 @@ async function authenticate(
   const cached = authCache.get(user.email)
   if (cached) return cached
 
-  // Resolve the API origin — mirror what `loginAs` relies on (the page's
-  // current baseURL routes /api/* to the backend via the same proxy).
-  const baseURL = (page.context().request as unknown as { _options?: { baseURL?: string } })._options?.baseURL
-    ?? page.url().match(/^https?:\/\/[^/]+/)?.[0]
-    ?? 'http://localhost'
-
-  const response = await page.request.post(`${baseURL}/api/auth/login/`, {
+  // page.request honours the configured use.baseURL when given a
+  // relative URL, so this stays correct under any host (CI, local
+  // 127.0.0.1, https proxies) without reading Playwright internals.
+  const response = await page.request.post('/api/auth/login/', {
     data: { email: user.email, password: user.password },
     headers: { 'Content-Type': 'application/json' },
   })
@@ -127,17 +136,21 @@ export async function loginAsApi(
 
   // Seat the access (and refresh, if available) cookie on the context. The
   // backend already accepts the access_token cookie for JWT auth, so this
-  // is functionally identical to a successful form login.
-  const origin = page.url().match(/^https?:\/\/[^/]+/)?.[0] ?? 'http://localhost'
-  const url = new URL(origin)
+  // is functionally identical to a successful form login. Derive the
+  // host + protocol from the configured baseURL (not page.url(), which
+  // can be ``about:blank`` before navigation or use a different host
+  // alias than the cookie scope) so cookies are correctly scoped under
+  // any baseURL — including https with secure=true.
+  const url = new URL(resolveBaseUrl(page))
+  const secure = url.protocol === 'https:'
   const cookies = [
-    { ...auth.accessCookie, domain: url.hostname, secure: false, httpOnly: true, sameSite: 'Lax' as const },
+    { ...auth.accessCookie, domain: url.hostname, secure, httpOnly: true, sameSite: 'Lax' as const },
   ]
   if (auth.refreshCookie) {
     cookies.push({
       ...auth.refreshCookie,
       domain: url.hostname,
-      secure: false,
+      secure,
       httpOnly: true,
       sameSite: 'Lax' as const,
     })
