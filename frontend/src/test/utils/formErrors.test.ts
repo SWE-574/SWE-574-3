@@ -119,6 +119,22 @@ describe('extractTopLevelDetail', () => {
     expect(extractTopLevelDetail({ field_errors: { title: ['x'] } })).toBeNull()
   })
 
+  it('promotes nested field_errors.non_field_errors over the generic detail', () => {
+    // Mirrors what `custom_exception_handler` produces when a serializer
+    // raises `ValidationError({'non_field_errors': [...]})`: the helpful
+    // message is buried under `field_errors.non_field_errors` while
+    // `detail` carries the generic "Validation failed." string.
+    expect(
+      extractTopLevelDetail({
+        detail: 'Validation failed.',
+        code: 'VALIDATION_ERROR',
+        field_errors: {
+          non_field_errors: ['You cannot post twice in a row.'],
+        },
+      }),
+    ).toBe('You cannot post twice in a row.')
+  })
+
   it('returns null for non-object payloads', () => {
     expect(extractTopLevelDetail(null)).toBeNull()
     expect(extractTopLevelDetail('oops')).toBeNull()

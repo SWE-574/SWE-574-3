@@ -67,12 +67,25 @@ export function extractFieldErrors(data: unknown): Record<string, string> {
  * Best-effort top-level `detail` extraction. Returned alongside the field
  * map when callers want to surface a banner / toast for non-field errors
  * (e.g. permission denied, throttled).
+ *
+ * The backend's custom envelope normalises serializer-level
+ * `non_field_errors` under `field_errors.non_field_errors` (see
+ * `backend/api/exceptions.py`), so we promote that to the banner too —
+ * otherwise the real validation message gets buried while the generic
+ * "Validation failed." detail is shown to the user.
  */
 export function extractTopLevelDetail(data: unknown): string | null {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null
-  const detail = (data as Record<string, unknown>).detail
+  const record = data as Record<string, unknown>
+  const fieldErrors = record.field_errors
+  if (fieldErrors && typeof fieldErrors === 'object' && !Array.isArray(fieldErrors)) {
+    const nestedNonField = (fieldErrors as Record<string, unknown>).non_field_errors
+    const nestedMsg = firstStringOf(nestedNonField)
+    if (nestedMsg) return nestedMsg
+  }
+  const detail = record.detail
   if (typeof detail === 'string' && detail.trim()) return detail
-  const nonField = (data as Record<string, unknown>).non_field_errors
+  const nonField = record.non_field_errors
   const nonFieldMsg = firstStringOf(nonField)
   if (nonFieldMsg) return nonFieldMsg
   return null
