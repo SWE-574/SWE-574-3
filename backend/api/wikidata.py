@@ -392,14 +392,16 @@ def fetch_wikidata_claims_batch(qids: List[str]) -> Dict[str, Optional[Dict]]:
     keystroke (one per autocomplete row) the first time a query was typed,
     which compounded the wbsearchentities call and pushed total response
     time well past the 1 s budget. The MediaWiki API accepts up to 50
-    comma-separated ids on ``wbgetentities``, so the cold-cache cost is
+    pipe-separated ids on ``wbgetentities``, so the cold-cache cost is
     one round-trip regardless of result count.
 
-    Returns a ``{qid: claims-dict-or-None}`` mapping covering every input
-    QID. Already-cached entries are taken from the local cache and the
-    cache is populated for any QID resolved through the upstream call.
-    Unknown / invalid QIDs map to ``None`` so callers can fail-open the
-    same way the per-id helper does.
+    Returns a ``{qid: claims-dict-or-None}`` mapping. Only inputs that
+    normalise to a ``Q...`` identifier appear in the output — falsy and
+    non-``Q`` inputs are dropped before the upstream call. Already-cached
+    entries are taken from the local cache and the cache is populated for
+    any QID resolved through the upstream call. Resolved QIDs that the
+    upstream call cannot answer map to ``None`` so callers can fail-open
+    the same way the per-id helper does.
     """
     if not qids:
         return {}
