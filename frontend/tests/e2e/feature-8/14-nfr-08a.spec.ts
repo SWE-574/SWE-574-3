@@ -9,15 +9,17 @@ import {
   USERS,
 } from '../helpers'
 
-test.skip('NFR-08a: accepted-state propagation reaches the other party within two seconds under normal load', async ({ browser, page }) => {
-  // Category C: the spec opens TWO additional browser contexts (owner watcher
-  // + requester) on top of the test page, navigates each to the chat thread,
-  // and only then starts the 2_000 ms timer. Inside Docker CI the sum of
-  // openConversationForService() and the WebSocket subscription handshake
-  // routinely lands at 2.3-3.5 s before any user action runs, so the
-  // expect(elapsedMs).toBeLessThanOrEqual(2_300) assertion fails before the
-  // toast can fire. Either drop the threshold to ~5 s or split the spec into
-  // a pure-API timing measurement that does not include UI-side cold-start.
+test('NFR-08a: accepted-state propagation reaches the other party within two seconds when both sides are subscribed', async ({ browser, page }) => {
+  // The 2s NFR is a steady-state propagation budget. The previous skip
+  // reason measured the cost of opening two cold browser contexts +
+  // navigating to the chat + WS handshake + the actual broadcast inside
+  // the same 2.3s envelope. That conflates UI cold start with the
+  // broadcast itself.
+  //
+  // The fix here is a receiver-side warm-up: round-trip a message
+  // through the watcher's OWN input so we know its WS is connected
+  // before we time the approve broadcast. If the watcher's WS were
+  // still cold, the warm-up wouldn't land within its 10s envelope.
   const owner = USERS.elif
   const [{ user: requester }] = await pickUsersWithBalanceAtLeast(page, 2, 1, [owner.email])
   const title = `NFR-08a Offer ${Date.now()}`
@@ -55,6 +57,18 @@ test.skip('NFR-08a: accepted-state propagation reaches the other party within tw
     await loginAs(requesterPage, requester)
     await openConversationForService(requesterPage, title)
     await requesterPage.getByRole('button', { name: 'Review & Approve' }).click()
+
+    // Pre-warm the watcher's WS subscription: send a chat message from the
+    // requester and wait for it to round-trip to the watcher. Once that
+    // lands, both sides' WS are confirmed live and the NFR-08a measurement
+    // below times only the steady-state state-propagation cost.
+    const requesterInput = requesterPage.getByPlaceholder(/Write a message/i)
+    if (await requesterInput.isVisible().catch(() => false)) {
+      const warmup = `NFR-08a warmup ${Date.now()}`
+      await requesterInput.fill(warmup)
+      await requesterInput.press('Enter')
+      await expect(ownerWatcherPage.getByText(warmup).first()).toBeVisible({ timeout: 10_000 })
+    }
 
     const startedAt = Date.now()
     await requesterPage.getByRole('button', { name: 'Approve & Confirm' }).click()
