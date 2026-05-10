@@ -563,7 +563,7 @@ class TestServiceViewSet:
             f'/api/services/{service.id}/',
             {'title': 'First save', 'version': 0},
         )
-        assert response.status_code == 200, response.content
+        assert_api_response(response, 200)
         service.refresh_from_db()
         assert service.version == 1
         assert response.json()['version'] == 1
@@ -586,13 +586,13 @@ class TestServiceViewSet:
             f'/api/services/{service.id}/',
             {'title': 'First writer', 'version': 0},
         )
-        assert first.status_code == 200, first.content
+        assert_api_response(first, 200)
 
         second = client.patch(
             f'/api/services/{service.id}/',
             {'description': 'Second writer wanted to change description', 'version': 0},
         )
-        assert second.status_code == 409, second.content
+        assert_problem_detail(second, 409)
         body = second.json()
         assert body['code'] == 'VERSION_CONFLICT'
         assert body['current_version'] == 1
@@ -618,7 +618,7 @@ class TestServiceViewSet:
             f'/api/services/{service.id}/',
             {'title': 'Legacy client save'},
         )
-        assert response.status_code == 200, response.content
+        assert_api_response(response, 200)
         service.refresh_from_db()
         assert service.title == 'Legacy client save'
         assert service.version == 1
@@ -1023,7 +1023,7 @@ class TestRecurrentSchedulingValidation:
         client.authenticate_user(user)
 
         response = client.post('/api/services/', self._payload('Offer', 'Recurrent'))
-        assert response.status_code == 400, response.content
+        assert_problem_detail(response, 400)
         body = response.json()
         assert 'field_errors' in body
         assert 'schedule_type' in body['field_errors']
@@ -1037,7 +1037,7 @@ class TestRecurrentSchedulingValidation:
         client.authenticate_user(user)
 
         response = client.post('/api/services/', self._payload('Need', 'Recurrent'))
-        assert response.status_code == 400, response.content
+        assert_problem_detail(response, 400)
         body = response.json()
         assert 'field_errors' in body
         assert 'schedule_type' in body['field_errors']
@@ -1051,7 +1051,7 @@ class TestRecurrentSchedulingValidation:
         client.authenticate_user(user)
 
         response = client.post('/api/services/', self._payload('Offer', 'One-Time'))
-        assert response.status_code == 201, response.content
+        assert_api_response(response, 201)
         assert response.json()['schedule_type'] == 'One-Time'
 
     def test_patch_offer_to_recurrent_returns_400(self):
@@ -1065,7 +1065,7 @@ class TestRecurrentSchedulingValidation:
             f'/api/services/{service.id}/',
             {'schedule_type': 'Recurrent'},
         )
-        assert response.status_code == 400, response.content
+        assert_problem_detail(response, 400)
         body = response.json()
         assert 'field_errors' in body
         assert 'schedule_type' in body['field_errors']
