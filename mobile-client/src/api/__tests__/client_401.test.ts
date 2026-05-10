@@ -106,6 +106,51 @@ describe("apiRequest 401 / refresh cascade", () => {
     expect(getRefreshToken()).toBeNull();
   });
 
+  it("emits auth:logout exactly once when several concurrent 401s share a failing refresh", async () => {
+    setAuthTokens("expired-access", "bad-refresh");
+
+    const fetchMock = global.fetch as jest.Mock;
+    // Hold the /auth/refresh/ response so all N callers observe the same
+    // in-flight refresh promise and resume from the same `null` resolution.
+    let resolveRefresh!: (value: Response) => void;
+    const refreshDeferred = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve;
+    });
+
+    fetchMock.mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/auth/refresh/")) {
+        return refreshDeferred;
+      }
+      return Promise.resolve(jsonResponse(401, { detail: "Token expired" }));
+    });
+
+    const logoutListener = jest.fn();
+    const unsubscribe = onAuthEvent("auth:logout", logoutListener);
+
+    try {
+      const concurrentRequests = Array.from({ length: 5 }, (_, idx) =>
+        apiRequest(`/users/me/?req=${idx}`).catch((err) => err),
+      );
+
+      // Let all callers reach `await refreshAccessTokenOnce()` before the
+      // shared refresh resolves. Without the loggingOut guard, every caller
+      // would re-enter the `else` branch and emit `auth:logout` again.
+      await Promise.resolve();
+      resolveRefresh(jsonResponse(401, { detail: "Refresh expired" }));
+
+      const results = await Promise.all(concurrentRequests);
+      for (const result of results) {
+        expect(result).toBeInstanceOf(ApiHttpError);
+      }
+    } finally {
+      unsubscribe();
+    }
+
+    expect(logoutListener).toHaveBeenCalledTimes(1);
+    expect(getAuthToken()).toBeNull();
+    expect(getRefreshToken()).toBeNull();
+  });
+
   it("does not attempt refresh when calling /auth/refresh/ itself", async () => {
     setAuthTokens("any-access", "any-refresh");
 
