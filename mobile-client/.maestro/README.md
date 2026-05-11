@@ -52,7 +52,7 @@ for f in $(find .maestro -name '*.yaml'); do maestro test --dry-run "$f"; done
 | Flow | Manual-plan section | What it checks |
 |---|---|---|
 | `auth/login.yaml` | (smoke) | Sign in with email/password lands on Home feed |
-| `auth/register.yaml` | (smoke) | New-account flow reaches the verification gate |
+| `auth/register.yaml` | (smoke) | New-account flow registers and lands on Home (the app currently auto-signs-in on success, no verification gate yet) |
 | `browse/home-to-detail.yaml` | (smoke) | Tap a service card, land on detail, see the Request CTA |
 | `post/post-offer.yaml` | (smoke) | Create an Offer from the Post tab |
 | `handshake/request.yaml` | (smoke) | Send a handshake from a service detail |

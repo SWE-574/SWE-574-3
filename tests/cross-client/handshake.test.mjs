@@ -29,25 +29,36 @@ test('web handshake request → mobile sees pending: user A on web posts an Offe
   // Server returns the model-level status which is lowercased ("pending").
   assert.match(hs.body.status, /^pending$/i, `unexpected status ${hs.body.status}`);
 
-  // Mobile B (the requester) lists own handshakes and sees the pending one.
-  const mobileListing = await api('GET', '/api/handshakes/?role=requester', mobileB);
-  assert.equal(mobileListing.status, 200);
-  const mobileIds = (mobileListing.body.results || mobileListing.body || []).map((h) => h.id);
-  assert.ok(
-    mobileIds.includes(handshakeId),
-    `mobile requester listing missing handshake ${handshakeId}`,
-  );
+  try {
+    // HandshakeViewSet.get_queryset already scopes results to the current
+    // user (requester OR service.user), and the viewset does not implement
+    // a `?role=` filter, so we list without one and rely on the membership
+    // check below.
+    // Mobile B (the requester) lists own handshakes and sees the pending one.
+    const mobileListing = await api('GET', '/api/handshakes/', mobileB);
+    assert.equal(mobileListing.status, 200);
+    const mobileIds = (mobileListing.body.results || mobileListing.body || []).map((h) => h.id);
+    assert.ok(
+      mobileIds.includes(handshakeId),
+      `mobile requester listing missing handshake ${handshakeId}`,
+    );
 
-  // Web A (the provider) lists incoming handshakes and sees the same pending one.
-  const webListing = await api('GET', '/api/handshakes/?role=provider', webA);
-  assert.equal(webListing.status, 200);
-  const webIds = (webListing.body.results || webListing.body || []).map((h) => h.id);
-  assert.ok(
-    webIds.includes(handshakeId),
-    `web provider listing missing handshake ${handshakeId}`,
-  );
-
-  // Cleanup: cancel the handshake, delete the service.
-  await api('POST', `/api/handshakes/${handshakeId}/cancel/`, mobileB);
-  await api('DELETE', `/api/services/${serviceId}/`, webA);
+    // Web A (the provider) lists incoming handshakes and sees the same pending one.
+    const webListing = await api('GET', '/api/handshakes/', webA);
+    assert.equal(webListing.status, 200);
+    const webIds = (webListing.body.results || webListing.body || []).map((h) => h.id);
+    assert.ok(
+      webIds.includes(handshakeId),
+      `web provider listing missing handshake ${handshakeId}`,
+    );
+  } finally {
+    // Best-effort cleanup so a failed assertion doesn't leave a Pending
+    // handshake + orphan service behind for the next run.
+    await api('POST', `/api/handshakes/${handshakeId}/cancel/`, mobileB);
+    const del = await api('DELETE', `/api/services/${serviceId}/`, webA);
+    assert.ok(
+      del.status === 204 || del.status === 200,
+      `service cleanup DELETE returned ${del.status}: ${JSON.stringify(del.body)}`,
+    );
+  }
 });

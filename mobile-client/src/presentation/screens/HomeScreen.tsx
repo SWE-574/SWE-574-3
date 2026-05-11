@@ -443,6 +443,7 @@ export default function HomeScreen() {
       <View style={styles.topBar}>
         <TouchableOpacity
           testID="home-post-button"
+          accessibilityRole="button"
           accessibilityLabel="Post a new service"
           onPress={() =>
             tabNavigation.navigate("PostService", { screen: "PostServiceHome" })

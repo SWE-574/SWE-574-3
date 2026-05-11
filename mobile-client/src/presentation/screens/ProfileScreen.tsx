@@ -483,6 +483,7 @@ export default function ProfileScreen() {
         <>
           <Pressable
             testID="profile-overflow"
+            accessibilityRole="button"
             accessibilityLabel="Profile menu"
             onPress={() => setMenuOpen((prev) => !prev)}
             style={styles.overflowButton}
@@ -553,6 +554,7 @@ export default function ProfileScreen() {
       ) : null}
       <TouchableOpacity
         testID="profile-notifications-bell"
+        accessibilityRole="button"
         accessibilityLabel="Open notifications"
         onPress={() => (navigation as any).navigate("Notifications")}
         style={styles.notificationButton}

@@ -734,6 +734,7 @@ export default function ForumScreen() {
       {isAuthenticated ? (
         <Pressable
           testID="forum-create-topic"
+          accessibilityRole="button"
           accessibilityLabel="Create a new topic"
           style={styles.fab}
           onPress={openCreateTopic}
