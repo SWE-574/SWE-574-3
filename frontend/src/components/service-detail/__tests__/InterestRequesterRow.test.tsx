@@ -142,8 +142,8 @@ describe('InterestRequesterRow', () => {
         />
       </Wrapper>,
     )
-    expect(screen.getByText('Accept')).toBeInTheDocument()
-    expect(screen.getByText('Decline')).toBeInTheDocument()
+    expect(screen.getByLabelText(/Accept request from Alice Smith/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Decline request from Alice Smith/i)).toBeInTheDocument()
   })
 
   it('calls onAccept when Accept button is clicked', () => {
@@ -157,7 +157,7 @@ describe('InterestRequesterRow', () => {
         />
       </Wrapper>,
     )
-    fireEvent.click(screen.getByText('Accept'))
+    fireEvent.click(screen.getByLabelText(/Accept request from Alice Smith/i))
     expect(onAccept).toHaveBeenCalledTimes(1)
   })
 
@@ -172,7 +172,7 @@ describe('InterestRequesterRow', () => {
         />
       </Wrapper>,
     )
-    fireEvent.click(screen.getByText('Decline'))
+    fireEvent.click(screen.getByLabelText(/Decline request from Alice Smith/i))
     expect(onReject).toHaveBeenCalledTimes(1)
   })
 
@@ -182,8 +182,8 @@ describe('InterestRequesterRow', () => {
         <InterestRequesterRow handshake={makeHandshake({ status: 'accepted' })} isOwner />
       </Wrapper>,
     )
-    expect(screen.queryByText('Accept')).not.toBeInTheDocument()
-    expect(screen.queryByText('Decline')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Accept request from Alice Smith/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Decline request from Alice Smith/i)).not.toBeInTheDocument()
   })
 
   // ── #300 / FR-13m: owner-side manual Mark-as-Complete fallback ──────────
@@ -312,9 +312,9 @@ describe('InterestRequesterRow', () => {
       l.getAttribute('href') === '/public-profile/user-fallback',
     )
     expect(profileLinks.length).toBeGreaterThanOrEqual(1)
-    // The "View profile" link specifically
+    // The view-profile icon button specifically (matched by its aria-label)
     const viewProfileLink = links.find((l) =>
-      l.textContent?.includes('View profile') &&
+      l.getAttribute('aria-label')?.startsWith('Open Fallback User') &&
       l.getAttribute('href') === '/public-profile/user-fallback',
     )
     expect(viewProfileLink).toBeDefined()

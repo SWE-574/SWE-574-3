@@ -1,6 +1,6 @@
 import { Box, Flex, Text } from '@chakra-ui/react'
 import { Link } from 'react-router-dom'
-import { FiArrowRight } from 'react-icons/fi'
+import { FiCheck, FiMessageSquare, FiUser, FiX } from 'react-icons/fi'
 import type { Handshake } from '@/services/handshakeAPI'
 import { HS_BADGE, STATUS_FALLBACK } from '@/constants/handshakeBadges'
 import {
@@ -87,10 +87,12 @@ const InterestRequesterRow = ({
     <Flex
       align="center"
       gap={3}
+      rowGap={2}
       px={3}
       py="10px"
       borderBottom={`1px solid ${GRAY200}`}
       opacity={isActive ? 1 : 0.65}
+      flexWrap="wrap"
       style={{ transition: 'background 0.1s' }}
       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = GRAY50 }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '' }}
@@ -99,7 +101,7 @@ const InterestRequesterRow = ({
       <Link
         to={profileUrl}
         aria-label={`View ${displayName}'s public profile`}
-        style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0, textDecoration: 'none' }}
+        style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: '1 1 160px', minWidth: 0, textDecoration: 'none' }}
       >
         {/* Avatar */}
         <Box flexShrink={0}>
@@ -135,43 +137,43 @@ const InterestRequesterRow = ({
           >
             {displayName}
           </Text>
-          <Flex align="center" gap="6px" mt="1px" flexWrap="wrap">
-            {memberSince && (
-              <Text fontSize="11px" color={GRAY400}>
-                {`Joined ${memberSince}`}
-              </Text>
-            )}
-            {/* Status badge */}
-            <Box
-              px="7px"
-              py="2px"
-              borderRadius="full"
-              fontSize="10px"
-              fontWeight={700}
-              style={{ background: cfg.bg, color: cfg.color }}
-            >
-              {cfg.label}
-            </Box>
-          </Flex>
+          {memberSince && (
+            <Text fontSize="11px" color={GRAY400} mt="1px">
+              {`Joined ${memberSince}`}
+            </Text>
+          )}
         </Box>
       </Link>
 
+      {/* Status badge — pinned to the same slot regardless of name/meta wrapping
+          so the participant's state is always at a predictable position in the row. */}
+      <Box
+        px="8px"
+        py="3px"
+        borderRadius="full"
+        fontSize="10px"
+        fontWeight={700}
+        flexShrink={0}
+        style={{ background: cfg.bg, color: cfg.color, whiteSpace: 'nowrap' }}
+      >
+        {cfg.label}
+      </Box>
+
       {/* Right action group */}
-      <Flex align="center" gap={2} flexShrink={0}>
-        {/* View profile button */}
+      <Flex align="center" gap={2} flexShrink={0} ml="auto" flexWrap="wrap" justifyContent="flex-end">
+        {/* View profile — icon-only to save room in the narrow sidebar */}
         <Link
           to={profileUrl}
           aria-label={`Open ${displayName}'s public profile page`}
+          title="View profile"
           style={{ textDecoration: 'none' }}
         >
           <Flex
             align="center"
-            gap="4px"
-            px="10px"
-            py="5px"
+            justify="center"
+            w="28px"
+            h="28px"
             borderRadius="7px"
-            fontSize="11px"
-            fontWeight={600}
             style={{
               border: `1px solid ${GRAY200}`,
               color: GRAY700,
@@ -179,55 +181,78 @@ const InterestRequesterRow = ({
               background: 'none',
             }}
           >
-            View profile <FiArrowRight size={11} />
+            <FiUser size={13} />
           </Flex>
         </Link>
 
-        {/* Accept button — only for pending status */}
+        {/* Open chat with this participant — direct link, no need to navigate via Messages */}
+        <Link
+          to={`/messages/${handshake.id}`}
+          aria-label={`Open chat with ${displayName}`}
+          title="Open chat"
+          style={{ textDecoration: 'none' }}
+        >
+          <Flex
+            align="center"
+            justify="center"
+            w="28px"
+            h="28px"
+            borderRadius="7px"
+            style={{
+              border: `1px solid ${GRAY200}`,
+              color: GREEN,
+              cursor: 'pointer',
+              background: GREEN_LT,
+            }}
+          >
+            <FiMessageSquare size={13} />
+          </Flex>
+        </Link>
+
+        {/* Accept button — icon-only for pending status */}
         {isPending && onAccept && (
           <Box
             as="button"
-            px="10px"
-            py="5px"
+            w="28px"
+            h="28px"
             borderRadius="7px"
-            fontSize="11px"
-            fontWeight={700}
-            style={{ background: GREEN_LT, border: 'none', cursor: 'pointer', color: GREEN }}
+            aria-label={`Accept request from ${displayName}`}
+            title="Accept"
+            style={{ background: GREEN_LT, border: 'none', cursor: 'pointer', color: GREEN, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             onClick={onAccept}
           >
-            Accept
+            <FiCheck size={13} />
           </Box>
         )}
-        {/* Reject button — only for pending status */}
+        {/* Reject button — icon-only for pending status */}
         {isPending && onReject && (
           <Box
             as="button"
-            px="10px"
-            py="5px"
+            w="28px"
+            h="28px"
             borderRadius="7px"
-            fontSize="11px"
-            fontWeight={700}
-            style={{ background: '#fee2e2', border: 'none', cursor: 'pointer', color: '#991b1b' }}
+            aria-label={`Decline request from ${displayName}`}
+            title="Decline"
+            style={{ background: '#fee2e2', border: 'none', cursor: 'pointer', color: '#991b1b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             onClick={onReject}
           >
-            Decline
+            <FiX size={13} />
           </Box>
         )}
-        {/* Mark as Complete — only for accepted status, owner not yet confirmed (#300 / FR-13m) */}
+        {/* Mark as Complete — icon-only, owner not yet confirmed (#300 / FR-13m) */}
         {canMarkComplete && (
           <Box
             as="button"
-            px="10px"
-            py="5px"
+            w="28px"
+            h="28px"
             borderRadius="7px"
-            fontSize="11px"
-            fontWeight={700}
             data-testid="mark-as-complete-button"
             aria-label={`Mark exchange with ${displayName} as complete`}
-            style={{ background: GREEN_LT, border: 'none', cursor: 'pointer', color: GREEN }}
+            title="Mark as complete"
+            style={{ background: GREEN, border: 'none', cursor: 'pointer', color: WHITE, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             onClick={onMarkComplete}
           >
-            Mark as Complete
+            <FiCheck size={13} />
           </Box>
         )}
       </Flex>
