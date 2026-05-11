@@ -265,48 +265,6 @@ export interface ServiceMedia {
   order?: number
 }
 
-export interface FeaturedServiceUser {
-  id: string
-  first_name: string
-  last_name: string
-  avatar_url: string | null
-}
-
-export interface FeaturedServiceTag {
-  id: string
-  name: string
-}
-
-export interface FeaturedService {
-  id: string
-  title: string
-  type: 'Offer' | 'Need' | 'Event'
-  user: FeaturedServiceUser
-  tags: FeaturedServiceTag[]
-  participant_count: number
-  max_participants: number
-  location_area: string | null
-  created_at: string
-  // Only populated on the friends slice.
-  friend_count?: number
-  friend_names?: string[]
-}
-
-export interface FeaturedProvider {
-  id: string
-  first_name: string
-  last_name: string
-  avatar_url: string | null
-  completed_count: number
-  positive_rep_count: number
-}
-
-export interface FeaturedResponse {
-  trending: FeaturedService[]
-  friends: FeaturedService[]
-  top_providers: FeaturedProvider[]
-}
-
 export interface FeaturedChip {
   qid: string
   label: string
