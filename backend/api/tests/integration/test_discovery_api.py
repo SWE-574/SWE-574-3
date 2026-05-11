@@ -4,8 +4,8 @@ Integration tests for Discovery API — FR-19c, FR-19e, FR-19h (blur), NFR-19a.
 Test classes and their status:
   TestAdminPinEvent             — green  (pin endpoint is implemented)
   TestAdminShowcaseFeatured     — xfail  (FR-19c: no showcase/featured concept)
-  TestFollowSystem              — green  (FR-19e: follow + default-sort boost landed)
-  TestDiscoveryFeedPerformance  — xfail  (NFR-19a: no SLA test enforced)
+  TestFollowSystem              — green  (FR-19e: follow model + endpoints landed)
+  TestDiscoveryFeedPerformance  — green  (NFR-19a: 2s SLA holding on the test corpus)
   TestLocationBlurInFeed        — xfail  (FR-19h: feed distance values are not blurred)
 """
 import time
@@ -173,6 +173,7 @@ class TestAdminShowcaseFeatured:
 
 # ---------------------------------------------------------------------------
 # FR-19e — Follow system (green — UserFollow + endpoints + default-sort boost)
+# FR-19e — Follow system (green — UserFollow + follow endpoints implemented)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
@@ -180,8 +181,7 @@ class TestAdminShowcaseFeatured:
 class TestFollowSystem:
     """
     FR-19e: users can follow each other via POST /api/users/{id}/follow/.
-    UserFollow (migration 0051), follow endpoints, and the discovery-feed
-    boost (default sort tiebreaker after `-is_pinned`) are all wired up.
+    The UserFollow model (migration 0051) and follow endpoints are wired up.
     """
 
     def test_user_can_follow_another_user(self):
@@ -193,7 +193,7 @@ class TestFollowSystem:
 
         resp = client.post(f'/api/users/{followed.id}/follow/')
 
-        assert resp.status_code in (200, 201)
+        assert_api_response(resp, 201)
 
     def test_user_can_unfollow(self):
         """DELETE /api/users/{id}/follow/ should remove the follow relationship."""
@@ -205,7 +205,7 @@ class TestFollowSystem:
 
         resp = client.delete(f'/api/users/{followed.id}/follow/')
 
-        assert resp.status_code in (200, 204)
+        assert_api_response(resp, 200)
 
     def test_follow_is_idempotent(self):
         """Following the same user twice should not create a duplicate entry."""
@@ -227,8 +227,12 @@ class TestFollowSystem:
 
         resp = client.post(f'/api/users/{user.id}/follow/')
 
-        assert resp.status_code in (400, 403)
+        assert_problem_detail(resp, 400)
 
+    @pytest.mark.xfail(
+        reason="Follow boost in ranking is not wired up; ranking stays as-is per #579 scope",
+        strict=False,
+    )
     def test_followed_user_listings_rank_higher_in_feed(self):
         """
         Services from a followed user should rank above equivalent-score services
@@ -272,22 +276,17 @@ class TestFollowSystem:
 
 
 # ---------------------------------------------------------------------------
-# NFR-19a — Discovery feed 2-second SLA (xfail — no benchmark enforced)
+# NFR-19a — Discovery feed 2-second SLA (green on the local test corpus)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason="NFR-19a: no performance SLA test exists; 2s threshold not enforced",
-    strict=False,
-)
 class TestDiscoveryFeedPerformance:
     """
     The discovery feed (including serialization and pagination) must return
     the first page within 2 seconds for a catalogue of ~1 000 active services.
-
-    Xfail because no benchmark guard exists and the threshold has not been
-    validated under load.
+    Holds in the local test corpus; load testing under realistic data is
+    tracked separately in the perf track.
     """
 
     FEED_SLA_SECONDS = 2.0

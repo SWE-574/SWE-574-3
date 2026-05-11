@@ -8,8 +8,10 @@ Covers the public event browsing and discovery requirements:
   FR-12f  Unauthenticated join attempt returns 401
   FR-12g  Cancelled events excluded from browse; detail page exposes cancellation state
 
-Tests for date-range filtering (FR-12c) will fail red until DateRangeStrategy is
-implemented in search_filters.py and wired into ServiceViewSet.
+FR-12c is wired up — `date_from` / `date_to` filtering on the event feed
+is handled in `DateRangeStrategy` (search_filters.py) and surfaces through
+`ServiceViewSet`. The tests in `TestEventDateRangeFilter` exercise that
+end-to-end and run green.
 """
 import pytest
 from datetime import timedelta
@@ -87,13 +89,11 @@ class TestEventFeedAnonymousAccess:
 
 
 # ---------------------------------------------------------------------------
-# FR-12c — Date range filtering
-# (These tests will FAIL until DateRangeStrategy is implemented)
+# FR-12c — Date range filtering (green at the event-browse API surface)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 @pytest.mark.integration
-@pytest.mark.xfail(reason="FR-12c: date_from/date_to filter not yet implemented", strict=False)
 class TestEventDateRangeFilter:
     """FR-12c: users can filter events by date_from and date_to."""
 

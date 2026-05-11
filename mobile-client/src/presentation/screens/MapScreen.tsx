@@ -17,14 +17,22 @@ import type { WebViewMessageEvent } from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
-import Slider from "@react-native-community/slider";
 import { colors } from "../../constants/colors";
 import { listServices } from "../../api/services";
 import type { Service, ServiceType } from "../../api/types";
 import { getMapboxToken } from "../../constants/env";
+import {
+  pillIdentity,
+  SIGNAL_CHIPS,
+  type PillIdentity,
+} from "../../utils/pillIdentity";
+import { getServiceDistanceKm } from "../../utils/discovery";
+import MapSearchResults, {
+  type MapSearchResult,
+} from "../components/MapSearchResults";
 import { MAPBOX_HTML } from "../../../assets/mapboxHtml";
 
-type FilterType = "all" | ServiceType;
+type SignalFilter = Exclude<PillIdentity, "default">;
 
 // Istanbul city center — used when location permission is denied
 const DEFAULT_LOCATION = { latitude: 41.0082, longitude: 28.9784 };
@@ -124,17 +132,6 @@ const unavailableStyles = StyleSheet.create({
   },
 });
 
-const FILTER_CONFIG: {
-  label: string;
-  value: FilterType;
-  activeColor: string;
-}[] = [
-  { label: "All", value: "all", activeColor: colors.GRAY700 },
-  { label: "Offers", value: "Offer", activeColor: colors.GREEN },
-  { label: "Needs", value: "Need", activeColor: colors.BLUE },
-  { label: "Events", value: "Event", activeColor: colors.AMBER },
-];
-
 type MapPayload = {
   id: string;
   type: ServiceType;
@@ -165,11 +162,13 @@ export default function MapScreen() {
   } | null>(null);
   const [locationResolved, setLocationResolved] = useState(false);
   const [isLoadingServices, setIsLoadingServices] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<FilterType>("all");
+  const [activeSignals, setActiveSignals] = useState<Set<SignalFilter>>(
+    () => new Set(),
+  );
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [distanceKm, setDistanceKm] = useState(15);
-  const [showRangeSlider, setShowRangeSlider] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapInited, setMapInited] = useState(false);
   // Bumped on Retry to force the WebView and the asset-load effect to remount.
@@ -205,31 +204,37 @@ export default function MapScreen() {
 
     (async () => {
       try {
-        let coords: { latitude: number; longitude: number } | null = null;
+        // Fast path: last-known position returns immediately without warming
+        // up GPS. Seeds the map with a real origin while the fresh fix is
+        // still pending, so the camera doesn't sit on Istanbul for 5+ seconds
+        // on cold start.
+        const last = await Location.getLastKnownPositionAsync().catch(
+          () => null,
+        );
+        if (last) {
+          setUserLocation({
+            latitude: last.coords.latitude,
+            longitude: last.coords.longitude,
+          });
+        }
+
         const { granted } = await Location.getForegroundPermissionsAsync();
-        if (granted) {
+        let permission = granted;
+        if (!permission) {
+          const request = await Location.requestForegroundPermissionsAsync();
+          permission = request.granted;
+        }
+        if (permission) {
           const pos = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
-          coords = {
+          setUserLocation({
             latitude: pos.coords.latitude,
             longitude: pos.coords.longitude,
-          };
-        } else {
-          const permission = await Location.requestForegroundPermissionsAsync();
-          if (permission.granted) {
-            const pos = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            coords = {
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-            };
-          }
+          });
         }
-        if (coords) setUserLocation(coords);
       } catch {
-        // fall back to Istanbul
+        // fall back to Istanbul / last-known
       } finally {
         setLocationResolved(true);
       }
@@ -243,11 +248,16 @@ export default function MapScreen() {
     webViewRef.current?.postMessage(JSON.stringify(payload));
   }, []);
 
-  // Send the init payload as soon as the WebView and the location resolution
-  // are both ready. Keep this firing only once.
+  // Init the map as soon as the WebView is ready. We deliberately do NOT
+  // wait on the GPS fix — iOS getCurrentPositionAsync can take 5–8s on a cold
+  // start, and blocking the map behind that is the dominant load-time cost.
+  // If no user location is known yet, fall back to Istanbul and fly to the
+  // real fix when it arrives (see effect below).
+  const initWithUserRef = useRef(false);
   useEffect(() => {
     if (mapInited) return;
-    if (!mapReady || !locationResolved) return;
+    if (!mapReady) return;
+    const haveUser = !!userLocation;
     const center = userLocation
       ? { lat: userLocation.latitude, lng: userLocation.longitude }
       : { lat: DEFAULT_LOCATION.latitude, lng: DEFAULT_LOCATION.longitude };
@@ -262,8 +272,28 @@ export default function MapScreen() {
         ? { lat: userLocation.latitude, lng: userLocation.longitude }
         : null,
     });
+    if (haveUser) initWithUserRef.current = true;
     setMapInited(true);
-  }, [mapReady, locationResolved, userLocation, services, post, mapInited, mapboxToken]);
+  }, [mapReady, userLocation, services, post, mapInited, mapboxToken]);
+
+  // If init ran before GPS resolved, fly to the user once the fresh fix
+  // arrives so they don't have to tap "find me" themselves.
+  useEffect(() => {
+    if (!mapInited) return;
+    if (!userLocation) return;
+    if (initWithUserRef.current) return;
+    initWithUserRef.current = true;
+    post({
+      type: "setUser",
+      lat: userLocation.latitude,
+      lng: userLocation.longitude,
+    });
+    post({
+      type: "flyTo",
+      lat: userLocation.latitude,
+      lng: userLocation.longitude,
+    });
+  }, [mapInited, userLocation, post]);
 
   const recenterOnUser = useCallback(async () => {
     try {
@@ -295,26 +325,30 @@ export default function MapScreen() {
     }
   }, [post]);
 
-  // Fetch services whenever location or the explicitly-chosen radius changes.
-  // The distance param is only forwarded when the viewer has opened the range
-  // slider -- without that gate, fetchServices would re-run the moment iOS
-  // location permission resolves and apply a 15 km hard cutoff around the
-  // viewer's coordinates. On the iOS simulator that is the Apple default
-  // (San Francisco, 37.7858/-122.4064), which sits ~10,000 km from the demo
-  // seed and silently filters every Istanbul row out of the response, so
-  // the map paints zero markers. Mirrors `radiusFilterEnabled` on the web
-  // dashboard.
+  // Hold the latest location in a ref so fetchServices can read it without
+  // re-firing when GPS refines from last-known to a fresh fix. Pre-fix we
+  // re-fetched listServices twice on every cold start.
+  const userLocationRef = useRef(userLocation);
+  useEffect(() => {
+    userLocationRef.current = userLocation;
+  }, [userLocation]);
+
+  // Pull every service the backend will return (capped at 100 by
+  // StandardResultsSetPagination.max_page_size in backend/api/views.py).
+  // We pass lat/lng when known so the backend orders by proximity, but never
+  // a distance cutoff — the map is meant to show all available listings, not
+  // a radius slice.
   const fetchServices = useCallback(async () => {
     try {
       setIsLoadingServices(true);
-      const params = userLocation
+      const loc = userLocationRef.current;
+      const params = loc
         ? {
-            page_size: 500,
-            lat: userLocation.latitude,
-            lng: userLocation.longitude,
-            ...(showRangeSlider ? { distance: distanceKm } : {}),
+            page_size: 100,
+            lat: loc.latitude,
+            lng: loc.longitude,
           }
-        : { page_size: 500 };
+        : { page_size: 100 };
 
       const { results } = await listServices(params);
       setServices(
@@ -331,20 +365,39 @@ export default function MapScreen() {
     } finally {
       setIsLoadingServices(false);
     }
-  }, [userLocation, distanceKm, showRangeSlider]);
+  }, []);
 
+  // Wait for the location resolution to settle before the first fetch so we
+  // make one call, not two — once with no coords, once with coords.
   useEffect(() => {
+    if (!locationResolved) return;
     fetchServices();
-  }, [fetchServices]);
+  }, [locationResolved, fetchServices]);
 
-  const trimmedSearch = searchQuery.trim().toLowerCase();
+  // 250ms is the same debounce used by the web Browse search; tighter feels
+  // jittery while typing, looser delays the dropdown long enough that users
+  // start to wonder whether the query took.
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 250);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
+
+  // Markers reflect signal selection but ignore the search query — the
+  // search box drives the dropdown surface, not the pin set. Pre-fix, typing
+  // "yoga" made every other pin disappear with no list to back it up.
   const visibleServices = useMemo(() => {
-    let list = services;
-    if (activeFilter !== "all") {
-      list = list.filter((s) => s.type === activeFilter);
-    }
-    if (trimmedSearch) {
-      list = list.filter((s) => {
+    if (activeSignals.size === 0) return services;
+    return services.filter((s) => {
+      const id = pillIdentity(s);
+      return id !== "default" && activeSignals.has(id);
+    });
+  }, [services, activeSignals]);
+
+  const lowerQuery = debouncedQuery.toLowerCase();
+  const searchResults = useMemo<MapSearchResult[]>(() => {
+    if (!lowerQuery) return [];
+    return visibleServices
+      .filter((s) => {
         const haystack = [
           s.title,
           s.description,
@@ -353,11 +406,23 @@ export default function MapScreen() {
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
-        return haystack.includes(trimmedSearch);
-      });
-    }
-    return list;
-  }, [services, activeFilter, trimmedSearch]);
+        return haystack.includes(lowerQuery);
+      })
+      .map((service) => ({
+        service,
+        distanceKm: getServiceDistanceKm(
+          service,
+          userLocation
+            ? {
+                latitude: userLocation.latitude,
+                longitude: userLocation.longitude,
+              }
+            : null,
+        ),
+      }));
+  }, [visibleServices, lowerQuery, userLocation]);
+
+  const showResultsDropdown = debouncedQuery.length > 0 && searchFocused;
 
   // Push the visible service set to the WebView whenever it changes (after init).
   useEffect(() => {
@@ -409,6 +474,29 @@ export default function MapScreen() {
     [services],
   );
 
+  const handleSelectResult = useCallback(
+    (service: Service) => {
+      const lat = Number(service.location_lat);
+      const lng = Number(service.location_lng);
+      if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+        post({ type: "flyTo", lat, lng, zoom: 14 });
+      }
+      setSelectedService(service);
+      setSearchFocused(false);
+      setSearchQuery("");
+    },
+    [post],
+  );
+
+  const toggleSignal = useCallback((id: SignalFilter) => {
+    setActiveSignals((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const handleViewDetail = useCallback(() => {
     if (!selectedService) return;
     const id = selectedService.id;
@@ -427,14 +515,6 @@ export default function MapScreen() {
         insetTop={insets.top}
         reason={!mapboxToken ? "no-token" : "load-failed"}
       />
-    );
-  }
-
-  if (!locationResolved) {
-    return (
-      <View style={[styles.loading, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={colors.GREEN} />
-      </View>
     );
   }
 
@@ -483,19 +563,38 @@ export default function MapScreen() {
             />
             <TextInput
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={(value) => {
+                setSearchQuery(value);
+                if (value.length > 0) setSearchFocused(true);
+              }}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
               placeholder="Search title, description, tags…"
               placeholderTextColor={colors.GRAY400}
               style={styles.searchInput}
               returnKeyType="search"
             />
             {searchQuery.length > 0 ? (
-              <Pressable hitSlop={8} onPress={() => setSearchQuery("")}>
+              <Pressable
+                hitSlop={8}
+                onPress={() => {
+                  setSearchQuery("");
+                  setSearchFocused(false);
+                }}
+              >
                 <Ionicons name="close-circle" size={16} color={colors.GRAY400} />
               </Pressable>
             ) : null}
           </View>
         </View>
+
+        {showResultsDropdown ? (
+          <MapSearchResults
+            results={searchResults}
+            onSelect={handleSelectResult}
+            emptyLabel={`No matches for "${debouncedQuery}"`}
+          />
+        ) : null}
 
         <ScrollView
           horizontal
@@ -503,49 +602,33 @@ export default function MapScreen() {
           contentContainerStyle={styles.pillsContent}
           style={styles.pillsScroll}
         >
-          {FILTER_CONFIG.map((f) => {
-            const active = activeFilter === f.value;
+          {SIGNAL_CHIPS.map((chip) => {
+            const active = activeSignals.has(chip.id);
             return (
               <TouchableOpacity
-                key={f.value}
-                onPress={() => setActiveFilter(f.value)}
+                key={chip.id}
+                onPress={() => toggleSignal(chip.id)}
                 activeOpacity={0.8}
                 style={[
                   styles.pill,
                   active && {
-                    backgroundColor: f.activeColor,
-                    borderColor: f.activeColor,
+                    backgroundColor: chip.color,
+                    borderColor: chip.color,
                   },
                 ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={chip.label}
+                testID={`map-signal-${chip.id}`}
               >
                 <Text
                   style={[styles.pillText, active && styles.pillTextActive]}
                 >
-                  {f.label}
+                  {chip.label}
                 </Text>
               </TouchableOpacity>
             );
           })}
-          <TouchableOpacity
-            onPress={() => setShowRangeSlider((v) => !v)}
-            activeOpacity={0.8}
-            style={[
-              styles.pill,
-              showRangeSlider && {
-                backgroundColor: colors.GREEN,
-                borderColor: colors.GREEN,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.pillText,
-                showRangeSlider && styles.pillTextActive,
-              ]}
-            >
-              Range · {distanceKm}km
-            </Text>
-          </TouchableOpacity>
           {isLoadingServices && (
             <ActivityIndicator
               size="small"
@@ -554,24 +637,6 @@ export default function MapScreen() {
             />
           )}
         </ScrollView>
-
-        {showRangeSlider ? (
-          <View style={styles.rangeRow}>
-            <Text style={styles.rangeLabel}>1km</Text>
-            <Slider
-              style={styles.rangeSlider}
-              minimumValue={1}
-              maximumValue={50}
-              step={1}
-              value={distanceKm}
-              onSlidingComplete={(v) => setDistanceKm(Math.round(v))}
-              minimumTrackTintColor={colors.GREEN}
-              maximumTrackTintColor={colors.GRAY300}
-              thumbTintColor={colors.GREEN}
-            />
-            <Text style={styles.rangeLabel}>50km</Text>
-          </View>
-        ) : null}
       </View>
 
       {/* Find-me FAB */}
@@ -852,31 +917,6 @@ const styles = StyleSheet.create({
   },
   spinner: {
     marginLeft: 4,
-  },
-  rangeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 14,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.WHITE,
-    borderWidth: 1,
-    borderColor: colors.GRAY200,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  rangeLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.GRAY500,
-  },
-  rangeSlider: {
-    flex: 1,
-    height: 28,
   },
   findMeFab: {
     position: "absolute",
