@@ -41,6 +41,10 @@ export function ChatInputBar({
       />
 
       <TouchableOpacity
+        testID="chat-send-button"
+        accessibilityRole="button"
+        accessibilityLabel="Send message"
+        accessibilityState={{ disabled: sendDisabled }}
         style={[styles.sendBtn, sendDisabled && styles.sendBtnDisabled]}
         onPress={onSend}
         disabled={sendDisabled}

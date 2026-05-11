@@ -57,6 +57,16 @@ eas build -p ios --profile development
 
 Production Android builds are configured to output an **APK** (`eas.json` → `build.production.android.buildType: "apk"`).
 
+#### Mapbox token on EAS
+
+EAS Build does not see the local `.env` file. Make the token available to every build profile once with:
+
+```bash
+eas secret:create --name EXPO_PUBLIC_MAPBOX_TOKEN --value pk.YOUR_TOKEN --scope project
+```
+
+`app.config.ts` reads `process.env.EXPO_PUBLIC_MAPBOX_TOKEN` first, so the secret is picked up automatically; no `eas.json` edit needed. Verify with `eas secret:list`.
+
 ### Local Android build (no EAS)
 
 ```bash
@@ -65,6 +75,14 @@ npm run build:android:local
 ```
 
 Produces a release APK at `mobile-client/android/app/build/outputs/apk/release/app-release.apk`. Requires Android SDK, JDK 17, and the `android/` folder populated by `npm run prebuild` (already in the repo). Useful for sideloading on a test device without going through EAS.
+
+To embed the Mapbox token in this APK, pass it on the command line (the value is read into the JS bundle at build time via `app.config.ts`):
+
+```bash
+EXPO_PUBLIC_MAPBOX_TOKEN=pk.YOUR_TOKEN npm run build:android:local
+```
+
+Without a token the Map tab shows a "Map unavailable" fallback. If the value is already in the repo-root `.env` (set by `make env`) you can skip the inline export — `app.config.ts` falls back to `.env` if `process.env` is empty.
 
 The APK is currently signed with the debug keystore (`android/app/build.gradle` → `release { signingConfig signingConfigs.debug }`), so it's fine for sideloading and internal QA but **not** suitable for Play Store distribution. For store-ready APKs, use `npm run build:android` (EAS handles signing) or wire a release keystore into `signingConfigs.release` first.
 

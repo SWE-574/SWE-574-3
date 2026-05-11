@@ -1322,11 +1322,27 @@ export default function ServiceWizard({
         </Pressable>
 
         {step < STEPS.length ? (
-          <Pressable style={[styles.nextButton, { backgroundColor: accent }]} onPress={goNext}>
+          <Pressable
+            testID="service-wizard-continue"
+            accessibilityRole="button"
+            accessibilityLabel="Continue to next step"
+            style={[styles.nextButton, { backgroundColor: accent }]}
+            onPress={goNext}
+          >
             <Text style={styles.nextButtonText}>Continue</Text>
           </Pressable>
         ) : (
           <Pressable
+            testID="service-wizard-submit"
+            accessibilityRole="button"
+            accessibilityLabel={
+              type === "Event"
+                ? "Create event"
+                : type === "Offer"
+                  ? "Post offer"
+                  : "Post need"
+            }
+            accessibilityState={{ disabled: submitting }}
             style={[
               styles.nextButton,
               { backgroundColor: accent },
