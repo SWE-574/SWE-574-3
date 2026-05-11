@@ -105,6 +105,10 @@ const baseReview: ProfileReview = {
 };
 
 describe("ActivityListScreen", () => {
+  // CI runners can be significantly slower than local — 15s gives the
+  // `findByText` polls headroom without masking real hangs.
+  jest.setTimeout(15000);
+
   beforeEach(() => {
     mockNavigate.mockReset();
     (listServices as jest.Mock).mockReset();

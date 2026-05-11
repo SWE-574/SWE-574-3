@@ -8,7 +8,7 @@ import EyebrowLabel from '@/components/ui/EyebrowLabel'
 import { getAchievementMeta } from '@/utils/achievementMeta'
 import {
   GRAY100, GRAY200, GRAY400, GRAY500, GRAY600, GRAY800,
-  GREEN, GREEN_LT, GREEN_MD,
+  GREEN, GREEN_LT,
   WHITE,
 } from '@/theme/tokens'
 
