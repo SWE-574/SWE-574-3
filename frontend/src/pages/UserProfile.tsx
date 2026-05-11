@@ -37,6 +37,7 @@ import { ServiceCard } from '@/components/profile/ServiceCard'
 import { ProfileReviewRow } from '@/components/profile/ProfileReviewRow'
 import { MyReportsList } from '@/pages/MyReports'
 import { useMyReports } from '@/hooks/useMyReports'
+import { useReveal } from '@/hooks/useReveal'
 
 // ── Shared helpers (still used by tab content) ─────────────────────────────────
 const AVATAR_PALETTE = [GREEN, BLUE, TEAL, AMBER, '#0D9488', '#EA580C']
@@ -180,6 +181,9 @@ const UserProfile = () => {
   const [historyLoading, setHistoryLoading]   = useState(true)
   const [eventsLoading, setEventsLoading]     = useState(true)
   const [activeTab, setActiveTab]         = useState<ServiceTab>(initialTab)
+  const { visible: visibleOffers, showMore: showMoreOffers } = useReveal(userId)
+  const { visible: visibleNeeds, showMore: showMoreNeeds } = useReveal(userId)
+  const { visible: visibleHistory, showMore: showMoreHistory } = useReveal(userId)
   const { reports: myReports, error: myReportsError } = useMyReports()
 
   useEffect(() => {
@@ -412,9 +416,19 @@ const UserProfile = () => {
                     onClick={() => navigate('/post-offer')}><FiPlus size={12} />Post an Offer</Box>
                 </Flex>
               ) : (
-                <Box p={3} display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
-                  {offersTab.map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
-                </Box>
+                <>
+                  <Box p={3} display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
+                    {offersTab.slice(0, visibleOffers).map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
+                  </Box>
+                  {offersTab.length > visibleOffers && (
+                    <Flex justify="center" pb={3}>
+                      <Box as="button" onClick={showMoreOffers}
+                        px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
+                        style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
+                      >Show more ({offersTab.length - visibleOffers})</Box>
+                    </Flex>
+                  )}
+                </>
               ))}
               </Box>
 
@@ -431,9 +445,19 @@ const UserProfile = () => {
                     onClick={() => navigate('/post-need')}><FiPlus size={12} />Post a Need</Box>
                 </Flex>
               ) : (
-                <Box p={3} display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
-                  {needsTab.map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
-                </Box>
+                <>
+                  <Box p={3} display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
+                    {needsTab.slice(0, visibleNeeds).map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
+                  </Box>
+                  {needsTab.length > visibleNeeds && (
+                    <Flex justify="center" pb={3}>
+                      <Box as="button" onClick={showMoreNeeds}
+                        px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
+                        style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
+                      >Show more ({needsTab.length - visibleNeeds})</Box>
+                    </Flex>
+                  )}
+                </>
               ))}
               </Box>
 
@@ -484,7 +508,7 @@ const UserProfile = () => {
                 </Flex>
               ) : (
                 <Box px={4}>
-                  {groupedOwnHistory.map((item) => (
+                  {groupedOwnHistory.slice(0, visibleHistory).map((item) => (
                     <HistoryRow
                       key={item.key}
                       item={item}
@@ -493,6 +517,14 @@ const UserProfile = () => {
                       onOpenDetails={() => setSelectedHistoryGroup(item)}
                     />
                   ))}
+                  {groupedOwnHistory.length > visibleHistory && (
+                    <Flex justify="center" py={3}>
+                      <Box as="button" onClick={showMoreHistory}
+                        px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
+                        style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
+                      >Show more ({groupedOwnHistory.length - visibleHistory})</Box>
+                    </Flex>
+                  )}
                 </Box>
               ))}
               </Box>
