@@ -2524,50 +2524,60 @@ class ServiceViewSet(viewsets.ModelViewSet):
             # Surface the field-level error instead of swallowing it.
             raise drf_serializers.ValidationError({exc.field: exc.message})
 
-        # Onboarding tag fallback (#478): when an onboarded viewer with
-        # declared skills hits the feed without an explicit tag filter,
-        # prefer services tagged with their skills and top up from the
-        # explore pool when too few match. Annotates `source` for the UI.
-        # Skipped when ?user= is set: profile pages must show every active
-        # service the owner has, regardless of whether the tags overlap the
-        # viewer's declared skills.
-        explicit_tag = (
-            self.request.query_params.get('tag')
-            or self.request.query_params.getlist('tags')
-        )
-        # Browse's "All" mode opts out of the implicit skills filter so the
-        # viewer sees the full active catalog instead of a skill-aware slice.
-        skip_onboarding_raw = self.request.query_params.get('skip_onboarding', '')
-        skip_onboarding = (
-            str(skip_onboarding_raw).strip().lower() in {'1', 'true', 'yes'}
-        )
-        if not explicit_tag and not user_param and not skip_onboarding:
-            from .ranking import apply_onboarding_fallback
-            queryset, _ = apply_onboarding_fallback(
-                queryset,
-                self.request.user,
-                getattr(settings, 'RANKING_ONBOARDING_MIN_RESULTS', 10),
+        # The feed-shaping filters below (onboarding tag fallback,
+        # explore_only, exclude_own) only make sense for the list view —
+        # they reshape the public catalogue. Detail actions like retrieve
+        # or @action(detail=True) endpoints (generate_qr_token,
+        # complete_event, cancel_event, …) target a specific pk and must
+        # not have their target silently dropped by feed shaping, or the
+        # caller sees a misleading 404. Status + is_visible filtering
+        # above still applies so genuinely non-public services 404 as they
+        # should.
+        if self.action == 'list':
+            # Onboarding tag fallback (#478): when an onboarded viewer with
+            # declared skills hits the feed without an explicit tag filter,
+            # prefer services tagged with their skills and top up from the
+            # explore pool when too few match. Annotates `source` for the UI.
+            # Skipped when ?user= is set: profile pages must show every active
+            # service the owner has, regardless of whether the tags overlap the
+            # viewer's declared skills.
+            explicit_tag = (
+                self.request.query_params.get('tag')
+                or self.request.query_params.getlist('tags')
             )
+            # Browse's "All" mode opts out of the implicit skills filter so the
+            # viewer sees the full active catalog instead of a skill-aware slice.
+            skip_onboarding_raw = self.request.query_params.get('skip_onboarding', '')
+            skip_onboarding = (
+                str(skip_onboarding_raw).strip().lower() in {'1', 'true', 'yes'}
+            )
+            if not explicit_tag and not user_param and not skip_onboarding:
+                from .ranking import apply_onboarding_fallback
+                queryset, _ = apply_onboarding_fallback(
+                    queryset,
+                    self.request.user,
+                    getattr(settings, 'RANKING_ONBOARDING_MIN_RESULTS', 10),
+                )
 
-        # explore_only=true (#480): restrict the feed to Phase 3 eligible
-        # services (cold-start, undershown quality, stale recurring) so the
-        # mobile "Try something new" carousel can fetch them in one call.
-        explore_only_raw = self.request.query_params.get('explore_only', '')
-        if str(explore_only_raw).strip().lower() in {'1', 'true', 'yes'}:
-            from .ranking import _eligible_exploration
-            sample = list(queryset[:200])
-            cold, under, stale = _eligible_exploration(sample)
-            eligible_ids = [s.id for s in (*cold, *under, *stale)]
-            queryset = queryset.filter(id__in=eligible_ids)
+            # explore_only=true (#480): restrict the feed to Phase 3 eligible
+            # services (cold-start, undershown quality, stale recurring) so the
+            # mobile "Try something new" carousel can fetch them in one call.
+            explore_only_raw = self.request.query_params.get('explore_only', '')
+            if str(explore_only_raw).strip().lower() in {'1', 'true', 'yes'}:
+                from .ranking import _eligible_exploration
+                sample = list(queryset[:200])
+                cold, under, stale = _eligible_exploration(sample)
+                eligible_ids = [s.id for s in (*cold, *under, *stale)]
+                queryset = queryset.filter(id__in=eligible_ids)
 
-        # Optional `exclude_own` toggle — Browse uses this so the viewer
-        # never sees their own services in the discovery feed.
-        exclude_own_raw = self.request.query_params.get('exclude_own', '')
-        if (
-            str(exclude_own_raw).strip().lower() in {'1', 'true', 'yes'}
-            and self.request.user.is_authenticated
-        ):
-            queryset = queryset.exclude(user=self.request.user)
+            # Optional `exclude_own` toggle — Browse uses this so the viewer
+            # never sees their own services in the discovery feed.
+            exclude_own_raw = self.request.query_params.get('exclude_own', '')
+            if (
+                str(exclude_own_raw).strip().lower() in {'1', 'true', 'yes'}
+                and self.request.user.is_authenticated
+            ):
+                queryset = queryset.exclude(user=self.request.user)
 
         # Filter by owner user (for profile pages)
         if user_param:

@@ -140,7 +140,6 @@ class TestProximityComposite:
         above every in-person row, regardless of how close the in-person row
         was to the viewer. Online should be proximity-neutral instead."""
         from datetime import timedelta
-        from decimal import Decimal as Dec
 
         from django.utils import timezone
 

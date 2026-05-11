@@ -13,7 +13,8 @@ import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.tests.helpers.factories import UserFactory, ServiceFactory
+from api.models import Tag
+from api.tests.helpers.factories import UserFactory, ServiceFactory, TagFactory
 from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
@@ -106,6 +107,28 @@ class TestGenerateQRTokenEndpoint:
         )
 
         assert_problem_detail(resp, 404)
+
+    def test_onboarded_organizer_with_mismatched_skills_can_still_generate(self):
+        """Regression for the actual prod bug. The organizer is onboarded with
+        skills that do NOT match the event's tags. Under the old code path,
+        apply_onboarding_fallback() filtered the queryset down to services
+        tagged with the viewer's skills, dropping the organizer's own event
+        — self.get_object() then raised Http404 and the UI showed
+        'Resource not found.' Once feed-shaping filters are gated to
+        self.action == 'list', this path stays clean."""
+        organizer = UserFactory(is_onboarded=True)
+        skill_tag = TagFactory()
+        organizer.skills.add(skill_tag)
+
+        event_tag = TagFactory()
+        event = _make_qr_event(organizer)
+        event.tags.add(event_tag)  # different tag from the organizer's skill
+
+        client = APIClient()
+        client.force_authenticate(user=organizer)
+        resp = client.post(f'/api/services/{event.id}/generate-qr-token/')
+
+        assert_api_response(resp, 200)
 
 
 @pytest.mark.django_db
