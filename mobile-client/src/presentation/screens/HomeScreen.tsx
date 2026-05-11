@@ -442,6 +442,8 @@ export default function HomeScreen() {
       {/* Top bar */}
       <View style={styles.topBar}>
         <TouchableOpacity
+          testID="home-post-button"
+          accessibilityLabel="Post a new service"
           onPress={() =>
             tabNavigation.navigate("PostService", { screen: "PostServiceHome" })
           }
@@ -600,6 +602,7 @@ export default function HomeScreen() {
       )}
 
       <FlatList
+        testID="home-feed"
         data={filteredServices}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item, index }) => (
