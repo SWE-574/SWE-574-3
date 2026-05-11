@@ -59,11 +59,17 @@ jobs:
         run: npm test -- --ci --forceExit --coverage
 
   build:
-    name: EAS Preview Build (Android)
+    name: EAS Preview Build (${{ matrix.platform }})
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: ${{ vars.ENABLE_MOBILE_BUILD == 'true' && github.event_name == 'pull_request' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [android, ios]
+    env:
+      PLATFORM: ${{ matrix.platform }}
 
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +99,6 @@ jobs:
         working-directory: mobile-client
         run: npm ci --prefer-offline --no-audit
 
-      - name: EAS preview build (Android)
+      - name: EAS preview build
         working-directory: mobile-client
-        run: eas build --profile preview --platform android --non-interactive
+        run: eas build --profile preview --platform "$PLATFORM" --non-interactive

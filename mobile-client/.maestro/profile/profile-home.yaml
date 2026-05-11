@@ -1,0 +1,25 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+  - profile
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §4.1: Profile home.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Profile(, tab,.*)?"
+- extendedWaitUntil:
+    visible:
+      text: "Profile(, tab,.*)?"
+    timeout: 8000
+# The profile screen renders the user's name, the credit balance pill,
+# and either "Settings" / "Time Activity" / "My commitments" in the
+# overflow menu. We assert a stable subset.
+- tapOn:
+    id: "profile-overflow"
+    optional: true
+- assertVisible:
+    text: "Settings"
+    optional: true

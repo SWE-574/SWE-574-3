@@ -1,0 +1,47 @@
+appId: com.apiary.thehive
+tags:
+  - messages
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+  MESSAGE_BODY: Maestro chat probe
+---
+# Manual test plan §2.2: P2P chat — send a message, see it appear.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Messages(, tab,.*)?"
+# Open the first conversation by tapping the first row in the list.
+# Open the first row in the conversation list. The Messages tab shows
+# either P2P chats or handshake threads at the top depending on activity.
+- tapOn:
+    index: 1
+    childOf:
+      id: "messages-list"
+- waitForAnimationToEnd:
+    timeout: 4000
+# Probe the chat composer — the placeholder varies by chat type and
+# project version, so we try a handful and tap whichever exists.
+- tapOn:
+    text: "Type a message"
+    optional: true
+- tapOn:
+    text: "Write a message"
+    optional: true
+- tapOn:
+    text: "Message"
+    optional: true
+- inputText: ${MESSAGE_BODY}
+- hideKeyboard
+- tapOn:
+    text: "Send"
+    optional: true
+- tapOn:
+    id: "chat-send-button"
+    optional: true
+# Maestro env-var interpolation does NOT apply inside nested matcher
+# objects (it works in primitive scalars like `inputText:` only). Inline
+# the literal body text.
+- extendedWaitUntil:
+    visible:
+      text: "Maestro chat probe"
+    timeout: 8000

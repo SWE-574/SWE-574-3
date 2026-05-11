@@ -1,0 +1,22 @@
+appId: com.apiary.thehive
+tags:
+  - profile
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §4.7: Calendar.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Profile(, tab,.*)?"
+# The section that opens Calendar is labelled "Schedule" with subtitle
+# "Calendar and upcoming sessions" in the profile body.
+- tapOn:
+    text: "Schedule"
+- extendedWaitUntil:
+    visible:
+      text: "(?i)calendar|schedule"
+    timeout: 8000
+- assertVisible:
+    text: "Upcoming"
+    optional: true

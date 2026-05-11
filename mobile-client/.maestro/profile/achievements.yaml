@@ -1,0 +1,24 @@
+appId: com.apiary.thehive
+tags:
+  - profile
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §4.3: Achievements list.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Profile(, tab,.*)?"
+# Achievements is a collapsible ProfileAccordionSection on the profile; the
+# row taps just toggle expansion. The actual AchievementsList screen opens
+# from a "View all achievements" CTA inside the expanded accordion body.
+- tapOn:
+    text: ".*Achievements.*"
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: "View all achievements"
+- extendedWaitUntil:
+    visible:
+      text: "(?i)achievement|badge"
+    timeout: 10000

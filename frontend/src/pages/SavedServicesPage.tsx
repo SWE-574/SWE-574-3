@@ -33,7 +33,7 @@ export default function SavedServicesPage() {
     }
   }, [])
 
-  const handleDismissed = (serviceId: string) => {
+  const handleRemoved = (serviceId: string) => {
     setServices((cur) => cur.filter((s) => s.id !== serviceId))
   }
 
@@ -105,7 +105,7 @@ export default function SavedServicesPage() {
                 key={service.id}
                 service={service}
                 lane="for_you"
-                onDismissed={handleDismissed}
+                onRemoved={handleRemoved}
               />
             ))}
           </Grid>

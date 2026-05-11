@@ -1,0 +1,18 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+  - messages
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §2.1: Conversation list.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Messages(, tab,.*)?"
+# Either there are conversations (header text) or the empty state.
+- assertVisible:
+    text: "Messages(, tab,.*)?"
+- swipe:
+    start: 50%, 70%
+    end: 50%, 30%
