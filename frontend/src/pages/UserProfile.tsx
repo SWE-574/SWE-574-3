@@ -41,6 +41,10 @@ import { useMyReports } from '@/hooks/useMyReports'
 // ── Shared helpers (still used by tab content) ─────────────────────────────────
 const AVATAR_PALETTE = [GREEN, BLUE, TEAL, AMBER, '#0D9488', '#EA580C']
 const AVATAR_IMAGE_BG = `linear-gradient(180deg, ${WHITE} 0%, ${GRAY100} 100%)`
+// Profile tabs render every record the API returned in one go; for large
+// portfolios that meant 50 service cards stacked in a single grid. Reveal in
+// pages of 6 (one full 2x3 grid row) and let the user expand on demand.
+const PROFILE_PAGE_SIZE = 6
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 const fmtDur = (d: number | string) => `${Number(d)}h`
@@ -180,6 +184,9 @@ const UserProfile = () => {
   const [historyLoading, setHistoryLoading]   = useState(true)
   const [eventsLoading, setEventsLoading]     = useState(true)
   const [activeTab, setActiveTab]         = useState<ServiceTab>(initialTab)
+  const [visibleOffers, setVisibleOffers] = useState(PROFILE_PAGE_SIZE)
+  const [visibleNeeds, setVisibleNeeds]   = useState(PROFILE_PAGE_SIZE)
+  const [visibleHistory, setVisibleHistory] = useState(PROFILE_PAGE_SIZE)
   const { reports: myReports, error: myReportsError } = useMyReports()
 
   useEffect(() => {
@@ -237,6 +244,14 @@ const UserProfile = () => {
       setReviewsAsOrganizer(rOrganizer.results)
     }).catch(() => {}).finally(() => setReviewsLoading(false))
     return () => ac.abort()
+  }, [userId])
+
+  // Reset the per-tab reveal counters when switching profile views so a
+  // viewer who scrolled deep on one user doesn't land halfway into another.
+  useEffect(() => {
+    setVisibleOffers(PROFILE_PAGE_SIZE)
+    setVisibleNeeds(PROFILE_PAGE_SIZE)
+    setVisibleHistory(PROFILE_PAGE_SIZE)
   }, [userId])
 
   useEffect(() => {
@@ -412,9 +427,19 @@ const UserProfile = () => {
                     onClick={() => navigate('/post-offer')}><FiPlus size={12} />Post an Offer</Box>
                 </Flex>
               ) : (
-                <Box p={3} display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
-                  {offersTab.map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
-                </Box>
+                <>
+                  <Box p={3} display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
+                    {offersTab.slice(0, visibleOffers).map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
+                  </Box>
+                  {offersTab.length > visibleOffers && (
+                    <Flex justify="center" pb={3}>
+                      <Box as="button" onClick={() => setVisibleOffers(c => c + PROFILE_PAGE_SIZE)}
+                        px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
+                        style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
+                      >Show more ({offersTab.length - visibleOffers})</Box>
+                    </Flex>
+                  )}
+                </>
               ))}
               </Box>
 
@@ -431,9 +456,19 @@ const UserProfile = () => {
                     onClick={() => navigate('/post-need')}><FiPlus size={12} />Post a Need</Box>
                 </Flex>
               ) : (
-                <Box p={3} display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
-                  {needsTab.map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
-                </Box>
+                <>
+                  <Box p={3} display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
+                    {needsTab.slice(0, visibleNeeds).map(s => <ServiceCard key={s.id} service={s} onNav={() => navigate(`/service-detail/${s.id}`)} />)}
+                  </Box>
+                  {needsTab.length > visibleNeeds && (
+                    <Flex justify="center" pb={3}>
+                      <Box as="button" onClick={() => setVisibleNeeds(c => c + PROFILE_PAGE_SIZE)}
+                        px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
+                        style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
+                      >Show more ({needsTab.length - visibleNeeds})</Box>
+                    </Flex>
+                  )}
+                </>
               ))}
               </Box>
 
@@ -484,7 +519,7 @@ const UserProfile = () => {
                 </Flex>
               ) : (
                 <Box px={4}>
-                  {groupedOwnHistory.map((item) => (
+                  {groupedOwnHistory.slice(0, visibleHistory).map((item) => (
                     <HistoryRow
                       key={item.key}
                       item={item}
@@ -493,6 +528,14 @@ const UserProfile = () => {
                       onOpenDetails={() => setSelectedHistoryGroup(item)}
                     />
                   ))}
+                  {groupedOwnHistory.length > visibleHistory && (
+                    <Flex justify="center" py={3}>
+                      <Box as="button" onClick={() => setVisibleHistory(c => c + PROFILE_PAGE_SIZE)}
+                        px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
+                        style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
+                      >Show more ({groupedOwnHistory.length - visibleHistory})</Box>
+                    </Flex>
+                  )}
                 </Box>
               ))}
               </Box>
