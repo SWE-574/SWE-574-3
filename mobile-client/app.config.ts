@@ -52,7 +52,16 @@ if (!apiUrl) {
   );
 }
 
-const mapboxToken = rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || "";
+// Read process.env first so the token is embedded in the JS bundle for
+// every common build path:
+//   - EAS Build:  set with `eas secret:create --name EXPO_PUBLIC_MAPBOX_TOKEN ...`
+//   - local APK:  `EXPO_PUBLIC_MAPBOX_TOKEN=pk.xxx npm run build:android:local`
+//                 (or the gradle invocation directly, with the same prefix)
+//   - expo run:*: the npm scripts in package.json already export inline env.
+// Falling back to the repo-root .env keeps the existing `make env` flow
+// working untouched.
+const mapboxToken =
+  process.env.EXPO_PUBLIC_MAPBOX_TOKEN || rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || "";
 
 module.exports = {
   ...mobileConfig,
