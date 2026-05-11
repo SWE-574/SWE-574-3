@@ -53,12 +53,13 @@ function formatMonth(date: Date): string {
 }
 
 function formatSelectedDay(dayKey: string | null): string {
-  if (!dayKey) return "Select a day";
-  return new Intl.DateTimeFormat("en-GB", {
+  if (!dayKey) return "SELECT A DAY";
+  const formatted = new Intl.DateTimeFormat("en-GB", {
     weekday: "long",
     day: "numeric",
     month: "short",
   }).format(new Date(`${dayKey}T12:00:00`));
+  return formatted.toLocaleUpperCase("en-US");
 }
 
 
@@ -392,12 +393,17 @@ const agendaStyles = StyleSheet.create({
   card: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: colors.WHITE,
-    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.GRAY200,
+    borderColor: "rgba(45,92,78,0.12)",
     overflow: "hidden",
     marginBottom: 8,
+    shadowColor: colors.GREEN,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
   },
   accentStrip: {
     width: 4,
@@ -445,15 +451,15 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
     marginTop: 0,
     marginBottom: 0,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.GRAY200,
+    borderColor: "rgba(45,92,78,0.10)",
     padding: 12,
     shadowOpacity: 0,
     shadowRadius: 0,
     shadowOffset: { width: 0, height: 0 },
     elevation: 0,
-    backgroundColor: colors.WHITE,
+    backgroundColor: "rgba(255,255,255,0.86)",
   },
   header: {
     flexDirection: "row",
@@ -466,7 +472,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 1.2,
     color: colors.GRAY500,
-    textTransform: "uppercase",
   },
   monthHeader: {
     flexDirection: "row",
@@ -530,7 +535,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: colors.GRAY500,
     letterSpacing: 0.7,
-    textTransform: "uppercase",
     marginBottom: 8,
   },
   emptyState: {
