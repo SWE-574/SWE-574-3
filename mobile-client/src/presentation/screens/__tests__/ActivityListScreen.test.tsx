@@ -126,17 +126,34 @@ describe("ActivityListScreen", () => {
 
   it("renders only ongoing Offer services for the 'offers' category", async () => {
     routeParamsRef.current = { category: "offers" };
-    (listServices as jest.Mock).mockResolvedValue({
-      results: [
-        makeService({ id: "a", title: "Offer A", type: "Offer" }),
-        makeService({ id: "b", title: "Need B", type: "Need" }),
-        makeService({ id: "c", title: "Event C", type: "Event" }),
-      ],
-    });
+    // Server-side filtering: the screen forwards `type` to listServices, so
+    // mirror real backend behaviour by returning only matching rows.
+    const catalog = [
+      makeService({ id: "a", title: "Offer A", type: "Offer" }),
+      makeService({ id: "b", title: "Need B", type: "Need" }),
+      makeService({ id: "c", title: "Event C", type: "Event" }),
+    ];
+    (listServices as jest.Mock).mockImplementation(
+      (params?: { type?: string }) =>
+        Promise.resolve({
+          results: params?.type
+            ? catalog.filter((s) => s.type === params.type)
+            : catalog,
+        }),
+    );
     const { findByText, queryByText } = render(<ActivityListScreen />);
     expect(await findByText("Offer A")).toBeTruthy();
     expect(queryByText("Need B")).toBeNull();
     expect(queryByText("Event C")).toBeNull();
+    // Server-side pagination contract: type filter + small page size.
+    expect(listServices).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user: "user-1",
+        type: "Offer",
+        page: 1,
+        page_size: 10,
+      }),
+    );
   });
 
   it("renders grouped history entries for the 'history' category", async () => {

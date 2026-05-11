@@ -406,28 +406,30 @@ export default function ProfileEditSheet({
         skill_ids = resolved.map((t) => t.id);
       }
 
-      const fieldEntries: Array<[string, string]> = [];
-      for (const [key, value] of Object.entries(diff)) {
-        // banner_url only has meaning when it's a saved CDN URL — the
-        // multipart upload below handles the new image case.
-        if (key === "banner_url" && pendingBanner) continue;
-        if (Array.isArray(value)) {
-          // featured_badges is the only array field today; send as JSON.
-          fieldEntries.push([key, JSON.stringify(value)]);
-        } else if (value != null) {
-          fieldEntries.push([key, String(value)]);
-        }
-      }
-      if (skillsChanged) {
-        fieldEntries.push(["skill_ids", JSON.stringify(skill_ids ?? [])]);
-      }
-
       let updated;
       if (pendingAvatar || pendingBanner) {
         // Multipart PATCH so the new image(s) ride along with the other diff.
+        // DRF `ListField` expects array values to appear as REPEATED keys
+        // (skill_ids=a&skill_ids=b). A JSON-stringified blob would land in
+        // the backend as a single literal string and fail validation
+        // (#627 review: "badge has not been earned" / "tag not found").
         const fd = new FormData();
-        for (const [key, value] of fieldEntries) {
-          fd.append(key, value);
+        for (const [key, value] of Object.entries(diff)) {
+          // banner_url only has meaning when it's a saved CDN URL — the
+          // multipart upload below handles the new image case.
+          if (key === "banner_url" && pendingBanner) continue;
+          if (Array.isArray(value)) {
+            for (const item of value) {
+              fd.append(key, String(item));
+            }
+          } else if (value != null) {
+            fd.append(key, String(value));
+          }
+        }
+        if (skillsChanged) {
+          for (const id of skill_ids ?? []) {
+            fd.append("skill_ids", id);
+          }
         }
         if (pendingAvatar) {
           fd.append("avatar", {

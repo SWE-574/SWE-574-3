@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import type { Service } from "../../api/types";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
-import { formatGroupOfferDateTime } from "../../utils/eventUtils";
+import { formatGroupOfferDateTime, isNearlyFull } from "../../utils/eventUtils";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import SmartPill from "./SmartPill";
@@ -41,10 +41,12 @@ export default function ServiceCard({
   const isGroupListing =
     service.type === "Event" ||
     (service.type === "Offer" && service.max_participants > 1);
-  const participantCount = service.participant_count ?? 0;
-  const maxParticipants = service.max_participants ?? 0;
-  const capacityRatio = maxParticipants > 0 ? participantCount / maxParticipants : 0;
-  const isNearlyFull = isGroupListing && capacityRatio >= 0.75 && capacityRatio < 1.0;
+  const showNearlyFull =
+    isGroupListing &&
+    isNearlyFull(
+      service.max_participants ?? 0,
+      service.participant_count ?? 0,
+    );
   const initials = getInitials(service.user.first_name, service.user.last_name);
   const displayName =
     [service.user.first_name, service.user.last_name]
@@ -139,16 +141,12 @@ export default function ServiceCard({
                   : "Event"}
             </Text>
           </View>
-          {isNearlyFull && (
-            <View style={styles.nearlyFullBadge}>
-              <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
-            </View>
-          )}
-          {service.is_newcomer_owner && (
-            <View style={styles.newcomerBadge}>
-              <Text style={styles.newcomerBadgeText}>New</Text>
-            </View>
-          )}
+          {/* "Rising newcomer" / for_you / explore_pool flavours are
+              rendered through SmartPill, mirroring the web SmartPill
+              priority chain. The capacity-scarcity "Nearly Full" pill
+              lives at the bottom-left of the footer instead, opposite
+              the participant counter, so it does not crowd the name
+              row. */}
           <SmartPill service={service} />
         </View>
 
@@ -218,13 +216,26 @@ export default function ServiceCard({
         )}
 
         <View style={styles.footer}>
-          <Ionicons name="people-outline" size={16} color={colors.GRAY500} />
+          {/* Left slot: time-sensitive capacity cue. Renders opposite the
+              participant counter so the "Nearly Full" badge stays close to
+              the "3/4" figure it describes, instead of crowding the name
+              row up top. */}
+          <View style={styles.footerLeft}>
+            {showNearlyFull && (
+              <View style={styles.nearlyFullBadge}>
+                <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
+              </View>
+            )}
+          </View>
 
-          <Text style={styles.participantCount}>
-            {service.participant_count
-              ? service.participant_count + "/" + service.max_participants
-              : "0/" + service.max_participants}
-          </Text>
+          <View style={styles.footerRight}>
+            <Ionicons name="people-outline" size={16} color={colors.GRAY500} />
+            <Text style={styles.participantCount}>
+              {service.participant_count
+                ? service.participant_count + "/" + service.max_participants
+                : "0/" + service.max_participants}
+            </Text>
+          </View>
         </View>
       </View>
     </View>
@@ -311,18 +322,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     color: colors.RED,
-  },
-  newcomerBadge: {
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    backgroundColor: colors.PURPLE_LT,
-    marginLeft: 4,
-  },
-  newcomerBadgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: colors.PURPLE,
   },
   typeOfferBadgeText: {
     fontSize: 11,
@@ -427,7 +426,16 @@ const styles = StyleSheet.create({
   },
   footer: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  footerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 1,
+  },
+  footerRight: {
+    flexDirection: "row",
     alignItems: "center",
   },
   participantCount: {

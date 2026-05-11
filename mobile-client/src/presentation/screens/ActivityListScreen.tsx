@@ -32,7 +32,7 @@ import {
   getVerifiedReviews,
   type ProfileReview,
 } from "../../api/users";
-import type { Service, UserHistoryItem } from "../../api/types";
+import type { Service } from "../../api/types";
 import {
   groupHistoryItems,
   isOwnHistoryItem,
@@ -78,12 +78,14 @@ export default function ActivityListScreen() {
   const category: ActivityCategory = route.params?.category ?? "offers";
 
   const [services, setServices] = useState<Service[]>([]);
+  const [servicesHasMore, setServicesHasMore] = useState(false);
+  const [servicesPage, setServicesPage] = useState(1);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [reviews, setReviews] = useState<ProfileReview[]>([]);
   const [reviewsCount, setReviewsCount] = useState(0);
   const [reviewPage, setReviewPage] = useState(1);
   const [reviewsHasMore, setReviewsHasMore] = useState(false);
-  const [page, setPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,31 +95,58 @@ export default function ActivityListScreen() {
   const isServiceCategory =
     category === "offers" || category === "needs" || category === "events";
 
+  const serviceTypeForCategory = useCallback(
+    (cat: ActivityCategory): "Offer" | "Need" | "Event" | undefined => {
+      if (cat === "offers") return "Offer";
+      if (cat === "needs") return "Need";
+      if (cat === "events") return "Event";
+      return undefined;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!user?.id) {
+      // Clear any previously loaded private data so it doesn't linger
+      // visibly after the user logs out while this screen is mounted
+      // (#627 review).
+      setServices([]);
+      setServicesHasMore(false);
+      setServicesPage(1);
+      setHistoryEntries([]);
+      setHistoryPage(1);
+      setReviews([]);
+      setReviewsCount(0);
+      setReviewsHasMore(false);
+      setReviewPage(1);
+      setSelectedHistoryEntry(null);
       setLoading(false);
+      setError(null);
       return;
     }
 
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setPage(1);
+    setServicesPage(1);
+    setHistoryPage(1);
     setReviewPage(1);
 
+    const owner = String(user.id);
+
     if (isServiceCategory) {
-      listServices({ user: String(user.id), page_size: 100 })
+      // Real server-side pagination: ask the backend for one page at a time
+      // filtered by service type, so users with >PAGE_SIZE services are no
+      // longer truncated at an arbitrary client-side ceiling (#627 review).
+      const type = serviceTypeForCategory(category);
+      listServices({ user: owner, type, page: 1, page_size: PAGE_SIZE })
         .then((res) => {
           if (cancelled) return;
-          const ongoing = (res.results ?? [])
+          const rows = (res.results ?? [])
             .filter((s) => s.is_visible !== false)
             .filter(isOngoingProfileService);
-          const filtered = ongoing.filter((s) => {
-            if (category === "offers") return s.type === "Offer";
-            if (category === "needs") return s.type === "Need";
-            return s.type === "Event";
-          });
-          setServices(filtered);
+          setServices(rows);
+          setServicesHasMore(Boolean(res.next));
         })
         .catch(() => {
           if (!cancelled) setError("Could not load activity.");
@@ -126,7 +155,7 @@ export default function ActivityListScreen() {
           if (!cancelled) setLoading(false);
         });
     } else if (category === "history") {
-      getUserHistory(String(user.id))
+      getUserHistory(owner)
         .then((rows) => {
           if (!cancelled) {
             const grouped = groupHistoryItems(rows.filter(isOwnHistoryItem));
@@ -140,7 +169,7 @@ export default function ActivityListScreen() {
           if (!cancelled) setLoading(false);
         });
     } else if (category === "reviews") {
-      getVerifiedReviews(String(user.id), {
+      getVerifiedReviews(owner, {
         page: 1,
         page_size: REVIEW_PAGE_SIZE,
       })
@@ -161,10 +190,36 @@ export default function ActivityListScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, category, isServiceCategory]);
+  }, [user?.id, category, isServiceCategory, serviceTypeForCategory]);
 
   const handleLoadMore = useCallback(() => {
     if (loadingMore) return;
+
+    if (isServiceCategory) {
+      if (!servicesHasMore || !user?.id) return;
+      const nextPage = servicesPage + 1;
+      const type = serviceTypeForCategory(category);
+      setLoadingMore(true);
+      listServices({
+        user: String(user.id),
+        type,
+        page: nextPage,
+        page_size: PAGE_SIZE,
+      })
+        .then((res) => {
+          const rows = (res.results ?? [])
+            .filter((s) => s.is_visible !== false)
+            .filter(isOngoingProfileService);
+          setServices((prev) => [...prev, ...rows]);
+          setServicesHasMore(Boolean(res.next));
+          setServicesPage(nextPage);
+        })
+        .catch(() => {
+          /* no-op: keep current list, paging stalls until next attempt */
+        })
+        .finally(() => setLoadingMore(false));
+      return;
+    }
 
     if (category === "reviews") {
       if (!reviewsHasMore || !user?.id) return;
@@ -186,24 +241,25 @@ export default function ActivityListScreen() {
       return;
     }
 
-    // Local pagination for service/history lists already fetched in full.
-    const total = isServiceCategory ? services.length : historyEntries.length;
-    if (page * PAGE_SIZE >= total) return;
-    setPage((p) => p + 1);
+    // History endpoint returns the full list in one shot, so paginate
+    // locally to keep render cost bounded.
+    if (historyPage * PAGE_SIZE >= historyEntries.length) return;
+    setHistoryPage((p) => p + 1);
   }, [
     loadingMore,
-    category,
-    reviewsHasMore,
-    user?.id,
-    reviewPage,
     isServiceCategory,
-    services.length,
+    servicesHasMore,
+    servicesPage,
+    category,
+    serviceTypeForCategory,
+    user?.id,
+    reviewsHasMore,
+    reviewPage,
+    historyPage,
     historyEntries.length,
-    page,
   ]);
 
-  const visibleServices = services.slice(0, page * PAGE_SIZE);
-  const visibleHistory = historyEntries.slice(0, page * PAGE_SIZE);
+  const visibleHistory = historyEntries.slice(0, historyPage * PAGE_SIZE);
 
   if (loading) {
     return (
@@ -246,7 +302,7 @@ export default function ActivityListScreen() {
   if (isServiceCategory) {
     return (
       <FlatList
-        data={visibleServices}
+        data={services}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <ActivityServiceCard

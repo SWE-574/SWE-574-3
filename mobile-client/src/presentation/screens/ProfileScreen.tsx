@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Image,
   Modal,
@@ -63,6 +69,7 @@ import HistoryCard, {
 } from "../components/profile/HistoryCard";
 import ReviewCard from "../components/profile/ReviewCard";
 import ScreenTopBar from "../components/ScreenTopBar";
+import type { ActivityCategory } from "./ActivityListScreen";
 
 const ACTIVITY_PREVIEW_LIMIT = 5;
 
@@ -81,7 +88,10 @@ type EditableProfile = {
   banner_url: string;
 };
 
-type ProfileTabKey = "offers" | "needs" | "events" | "history" | "reviews";
+// Profile activity tabs and the `ActivityList` route param share the same
+// five categories; tie them together so the route navigate call below is
+// type-safe (#627 review).
+type ProfileTabKey = ActivityCategory;
 type ShowcaseTabKey = "portfolio" | "skills" | "achievements";
 
 export default function ProfileScreen() {
@@ -143,8 +153,16 @@ export default function ProfileScreen() {
     }, [profileUserId, refreshUser]),
   );
 
+  // Track which owner the most recent fetch was started for. When the user
+  // logs out (or switches accounts) mid-flight we drop the stale completion
+  // instead of clobbering the cleared-out state. Replaces the unused
+  // `cancelled` flag that previously did nothing (#627 review).
+  const lastFetchOwnerRef = useRef<string | null>(null);
+
   const fetchAll = useCallback(
     async (ownerId: string) => {
+      lastFetchOwnerRef.current = ownerId;
+
       const [servicesRes, summaryRes, savedRes, historyRes, reviewsRes] =
         await Promise.allSettled([
           listServices({ user: ownerId, page_size: 50 }),
@@ -153,6 +171,10 @@ export default function ProfileScreen() {
           getUserHistory(ownerId),
           getVerifiedReviews(ownerId, { page: 1, page_size: 20 }),
         ]);
+
+      // Stale completion — user changed (or logged out) while we were
+      // in flight; bail before overwriting the new state.
+      if (lastFetchOwnerRef.current !== ownerId) return;
 
       if (servicesRes.status === "fulfilled") {
         const rows = servicesRes.value.results ?? [];
@@ -184,6 +206,7 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     if (!user?.id) {
+      lastFetchOwnerRef.current = null;
       setActiveServices([]);
       setTimeSummary(EMPTY_SUMMARY);
       setTimeSummaryLoading(false);
@@ -193,16 +216,11 @@ export default function ProfileScreen() {
       setReviewsLoading(false);
       return;
     }
-    let cancelled = false;
     setTimeSummaryLoading(true);
     setReviewsLoading(true);
     fetchAll(String(user.id)).catch(() => {
       /* fetchAll swallows individual errors */
     });
-    return () => {
-      cancelled = true;
-      void cancelled;
-    };
   }, [user?.id, fetchAll]);
 
   const handleRefresh = useCallback(async () => {
@@ -342,7 +360,7 @@ export default function ProfileScreen() {
       maxItems={ACTIVITY_PREVIEW_LIMIT}
       onViewMore={
         services.length > ACTIVITY_PREVIEW_LIMIT
-          ? () => navigation.navigate("ActivityList", { category: activeTab as any })
+          ? () => navigation.navigate("ActivityList", { category: activeTab })
           : undefined
       }
       renderItem={(s) => (
@@ -540,9 +558,9 @@ export default function ProfileScreen() {
       {menuOpen ? (
         <View style={styles.overflowMenu}>
           <Pressable
-            testID="profile-overflow"
+            testID="profile-overflow-settings"
             accessibilityRole="button"
-            accessibilityLabel="Profile menu"
+            accessibilityLabel="Settings"
             onPress={() => {
               setMenuOpen(false);
               navigation.navigate("ProfileEdit", { initialTab: "identity" });
@@ -551,12 +569,14 @@ export default function ProfileScreen() {
               styles.overflowMenuItem,
               pressed && styles.pressed,
             ]}
-
           >
             <Ionicons name="settings-outline" size={17} color={colors.GRAY700} />
             <Text style={styles.overflowMenuText}>Settings</Text>
           </Pressable>
           <Pressable
+            testID="profile-overflow-commitments"
+            accessibilityRole="button"
+            accessibilityLabel="My commitments"
             onPress={() => {
               setMenuOpen(false);
               navigation.navigate("MyCommitments");
@@ -570,6 +590,9 @@ export default function ProfileScreen() {
             <Text style={styles.overflowMenuText}>My commitments</Text>
           </Pressable>
           <Pressable
+            testID="profile-overflow-logout"
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
             onPress={() => {
               setMenuOpen(false);
               void logout();

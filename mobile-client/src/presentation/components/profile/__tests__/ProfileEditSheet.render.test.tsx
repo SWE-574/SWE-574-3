@@ -55,13 +55,34 @@ jest.mock("@expo/vector-icons/Ionicons", () => {
 
 // SkillTagAutocomplete fans out into network calls of its own; replace with
 // a stub so it doesn't blow up rendering during these tests.
+// The stub also exposes the `onSelect` callback so tests can drive a
+// skill-add without rendering the real autocomplete UI.
+let skillOnSelect:
+  | ((tag: { id: string; name: string }) => void)
+  | undefined;
 jest.mock("../SkillTagAutocomplete", () => {
   const React = require("react");
   const { View } = require("react-native");
   return {
     __esModule: true,
-    default: () => React.createElement(View, null),
+    default: (props: { onSelect?: (tag: { id: string; name: string }) => void }) => {
+      skillOnSelect = props.onSelect;
+      return React.createElement(View, null);
+    },
   };
+});
+
+// BadgeShowcase has its own picker UI; in tests we just need to drive the
+// `onSelectionChange` callback so we can verify how the diff is sent.
+let badgeOnSelectionChange: ((ids: string[]) => void) | undefined;
+jest.mock("../BadgeShowcase", () => {
+  const React = require("react");
+  const { View } = require("react-native");
+  const Mock = (props: { onSelectionChange?: (ids: string[]) => void }) => {
+    badgeOnSelectionChange = props.onSelectionChange;
+    return React.createElement(View, null);
+  };
+  return { __esModule: true, default: Mock };
 });
 
 import ProfileEditSheet from "../ProfileEditSheet";
@@ -225,5 +246,158 @@ describe("ProfileEditSheet photos tab", () => {
     const body = patchMeMock.mock.calls[0][0];
     expect(body).toBeInstanceOf(FormData);
     expect(onSaveSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Regression: when a multipart save fires alongside an array-valued diff
+ * (`featured_badges`, `skill_ids`), the values must be appended as repeated
+ * keys rather than JSON-stringified blobs. DRF `ListField` only parses the
+ * former out of `multipart/form-data` — the latter is rejected as a single
+ * literal string and the backend fails validation with cryptic errors
+ * ("badge has not been earned", "tag not found", etc.).
+ *
+ * The bug only fires when a photo pick is combined with a Showcase or Skills
+ * change in the same edit session; JSON-only patches go through the JSON
+ * branch and serialize correctly.
+ */
+describe("ProfileEditSheet multipart save with array diff", () => {
+  beforeEach(() => {
+    searchMapboxLocationsMock.mockReset();
+    patchMeMock.mockReset();
+    badgeOnSelectionChange = undefined;
+    skillOnSelect = undefined;
+  });
+
+  const formDataEntries = (fd: FormData): Array<[string, unknown]> => {
+    // React Native FormData stores parts on `_parts`; node FormData exposes
+    // `entries()`. Try both so the test is portable across runners.
+    const parts = (fd as unknown as { _parts?: Array<[string, unknown]> })
+      ._parts;
+    if (Array.isArray(parts)) return parts;
+    return Array.from((fd as unknown as { entries(): IterableIterator<[string, unknown]> }).entries());
+  };
+
+  it("appends featured_badges as repeated keys, not a JSON-stringified array", async () => {
+    const onPickAvatar = jest.fn(async () => ({
+      uri: "file:///tmp/picked.jpg",
+      name: "picked.jpg",
+      mimeType: "image/jpeg",
+    }));
+    patchMeMock.mockResolvedValue({ ...baseUser });
+
+    const userWithBadge = {
+      ...baseUser,
+      featured_badges: ["badge-a"],
+    };
+
+    const { findByLabelText, getByText } = render(
+      <ProfileEditSheet
+        visible
+        presentation="screen"
+        initialTab="showcase"
+        user={userWithBadge}
+        onClose={() => undefined}
+        onSaveSuccess={() => undefined}
+        onPickAvatar={onPickAvatar}
+      />,
+    );
+
+    // BadgeShowcase mock captures the callback on mount; change selection
+    // so featured_badges enters the diff.
+    await waitFor(() => expect(badgeOnSelectionChange).toBeDefined());
+    await act(async () => {
+      badgeOnSelectionChange?.(["badge-b", "badge-c"]);
+    });
+
+    // Switch to the Photos tab and queue an avatar so the multipart branch
+    // is exercised.
+    await act(async () => {
+      fireEvent.press(getByText("Photos"));
+    });
+    await act(async () => {
+      fireEvent.press(await findByLabelText("Change avatar"));
+    });
+
+    await act(async () => {
+      fireEvent.press(await findByLabelText("Save changes"));
+    });
+
+    await waitFor(() => expect(patchMeMock).toHaveBeenCalledTimes(1));
+    const body = patchMeMock.mock.calls[0][0] as FormData;
+    expect(body).toBeInstanceOf(FormData);
+
+    const entries = formDataEntries(body);
+    const badgeEntries = entries.filter(([key]) => key === "featured_badges");
+
+    // Each id must be a separate entry; DRF rejects '["badge-b","badge-c"]'.
+    expect(badgeEntries.map(([, value]) => value)).toEqual([
+      "badge-b",
+      "badge-c",
+    ]);
+    badgeEntries.forEach(([, value]) => {
+      expect(typeof value).toBe("string");
+      expect(value).not.toMatch(/^\[/);
+    });
+  });
+
+  it("appends skill_ids as repeated keys, not a JSON-stringified array", async () => {
+    const onPickAvatar = jest.fn(async () => ({
+      uri: "file:///tmp/picked.jpg",
+      name: "picked.jpg",
+      mimeType: "image/jpeg",
+    }));
+    patchMeMock.mockResolvedValue({ ...baseUser });
+
+    const { findByLabelText, getByText } = render(
+      <ProfileEditSheet
+        visible
+        presentation="screen"
+        initialTab="skills"
+        user={baseUser}
+        onClose={() => undefined}
+        onSaveSuccess={() => undefined}
+        onPickAvatar={onPickAvatar}
+      />,
+    );
+
+    await waitFor(() => expect(skillOnSelect).toBeDefined());
+
+    // Two UUID-shaped ids → ensureTagInDb is skipped and ids flow straight
+    // into `skill_ids` on save.
+    const uuid = (suffix: string) =>
+      `11111111-2222-3333-4444-${suffix.padStart(12, "0")}`;
+    await act(async () => {
+      skillOnSelect?.({ id: uuid("aaa"), name: "React" });
+    });
+    await act(async () => {
+      skillOnSelect?.({ id: uuid("bbb"), name: "TypeScript" });
+    });
+
+    await act(async () => {
+      fireEvent.press(getByText("Photos"));
+    });
+    await act(async () => {
+      fireEvent.press(await findByLabelText("Change avatar"));
+    });
+
+    await act(async () => {
+      fireEvent.press(await findByLabelText("Save changes"));
+    });
+
+    await waitFor(() => expect(patchMeMock).toHaveBeenCalledTimes(1));
+    const body = patchMeMock.mock.calls[0][0] as FormData;
+    expect(body).toBeInstanceOf(FormData);
+
+    const entries = formDataEntries(body);
+    const skillEntries = entries.filter(([key]) => key === "skill_ids");
+    expect(skillEntries.map(([, value]) => value)).toEqual([
+      uuid("aaa"),
+      uuid("bbb"),
+    ]);
+    skillEntries.forEach(([, value]) => {
+      expect(typeof value).toBe("string");
+      expect(value).not.toMatch(/^\[/);
+    });
   });
 });
