@@ -10,8 +10,9 @@ import {
   getAchievementProgress,
   type AchievementProgressItem,
 } from "../../api/achievementProgress";
-import { patchMe } from "../../api/users";
-import ProfileEditSheet from "../components/profile/ProfileEditSheet";
+import ProfileEditSheet, {
+  type PickedImageAsset,
+} from "../components/profile/ProfileEditSheet";
 import type { BadgeProgress } from "../components/profile/BadgeShowcase";
 
 function mapAchievementToBadgeProgress(items: AchievementProgressItem[]): BadgeProgress[] {
@@ -77,14 +78,16 @@ export default function ProfileEditScreen() {
     loadBadgeProgress();
   }, [loadBadgeProgress]);
 
-  const uploadProfileImage = async (kind: "avatar" | "banner") => {
+  const pickProfileImage = async (
+    kind: "avatar" | "banner",
+  ): Promise<PickedImageAsset | null> => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
         "Permission required",
         "Please allow photo library access to update your profile photos.",
       );
-      return;
+      return null;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -94,25 +97,14 @@ export default function ProfileEditScreen() {
       quality: 0.9,
     });
 
-    if (result.canceled || !result.assets[0]) return;
+    if (result.canceled || !result.assets[0]) return null;
 
     const asset = result.assets[0];
-    const formData = new FormData();
-    formData.append(kind, {
+    return {
       uri: asset.uri,
       name: asset.fileName ?? `${kind}-${Date.now()}.jpg`,
-      type: asset.mimeType ?? "image/jpeg",
-    } as unknown as Blob);
-
-    try {
-      await patchMe(formData as Parameters<typeof patchMe>[0]);
-      await refreshUser({ force: true });
-    } catch (err) {
-      Alert.alert(
-        "Upload failed",
-        err instanceof Error ? err.message : "Could not update your profile photo.",
-      );
-    }
+      mimeType: asset.mimeType ?? "image/jpeg",
+    };
   };
 
   if (!user) {
@@ -138,8 +130,8 @@ export default function ProfileEditScreen() {
       badgeProgressLoading={badgeProgressLoading}
       badgeProgressError={badgeProgressError}
       onBadgeProgressRetry={loadBadgeProgress}
-      onAvatarChangePress={() => void uploadProfileImage("avatar")}
-      onCoverPhotoChangePress={() => void uploadProfileImage("banner")}
+      onPickAvatar={() => pickProfileImage("avatar")}
+      onPickCoverPhoto={() => pickProfileImage("banner")}
     />
   );
 }

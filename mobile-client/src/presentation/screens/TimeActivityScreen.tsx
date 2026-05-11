@@ -441,6 +441,13 @@ export default function TimeActivityScreen() {
   const [page, setPage] = useState(1);
   const [count, setCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  /**
+   * Until every screen-level loader (transactions, insights, agreements,
+   * event history) finishes once, we want the full-screen spinner instead of
+   * partial empty states. Toggles to false in the bootstrap effect after the
+   * first round completes.
+   */
+  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isAgreementsOpen, setIsAgreementsOpen] = useState(false);
@@ -761,14 +768,34 @@ export default function TimeActivityScreen() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (!hasInitiallyLoaded) return;
     void loadTransactions(1, "replace");
-  }, [direction, loadTransactions]);
+  }, [direction, hasInitiallyLoaded, loadTransactions]);
 
   useEffect(() => {
-    void loadAgreements();
-    void loadInsights();
-    void loadEventHistory();
-  }, [loadAgreements, loadEventHistory, loadInsights]);
+    if (hasInitiallyLoaded) return;
+    let cancelled = false;
+    setIsLoading(true);
+    void Promise.all([
+      loadTransactions(1, "replace"),
+      loadAgreements(),
+      loadInsights(),
+      loadEventHistory(),
+    ]).finally(() => {
+      if (!cancelled) {
+        setHasInitiallyLoaded(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasInitiallyLoaded,
+    loadAgreements,
+    loadEventHistory,
+    loadInsights,
+    loadTransactions,
+  ]);
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -902,6 +929,15 @@ export default function TimeActivityScreen() {
     }));
   }, []);
 
+  if (!hasInitiallyLoaded) {
+    return (
+      <View style={[styles.container, styles.initialLoadingWrap]}>
+        <ActivityIndicator size="large" color={colors.GREEN} />
+        <Text style={styles.initialLoadingText}>Loading your time activity…</Text>
+      </View>
+    );
+  }
+
   return (
     <>
     <FlatList
@@ -929,7 +965,7 @@ export default function TimeActivityScreen() {
               <View style={styles.heroIconBubble}>
                 <Ionicons name="time-outline" size={16} color={colors.WHITE} />
               </View>
-              <Text style={styles.heroLabel}>Time Available</Text>
+              <Text style={styles.heroLabel}>TIME AVAILABLE</Text>
             </View>
 
             <Text style={styles.heroValue}>{formatHours(summary.current_balance)}</Text>
@@ -951,7 +987,7 @@ export default function TimeActivityScreen() {
 
             <View style={styles.heroBottomRow}>
               <View style={styles.heroSideCard}>
-                <Text style={styles.heroSideLabel}>Top community partner</Text>
+                <Text style={styles.heroSideLabel}>TOP COMMUNITY PARTNER</Text>
                 {topPartner ? (
                   <Pressable
                     onPress={() => openPublicProfile(topPartner.id)}
@@ -992,25 +1028,25 @@ export default function TimeActivityScreen() {
               </View>
 
               <View style={styles.heroSideCard}>
-                <Text style={styles.heroSideLabel}>Activity pulse</Text>
+                <Text style={styles.heroSideLabel}>ACTIVITY PULSE</Text>
                 <View style={styles.heroPulseGrid}>
                   <View style={styles.heroPulseCell}>
                     <Text style={styles.heroPulseValue}>{insightStats.monthActivityCount}</Text>
-                    <Text style={styles.heroPulseLabel}>Month</Text>
+                    <Text style={styles.heroPulseLabel}>MONTH</Text>
                   </View>
                   <View style={styles.heroPulseCell}>
                     <Text style={styles.heroPulseValue}>{formatHours(insightStats.reservedNow)}</Text>
-                    <Text style={styles.heroPulseLabel}>Reserved</Text>
+                    <Text style={styles.heroPulseLabel}>RESERVED</Text>
                   </View>
                   <View style={styles.heroPulseCell}>
                     <Text style={styles.heroPulseValue}>{formatHours(insightStats.lastSevenDayHours)}</Text>
-                    <Text style={styles.heroPulseLabel}>Last 7d</Text>
+                    <Text style={styles.heroPulseLabel}>LAST 7D</Text>
                   </View>
                   <View style={styles.heroPulseCell}>
                     <Text style={styles.heroPulseValue}>
                       {activeAgreementDelta === 0 ? "0h" : formatAmount(activeAgreementDelta)}
                     </Text>
-                    <Text style={styles.heroPulseLabel}>Active</Text>
+                    <Text style={styles.heroPulseLabel}>ACTIVE</Text>
                   </View>
                 </View>
               </View>
@@ -1046,7 +1082,7 @@ export default function TimeActivityScreen() {
 
             <View style={styles.insightPanel}>
               <View style={styles.insightPanelHeader}>
-                <Text style={styles.insightPanelTitle}>28-day activity</Text>
+                <Text style={styles.insightPanelTitle}>28-DAY ACTIVITY</Text>
                 <Text style={styles.insightPanelHint}>
                   {formatHours(insightStats.lastSevenDayHours)} · last 7d
                 </Text>
@@ -1079,7 +1115,7 @@ export default function TimeActivityScreen() {
             </View>
 
             <View style={styles.insightPanel}>
-              <Text style={styles.insightPanelTitle}>Time flow</Text>
+              <Text style={styles.insightPanelTitle}>TIME FLOW</Text>
               <View style={styles.timeFlowRow}>
                 <View>
                   <View style={styles.timeFlowLabelRow}>
@@ -1119,7 +1155,7 @@ export default function TimeActivityScreen() {
             <View style={styles.insightPanel}>
               <View style={styles.insightPanelHeader}>
                 <View style={{ flexShrink: 1 }}>
-                  <Text style={styles.insightPanelTitle}>Activity mix</Text>
+                  <Text style={styles.insightPanelTitle}>ACTIVITY MIX</Text>
                   <Text style={styles.insightPanelHint}>Hours, role and recency per type</Text>
                 </View>
                 <Text style={styles.activityMixTotal}>
@@ -2066,7 +2102,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 1.6,
-    textTransform: "uppercase",
     color: "rgba(255,255,255,0.95)",
   },
   heroValue: {
@@ -2112,7 +2147,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
     color: "rgba(255,255,255,0.85)",
-    textTransform: "uppercase",
     letterSpacing: 1.2,
     marginBottom: 8,
   },
@@ -2167,7 +2201,6 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "800",
     color: "rgba(255,255,255,0.85)",
-    textTransform: "uppercase",
     letterSpacing: 0.6,
     marginTop: 3,
   },
@@ -2235,7 +2268,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     color: colors.GRAY900,
-    textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   insightPanelHint: {
@@ -2379,7 +2411,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     color: colors.GRAY900,
-    textTransform: "uppercase",
     letterSpacing: 0.8,
   },
   activityMixSharePill: {
@@ -2541,7 +2572,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "900",
     letterSpacing: 0.8,
-    textTransform: "uppercase",
   },
   agreementTypeMeta: {
     fontSize: 11,
@@ -2914,6 +2944,18 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
     alignItems: "center",
     justifyContent: "center",
+  },
+  initialLoadingWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    paddingHorizontal: 24,
+  },
+  initialLoadingText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.GRAY500,
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,

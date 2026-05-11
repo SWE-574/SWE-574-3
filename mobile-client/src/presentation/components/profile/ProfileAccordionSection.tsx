@@ -48,7 +48,13 @@ export default function ProfileAccordionSection({
   };
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, expanded && styles.wrapExpanded]}>
+      {/* Liquid glass layers */}
+      <View style={styles.glassBase} />
+      <View style={styles.glassTint} />
+      <View style={styles.glassHighlight} />
+      <View style={styles.glassBlob} />
+
       <Pressable
         onPress={handlePress}
         style={({ pressed }) => [
@@ -88,18 +94,46 @@ export default function ProfileAccordionSection({
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: colors.WHITE,
     marginHorizontal: 16,
-    marginTop: 14,
-    borderRadius: 16,
+    marginTop: 12,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: colors.GRAY200,
+    borderColor: "rgba(45,92,78,0.10)",
     overflow: "hidden",
-    shadowColor: colors.GRAY900,
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: colors.GREEN,
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 3,
+  },
+  wrapExpanded: {
+    shadowOpacity: 0.14,
+    borderColor: "rgba(45,92,78,0.16)",
+  },
+  glassBase: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(255,255,255,0.96)",
+  },
+  glassTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(240,253,244,0.35)",
+  },
+  glassHighlight: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.9)",
+  },
+  glassBlob: {
+    position: "absolute",
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "rgba(45,92,78,0.06)",
+    top: -42,
+    right: -32,
   },
   header: {
     flexDirection: "row",
@@ -107,20 +141,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 12,
-    backgroundColor: colors.WHITE,
+    backgroundColor: "transparent",
   },
   headerPressed: {
-    backgroundColor: colors.GRAY50,
+    backgroundColor: "rgba(45,92,78,0.04)",
   },
   iconCircle: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.GREEN_LT,
+    backgroundColor: "rgba(255,255,255,0.92)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: `${colors.GREEN}33`,
+    shadowColor: colors.GREEN,
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
   },
   headerText: {
     flex: 1,
@@ -172,7 +211,7 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     paddingTop: 2,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.GRAY200,
-    backgroundColor: colors.GRAY50,
+    borderTopColor: "rgba(45,92,78,0.10)",
+    backgroundColor: "rgba(255,255,255,0.55)",
   },
 });

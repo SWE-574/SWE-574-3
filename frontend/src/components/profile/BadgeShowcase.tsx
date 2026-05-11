@@ -2,12 +2,13 @@ import React, { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Box, Flex, Text } from '@chakra-ui/react'
 import { toast } from 'sonner'
-import { FiPlus, FiArrowUp, FiArrowDown, FiStar, FiCheckCircle, FiLock } from 'react-icons/fi'
+import { FiAward, FiPlus, FiArrowUp, FiArrowDown, FiCheckCircle, FiLock } from 'react-icons/fi'
 import type { BadgeDetail, BadgeProgress } from '@/types'
 import EyebrowLabel from '@/components/ui/EyebrowLabel'
+import { getAchievementMeta } from '@/utils/achievementMeta'
 import {
   GRAY100, GRAY200, GRAY400, GRAY500, GRAY600, GRAY800,
-  GREEN, GREEN_LT, GREEN_MD,
+  GREEN, GREEN_LT,
   WHITE,
 } from '@/theme/tokens'
 
@@ -114,8 +115,14 @@ function BadgeTooltip({
 
 // ── Compact badge circle ────────────────────────────────────────────────────────
 function CompactBadgeCircle({ badge, onHeroSurface }: { badge: BadgeDetail; onHeroSurface?: boolean }) {
-  const bg = onHeroSurface ? 'rgba(255,255,255,0.2)' : GREEN_LT
-  const iconColor = onHeroSurface ? 'rgba(255,255,255,0.9)' : GREEN
+  const meta = getAchievementMeta(badge.id)
+  const FallbackIcon = meta.icon
+  // When no remote icon_url is available we fall back to the per-badge icon
+  // registry, tinted with the badge's brand color so each badge keeps its own
+  // identity instead of every fallback looking like a generic star.
+  const fallbackBg = onHeroSurface ? `${meta.color}55` : `${meta.color}1A`
+  const bg = badge.icon_url ? (onHeroSurface ? 'rgba(255,255,255,0.2)' : GREEN_LT) : fallbackBg
+  const fallbackIconColor = onHeroSurface ? WHITE : meta.color
 
   return (
     <BadgeTooltip badge={badge} placement={onHeroSurface ? 'bottom' : 'top'}>
@@ -130,7 +137,7 @@ function CompactBadgeCircle({ badge, onHeroSurface }: { badge: BadgeDetail; onHe
         aria-label={badge.name}
         style={{
           background: bg,
-          border: onHeroSurface ? '1px solid rgba(255,255,255,0.35)' : `1px solid ${GREEN}30`,
+          border: onHeroSurface ? '1px solid rgba(255,255,255,0.35)' : `1px solid ${meta.color}30`,
           cursor: 'default',
           overflow: 'hidden',
         }}
@@ -142,7 +149,7 @@ function CompactBadgeCircle({ badge, onHeroSurface }: { badge: BadgeDetail; onHe
             style={{ width: '28px', height: '28px', objectFit: 'contain' }}
           />
         ) : (
-          <FiStar size={18} color={iconColor} />
+          <FallbackIcon size={18} color={fallbackIconColor} />
         )}
       </Flex>
     </BadgeTooltip>
@@ -303,17 +310,26 @@ function PickerShowcase({ allBadges, selected, onChange }: PickerProps) {
                 py={2}
                 borderTop={index > 0 ? `1px solid ${GREEN}20` : undefined}
               >
-                <Flex
-                  w="32px"
-                  h="32px"
-                  borderRadius="full"
-                  align="center"
-                  justify="center"
-                  flexShrink={0}
-                  style={{ background: GREEN_MD, border: `1px solid ${GREEN}30` }}
-                >
-                  <FiStar size={14} color={GREEN} />
-                </Flex>
+                {(() => {
+                  const meta = getAchievementMeta(badge.badge_type)
+                  const Icon = meta.icon
+                  return (
+                    <Flex
+                      w="32px"
+                      h="32px"
+                      borderRadius="full"
+                      align="center"
+                      justify="center"
+                      flexShrink={0}
+                      style={{
+                        background: `${meta.color}1A`,
+                        border: `1px solid ${meta.color}40`,
+                      }}
+                    >
+                      <Icon size={14} color={meta.color} />
+                    </Flex>
+                  )
+                })()}
                 <Text fontSize="12px" fontWeight={700} color={GREEN} flex={1}>
                   {badge.name}
                 </Text>
@@ -382,6 +398,8 @@ function PickerShowcase({ allBadges, selected, onChange }: PickerProps) {
           <Box display="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '8px' }}>
             {earnedBadges.map((badge) => {
               const isSelected = selected.includes(badge.badge_type)
+              const meta = getAchievementMeta(badge.badge_type)
+              const Icon = meta.icon
               return (
                 <Box
                   key={badge.badge_type}
@@ -389,9 +407,9 @@ function PickerShowcase({ allBadges, selected, onChange }: PickerProps) {
                   onClick={() => handleToggle(badge.badge_type)}
                   p={3}
                   borderRadius="12px"
-                  border={`1px solid ${GREEN}40`}
+                  border={`1px solid ${meta.color}40`}
                   style={{
-                    background: isSelected ? GREEN_MD : GREEN_LT,
+                    background: isSelected ? `${meta.color}25` : `${meta.color}10`,
                     cursor: 'pointer',
                     textAlign: 'left',
                     transition: 'background 0.12s',
@@ -407,11 +425,15 @@ function PickerShowcase({ allBadges, selected, onChange }: PickerProps) {
                       align="center"
                       justify="center"
                       flexShrink={0}
-                      style={{ background: isSelected ? GREEN_MD : GREEN_LT }}
+                      style={{ background: isSelected ? `${meta.color}30` : `${meta.color}1A` }}
                     >
-                      {isSelected ? <FiCheckCircle size={14} color={GREEN} /> : <FiStar size={14} color={GREEN} />}
+                      {isSelected ? (
+                        <FiCheckCircle size={14} color={meta.color} />
+                      ) : (
+                        <Icon size={14} color={meta.color} />
+                      )}
                     </Flex>
-                    <Text fontSize="12px" fontWeight={700} color={GREEN}>
+                    <Text fontSize="12px" fontWeight={700} color={meta.color}>
                       {badge.name}
                     </Text>
                   </Flex>
@@ -478,7 +500,7 @@ function PickerShowcase({ allBadges, selected, onChange }: PickerProps) {
 
       {allBadges.length === 0 && (
         <Flex direction="column" align="center" py={6} gap={2}>
-          <FiStar size={24} color={GRAY400} />
+          <FiAward size={24} color={GRAY400} />
           <Text fontSize="13px" color={GRAY500}>Complete exchanges to earn badges</Text>
         </Flex>
       )}

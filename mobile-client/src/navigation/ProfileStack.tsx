@@ -13,6 +13,10 @@ import TimeActivityScreen from "../presentation/screens/TimeActivityScreen";
 import ServiceDetailScreen from "../presentation/screens/ServiceDetailScreen";
 import CalendarScreen from "../presentation/screens/CalendarScreen";
 import ProfileEditScreen from "../presentation/screens/ProfileEditScreen";
+import ActivityListScreen, {
+  ACTIVITY_LIST_TITLES,
+  type ActivityCategory,
+} from "../presentation/screens/ActivityListScreen";
 import { colors } from "../constants/colors";
 
 export type ProfileStackParamList = {
@@ -33,6 +37,7 @@ export type ProfileStackParamList = {
     | undefined;
   ServiceDetail: { id: string };
   Calendar: undefined;
+  ActivityList: { category: ActivityCategory };
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -147,6 +152,19 @@ export default function ProfileStack() {
           gestureEnabled: true,
           animation: "slide_from_right",
         }}
+      />
+      <Stack.Screen
+        name="ActivityList"
+        component={ActivityListScreen}
+        options={({ route }) => ({
+          headerShown: true,
+          title: ACTIVITY_LIST_TITLES[route.params?.category ?? "offers"],
+          headerStyle: { backgroundColor: colors.WHITE },
+          headerTitleStyle: { fontSize: 17, fontWeight: "600" },
+          headerShadowVisible: true,
+          gestureEnabled: true,
+          animation: "slide_from_right",
+        })}
       />
     </Stack.Navigator>
   );

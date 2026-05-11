@@ -9,6 +9,7 @@ import {
 import Ionicons from "@expo/vector-icons/Ionicons";
 import type { Service } from "../../api/types";
 import { colors } from "../../constants/colors";
+import SmartPill from "./SmartPill";
 
 function getInitials(first: string, last: string): string {
   const f = (first || "").trim().charAt(0) || "";
@@ -61,6 +62,11 @@ export default function FeaturedServiceCard({
             {service.type.toUpperCase()}
           </Text>
         </View>
+        {/* Mirrors ServiceCard / web: the SmartPill priority chain renders
+            the strongest discovery signal (for_you, Rising newcomer,
+            "X spots left", explore_pool flavour) right next to the type
+            badge. */}
+        <SmartPill service={service} />
       </View>
 
       <View style={styles.body}>
@@ -151,8 +157,8 @@ const styles = StyleSheet.create({
   },
   headerStrip: {
     height: 44,
-    justifyContent: "center",
-    alignItems: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 10,
   },
   typeBadge: {

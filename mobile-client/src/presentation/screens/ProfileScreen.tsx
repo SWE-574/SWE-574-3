@@ -1,8 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Image,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,7 +32,12 @@ import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
-import { listServices } from "../../api/services";
+import { listSavedServices, listServices } from "../../api/services";
+import {
+  EMPTY_SUMMARY,
+  listTransactions,
+  type TransactionSummary,
+} from "../../api/transactions";
 import {
   getUserHistory,
   getVerifiedReviews,
@@ -37,7 +49,6 @@ import {
   isOwnHistoryItem,
 } from "../../utils/historyGrouping";
 import {
-  activityCardAccent,
   formatHours,
   formatShortDate,
   getInitials,
@@ -50,6 +61,17 @@ import { useNotificationStore } from "../../store/useNotificationStore";
 import ProfileHero from "../components/profile/ProfileHero";
 import ProfileAccordionSection from "../components/profile/ProfileAccordionSection";
 import UpcomingScheduleCard from "../components/profile/UpcomingScheduleCard";
+import TimeBalanceCard from "../components/profile/TimeBalanceCard";
+import HorizontalCardCarousel from "../components/profile/HorizontalCardCarousel";
+import ActivityServiceCard from "../components/profile/ActivityServiceCard";
+import HistoryCard, {
+  type HistoryEntry,
+} from "../components/profile/HistoryCard";
+import ReviewCard from "../components/profile/ReviewCard";
+import ScreenTopBar from "../components/ScreenTopBar";
+import type { ActivityCategory } from "./ActivityListScreen";
+
+const ACTIVITY_PREVIEW_LIMIT = 5;
 
 type ProfileHomeNavigation = CompositeNavigationProp<
   NativeStackNavigationProp<ProfileStackParamList, "ProfileHome">,
@@ -66,7 +88,11 @@ type EditableProfile = {
   banner_url: string;
 };
 
-type ProfileTabKey = "offers" | "needs" | "events" | "history" | "reviews";
+// Profile activity tabs and the `ActivityList` route param share the same
+// five categories; tie them together so the route navigate call below is
+// type-safe (#627 review).
+type ProfileTabKey = ActivityCategory;
+type ShowcaseTabKey = "portfolio" | "skills" | "achievements";
 
 export default function ProfileScreen() {
   const { user, logout, refreshUser } = useAuth();
@@ -80,17 +106,23 @@ export default function ProfileScreen() {
 
   const [activeTab, setActiveTab] = useState<ProfileTabKey>("offers");
   const [activeServices, setActiveServices] = useState<Service[]>([]);
+  const [savedServices, setSavedServices] = useState<Service[]>([]);
   const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
   const [reviews, setReviews] = useState<ProfileReview[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [timeSummary, setTimeSummary] =
+    useState<TransactionSummary>(EMPTY_SUMMARY);
+  const [timeSummaryLoading, setTimeSummaryLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [scheduleExpanded, setScheduleExpanded] = useState(false);
   const [activityExpanded, setActivityExpanded] = useState(false);
-  const [skillsExpanded, setSkillsExpanded] = useState(false);
-  const [achievementsExpanded, setAchievementsExpanded] = useState(false);
-  const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<
-    ReturnType<typeof groupHistoryItems>[number] | null
-  >(null);
+  const [savedExpanded, setSavedExpanded] = useState(false);
+  const [showcaseExpanded, setShowcaseExpanded] = useState(false);
+  const [showcaseTab, setShowcaseTab] =
+    useState<ShowcaseTabKey>("portfolio");
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedHistoryEntry, setSelectedHistoryEntry] =
+    useState<HistoryEntry | null>(null);
 
   const initialForm = useMemo<EditableProfile>(
     () => ({
@@ -121,78 +153,88 @@ export default function ProfileScreen() {
     }, [profileUserId, refreshUser]),
   );
 
-  useEffect(() => {
-    if (!user?.id) return;
-    const ownerId = String(user.id);
-    let cancelled = false;
+  // Track which owner the most recent fetch was started for. When the user
+  // logs out (or switches accounts) mid-flight we drop the stale completion
+  // instead of clobbering the cleared-out state. Replaces the unused
+  // `cancelled` flag that previously did nothing (#627 review).
+  const lastFetchOwnerRef = useRef<string | null>(null);
 
-    setActiveServices([]);
-    listServices({ user: ownerId, page_size: 50 })
-      .then((res) => {
-        if (cancelled) return;
-        const rows = res.results ?? [];
-        setActiveServices(rows.filter((service) => service.is_visible !== false));
-      })
-      .catch(() => {
-        if (!cancelled) setActiveServices([]);
-      });
+  const fetchAll = useCallback(
+    async (ownerId: string) => {
+      lastFetchOwnerRef.current = ownerId;
 
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
+      const [servicesRes, summaryRes, savedRes, historyRes, reviewsRes] =
+        await Promise.allSettled([
+          listServices({ user: ownerId, page_size: 50 }),
+          listTransactions({ page_size: 1 }),
+          listSavedServices(),
+          getUserHistory(ownerId),
+          getVerifiedReviews(ownerId, { page: 1, page_size: 20 }),
+        ]);
+
+      // Stale completion — user changed (or logged out) while we were
+      // in flight; bail before overwriting the new state.
+      if (lastFetchOwnerRef.current !== ownerId) return;
+
+      if (servicesRes.status === "fulfilled") {
+        const rows = servicesRes.value.results ?? [];
+        setActiveServices(rows.filter((s) => s.is_visible !== false));
+      } else {
+        setActiveServices([]);
+      }
+
+      setTimeSummary(
+        summaryRes.status === "fulfilled"
+          ? summaryRes.value.summary ?? EMPTY_SUMMARY
+          : EMPTY_SUMMARY,
+      );
+      setTimeSummaryLoading(false);
+
+      setSavedServices(
+        savedRes.status === "fulfilled" ? savedRes.value.results ?? [] : [],
+      );
+
+      setHistoryItems(historyRes.status === "fulfilled" ? historyRes.value : []);
+
+      setReviews(
+        reviewsRes.status === "fulfilled" ? reviewsRes.value.results ?? [] : [],
+      );
+      setReviewsLoading(false);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!user?.id) {
+      lastFetchOwnerRef.current = null;
+      setActiveServices([]);
+      setTimeSummary(EMPTY_SUMMARY);
+      setTimeSummaryLoading(false);
+      setSavedServices([]);
       setHistoryItems([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    getUserHistory(String(user.id))
-      .then((rows) => {
-        if (!cancelled) setHistoryItems(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setHistoryItems([]);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!user?.id) {
       setReviews([]);
+      setReviewsLoading(false);
       return;
     }
-
-    let cancelled = false;
+    setTimeSummaryLoading(true);
     setReviewsLoading(true);
+    fetchAll(String(user.id)).catch(() => {
+      /* fetchAll swallows individual errors */
+    });
+  }, [user?.id, fetchAll]);
 
-    getVerifiedReviews(String(user.id), { page: 1, page_size: 20 })
-      .then((response) => {
-        if (!cancelled) {
-          setReviews(response.results ?? []);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setReviews([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setReviewsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
+  const handleRefresh = useCallback(async () => {
+    if (!user?.id) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        refreshUser({ force: true }).catch(() => undefined),
+        fetchAll(String(user.id)),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user?.id, refreshUser, fetchAll]);
 
   if (!user) {
     return (
@@ -281,165 +323,161 @@ export default function ProfileScreen() {
     ]),
   ];
 
-  const renderServiceTab = (services: Service[], emptyText: string) => {
-    if (!services.length) {
-      return (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>Nothing here yet</Text>
-          <Text style={styles.emptyStateText}>{emptyText}</Text>
-        </View>
-      );
-    }
+  const showcaseTabs: Array<{ key: ShowcaseTabKey; label: string; count: number }> = [
+    {
+      key: "portfolio",
+      label: "Portfolio",
+      count: typedUser.portfolio_images?.length ?? 0,
+    },
+    {
+      key: "skills",
+      label: "Skills",
+      count: typedUser.skills?.length ?? 0,
+    },
+    {
+      key: "achievements",
+      label: "Achievements",
+      count: mergedAchievementIds.length,
+    },
+  ];
 
-    return services.map((service) => (
-      <Pressable
-        key={service.id}
-        accessibilityRole="button"
-        accessibilityLabel={`Open service ${service.title}`}
-        onPress={() => navigation.navigate("ServiceDetail", { id: service.id })}
-        style={({ pressed }) => [
-          styles.serviceCardPressable,
-          pressed && styles.pressed,
-        ]}
-      >
-        <ProfileActivityServiceCard service={service} />
-      </Pressable>
-    ));
-  };
+  const showcaseTotalBadge = showcaseTabs.reduce(
+    (sum, t) => sum + t.count,
+    0,
+  );
 
-  const renderHistoryTab = () => {
-    if (!ownHistoryEntries.length) {
-      return (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>No completed history yet</Text>
-          <Text style={styles.emptyStateText}>
-            Finished exchanges on your services will show up here.
-          </Text>
-        </View>
-      );
-    }
+  const renderEmpty = (title: string, body: string) => (
+    <View style={styles.emptyStateCard}>
+      <Text style={styles.emptyStateTitle}>{title}</Text>
+      <Text style={styles.emptyStateText}>{body}</Text>
+    </View>
+  );
 
-    return ownHistoryEntries.map((entry) => (
-      <Pressable
-        key={entry.key}
-        accessibilityRole="button"
-        accessibilityLabel={`Open history item ${entry.serviceTitle}`}
-        onPress={() => navigation.navigate("ServiceDetail", { id: entry.serviceId })}
-        style={({ pressed }) => [
-          styles.historyCard,
-          pressed && styles.pressed,
-        ]}
-      >
-        <View style={styles.historyCardHeader}>
-          <View style={styles.historyCardTitleWrap}>
-            <Text style={styles.historyCardTitle}>{entry.serviceTitle}</Text>
-            <Text style={styles.historyCardMeta}>
-              With {entry.partnerName} · {formatShortDate(entry.completedDate)}
-            </Text>
-          </View>
-          <View style={styles.historyHoursPill}>
-            <Text style={styles.historyHoursPillText}>{formatHours(entry.duration)}</Text>
-          </View>
-        </View>
-        <View style={styles.historyCardFooter}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`View participants for ${entry.serviceTitle}`}
-            onPress={(event) => {
-              event.stopPropagation();
-              setSelectedHistoryEntry(entry);
-            }}
-            style={({ pressed }) => [
-              styles.historyFooterAction,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.historyFooterText}>
-              {entry.useCount} participant{entry.useCount !== 1 ? "s" : ""}
-            </Text>
-            <Ionicons
-              name="chevron-forward"
-              size={15}
-              color={colors.GRAY400}
-            />
-          </Pressable>
-        </View>
-      </Pressable>
-    ));
-  };
+  const renderServiceTab = (services: Service[], emptyText: string) => (
+    <HorizontalCardCarousel
+      items={services}
+      keyExtractor={(s) => s.id}
+      maxItems={ACTIVITY_PREVIEW_LIMIT}
+      onViewMore={
+        services.length > ACTIVITY_PREVIEW_LIMIT
+          ? () => navigation.navigate("ActivityList", { category: activeTab })
+          : undefined
+      }
+      renderItem={(s) => (
+        <ActivityServiceCard
+          service={s}
+          onPress={() => navigation.navigate("ServiceDetail", { id: s.id })}
+        />
+      )}
+      emptyContent={renderEmpty("Nothing here yet", emptyText)}
+    />
+  );
+
+  const renderHistoryTab = () => (
+    <HorizontalCardCarousel
+      items={ownHistoryEntries}
+      keyExtractor={(entry) => entry.key}
+      maxItems={ACTIVITY_PREVIEW_LIMIT}
+      cardHeight={140}
+      onViewMore={
+        ownHistoryEntries.length > ACTIVITY_PREVIEW_LIMIT
+          ? () => navigation.navigate("ActivityList", { category: "history" })
+          : undefined
+      }
+      renderItem={(entry) => (
+        <HistoryCard
+          entry={entry}
+          onPress={() =>
+            navigation.navigate("ServiceDetail", { id: entry.serviceId })
+          }
+          onPressParticipants={() => setSelectedHistoryEntry(entry)}
+        />
+      )}
+      emptyContent={renderEmpty(
+        "No completed history yet",
+        "Finished exchanges on your services will show up here.",
+      )}
+    />
+  );
 
   const renderReviewsTab = () => {
     if (reviewsLoading) {
-      return (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateText}>Reviews are loading...</Text>
-        </View>
+      return renderEmpty("Reviews are loading...", "Hold on while we fetch your reviews.");
+    }
+    return (
+      <HorizontalCardCarousel
+        items={reviews}
+        keyExtractor={(review) => review.id}
+        maxItems={ACTIVITY_PREVIEW_LIMIT}
+        cardHeight={170}
+        onViewMore={
+          reviews.length > ACTIVITY_PREVIEW_LIMIT
+            ? () => navigation.navigate("ActivityList", { category: "reviews" })
+            : undefined
+        }
+        renderItem={(review) => <ReviewCard review={review} />}
+        emptyContent={renderEmpty(
+          "No reviews yet",
+          "Verified reviews from completed exchanges will appear here.",
+        )}
+      />
+    );
+  };
+
+  const renderPortfolioTab = () => {
+    const images = typedUser.portfolio_images ?? [];
+    if (!images.length) {
+      return renderEmpty(
+        "No portfolio yet",
+        "Showcase your work by adding images to your portfolio in profile settings.",
       );
     }
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.portfolioRow}
+      >
+        {images.map((imageUrl, index) => (
+          <Image
+            key={`${imageUrl}-${index}`}
+            source={{ uri: imageUrl }}
+            style={styles.portfolioImage}
+          />
+        ))}
+      </ScrollView>
+    );
+  };
 
-    if (!reviews.length) {
-      return (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>No reviews yet</Text>
-          <Text style={styles.emptyStateText}>
-            Verified reviews from completed exchanges will appear here.
-          </Text>
-        </View>
+  const renderSkillsTab = () => {
+    if (!typedUser.skills?.length) {
+      return renderEmpty(
+        "No skills yet",
+        "Add the topics you most often share so others can discover your offers.",
       );
     }
+    return <ProfileSkillsSection skills={typedUser.skills} embedded />;
+  };
 
-    return reviews.map((review) => (
-      <View key={review.id} style={styles.reviewCard}>
-        <View style={styles.reviewHeader}>
-          {review.user_avatar_url ? (
-            <Image
-              source={{ uri: review.user_avatar_url }}
-              style={styles.reviewAvatarImage}
-            />
-          ) : (
-            <View style={styles.reviewAvatar}>
-              <Text style={styles.reviewAvatarText}>
-                {(review.user_name || "?").slice(0, 1).toUpperCase()}
-              </Text>
-            </View>
-          )}
-          <View style={styles.reviewHeaderText}>
-            <Text style={styles.reviewAuthor}>{review.user_name || "Community member"}</Text>
-            <Text style={styles.reviewMeta}>
-              {review.service_title || "Exchange review"} · {formatShortDate(review.created_at)}
-            </Text>
-          </View>
-          {review.is_verified_review ? (
-            <View style={styles.reviewVerifiedPill}>
-              <Text style={styles.reviewVerifiedText}>Verified</Text>
-            </View>
-          ) : null}
-        </View>
-        <Text style={styles.reviewBody}>{review.body}</Text>
-        <View style={styles.reviewFooter}>
-          {review.handshake_hours ? (
-            <View style={styles.reviewInfoChip}>
-              <Ionicons name="time-outline" size={12} color={colors.GREEN} />
-              <Text style={styles.reviewInfoChipText}>
-                {formatHours(review.handshake_hours)}
-              </Text>
-            </View>
-          ) : null}
-          {review.reply_count ? (
-            <View style={styles.reviewInfoChip}>
-              <Ionicons
-                name="chatbubble-outline"
-                size={12}
-                color={colors.PURPLE}
-              />
-              <Text style={styles.reviewInfoChipText}>
-                {review.reply_count} replies
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      </View>
-    ));
+  const renderAchievementsTab = () => (
+    <AchievementsSection
+      completedIds={mergedAchievementIds}
+      onViewAll={
+        user?.id
+          ? () =>
+              navigation.navigate("AchievementsList", {
+                userId: user.id,
+              })
+          : undefined
+      }
+      embedded
+    />
+  );
+
+  const renderShowcaseTab = () => {
+    if (showcaseTab === "portfolio") return renderPortfolioTab();
+    if (showcaseTab === "skills") return renderSkillsTab();
+    return renderAchievementsTab();
   };
 
   const renderActiveTab = () => {
@@ -473,103 +511,114 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
+      <ScreenTopBar
+        title="Profile"
+        right={
+          <View style={styles.topBarActions}>
+            <Pressable
+              testID="profile-overflow"
+              onPress={() => setMenuOpen((prev) => !prev)}
+              style={({ pressed }) => [
+                styles.topBarIconButton,
+                pressed && styles.pressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Profile menu"
+            >
+              <Ionicons
+                name="ellipsis-horizontal"
+                size={20}
+                color={colors.GRAY700}
+              />
+            </Pressable>
+            <TouchableOpacity
+              testID="profile-notifications-bell"
+              onPress={() => (navigation as any).navigate("Notifications")}
+              style={styles.topBarIconButton}
+              accessibilityRole="button"
+              accessibilityLabel="Open notifications"
+            >
+              <Ionicons
+                name="notifications-outline"
+                size={20}
+                color={colors.GREEN}
+              />
+              <NotificationBadge count={unreadCount} />
+            </TouchableOpacity>
+          </View>
+        }
+      />
+
       {menuOpen ? (
         <Pressable
           style={styles.menuBackdrop}
           onPress={() => setMenuOpen(false)}
         />
       ) : null}
-      {user ? (
-        <>
+      {menuOpen ? (
+        <View style={styles.overflowMenu}>
           <Pressable
-            testID="profile-overflow"
+            testID="profile-overflow-settings"
             accessibilityRole="button"
-            accessibilityLabel="Profile menu"
-            onPress={() => setMenuOpen((prev) => !prev)}
-            style={styles.overflowButton}
+            accessibilityLabel="Settings"
+            onPress={() => {
+              setMenuOpen(false);
+              navigation.navigate("ProfileEdit", { initialTab: "identity" });
+            }}
+            style={({ pressed }) => [
+              styles.overflowMenuItem,
+              pressed && styles.pressed,
+            ]}
           >
-            <Ionicons
-              name="ellipsis-horizontal"
-              size={20}
-              color={colors.GRAY700}
-            />
+            <Ionicons name="settings-outline" size={17} color={colors.GRAY700} />
+            <Text style={styles.overflowMenuText}>Settings</Text>
           </Pressable>
-          {menuOpen ? (
-            <View style={styles.overflowMenu}>
-              <Pressable
-                onPress={() => {
-                  setMenuOpen(false);
-                  navigation.navigate("ProfileEdit", { initialTab: "identity" });
-                }}
-                style={({ pressed }) => [
-                  styles.overflowMenuItem,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Ionicons name="settings-outline" size={17} color={colors.GRAY700} />
-                <Text style={styles.overflowMenuText}>Settings</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setMenuOpen(false);
-                  navigation.navigate("TimeActivity");
-                }}
-                style={({ pressed }) => [
-                  styles.overflowMenuItem,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Ionicons name="time-outline" size={17} color={colors.GRAY700} />
-                <Text style={styles.overflowMenuText}>Time Activity</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setMenuOpen(false);
-                  navigation.navigate("MyCommitments");
-                }}
-                style={({ pressed }) => [
-                  styles.overflowMenuItem,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Ionicons name="checkmark-done-outline" size={17} color={colors.GRAY700} />
-                <Text style={styles.overflowMenuText}>My commitments</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setMenuOpen(false);
-                  void logout();
-                }}
-                style={({ pressed }) => [
-                  styles.overflowMenuItem,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Ionicons name="log-out-outline" size={17} color={colors.RED} />
-                <Text style={styles.overflowMenuDangerText}>Log out</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </>
+          <Pressable
+            testID="profile-overflow-commitments"
+            accessibilityRole="button"
+            accessibilityLabel="My commitments"
+            onPress={() => {
+              setMenuOpen(false);
+              navigation.navigate("MyCommitments");
+            }}
+            style={({ pressed }) => [
+              styles.overflowMenuItem,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="checkmark-done-outline" size={17} color={colors.GRAY700} />
+            <Text style={styles.overflowMenuText}>My commitments</Text>
+          </Pressable>
+          <Pressable
+            testID="profile-overflow-logout"
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+            onPress={() => {
+              setMenuOpen(false);
+              void logout();
+            }}
+            style={({ pressed }) => [
+              styles.overflowMenuItem,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="log-out-outline" size={17} color={colors.RED} />
+            <Text style={styles.overflowMenuDangerText}>Log out</Text>
+          </Pressable>
+        </View>
       ) : null}
-      <TouchableOpacity
-        testID="profile-notifications-bell"
-        accessibilityRole="button"
-        accessibilityLabel="Open notifications"
-        onPress={() => (navigation as any).navigate("Notifications")}
-        style={styles.notificationButton}
-      >
-        <Ionicons
-          name="notifications-outline"
-          size={22}
-          color={colors.GREEN}
-        />
-        <NotificationBadge count={unreadCount} />
-      </TouchableOpacity>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.GREEN}
+            colors={[colors.GREEN]}
+          />
+        }
       >
         {/* New hero component */}
         <ProfileHero
@@ -611,6 +660,14 @@ export default function ProfileScreen() {
               kind: "following",
             });
           }}
+        />
+
+        <TimeBalanceCard
+          balance={Number(timeSummary.current_balance) || 0}
+          earned={Number(timeSummary.total_earned) || 0}
+          spent={Math.abs(Number(timeSummary.total_spent) || 0)}
+          loading={timeSummaryLoading}
+          onViewActivity={() => navigation.navigate("TimeActivity")}
         />
 
         <ProfileAccordionSection
@@ -675,58 +732,93 @@ export default function ProfileScreen() {
               );
             })}
           </ScrollView>
-          <View style={styles.tabPanel}>{renderActiveTab()}</View>
+          <View key={activeTab} style={styles.tabPanel}>
+            {renderActiveTab()}
+          </View>
         </ProfileAccordionSection>
 
-        {!!typedUser.skills?.length && (
-          <ProfileAccordionSection
-            title="Skills"
-            subtitle="Topics you often share"
-            icon="sparkles-outline"
-            badge={typedUser.skills.length}
-            expanded={skillsExpanded}
-            onToggle={() => setSkillsExpanded((v) => !v)}
-          >
-            <ProfileSkillsSection skills={typedUser.skills} embedded />
-          </ProfileAccordionSection>
-        )}
-
         <ProfileAccordionSection
-          title="Achievements"
-          subtitle="Milestones unlocked in the community"
-          icon="ribbon-outline"
-          badge={mergedAchievementIds.length}
-          expanded={achievementsExpanded}
-          onToggle={() => setAchievementsExpanded((v) => !v)}
+          title="Saved"
+          subtitle="Services you bookmarked"
+          icon="bookmark-outline"
+          badge={savedServices.length}
+          expanded={savedExpanded}
+          onToggle={() => setSavedExpanded((v) => !v)}
         >
-          <AchievementsSection
-            completedIds={mergedAchievementIds}
-            onViewAll={
-              user?.id
-                ? () =>
-                    navigation.navigate("AchievementsList", {
-                      userId: user.id,
-                    })
-                : undefined
-            }
-            embedded
+          <HorizontalCardCarousel
+            items={savedServices}
+            keyExtractor={(s) => s.id}
+            renderItem={(s) => (
+              <ActivityServiceCard
+                service={s}
+                onPress={() =>
+                  navigation.navigate("ServiceDetail", { id: s.id })
+                }
+              />
+            )}
+            emptyContent={renderEmpty(
+              "No saved services yet",
+              "Tap the bookmark on any service to keep it here for quick access.",
+            )}
           />
         </ProfileAccordionSection>
 
-        {!!typedUser.portfolio_images?.length && (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Portfolio</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {typedUser.portfolio_images.map((imageUrl, index) => (
-                <Image
-                  key={`${imageUrl}-${index}`}
-                  source={{ uri: imageUrl }}
-                  style={styles.portfolioImage}
-                />
-              ))}
-            </ScrollView>
+        <ProfileAccordionSection
+          title="Showcase"
+          subtitle="Portfolio, skills, and achievements"
+          icon="sparkles-outline"
+          badge={showcaseTotalBadge}
+          expanded={showcaseExpanded}
+          onToggle={() => setShowcaseExpanded((v) => !v)}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.profileTabsRow}
+          >
+            {showcaseTabs.map((tab) => {
+              const isActive = showcaseTab === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  onPress={() => setShowcaseTab(tab.key)}
+                  style={({ pressed }) => [
+                    styles.profileTab,
+                    isActive && styles.profileTabActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.profileTabText,
+                      isActive && styles.profileTabTextActive,
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                  <View
+                    style={[
+                      styles.profileTabCount,
+                      isActive && styles.profileTabCountActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.profileTabCountText,
+                        isActive && styles.profileTabCountTextActive,
+                      ]}
+                    >
+                      {tab.count}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <View key={showcaseTab} style={styles.tabPanel}>
+            {renderShowcaseTab()}
           </View>
-        )}
+        </ProfileAccordionSection>
 
       </ScrollView>
       <Modal
@@ -782,145 +874,6 @@ export default function ProfileScreen() {
   );
 }
 
-function ProfileActivityServiceCard({ service }: { service: Service }) {
-  const accent = activityCardAccent(service.type);
-  const participantLabel =
-    service.type === "Event"
-      ? `${service.participant_count ?? 0}/${service.max_participants} joined`
-      : service.max_participants > 1
-        ? `${service.participant_count ?? 0}/${service.max_participants} spots`
-        : "1:1 exchange";
-
-  return (
-    <View style={profileActivityCardStyles.card}>
-      <View style={profileActivityCardStyles.topRow}>
-        <View
-          style={[
-            profileActivityCardStyles.typeBadge,
-            { backgroundColor: accent.bg },
-          ]}
-        >
-          <Ionicons name={accent.icon} size={12} color={accent.color} />
-          <Text
-            style={[
-              profileActivityCardStyles.typeBadgeText,
-              { color: accent.color },
-            ]}
-          >
-            {accent.label}
-          </Text>
-        </View>
-        <View style={profileActivityCardStyles.metaRow}>
-          <View style={profileActivityCardStyles.metaBadge}>
-            <Ionicons name="time-outline" size={12} color={colors.GRAY500} />
-            <Text style={profileActivityCardStyles.metaBadgeText}>
-              {formatHours(service.duration)}
-            </Text>
-          </View>
-          <View style={profileActivityCardStyles.metaBadge}>
-            <Ionicons name="people-outline" size={12} color={colors.GRAY500} />
-            <Text style={profileActivityCardStyles.metaBadgeText}>
-              {participantLabel}
-            </Text>
-          </View>
-        </View>
-      </View>
-      <Text style={profileActivityCardStyles.title} numberOfLines={2}>
-        {service.title}
-      </Text>
-      <Text style={profileActivityCardStyles.description} numberOfLines={2}>
-        {service.description || "No description yet."}
-      </Text>
-      <View style={profileActivityCardStyles.bottomRow}>
-        <View style={profileActivityCardStyles.metaBadge}>
-          <Ionicons name="location-outline" size={12} color={colors.GRAY500} />
-          <Text style={profileActivityCardStyles.metaBadgeText}>
-            {service.location_area || service.location_type || "Flexible"}
-          </Text>
-        </View>
-        {service.schedule_details ? (
-          <View style={profileActivityCardStyles.metaBadge}>
-            <Ionicons name="calendar-outline" size={12} color={colors.GRAY500} />
-            <Text
-              style={profileActivityCardStyles.metaBadgeText}
-              numberOfLines={1}
-            >
-              {service.schedule_details}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-const profileActivityCardStyles = StyleSheet.create({
-  card: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.GRAY200,
-    backgroundColor: colors.WHITE,
-    padding: 12,
-  },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 10,
-    marginBottom: 10,
-  },
-  typeBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  typeBadgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  metaRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    justifyContent: "flex-end",
-    flex: 1,
-  },
-  metaBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: colors.GRAY100,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  metaBadgeText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.GRAY600,
-    flexShrink: 1,
-  },
-  title: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: colors.GRAY800,
-    marginBottom: 6,
-  },
-  description: {
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.GRAY600,
-    marginBottom: 10,
-  },
-  bottomRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-  },
-});
 
 const getStyles = (top: number, bottom: number) =>
   StyleSheet.create({
@@ -929,8 +882,28 @@ const getStyles = (top: number, bottom: number) =>
       backgroundColor: colors.GRAY50,
     },
     scrollContent: {
-      paddingTop: top + 16,
+      paddingTop: 4,
       paddingBottom: Math.max(32, bottom + 16),
+    },
+    topBarActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    topBarIconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.WHITE,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      alignItems: "center",
+      justifyContent: "center",
+      shadowColor: colors.GRAY900,
+      shadowOpacity: 0.06,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 2,
     },
     authContainer: {
       flex: 1,
@@ -1085,51 +1058,13 @@ const getStyles = (top: number, bottom: number) =>
       fontWeight: "600",
       color: colors.GREEN,
     },
-    notificationButton: {
-      position: "absolute",
-      top: top + 12,
-      right: 16,
-      zIndex: 10,
-      backgroundColor: "rgba(255,255,255,0.92)",
-      borderRadius: 20,
-      width: 40,
-      height: 40,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 1,
-      borderColor: colors.GRAY200,
-      shadowColor: colors.GRAY900,
-      shadowOpacity: 0.08,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 3,
-    },
-    overflowButton: {
-      position: "absolute",
-      top: top + 12,
-      right: 64,
-      zIndex: 10,
-      backgroundColor: "rgba(255,255,255,0.92)",
-      borderRadius: 20,
-      width: 40,
-      height: 40,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 1,
-      borderColor: colors.GRAY200,
-      shadowColor: colors.GRAY900,
-      shadowOpacity: 0.08,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 3,
-    },
     menuBackdrop: {
       ...StyleSheet.absoluteFillObject,
       zIndex: 8,
     },
     overflowMenu: {
       position: "absolute",
-      top: top + 58,
+      top: top + 56,
       right: 16,
       zIndex: 12,
       backgroundColor: colors.WHITE,
@@ -1683,11 +1618,15 @@ const getStyles = (top: number, bottom: number) =>
       fontSize: 13,
       fontWeight: "600",
     },
+    portfolioRow: {
+      paddingVertical: 4,
+      paddingRight: 12,
+      gap: 10,
+    },
     portfolioImage: {
-      width: 170,
-      height: 100,
-      borderRadius: 12,
-      marginRight: 12,
+      width: 180,
+      height: 120,
+      borderRadius: 14,
       backgroundColor: colors.GRAY200,
     },
     primaryButton: {

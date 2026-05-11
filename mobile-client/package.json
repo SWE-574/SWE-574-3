@@ -97,7 +97,9 @@
         ],
         "testMatch": [
           "**/components/__tests__/**/*.test.tsx",
-          "**/__tests__/components/**/*.test.tsx"
+          "**/components/**/__tests__/**/*.test.tsx",
+          "**/__tests__/components/**/*.test.tsx",
+          "**/screens/__tests__/**/*.test.tsx"
         ],
         "transformIgnorePatterns": [
           "node_modules/(?!((jest-)?react-native|@react-native|@react-navigation|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-clone-referenced-element|@react-native-community|sentry-expo|native-base|react-native-svg))"

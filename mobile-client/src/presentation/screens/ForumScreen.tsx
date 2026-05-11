@@ -15,7 +15,6 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -28,6 +27,7 @@ import { getMyActivity, listCategories, listTopics } from "../../api/forum";
 import { colors } from "../../constants/colors";
 import { useAuth } from "../../context/AuthContext";
 import TopicCard from "../components/TopicCard";
+import ScreenTopBar from "../components/ScreenTopBar";
 import type { ForumStackParamList } from "../../navigation/ForumStack";
 
 type ForumNavProp = NativeStackNavigationProp<ForumStackParamList, "ForumFeed">;
@@ -676,24 +676,20 @@ export default function ForumScreen() {
 
   if (loading && topics.length === 0 && !error) {
     return (
-      <SafeAreaView edges={["top"]} style={styles.container}>
-        <View style={styles.topBar}>
-          <Text style={styles.topBarTitle}>Community Forum</Text>
-        </View>
+      <View style={styles.container}>
+        <ScreenTopBar title="Community Forum" />
         <ActivityIndicator
           size="large"
           color={colors.GREEN}
           style={styles.fullScreenSpinner}
         />
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.container}>
-      <View style={styles.topBar}>
-        <Text style={styles.topBarTitle}>Community Forum</Text>
-      </View>
+    <View style={styles.container}>
+      <ScreenTopBar title="Community Forum" />
 
       <FlatList
         ref={listRef}
@@ -742,7 +738,7 @@ export default function ForumScreen() {
           <Ionicons name="add" size={28} color={colors.WHITE} />
         </Pressable>
       ) : null}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -750,19 +746,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.GRAY50,
-  },
-  topBar: {
-    backgroundColor: colors.WHITE,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.GRAY200,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
-  },
-  topBarTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: colors.GRAY900,
   },
   heroCard: {
     marginHorizontal: 16,

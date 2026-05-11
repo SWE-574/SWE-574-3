@@ -121,13 +121,10 @@ export default function NotificationPreferencesScreen() {
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
     >
-      <View style={styles.header}>
-        <Text style={styles.title}>Notifications</Text>
-        <Text style={styles.subtitle}>
-          Choose which alerts you want delivered to your device. You can still
-          read everything in the in-app notifications screen.
-        </Text>
-      </View>
+      <Text style={styles.subtitle}>
+        Choose which alerts you want delivered to your device. You can still
+        read everything in the in-app notifications screen.
+      </Text>
 
       <Row
         row={MASTER_ROW}
@@ -185,19 +182,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 12,
   },
-  header: {
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 6,
-  },
   subtitle: {
     fontSize: 13,
     color: '#6B7280',
     lineHeight: 19,
+    marginBottom: 16,
   },
   row: {
     flexDirection: 'row',

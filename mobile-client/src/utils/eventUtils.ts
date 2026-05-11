@@ -29,6 +29,18 @@ export function isEventFull(maxParticipants: number, participantCount: number): 
   return participantCount >= maxParticipants;
 }
 
+/**
+ * Returns true when 75-99% of capacity is filled. Mirrors web `isNearlyFull`
+ * so the "X spots left" SmartPill on mobile fires for the same listings as
+ * the desktop client. Single-seat services never qualify because they jump
+ * straight from 0% to 100% without crossing the band.
+ */
+export function isNearlyFull(maxParticipants: number, participantCount: number): boolean {
+  if (maxParticipants <= 0) return false;
+  const pct = participantCount / maxParticipants;
+  return pct >= 0.75 && pct < 1.0;
+}
+
 /** Returns true if the user is currently under an event-participation ban. */
 export function isEventBanned(bannedUntil: string | null | undefined): boolean {
   if (!bannedUntil) return false;

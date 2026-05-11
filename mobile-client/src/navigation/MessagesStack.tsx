@@ -63,7 +63,7 @@ export default function MessagesStack() {
       <Stack.Screen
         name="MessagesList"
         component={MessagesScreen}
-        options={{ title: "Messages" }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Chat"

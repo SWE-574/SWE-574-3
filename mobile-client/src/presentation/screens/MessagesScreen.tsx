@@ -20,6 +20,7 @@ import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import ScreenTopBar from "../components/ScreenTopBar";
 import { useScreenCache } from "../../hooks/useScreenCache";
 import { ApiNetworkError } from "../../api/client";
 import { shouldSuppressChatLoadError } from "../../utils/messagesOffline";
@@ -915,6 +916,7 @@ export default function MessagesScreen() {
 
   return (
     <View style={styles.safeArea}>
+      <ScreenTopBar title="Messages" />
       <View style={styles.screen}>
         {!user ? (
           <View style={styles.centerState}>

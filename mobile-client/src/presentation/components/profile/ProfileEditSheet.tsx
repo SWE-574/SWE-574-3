@@ -77,10 +77,15 @@ export interface ProfileEditSheetProps {
   /** Set when badge progress failed to load (Showcase tab shows retry) */
   badgeProgressError?: string | null;
   onBadgeProgressRetry?: () => void;
-  /** Called when the user taps "Change avatar" */
-  onAvatarChangePress?: () => void;
-  /** Called when the user taps "Change cover photo" */
-  onCoverPhotoChangePress?: () => void;
+  /**
+   * Called when the user taps "Change avatar". The handler should pick an
+   * image and return its local asset (URI + filename + mime) so the sheet
+   * can preview it and queue the upload alongside the rest of the form.
+   * Return `null` (or resolve with no value) when the user cancels.
+   */
+  onPickAvatar?: () => Promise<PickedImageAsset | null | void>;
+  /** Called when the user taps "Change cover photo". Same contract as `onPickAvatar`. */
+  onPickCoverPhoto?: () => Promise<PickedImageAsset | null | void>;
   /** Called when the user taps "Change email" */
   onChangeEmailPress?: () => void;
   /** Called when the user taps "Change password" */
@@ -99,6 +104,12 @@ type EditableFields = {
   banner_url: string;
   /** Profile skills — persisted via PATCH `skill_ids` (web parity) */
   skills: SkillTag[];
+};
+
+export type PickedImageAsset = {
+  uri: string;
+  name?: string | null;
+  mimeType?: string | null;
 };
 
 type EditTabKey = "identity" | "photos" | "skills" | "showcase" | "privacy";
@@ -243,8 +254,8 @@ export default function ProfileEditSheet({
   badgeProgressLoading = false,
   badgeProgressError = null,
   onBadgeProgressRetry,
-  onAvatarChangePress,
-  onCoverPhotoChangePress,
+  onPickAvatar,
+  onPickCoverPhoto,
   onChangeEmailPress,
   onChangePasswordPress,
   initialTab = "identity",
@@ -267,11 +278,21 @@ export default function ProfileEditSheet({
   });
 
   const [form, setForm] = useState<EditableFields>(buildInitial);
+  const [pendingAvatar, setPendingAvatar] = useState<PickedImageAsset | null>(
+    null,
+  );
+  const [pendingBanner, setPendingBanner] = useState<PickedImageAsset | null>(
+    null,
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<EditTabKey>(initialTab);
   const [locationSuggestions, setLocationSuggestions] = useState<LocationValue[]>([]);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [locationFocused, setLocationFocused] = useState(false);
+  /** When the user picks a suggestion we suppress autocomplete for the
+   * resulting value so the dropdown does not re-open with the same text. */
+  const suppressLocationSuggestionsRef = useRef(false);
   // UI-only public visibility toggle (no backend support yet)
   const [isPublic, setIsPublic] = useState(true);
 
@@ -283,9 +304,13 @@ export default function ProfileEditSheet({
       const initial = buildInitial();
       setForm(initial);
       originalRef.current = initial;
+      setPendingAvatar(null);
+      setPendingBanner(null);
       setSaveError(null);
       setActiveTab(initialTab);
       setLocationSuggestions([]);
+      setLocationFocused(false);
+      suppressLocationSuggestionsRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTab, visible]);
@@ -294,7 +319,14 @@ export default function ProfileEditSheet({
     let active = true;
     const query = form.location.trim();
 
-    if (!visible || activeTab !== "identity" || !getMapboxToken() || query.length < 2) {
+    if (
+      !visible ||
+      activeTab !== "identity" ||
+      !getMapboxToken() ||
+      !locationFocused ||
+      suppressLocationSuggestionsRef.current ||
+      query.length < 2
+    ) {
       setLocationSuggestions([]);
       setLocationLoading(false);
       return;
@@ -318,11 +350,14 @@ export default function ProfileEditSheet({
       active = false;
       clearTimeout(timer);
     };
-  }, [activeTab, form.location, visible]);
+  }, [activeTab, form.location, locationFocused, visible]);
 
   const dirty = useMemo(
-    () => isDirty(originalRef.current, form),
-    [form],
+    () =>
+      isDirty(originalRef.current, form) ||
+      pendingAvatar !== null ||
+      pendingBanner !== null,
+    [form, pendingAvatar, pendingBanner],
   );
 
   const handleClose = () => {
@@ -371,14 +406,58 @@ export default function ProfileEditSheet({
         skill_ids = resolved.map((t) => t.id);
       }
 
-      const body: Partial<UserProfileRequest> = {
-        ...(diff as Partial<UserProfileRequest>),
-      };
-      if (skillsChanged) {
-        body.skill_ids = skill_ids ?? [];
+      let updated;
+      if (pendingAvatar || pendingBanner) {
+        // Multipart PATCH so the new image(s) ride along with the other diff.
+        // DRF `ListField` expects array values to appear as REPEATED keys
+        // (skill_ids=a&skill_ids=b). A JSON-stringified blob would land in
+        // the backend as a single literal string and fail validation
+        // (#627 review: "badge has not been earned" / "tag not found").
+        const fd = new FormData();
+        for (const [key, value] of Object.entries(diff)) {
+          // banner_url only has meaning when it's a saved CDN URL — the
+          // multipart upload below handles the new image case.
+          if (key === "banner_url" && pendingBanner) continue;
+          if (Array.isArray(value)) {
+            for (const item of value) {
+              fd.append(key, String(item));
+            }
+          } else if (value != null) {
+            fd.append(key, String(value));
+          }
+        }
+        if (skillsChanged) {
+          for (const id of skill_ids ?? []) {
+            fd.append("skill_ids", id);
+          }
+        }
+        if (pendingAvatar) {
+          fd.append("avatar", {
+            uri: pendingAvatar.uri,
+            name: pendingAvatar.name ?? `avatar-${Date.now()}.jpg`,
+            type: pendingAvatar.mimeType ?? "image/jpeg",
+          } as unknown as Blob);
+        }
+        if (pendingBanner) {
+          fd.append("banner", {
+            uri: pendingBanner.uri,
+            name: pendingBanner.name ?? `banner-${Date.now()}.jpg`,
+            type: pendingBanner.mimeType ?? "image/jpeg",
+          } as unknown as Blob);
+        }
+        updated = await patchMe(fd);
+      } else {
+        const body: Partial<UserProfileRequest> = {
+          ...(diff as Partial<UserProfileRequest>),
+        };
+        if (skillsChanged) {
+          body.skill_ids = skill_ids ?? [];
+        }
+        updated = await patchMe(body);
       }
 
-      const updated = await patchMe(body);
+      setPendingAvatar(null);
+      setPendingBanner(null);
       onSaveSuccess(updated);
       // Parent dismisses the editor (e.g. navigation.goBack once). Do not call
       // onClose() here — that would double-pop and leave the previous screen
@@ -411,22 +490,27 @@ export default function ProfileEditSheet({
           { paddingBottom: insets.bottom + 8 },
         ]}
       >
-        {/* Sheet header */}
+        {/* Sheet header — only render the title row in modal mode. When
+            presented as a stack screen the native nav header already shows
+            "Edit profile" and a back button, so a duplicate title row is
+            redundant. */}
         <View style={styles.sheetHeader}>
-          <View style={styles.headerRow}>
-            <View>
-              <Text style={styles.sheetEyebrow}>Profile settings</Text>
-              <Text style={styles.sheetTitle}>Edit profile</Text>
+          {presentation === "modal" ? (
+            <View style={styles.headerRow}>
+              <View>
+                <Text style={styles.sheetEyebrow}>Profile settings</Text>
+                <Text style={styles.sheetTitle}>Edit profile</Text>
+              </View>
+              <Pressable
+                onPress={handleClose}
+                style={styles.closeButton}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={22} color={colors.GRAY700} />
+              </Pressable>
             </View>
-            <Pressable
-              onPress={handleClose}
-              style={styles.closeButton}
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-            >
-              <Ionicons name="close" size={22} color={colors.GRAY700} />
-            </Pressable>
-          </View>
+          ) : null}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -483,39 +567,63 @@ export default function ProfileEditSheet({
                 value={form.last_name}
                 onChangeText={setField("last_name")}
               />
-              <FormField
-                label="Username"
-                value={user.email?.split("@")[0] ?? ""}
-                readOnly
-                helperText="Username cannot be changed."
-              />
               <View style={fieldStyles.group}>
                 <Text style={fieldStyles.label}>City / Location</Text>
                 <View style={styles.locationInputWrap}>
                   <Ionicons name="location-outline" size={17} color={colors.GRAY500} />
                   <TextInput
                     value={form.location}
-                    onChangeText={setField("location")}
-                    placeholder="Search a city, district, or address"
+                    onChangeText={(text) => {
+                      suppressLocationSuggestionsRef.current = false;
+                      setField("location")(text);
+                    }}
+                    onFocus={() => {
+                      setLocationFocused(true);
+                    }}
+                    onBlur={() => {
+                      setLocationFocused(false);
+                      setLocationSuggestions([]);
+                    }}
+                    placeholder="Tap to search a city, district, or address"
                     placeholderTextColor={colors.GRAY400}
                     style={styles.locationInput}
                     autoCapitalize="words"
                   />
                   {locationLoading ? (
                     <ActivityIndicator size="small" color={colors.GREEN} />
+                  ) : form.location ? (
+                    <Pressable
+                      onPress={() => {
+                        suppressLocationSuggestionsRef.current = false;
+                        setForm((prev) => ({ ...prev, location: "" }));
+                        setLocationSuggestions([]);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear location"
+                      hitSlop={8}
+                    >
+                      <Ionicons
+                        name="close-circle"
+                        size={18}
+                        color={colors.GRAY400}
+                      />
+                    </Pressable>
                   ) : null}
                 </View>
-                {locationSuggestions.length > 0 ? (
+                {locationFocused && locationSuggestions.length > 0 ? (
                   <View style={styles.locationSuggestions}>
                     {locationSuggestions.map((item) => (
                       <Pressable
                         key={`${item.lat}-${item.lng}-${item.fullAddress ?? item.label}`}
                         onPress={() => {
+                          const chosen = item.fullAddress ?? item.label;
+                          suppressLocationSuggestionsRef.current = true;
                           setForm((prev) => ({
                             ...prev,
-                            location: item.fullAddress ?? item.label,
+                            location: chosen,
                           }));
                           setLocationSuggestions([]);
+                          setLocationFocused(false);
                         }}
                         style={({ pressed }) => [
                           styles.locationSuggestionRow,
@@ -558,38 +666,142 @@ export default function ProfileEditSheet({
           {activeTab === "photos" ? (
             <>
               <SectionHeader title="Avatar & cover photo" />
-              <View style={styles.photoGrid}>
-                <TouchableOpacity
-                  onPress={onAvatarChangePress}
-                  style={styles.photoActionCard}
-                  accessibilityRole="button"
-                  accessibilityLabel="Change avatar"
-                >
-                  <Ionicons name="camera-outline" size={20} color={colors.GREEN} />
+
+              <View style={styles.photoPreviewRow}>
+                <View style={styles.avatarPreviewWrap}>
+                  {pendingAvatar?.uri || user.avatar_url ? (
+                    <Image
+                      source={{
+                        uri: pendingAvatar?.uri ?? user.avatar_url ?? undefined,
+                      }}
+                      style={styles.avatarPreview}
+                      accessibilityLabel="Profile photo preview"
+                      accessibilityIgnoresInvertColors
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.avatarPreview,
+                        styles.avatarPreviewFallback,
+                      ]}
+                    >
+                      <Ionicons
+                        name="person-outline"
+                        size={28}
+                        color={colors.GRAY400}
+                      />
+                    </View>
+                  )}
+                  {pendingAvatar ? (
+                    <View style={styles.photoPendingBadge}>
+                      <Ionicons name="ellipse" size={8} color={colors.WHITE} />
+                      <Text style={styles.photoPendingBadgeText}>New</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <View style={{ flex: 1, gap: 8 }}>
                   <Text style={styles.photoActionTitle}>Profile photo</Text>
-                  <Text style={styles.photoActionText}>Update your avatar.</Text>
-                </TouchableOpacity>
+                  <Text style={styles.photoActionText}>
+                    Pick a new avatar. It uploads when you tap{" "}
+                    <Text style={{ fontWeight: "700" }}>Save changes</Text>.
+                  </Text>
+                  <View style={styles.photoButtonRow}>
+                    <TouchableOpacity
+                      onPress={async () => {
+                        if (!onPickAvatar) return;
+                        const asset = await onPickAvatar();
+                        if (asset) setPendingAvatar(asset);
+                      }}
+                      style={styles.photoPrimaryButton}
+                      accessibilityRole="button"
+                      accessibilityLabel="Change avatar"
+                    >
+                      <Ionicons
+                        name="camera-outline"
+                        size={14}
+                        color={colors.WHITE}
+                      />
+                      <Text style={styles.photoPrimaryButtonText}>
+                        {pendingAvatar ? "Replace" : "Choose photo"}
+                      </Text>
+                    </TouchableOpacity>
+                    {pendingAvatar ? (
+                      <TouchableOpacity
+                        onPress={() => setPendingAvatar(null)}
+                        style={styles.photoSecondaryButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Discard new avatar"
+                      >
+                        <Text style={styles.photoSecondaryButtonText}>
+                          Discard
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.coverPreviewWrapper}>
+                {pendingBanner?.uri || user.banner_url ? (
+                  <Image
+                    source={{
+                      uri: pendingBanner?.uri ?? user.banner_url ?? undefined,
+                    }}
+                    style={styles.coverPreview}
+                    accessibilityLabel="Cover photo preview"
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : (
+                  <View style={[styles.coverPreview, styles.coverPreviewEmpty]}>
+                    <Ionicons
+                      name="image-outline"
+                      size={28}
+                      color={colors.GRAY400}
+                    />
+                    <Text style={styles.coverPreviewEmptyText}>
+                      No cover photo yet
+                    </Text>
+                  </View>
+                )}
+                {pendingBanner ? (
+                  <View style={styles.coverPendingBadge}>
+                    <Ionicons name="ellipse" size={8} color={colors.WHITE} />
+                    <Text style={styles.photoPendingBadgeText}>New</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.photoActionTitle}>Cover photo</Text>
+              <Text style={styles.photoActionText}>
+                Wide hero banner shown at the top of your profile. Uploads when
+                you tap <Text style={{ fontWeight: "700" }}>Save changes</Text>.
+              </Text>
+              <View style={[styles.photoButtonRow, { marginTop: 10 }]}>
                 <TouchableOpacity
-                  onPress={onCoverPhotoChangePress}
-                  style={styles.photoActionCard}
+                  onPress={async () => {
+                    if (!onPickCoverPhoto) return;
+                    const asset = await onPickCoverPhoto();
+                    if (asset) setPendingBanner(asset);
+                  }}
+                  style={styles.photoPrimaryButton}
                   accessibilityRole="button"
                   accessibilityLabel="Change cover photo"
                 >
-                  <Ionicons name="image-outline" size={20} color={colors.GREEN} />
-                  <Text style={styles.photoActionTitle}>Cover photo</Text>
-                  <Text style={styles.photoActionText}>Refresh the hero banner.</Text>
+                  <Ionicons name="image-outline" size={14} color={colors.WHITE} />
+                  <Text style={styles.photoPrimaryButtonText}>
+                    {pendingBanner ? "Replace" : "Choose photo"}
+                  </Text>
                 </TouchableOpacity>
+                {pendingBanner ? (
+                  <TouchableOpacity
+                    onPress={() => setPendingBanner(null)}
+                    style={styles.photoSecondaryButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Discard new cover photo"
+                  >
+                    <Text style={styles.photoSecondaryButtonText}>Discard</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
-              {form.banner_url ? (
-                <View style={styles.coverPreviewWrapper}>
-                  <Image
-                    source={{ uri: form.banner_url }}
-                    style={styles.coverPreview}
-                    accessibilityLabel="Current cover photo"
-                    accessibilityIgnoresInvertColors
-                  />
-                </View>
-              ) : null}
             </>
           ) : null}
 
@@ -1072,8 +1284,104 @@ const styles = StyleSheet.create({
   },
   coverPreview: {
     width: "100%",
-    height: 80,
+    height: 120,
     resizeMode: "cover",
+  },
+  coverPreviewEmpty: {
+    backgroundColor: colors.GRAY50,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  coverPreviewEmptyText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.GRAY500,
+  },
+  photoPreviewRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 14,
+    marginBottom: 16,
+  },
+  avatarPreviewWrap: {
+    position: "relative",
+  },
+  avatarPreview: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: colors.GRAY200,
+    borderWidth: 2,
+    borderColor: colors.WHITE,
+  },
+  avatarPreviewFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.GRAY100,
+  },
+  photoPendingBadge: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: colors.GREEN,
+    borderWidth: 1.5,
+    borderColor: colors.WHITE,
+  },
+  coverPendingBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: colors.GREEN,
+  },
+  photoPendingBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: colors.WHITE,
+    letterSpacing: 0.4,
+  },
+  photoButtonRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  photoPrimaryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: colors.GREEN,
+  },
+  photoPrimaryButtonText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.WHITE,
+  },
+  photoSecondaryButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.GRAY300,
+  },
+  photoSecondaryButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.GRAY600,
   },
   coverButton: {
     flexDirection: "row",
