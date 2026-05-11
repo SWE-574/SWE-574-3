@@ -373,6 +373,10 @@ class _ScheduleConflictTracker:
 
     def __init__(self):
         self._spans: dict = {}
+        # Fixed-group offers host one session shared by multiple participants;
+        # remember which (service_pk, host_id) pairs already booked the host
+        # so we don't flag every additional participant as a host conflict.
+        self._fixed_group_hosts: set = set()
 
     def claim(self, user_id, start: datetime, end: datetime) -> bool:
         spans = self._spans.setdefault(user_id, [])
@@ -380,6 +384,13 @@ class _ScheduleConflictTracker:
             if start < e and end > s:
                 return False
         spans.append((start, end))
+        return True
+
+    def mark_fixed_group_host(self, service_pk, user_id) -> bool:
+        key = (service_pk, user_id)
+        if key in self._fixed_group_hosts:
+            return False
+        self._fixed_group_hosts.add(key)
         return True
 
 
@@ -1837,7 +1848,18 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
         handshake.exact_location = exact_locations.get(service.location_area, f'{service.location_area} area')
         handshake.exact_location_guide = None
         handshake.exact_duration = service.duration
-        handshake.scheduled_time = quarter_hour(timezone.now() + timedelta(days=3))
+        # Use the service's own scheduled_time when available so each demo
+        # handshake lands on a distinct slot instead of every non-fixed
+        # handshake colliding on a single (now+3d) placeholder. For
+        # services without a scheduled_time, derive a stable per-service
+        # offset from the UUID so two such services don't share a slot.
+        if service.scheduled_time:
+            handshake.scheduled_time = service.scheduled_time
+        else:
+            slot = service.pk.int % (7 * 24 * 4)  # quarter-hour slots over a week
+            handshake.scheduled_time = quarter_hour(
+                timezone.now() + timedelta(days=3, minutes=15 * slot)
+            )
         handshake.exact_location_maps_url = build_google_maps_url(
             handshake.exact_location,
             service.location_lat,
@@ -1847,11 +1869,24 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
     handshake.save()
 
     # #503: register both sides of the handshake on the demo calendar so we
-    # notice overlapping time blocks for the same user.
-    if handshake.scheduled_time is not None and handshake.exact_duration:
+    # notice overlapping time blocks for the same user. Skip completed
+    # handshakes (their scheduled_time gets backdated below, so the future
+    # claim would be bogus) and dedupe the host slot for fixed-group offers
+    # (one host runs a single session for many participants).
+    if (
+        completed_days_ago is None
+        and handshake.scheduled_time is not None
+        and handshake.exact_duration
+    ):
         start = handshake.scheduled_time
         end = start + timedelta(hours=float(handshake.exact_duration))
-        for participant in (requester, service.user):
+        participants = [requester]
+        if is_fixed_group_offer(service):
+            if _SCHEDULE.mark_fixed_group_host(service.pk, service.user.id):
+                participants.append(service.user)
+        else:
+            participants.append(service.user)
+        for participant in participants:
             if not _SCHEDULE.claim(participant.id, start, end):
                 print(
                     f"  [conflict] {participant.email} double-booked across "
