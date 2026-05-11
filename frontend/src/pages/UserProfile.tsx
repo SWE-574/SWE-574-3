@@ -37,14 +37,11 @@ import { ServiceCard } from '@/components/profile/ServiceCard'
 import { ProfileReviewRow } from '@/components/profile/ProfileReviewRow'
 import { MyReportsList } from '@/pages/MyReports'
 import { useMyReports } from '@/hooks/useMyReports'
+import { useReveal } from '@/hooks/useReveal'
 
 // ── Shared helpers (still used by tab content) ─────────────────────────────────
 const AVATAR_PALETTE = [GREEN, BLUE, TEAL, AMBER, '#0D9488', '#EA580C']
 const AVATAR_IMAGE_BG = `linear-gradient(180deg, ${WHITE} 0%, ${GRAY100} 100%)`
-// Profile tabs render every record the API returned in one go; for large
-// portfolios that meant 50 service cards stacked in a single grid. Reveal in
-// pages of 6 (one full 2x3 grid row) and let the user expand on demand.
-const PROFILE_PAGE_SIZE = 6
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 const fmtDur = (d: number | string) => `${Number(d)}h`
@@ -184,9 +181,9 @@ const UserProfile = () => {
   const [historyLoading, setHistoryLoading]   = useState(true)
   const [eventsLoading, setEventsLoading]     = useState(true)
   const [activeTab, setActiveTab]         = useState<ServiceTab>(initialTab)
-  const [visibleOffers, setVisibleOffers] = useState(PROFILE_PAGE_SIZE)
-  const [visibleNeeds, setVisibleNeeds]   = useState(PROFILE_PAGE_SIZE)
-  const [visibleHistory, setVisibleHistory] = useState(PROFILE_PAGE_SIZE)
+  const { visible: visibleOffers, showMore: showMoreOffers } = useReveal(userId)
+  const { visible: visibleNeeds, showMore: showMoreNeeds } = useReveal(userId)
+  const { visible: visibleHistory, showMore: showMoreHistory } = useReveal(userId)
   const { reports: myReports, error: myReportsError } = useMyReports()
 
   useEffect(() => {
@@ -244,14 +241,6 @@ const UserProfile = () => {
       setReviewsAsOrganizer(rOrganizer.results)
     }).catch(() => {}).finally(() => setReviewsLoading(false))
     return () => ac.abort()
-  }, [userId])
-
-  // Reset the per-tab reveal counters when switching profile views so a
-  // viewer who scrolled deep on one user doesn't land halfway into another.
-  useEffect(() => {
-    setVisibleOffers(PROFILE_PAGE_SIZE)
-    setVisibleNeeds(PROFILE_PAGE_SIZE)
-    setVisibleHistory(PROFILE_PAGE_SIZE)
   }, [userId])
 
   useEffect(() => {
@@ -433,7 +422,7 @@ const UserProfile = () => {
                   </Box>
                   {offersTab.length > visibleOffers && (
                     <Flex justify="center" pb={3}>
-                      <Box as="button" onClick={() => setVisibleOffers(c => c + PROFILE_PAGE_SIZE)}
+                      <Box as="button" onClick={showMoreOffers}
                         px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
                         style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
                       >Show more ({offersTab.length - visibleOffers})</Box>
@@ -462,7 +451,7 @@ const UserProfile = () => {
                   </Box>
                   {needsTab.length > visibleNeeds && (
                     <Flex justify="center" pb={3}>
-                      <Box as="button" onClick={() => setVisibleNeeds(c => c + PROFILE_PAGE_SIZE)}
+                      <Box as="button" onClick={showMoreNeeds}
                         px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
                         style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
                       >Show more ({needsTab.length - visibleNeeds})</Box>
@@ -530,7 +519,7 @@ const UserProfile = () => {
                   ))}
                   {groupedOwnHistory.length > visibleHistory && (
                     <Flex justify="center" py={3}>
-                      <Box as="button" onClick={() => setVisibleHistory(c => c + PROFILE_PAGE_SIZE)}
+                      <Box as="button" onClick={showMoreHistory}
                         px="14px" py="7px" borderRadius="8px" fontSize="12px" fontWeight={600}
                         style={{ background: GRAY100, color: GRAY600, border: `1px solid ${GRAY200}`, cursor: 'pointer' }}
                       >Show more ({groupedOwnHistory.length - visibleHistory})</Box>
