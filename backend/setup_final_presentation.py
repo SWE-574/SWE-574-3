@@ -14,6 +14,7 @@ services whose titles are known to be created for existing demo users
 accumulate across runs.
 """
 import os
+import mimetypes
 import django
 
 if __name__ == "__main__":
@@ -41,6 +42,59 @@ from datetime import timedelta
 print("=" * 60)
 print("The Hive — Mother's Day Scenario Seed")
 print("=" * 60)
+
+# ---------------------------------------------------------------------------
+# [0] Upload demo media assets to MinIO
+# ---------------------------------------------------------------------------
+from django.conf import settings as _settings_early
+
+def _upload_demo_media():
+    """Upload every file in backend/demo_media/ to MinIO under the demo/ prefix.
+
+    Safe to run on every seed: PUT with the same key is idempotent.
+    Skips silently if boto3 is unavailable or MinIO is unreachable.
+    """
+    try:
+        import boto3
+        from botocore.exceptions import BotoCoreError, ClientError
+    except ImportError:
+        print("  boto3 not available — skipping demo media upload")
+        return
+
+    media_dir = os.path.join(os.path.dirname(__file__), 'demo_media')
+    if not os.path.isdir(media_dir):
+        print("  demo_media/ not found — skipping upload")
+        return
+
+    endpoint = getattr(_settings_early, 'AWS_S3_ENDPOINT_URL', 'http://localhost:9010')
+    bucket   = getattr(_settings_early, 'AWS_STORAGE_BUCKET_NAME', 'hive-media')
+    key_id   = getattr(_settings_early, 'AWS_ACCESS_KEY_ID', 'minioadmin')
+    secret   = getattr(_settings_early, 'AWS_SECRET_ACCESS_KEY', 'minioadmin123')
+
+    try:
+        s3 = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=key_id,
+            aws_secret_access_key=secret,
+        )
+        uploaded = 0
+        for fname in os.listdir(media_dir):
+            fpath = os.path.join(media_dir, fname)
+            if not os.path.isfile(fpath):
+                continue
+            content_type, _ = mimetypes.guess_type(fname)
+            s3.upload_file(
+                fpath, bucket, f'demo/{fname}',
+                ExtraArgs={'ContentType': content_type or 'application/octet-stream', 'ACL': 'public-read'},
+            )
+            uploaded += 1
+        print(f"  Uploaded {uploaded} demo media file(s) to MinIO ({bucket}/demo/)")
+    except (BotoCoreError, ClientError, Exception) as exc:
+        print(f"  MinIO upload skipped: {exc}")
+
+print("\n[0/9] Uploading demo media assets...")
+_upload_demo_media()
 
 # ---------------------------------------------------------------------------
 # [1] Cleanup
@@ -164,7 +218,7 @@ def demo_media_url(filename):
 now = timezone.now()
 
 CURATED_AVATARS = {
-    'yusuf':  'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'yusuf':  f"{DEMO_MEDIA_BASE}/demo/yusuf.png",
     'selman': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
     'berk':   'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
     'ahmet':  'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
@@ -695,7 +749,7 @@ hs_driving, _ = simulate_handshake_workflow(
     completed_days_ago=930,
 )
 seed_chat(hs_driving, [
-    (ahmet,  'Hey Yusuf! I can help. I learned on a '90s Renault so this should be fun.', 0.5),
+    (ahmet,  "Hey Yusuf! I can help. I learned on a '90s Renault so this should be fun.", 0.5),
     (yusuf,  'Haha perfect, that is exactly the energy I need. When works for you?', 1.0),
     (ahmet,  'Saturday morning? We can start in the Beşiktaş side streets, low traffic.', 1.3),
     (yusuf,  'Saturday works great. Thank you for offering!', 1.6),
@@ -976,57 +1030,53 @@ print("\n[7/9] Adding reputation for Yusuf's completed exchanges...")
 add_reputation(
     hs_driving, ahmet, yusuf, True, True, True,
     'Yusuf was focused and picked it up quickly. Easy to teach when someone actually wants to learn.',
-    image_url=demo_media_url('history-driving.jpg'),
 )
 add_reputation(
     hs_driving, yusuf, ahmet, True, True, True,
     'Ahmet was patient and clear. I drove a manual car home the same day.',
-    image_url=demo_media_url('history-driving-yusuf.jpg'),
 )
 add_reputation(
     hs_photo, murat_demo, yusuf, True, True, True,
     'Yusuf already had a good eye, the walk just gave him a framework. Great student.',
-    image_url=demo_media_url('history-photo-walk.jpg'),
+    image_url=demo_media_url('photography.jpeg'),
 )
 add_reputation(
     hs_photo, yusuf, murat_demo, True, True, True,
     'Murat showed me how to see a street differently. The photographs from that morning are still some of my favourites.',
-    image_url=demo_media_url('history-photo-walk-yusuf.jpg'),
+    image_url=demo_media_url('photography.jpeg'),
 )
 add_reputation(
     hs_tarhana, can_demo, yusuf, True, True, True,
     'Yusuf is a natural in the kitchen. He went home with a full jar and is already planning to make it again.',
-    image_url=demo_media_url('history-tarhana.jpg'),
+    image_url=demo_media_url('tarhana.jpeg'),
 )
 add_reputation(
     hs_tarhana, yusuf, can_demo, True, True, True,
     'A Sunday afternoon in Can\'s kitchen making tarhana from scratch, exactly the kind of afternoon The Hive is for.',
-    image_url=demo_media_url('history-tarhana-yusuf.jpg'),
+    image_url=demo_media_url('tarhana.jpeg'),
 )
 add_reputation(
     hs_finance, leyla, yusuf, True, True, True,
     'Yusuf made personal finance feel approachable for the first time. Left knowing what to actually do next.',
-    image_url=demo_media_url('history-finance.jpg'),
 )
 add_reputation(
     hs_finance, yusuf, leyla, True, True, True,
     'Leyla asked sharp questions. A pleasure to explain things to someone genuinely curious.',
-    image_url=demo_media_url('history-finance-yusuf.jpg'),
 )
 
 # ── Event evaluations (so history shows Reviewed, not Evaluation Pending) ────
 add_reputation(hs_watch,  berk,       yusuf, True, True, True, 'Great energy at the match, glad he came.')
 add_reputation(hs_watch,  yusuf,      berk,  True, True, True, 'Berk organises these brilliantly. Atmosphere was electric.',
-               image_url=demo_media_url('history-watch-party.png'))
+               image_url=demo_media_url('mathc-game.png'))
 add_reputation(hs_book,   selin_demo, yusuf, True, True, True, 'Yusuf always comes prepared and adds to the discussion.')
 add_reputation(hs_book,   yusuf,      selin_demo, True, True, True, 'One of the best sessions in the series.',
-               image_url=demo_media_url('history-book-circle.png'))
+               image_url=demo_media_url('book-club.png'))
 add_reputation(hs_picnic, berk,       yusuf, True, True, True, 'Showed up early and helped set up. Exactly the kind of neighbour you want.')
 add_reputation(hs_picnic, yusuf,      berk,  True, True, True, 'Perfect afternoon by the Bosphorus. Berk makes everyone feel at home.',
-               image_url=demo_media_url('history-picnic-yusuf.jpg'))
+               image_url=demo_media_url('bebek-games.png'))
 add_reputation(hs_walk,   emre_demo,  yusuf, True, True, True, 'Yusuf was great company at sunrise. Quiet, present, good conversation.')
 add_reputation(hs_walk,   yusuf,      emre_demo, True, True, True, 'Emre picks the best spots. The light was perfect.',
-               image_url=demo_media_url('history-bosphorus-walk.png'))
+               image_url=demo_media_url('boshphorus-walk.png'))
 
 # ── Other participants' reviews for past events ───────────────────────────────
 
@@ -1333,6 +1383,7 @@ yusuf_photo_offer = create_service(
     schedule_details='Saturday morning, Bebek pier at 06:30',
     tags=[photography_tag],
     created_days_ago=7,
+    cover_url=demo_media_url('photography.jpeg'),
 )
 print(f"  Yusuf's photography offer: active")
 
