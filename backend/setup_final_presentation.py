@@ -272,6 +272,7 @@ def create_user(email, first_name, last_name, bio, balance, karma,
                 date_joined_offset_days=0, avatar_key=None, location=None,
                 is_onboarded=True):
     avatar_url = CURATED_AVATARS.get(avatar_key or first_name.lower())
+    target_date_joined = timezone.now() - timedelta(days=date_joined_offset_days)
     user, created = User.objects.get_or_create(
         email=email,
         defaults={
@@ -286,7 +287,6 @@ def create_user(email, first_name, last_name, bio, balance, karma,
             'role': 'member',
             'is_verified': True,
             'is_onboarded': is_onboarded,
-            'date_joined': timezone.now() - timedelta(days=date_joined_offset_days),
         }
     )
     if not created:
@@ -294,6 +294,9 @@ def create_user(email, first_name, last_name, bio, balance, karma,
         user.karma_score = karma
         user.is_onboarded = is_onboarded
         user.save()
+    # date_joined is auto_now_add — must backdate with update() after create/save
+    User.objects.filter(pk=user.pk).update(date_joined=target_date_joined)
+    user.refresh_from_db(fields=['date_joined'])
     print(f"  {'Created' if created else 'Updated'}: {email} ({first_name} {last_name})")
     return user
 
@@ -527,7 +530,7 @@ kaan = create_user(
 yusuf = create_user(
     'yusuf@demo.com', 'Yusuf', 'Arslan',
     'Three years ago I moved to Bebek from İzmir knowing nobody in the city. The Hive is how I found my neighbourhood. I work in financial risk in Levent, but my weekends here have been the real education: photography walks in Balat, tarhana Sundays in Can\'s kitchen, book circles, sunrise walks by the Bosphorus. Three years on, I know this neighbourhood by name. Happy to talk finance or share a recipe anytime.',
-    balance=19,  # 3 starting + 16 earned over 3 years; transactions will net to ~14
+    balance=10,
     karma=87, date_joined_offset_days=1095,
     avatar_key='yusuf', location='Bebek, Istanbul',
 )
@@ -998,7 +1001,7 @@ event_rep_data = [
     (elif_demo,   now - timedelta(days=50),   'A natural teacher who made the session feel easy.'),
 ]
 for giver, when, comment in event_rep_data:
-    ReputationRep.objects.create(
+    _rep = ReputationRep.objects.create(
         handshake=hs_finance,
         giver=giver,
         receiver=yusuf,
@@ -1006,8 +1009,8 @@ for giver, when, comment in event_rep_data:
         is_helpful=True,
         is_kind=True,
         comment=comment,
-        created_at=when,
     )
+    ReputationRep.objects.filter(pk=_rep.pk).update(created_at=when)
 print(f"  Added {len(event_rep_data)} community reputation records")
 
 # ── Two extra real provider sessions for Yusuf (Time Giver Bronze threshold) ─
