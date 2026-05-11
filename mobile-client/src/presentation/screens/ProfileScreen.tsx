@@ -498,13 +498,14 @@ export default function ProfileScreen() {
         right={
           <View style={styles.topBarActions}>
             <Pressable
+              testID="profile-overflow"
               onPress={() => setMenuOpen((prev) => !prev)}
               style={({ pressed }) => [
                 styles.topBarIconButton,
                 pressed && styles.pressed,
               ]}
               accessibilityRole="button"
-              accessibilityLabel="More options"
+              accessibilityLabel="Profile menu"
             >
               <Ionicons
                 name="ellipsis-horizontal"
@@ -513,6 +514,7 @@ export default function ProfileScreen() {
               />
             </Pressable>
             <TouchableOpacity
+              testID="profile-notifications-bell"
               onPress={() => (navigation as any).navigate("Notifications")}
               style={styles.topBarIconButton}
               accessibilityRole="button"
