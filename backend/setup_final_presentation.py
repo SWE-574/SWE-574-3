@@ -18,7 +18,7 @@ if __name__ == "__main__":
 from api.models import (
     ChatMessage, Handshake, Notification, ReputationRep, Comment,
     Service, Tag, User, UserBadge, ServiceMedia, TransactionHistory,
-    NegativeRep, UserFollow,
+    NegativeRep, UserFollow, CommentMedia,
 )
 from api.achievement_utils import check_and_assign_badges
 from api.services import HandshakeService, EventHandshakeService
@@ -105,7 +105,7 @@ art_tag = tag_objects['Art']
 now = timezone.now()
 
 CURATED_AVATARS = {
-    'yusuf':  'https://images.unsplash.com/photo-1566492031773-4f4e44671857?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
+    'yusuf':  'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
     'selman': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
     'berk':   'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
     'ahmet':  'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&crop=face&w=256&h=256&q=80',
@@ -384,18 +384,18 @@ def backdate_completed_event(service, days_ago):
         event_completed_at=completed_at,
         status='Completed',
     )
-    Handshake.objects.filter(service=service, status='attended').update(
+    Handshake.objects.filter(service=service, status__in=['attended', 'completed']).update(
         scheduled_time=scheduled_at,
         updated_at=completed_at,
         evaluation_window_starts_at=completed_at,
         evaluation_window_ends_at=window_end,
-        # Set closed_at so the frontend shows the window as explicitly expired
         evaluation_window_closed_at=window_end,
     )
     service.refresh_from_db()
 
 
-def add_reputation(handshake, giver, receiver, punctual=True, helpful=True, kind=True, comment=''):
+def add_reputation(handshake, giver, receiver, punctual=True, helpful=True, kind=True, comment='', image_url=None):
+    rep_time = handshake.updated_at + timedelta(hours=2)
     rep = ReputationRep.objects.create(
         handshake=handshake,
         giver=giver,
@@ -404,17 +404,19 @@ def add_reputation(handshake, giver, receiver, punctual=True, helpful=True, kind
         is_helpful=helpful,
         is_kind=kind,
         comment=comment,
-        created_at=handshake.updated_at + timedelta(hours=2),
     )
+    ReputationRep.objects.filter(pk=rep.pk).update(created_at=rep_time)
     if comment:
-        Comment.objects.create(
+        c = Comment.objects.create(
             service=handshake.service,
             user=giver,
             body=comment,
             is_verified_review=True,
             related_handshake=handshake,
-            created_at=rep.created_at,
         )
+        Comment.objects.filter(pk=c.pk).update(created_at=rep_time)
+        if image_url:
+            CommentMedia.objects.create(comment=c, file_url=image_url)
     return rep
 
 
@@ -539,6 +541,15 @@ watch_party_hist = create_service(
 hs_watch = event_rsvp(watch_party_hist, yusuf, joined_days_ago=1068)
 hs_watch = EventHandshakeService.checkin(hs_watch, yusuf)
 hs_watch = EventHandshakeService.mark_attended(hs_watch, berk)
+hs_watch_emre = event_rsvp(watch_party_hist, emre_demo, joined_days_ago=1068)
+hs_watch_emre = EventHandshakeService.checkin(hs_watch_emre, emre_demo)
+EventHandshakeService.mark_attended(hs_watch_emre, berk)
+hs_watch_can = event_rsvp(watch_party_hist, can_demo, joined_days_ago=1068)
+hs_watch_can = EventHandshakeService.checkin(hs_watch_can, can_demo)
+EventHandshakeService.mark_attended(hs_watch_can, berk)
+hs_watch_murat = event_rsvp(watch_party_hist, murat_demo, joined_days_ago=1068)
+hs_watch_murat = EventHandshakeService.checkin(hs_watch_murat, murat_demo)
+EventHandshakeService.mark_attended(hs_watch_murat, berk)
 EventHandshakeService.complete_event(watch_party_hist, berk)
 backdate_completed_event(watch_party_hist, days_ago=1065)
 hs_watch.refresh_from_db()
@@ -654,6 +665,18 @@ book_circle_hist = create_service(
 hs_book = event_rsvp(book_circle_hist, yusuf, joined_days_ago=645)
 hs_book = EventHandshakeService.checkin(hs_book, yusuf)
 hs_book = EventHandshakeService.mark_attended(hs_book, selin_demo)
+hs_book_zeynep = event_rsvp(book_circle_hist, zeynep_demo, joined_days_ago=645)
+hs_book_zeynep = EventHandshakeService.checkin(hs_book_zeynep, zeynep_demo)
+EventHandshakeService.mark_attended(hs_book_zeynep, selin_demo)
+hs_book_levent = event_rsvp(book_circle_hist, levent_demo, joined_days_ago=645)
+hs_book_levent = EventHandshakeService.checkin(hs_book_levent, levent_demo)
+EventHandshakeService.mark_attended(hs_book_levent, selin_demo)
+hs_book_ayse = event_rsvp(book_circle_hist, ayse_demo, joined_days_ago=645)
+hs_book_ayse = EventHandshakeService.checkin(hs_book_ayse, ayse_demo)
+EventHandshakeService.mark_attended(hs_book_ayse, selin_demo)
+hs_book_murat = event_rsvp(book_circle_hist, murat_demo, joined_days_ago=645)
+hs_book_murat = EventHandshakeService.checkin(hs_book_murat, murat_demo)
+EventHandshakeService.mark_attended(hs_book_murat, selin_demo)
 EventHandshakeService.complete_event(book_circle_hist, selin_demo)
 backdate_completed_event(book_circle_hist, days_ago=640)
 hs_book.refresh_from_db()
@@ -741,6 +764,15 @@ picnic_hist = create_service(
 hs_picnic = event_rsvp(picnic_hist, yusuf, joined_days_ago=360)
 hs_picnic = EventHandshakeService.checkin(hs_picnic, yusuf)
 hs_picnic = EventHandshakeService.mark_attended(hs_picnic, berk)
+hs_picnic_emre = event_rsvp(picnic_hist, emre_demo, joined_days_ago=360)
+hs_picnic_emre = EventHandshakeService.checkin(hs_picnic_emre, emre_demo)
+EventHandshakeService.mark_attended(hs_picnic_emre, berk)
+hs_picnic_zeynep = event_rsvp(picnic_hist, zeynep_demo, joined_days_ago=360)
+hs_picnic_zeynep = EventHandshakeService.checkin(hs_picnic_zeynep, zeynep_demo)
+EventHandshakeService.mark_attended(hs_picnic_zeynep, berk)
+hs_picnic_yasemin = event_rsvp(picnic_hist, yasemin_demo, joined_days_ago=360)
+hs_picnic_yasemin = EventHandshakeService.checkin(hs_picnic_yasemin, yasemin_demo)
+EventHandshakeService.mark_attended(hs_picnic_yasemin, berk)
 EventHandshakeService.complete_event(picnic_hist, berk)
 backdate_completed_event(picnic_hist, days_ago=355)
 hs_picnic.refresh_from_db()
@@ -800,6 +832,12 @@ bosphorus_walk_hist = create_service(
 hs_walk = event_rsvp(bosphorus_walk_hist, yusuf, joined_days_ago=98)
 hs_walk = EventHandshakeService.checkin(hs_walk, yusuf)
 hs_walk = EventHandshakeService.mark_attended(hs_walk, emre_demo)
+hs_walk_can = event_rsvp(bosphorus_walk_hist, can_demo, joined_days_ago=98)
+hs_walk_can = EventHandshakeService.checkin(hs_walk_can, can_demo)
+EventHandshakeService.mark_attended(hs_walk_can, emre_demo)
+hs_walk_leyla = event_rsvp(bosphorus_walk_hist, leyla, joined_days_ago=98)
+hs_walk_leyla = EventHandshakeService.checkin(hs_walk_leyla, leyla)
+EventHandshakeService.mark_attended(hs_walk_leyla, emre_demo)
 EventHandshakeService.complete_event(bosphorus_walk_hist, emre_demo)
 backdate_completed_event(bosphorus_walk_hist, days_ago=95)
 hs_walk.refresh_from_db()
@@ -807,6 +845,7 @@ print("  History 8: Early Morning Bosphorus Walk (Feb 2026) — attended")
 
 yusuf.refresh_from_db()
 print(f"  Yusuf's timebank balance after history: {yusuf.timebank_balance}h")
+
 
 # ---------------------------------------------------------------------------
 # [7] Reputation for Yusuf's history
@@ -845,6 +884,43 @@ add_reputation(
     hs_finance, yusuf, leyla, True, True, True,
     'Leyla asked sharp questions. A pleasure to explain things to someone genuinely curious.',
 )
+
+# ── Event evaluations (so history shows Reviewed, not Evaluation Pending) ────
+add_reputation(hs_watch,  berk,       yusuf, True, True, True, 'Great energy at the match, glad he came.')
+add_reputation(hs_watch,  yusuf,      berk,  True, True, True, 'Berk organises these brilliantly. Atmosphere was electric.',
+               image_url='http://localhost:9010/hive-media/demo/history-watch-party.png')
+add_reputation(hs_book,   selin_demo, yusuf, True, True, True, 'Yusuf always comes prepared and adds to the discussion.')
+add_reputation(hs_book,   yusuf,      selin_demo, True, True, True, 'One of the best sessions in the series.',
+               image_url='http://localhost:9010/hive-media/demo/history-book-circle.png')
+add_reputation(hs_picnic, berk,       yusuf, True, True, True, 'Showed up early and helped set up. Exactly the kind of neighbour you want.')
+add_reputation(hs_picnic, yusuf,      berk,  True, True, True, 'Perfect afternoon by the Bosphorus. Berk makes everyone feel at home.')
+add_reputation(hs_walk,   emre_demo,  yusuf, True, True, True, 'Yusuf was great company at sunrise. Quiet, present, good conversation.')
+add_reputation(hs_walk,   yusuf,      emre_demo, True, True, True, 'Emre picks the best spots. The light was perfect.',
+               image_url='http://localhost:9010/hive-media/demo/history-bosphorus-walk.png')
+
+# ── Other participants' reviews for past events ───────────────────────────────
+
+# Watch Party reviews — each participant reviews via their own handshake
+add_reputation(hs_watch_emre,  emre_demo,    berk,      True, True, True, 'Perfect night out. Berk had the best spot by the screen.')
+add_reputation(hs_watch_can,   can_demo,     berk,      True, True, True, 'Loved it. The crowd made the match ten times better.')
+add_reputation(hs_watch_murat, murat_demo,   berk,      True, True, True, 'Great organisation, great energy. Would join every time.')
+
+# Book Circle reviews
+add_reputation(hs_book_zeynep, zeynep_demo,  selin_demo, True, True, True, 'Selin keeps the conversation thoughtful and inclusive. A joy every session.')
+add_reputation(hs_book_levent, levent_demo,  selin_demo, True, True, True, 'The best kind of Sunday afternoon. Kahneman never felt this enjoyable.')
+add_reputation(hs_book_ayse,   ayse_demo,    selin_demo, True, True, True, 'Warm, well-prepared, always finds a way to bring everyone in.')
+add_reputation(hs_book_murat,  murat_demo,   selin_demo, True, True, True, 'First time at a book circle and I am already signed up for the next.')
+
+# Picnic reviews
+add_reputation(hs_picnic_emre,    emre_demo,    berk,   True, True, True, 'One of those afternoons you remember. Berk makes it feel effortless.')
+add_reputation(hs_picnic_zeynep,  zeynep_demo,  berk,   True, True, True, 'Good food, good people, perfect weather. Really well organised.')
+add_reputation(hs_picnic_yasemin, yasemin_demo, berk,   True, True, True, 'Felt like a real neighbourhood. Glad I came.')
+
+# Bosphorus Walk reviews
+add_reputation(hs_walk_can,   can_demo,  emre_demo, True, True, True, 'The silence of the city at that hour is something else. Emre picked the perfect route.')
+add_reputation(hs_walk_leyla, leyla,     emre_demo, True, True, True, 'Calm, unhurried, beautiful. Exactly what I needed.')
+
+print("  Other participants' reviews added for past events")
 
 # ── Reputation reps from Yusuf's event attendances ───────────────────────────
 # Events don't create bilateral reputation records automatically, so we add
