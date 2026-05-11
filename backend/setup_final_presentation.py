@@ -979,9 +979,9 @@ print(f"  Added {len(event_rep_data)} community reputation records")
 # but not narrated individually in the scenario (pre-history giving).
 giving_entries = [
     (now - timedelta(days=900), Decimal('2.0'), 'Photography advice session, Bosphorus walk companion'),
-    (now - timedelta(days=750), Decimal('1.5'), 'Personal finance Q&A, neighbour coffee chat'),
+    (now - timedelta(days=750), Decimal('1.0'), 'Personal finance Q&A, neighbour coffee chat'),
     (now - timedelta(days=580), Decimal('2.0'), 'Insurance basics for a freelance neighbour'),
-    (now - timedelta(days=310), Decimal('1.5'), 'Budgeting session for a young colleague'),
+    (now - timedelta(days=310), Decimal('1.0'), 'Budgeting session for a young colleague'),
     (now - timedelta(days=160), Decimal('2.0'), 'Cooking session, Aegean recipes shared with a neighbour'),
 ]
 for when, amount, description in giving_entries:
@@ -1161,6 +1161,45 @@ guitar_lessons = create_service(
     created_days_ago=3,
 )
 print(f"  Guitar lessons: active")
+
+# ── Bosphorus Golden Hour Walk — Yusuf's active Offer ────────────────────────
+yusuf_photo_offer = create_service(
+    user=yusuf,
+    title='Bosphorus Golden Hour Walk: Beginner Photography',
+    description='A relaxed sunrise walk along the Bosphorus shore focused on composition, light, and seeing the familiar city differently. All cameras welcome: phone, mirrorless, or film. You will leave with a handful of shots you actually like.',
+    service_type='Offer',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Beşiktaş',
+    location_lat=Decimal('41.0777'),
+    location_lng=Decimal('28.9984'),
+    max_participants=2,
+    schedule_type='One-Time',
+    scheduled_time=now + timedelta(days=5),
+    schedule_details='Saturday morning, Bebek pier at 06:30',
+    tags=[photography_tag],
+    created_days_ago=7,
+)
+print(f"  Yusuf's photography offer: active")
+
+# ── Help Printing and Framing Photos — Yusuf's active Need ───────────────────
+yusuf_print_need = create_service(
+    user=yusuf,
+    title='Help Printing and Framing My Bosphorus Walk Photos',
+    description='I have a set of prints from my recent Bosphorus walks that I want to frame and hang. Looking for someone who knows about print quality, paper types, or framing. Happy to exchange an hour of finance advice in return.',
+    service_type='Need',
+    duration='1.00',
+    location_type='In-Person',
+    location_area='Beşiktaş',
+    location_lat=Decimal('41.0422'),
+    location_lng=Decimal('29.0089'),
+    max_participants=1,
+    schedule_type='One-Time',
+    schedule_details='Flexible timing, Beşiktaş area',
+    tags=[photography_tag, art_tag],
+    created_days_ago=3,
+)
+print(f"  Yusuf's photo printing need: active")
 
 # ── Botanical Watercolour for Beginners (Ayşe) ──────────────────────────────
 watercolour_live = create_service(
