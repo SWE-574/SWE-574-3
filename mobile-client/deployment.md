@@ -37,7 +37,8 @@ Run all commands from `mobile-client/`.
 ```bash
 npm run build:android          # EAS cloud, production APK
 npm run build:android:local    # Local gradle release APK, picks up backend URL + Mapbox token from .env
-npm run build:android:emulator # Same APK, but forces EXPO_PUBLIC_API_URL=http://10.0.2.2:8000/api for the Android emulator
+npm run build:android:emulator # Local APK forced to http://10.0.2.2:8000/api (Android emulator + local backend)
+npm run build:android:prod     # Local APK forced to https://apiary.selmangunes.com/api (sideloadable prod-config build)
 npm run build:ios              # EAS cloud, production iOS
 npm run build:preview          # EAS cloud, preview build (Android + iOS)
 ```
@@ -95,14 +96,14 @@ npm run build:android:emulator
 # (EXPO_PUBLIC_API_URL in .env already points at http://<LAN_IP>:8000/api)
 npm run build:android:local
 
-# Prod-shaped APK without going through EAS (sideloadable; signed with the
-# debug keystore, so suitable for internal QA, not Play Store)
-EXPO_PUBLIC_API_URL=https://apiary.selmangunes.com/api \
-EXPO_PUBLIC_MAPBOX_TOKEN=pk.YOUR_PROD_TOKEN \
-  npm run build:android:local
+# Prod-shaped APK without going through EAS — points at the deployed
+# backend at apiary.selmangunes.com. Hand this APK to a teammate /
+# tester for sideloading. Mapbox token comes from .env; if .env doesn't
+# have one yet, prefix EXPO_PUBLIC_MAPBOX_TOKEN=pk.… on the call.
+npm run build:android:prod
 ```
 
-The third recipe is the answer to "I want a production-config APK without using EAS." It's the same gradle command, just with env vars pointing at the production backend and a production Mapbox token. The APK lands at the usual `android/app/build/outputs/apk/release/app-release.apk` path. For Play Store distribution, swap the debug keystore signing for a real release keystore in `android/app/build.gradle`'s `signingConfigs.release` (or use `npm run build:android`, which EAS signs for you).
+The third recipe is the answer to "I want a production-config APK without using EAS." Output lands at `android/app/build/outputs/apk/release/app-release.apk`. The APK is signed with the debug keystore (per `android/app/build.gradle`'s `signingConfigs.release`), which is fine for sideloading and internal QA but **not** for Play Store. For Play Store distribution, either wire a real release keystore into `signingConfigs.release` and re-run, or use `npm run build:android` (EAS handles signing).
 
 Without a token the Map tab shows a "Map unavailable" fallback. If the value is already in the repo-root `.env` (set by `make env`) you can skip the inline export — `app.config.ts` falls back to `.env` if `process.env` is empty.
 
