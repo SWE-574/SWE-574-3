@@ -1,7 +1,7 @@
 .PHONY: help env \
         setup setup-demo dev dev-all stop reset install migrate makemigrations lint build clean \
         mobile mobile-setup \
-        mobile-build-android mobile-build-android-local mobile-build-android-emulator mobile-build-android-prod mobile-build-ios mobile-build-preview \
+        mobile-build-android mobile-build-android-local mobile-build-android-emulator mobile-build-android-emulator-clean mobile-build-android-prod mobile-build-android-prod-clean mobile-build-ios mobile-build-preview \
         db-shell db-time db-time-reset \
         infra-up infra-down infra-reset infra-demo \
         docker-up docker-down docker-logs docker-build docker-reset docker-demo \
@@ -229,6 +229,12 @@ mobile-build-android-emulator: ## Local gradle release APK pointed at 10.0.2.2 (
 
 mobile-build-android-prod: ## Local gradle release APK pointed at apiary.selmangunes.com (sideloadable; Mapbox token from .env)
 	@cd mobile-client && npm run build:android:prod
+
+mobile-build-android-prod-clean: ## Same as -prod, but wipes the JS bundle cache first (use after switching env vars)
+	@cd mobile-client && npm run build:android:prod:clean
+
+mobile-build-android-emulator-clean: ## Same as -emulator, but wipes the JS bundle cache first
+	@cd mobile-client && npm run build:android:emulator:clean
 
 mobile-build-ios: ## EAS production build for iOS
 	@cd mobile-client && npm run build:ios

@@ -35,13 +35,20 @@ Run all commands from `mobile-client/`.
 ### npm scripts (preferred)
 
 ```bash
-npm run build:android          # EAS cloud, production APK
-npm run build:android:local    # Local gradle release APK, picks up backend URL + Mapbox token from .env
-npm run build:android:emulator # Local APK forced to http://10.0.2.2:8000/api (Android emulator + local backend)
-npm run build:android:prod     # Local APK forced to https://apiary.selmangunes.com/api (sideloadable prod-config build)
-npm run build:ios              # EAS cloud, production iOS
-npm run build:preview          # EAS cloud, preview build (Android + iOS)
+npm run build:android                  # EAS cloud, production APK
+npm run build:android:local            # Local gradle release APK, picks up backend URL + Mapbox token from .env
+npm run build:android:emulator         # Local APK forced to http://10.0.2.2:8000/api (Android emulator + local backend)
+npm run build:android:prod             # Local APK forced to https://apiary.selmangunes.com/api (sideloadable prod-config build)
+npm run build:android:emulator:clean   # Same as :emulator, plus wipes the JS bundle cache first
+npm run build:android:prod:clean       # Same as :prod, plus wipes the JS bundle cache first
+npm run clean:android:bundle           # Standalone: wipe just the JS bundle cache (use when env-var changes don't show up)
+npm run build:ios                      # EAS cloud, production iOS
+npm run build:preview                  # EAS cloud, preview build (Android + iOS)
 ```
+
+### When to use the `:clean` variants
+
+Gradle's `bundleReleaseJsAndAssets` task fingerprints input *files* but not environment variables. So if you build with one `EXPO_PUBLIC_API_URL` / `EXPO_PUBLIC_MAPBOX_TOKEN`, then re-run with different values, gradle marks the bundle task `UP-TO-DATE` and the APK still has the old values baked in. The `:clean` variants delete `android/app/build/{generated,intermediates}/{assets,bundle}` before invoking gradle, which forces a real re-bundle. Rule of thumb: if you're rebuilding without touching source code (typically because you're flipping env vars between emulator and prod runs), use the `:clean` variant.
 
 `make` wrappers exist at the repo root: `make mobile-build-android`, `make mobile-build-android-local`, `make mobile-build-ios`, `make mobile-build-preview`.
 
