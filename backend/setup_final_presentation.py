@@ -859,34 +859,42 @@ print("\n[7/9] Adding reputation for Yusuf's completed exchanges...")
 add_reputation(
     hs_driving, ahmet, yusuf, True, True, True,
     'Yusuf was focused and picked it up quickly. Easy to teach when someone actually wants to learn.',
+    image_url='http://localhost:9010/hive-media/demo/history-driving.jpg',
 )
 add_reputation(
     hs_driving, yusuf, ahmet, True, True, True,
     'Ahmet was patient and clear. I drove a manual car home the same day.',
+    image_url='http://localhost:9010/hive-media/demo/history-driving-yusuf.jpg',
 )
 add_reputation(
     hs_photo, murat_demo, yusuf, True, True, True,
     'Yusuf already had a good eye, the walk just gave him a framework. Great student.',
+    image_url='http://localhost:9010/hive-media/demo/history-photo-walk.jpg',
 )
 add_reputation(
     hs_photo, yusuf, murat_demo, True, True, True,
     'Murat showed me how to see a street differently. The photographs from that morning are still some of my favourites.',
+    image_url='http://localhost:9010/hive-media/demo/history-photo-walk-yusuf.jpg',
 )
 add_reputation(
     hs_tarhana, can_demo, yusuf, True, True, True,
     'Yusuf is a natural in the kitchen. He went home with a full jar and is already planning to make it again.',
+    image_url='http://localhost:9010/hive-media/demo/history-tarhana.jpg',
 )
 add_reputation(
     hs_tarhana, yusuf, can_demo, True, True, True,
     'A Sunday afternoon in Can\'s kitchen making tarhana from scratch, exactly the kind of afternoon The Hive is for.',
+    image_url='http://localhost:9010/hive-media/demo/history-tarhana-yusuf.jpg',
 )
 add_reputation(
     hs_finance, leyla, yusuf, True, True, True,
     'Yusuf made personal finance feel approachable for the first time. Left knowing what to actually do next.',
+    image_url='http://localhost:9010/hive-media/demo/history-finance.jpg',
 )
 add_reputation(
     hs_finance, yusuf, leyla, True, True, True,
     'Leyla asked sharp questions. A pleasure to explain things to someone genuinely curious.',
+    image_url='http://localhost:9010/hive-media/demo/history-finance-yusuf.jpg',
 )
 
 # ── Event evaluations (so history shows Reviewed, not Evaluation Pending) ────
@@ -897,7 +905,8 @@ add_reputation(hs_book,   selin_demo, yusuf, True, True, True, 'Yusuf always com
 add_reputation(hs_book,   yusuf,      selin_demo, True, True, True, 'One of the best sessions in the series.',
                image_url='http://localhost:9010/hive-media/demo/history-book-circle.png')
 add_reputation(hs_picnic, berk,       yusuf, True, True, True, 'Showed up early and helped set up. Exactly the kind of neighbour you want.')
-add_reputation(hs_picnic, yusuf,      berk,  True, True, True, 'Perfect afternoon by the Bosphorus. Berk makes everyone feel at home.')
+add_reputation(hs_picnic, yusuf,      berk,  True, True, True, 'Perfect afternoon by the Bosphorus. Berk makes everyone feel at home.',
+               image_url='http://localhost:9010/hive-media/demo/history-picnic-yusuf.jpg')
 add_reputation(hs_walk,   emre_demo,  yusuf, True, True, True, 'Yusuf was great company at sunrise. Quiet, present, good conversation.')
 add_reputation(hs_walk,   yusuf,      emre_demo, True, True, True, 'Emre picks the best spots. The light was perfect.',
                image_url='http://localhost:9010/hive-media/demo/history-bosphorus-walk.png')
