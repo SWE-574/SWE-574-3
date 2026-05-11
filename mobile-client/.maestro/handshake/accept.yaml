@@ -2,20 +2,22 @@ appId: com.apiary.thehive
 tags:
   - handshake
 env:
-  # This flow logs in as the provider/owner and accepts a pending request.
-  # The pending request must be seeded (or created via handshake/request.yaml
-  # run as the requester on a different account first).
-  TEST_EMAIL: provider@demo.com
+  # This flow logs in as the service owner and accepts the pending handshake
+  # request that handshake/request.yaml just submitted on a different account.
+  # The seed user `elif@demo.com` owns demo offers, so we log in as a second
+  # seeded user and accept from their inbox.
+  TEST_EMAIL: cem@demo.com
   TEST_PASSWORD: demo123
 ---
 - runFlow: ../auth/login.yaml
 - tapOn:
-    text: "Messages"
+    text: "Messages(, tab,.*)?"
 - tapOn:
     text: "Maestro test handshake request"
     optional: true
 - tapOn:
     text: "Accept"
-- assertVisible:
-    text: "Accepted"
+- extendedWaitUntil:
+    visible:
+      text: "(?i)accepted"
     timeout: 10000

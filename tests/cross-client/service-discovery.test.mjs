@@ -14,14 +14,21 @@ test('web post → mobile discovery: an Offer posted by a web client appears in 
     status: 'Active',
     location_type: 'Online',
     duration: '1.00',
+    schedule_type: 'One-Time',
   });
   assert.equal(create.status, 201, `service create failed: ${JSON.stringify(create.body)}`);
   const serviceId = create.body.id;
 
   // Mobile B browses the discovery feed and confirms the new offer is there.
-  const feed = await api('GET', '/api/services/?type=Offer&page_size=100', mobileB);
+  // Search by the unique title rather than scanning unfiltered top results so
+  // the test does not race against pagination or a stale list cache.
+  const feed = await api(
+    'GET',
+    `/api/services/?type=Offer&search=${encodeURIComponent(title)}&page_size=100`,
+    mobileB,
+  );
   assert.equal(feed.status, 200);
-  const ids = (feed.body.results || []).map((s) => s.id);
+  const ids = ((feed.body.results ?? feed.body) || []).map((s) => s.id);
   assert.ok(
     ids.includes(serviceId),
     `mobile feed missing the new offer ${serviceId}; got ${ids.length} services`,

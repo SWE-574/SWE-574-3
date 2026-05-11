@@ -1,0 +1,20 @@
+appId: com.apiary.thehive
+tags:
+  - profile
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §4.5: Notifications list.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Profile(, tab,.*)?"
+- tapOn:
+    id: "profile-notifications-bell"
+    optional: true
+- tapOn:
+    text: "Notifications"
+    optional: true
+- extendedWaitUntil:
+    visible: "Notifications"
+    timeout: 8000

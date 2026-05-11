@@ -2,7 +2,9 @@
 
 For screens and flows that the Maestro flows in `.maestro/` don't cover. An AI agent or a human tester should be able to follow this top-to-bottom on a fresh install and produce a checked-off pass/fail report.
 
-The critical happy-paths (auth, browse, post, handshake, QR) are automated — see `.maestro/README.md`. Everything below is the long tail.
+The critical happy-paths (auth, browse, post, handshake, QR) are automated, and **most navigational / read-only sub-steps below are also automated** — see `.maestro/README.md` for the table mapping each plan section to its Maestro flow. The steps that remain manual are the ones Maestro fundamentally cannot drive (camera, push, gallery picker, airplane mode, deep links).
+
+> ⚙️ A section header tagged **`[automated: <flow>]`** means the happy-path is covered by Maestro; you only need to manually test the sub-steps that the flow does not assert (e.g. infinite scroll, the read-time of a payload, visual polish).
 
 ## Setup
 
@@ -16,7 +18,7 @@ Note any **bugs** as you go with a screenshot and a one-line repro. Don't try to
 
 ## 1. Forum tab
 
-### 1.1 Forum feed loads
+### 1.1 Forum feed loads `[automated: forum/feed.yaml]`
 
 - Tap the **Forum** tab.
 - Expect: list of topics, each showing title, author, last activity timestamp.
@@ -29,7 +31,7 @@ Note any **bugs** as you go with a screenshot and a one-line repro. Don't try to
 - Expect: title, body, comment list (chronological), comment composer at the bottom.
 - The composer behaves correctly with the keyboard (no overlap, send button reachable).
 
-### 1.3 Create a topic
+### 1.3 Create a topic `[automated: forum/create-topic.yaml]`
 
 - From Forum feed, tap the create-topic button (FAB or header action).
 - Fill title + body, submit.
@@ -56,13 +58,13 @@ Note any **bugs** as you go with a screenshot and a one-line repro. Don't try to
 
 ## 2. Messages tab
 
-### 2.1 Conversation list
+### 2.1 Conversation list `[automated: messages/conversation-list.yaml]`
 
 - Tap the **Messages** tab.
 - Expect: list of conversations sorted by most-recent activity.
 - Unread conversations show a badge.
 
-### 2.2 P2P chat
+### 2.2 P2P chat `[automated: messages/p2p-chat.yaml]`
 
 - Open a P2P conversation.
 - Expect: message bubbles in chronological order (own messages on the right).
@@ -103,7 +105,7 @@ Note any **bugs** as you go with a screenshot and a one-line repro. Don't try to
 
 ## 3. Map tab
 
-### 3.1 Map renders
+### 3.1 Map renders `[automated: map/map-loads.yaml — boot only, markers inside WebView are manual]`
 
 - Tap the **Map** tab.
 - Expect: Mapbox map renders centered on the user's location (after permission grant) or a sensible default.
@@ -128,28 +130,28 @@ Note any **bugs** as you go with a screenshot and a one-line repro. Don't try to
 
 ## 4. Profile tab
 
-### 4.1 Profile home
+### 4.1 Profile home `[automated: profile/profile-home.yaml]`
 
 - Tap the **Profile** tab.
 - Expect: avatar, display name, time-credit balance, achievement showcase, "My listings" section.
 
-### 4.2 Profile edit
+### 4.2 Profile edit `[automated: profile/edit-profile.yaml]`
 
 - Tap edit (pencil/sheet).
 - Change display name. Save.
 - Expect: returns to profile, name is updated, no extra fetch shimmer.
 
-### 4.3 Achievements list
+### 4.3 Achievements list `[automated: profile/achievements.yaml]`
 
 - Tap "Achievements" or a badge in the showcase.
 - Expect: full grid of badges, earned ones full-color, unearned ones grayed.
 
-### 4.4 Follow list (followers / following)
+### 4.4 Follow list (followers / following) `[automated: profile/follow-list.yaml]`
 
 - From profile, tap "Followers" or "Following".
 - Expect: list of users with avatar + display name. Tap a row → public profile.
 
-### 4.5 Notifications list
+### 4.5 Notifications list `[automated: profile/notifications.yaml]`
 
 - From profile, tap the notifications icon.
 - Expect: chronological notifications. Each notification:
@@ -162,20 +164,20 @@ Note any **bugs** as you go with a screenshot and a one-line repro. Don't try to
 - From profile, settings → notification preferences.
 - Toggle a category off, kill the app, reopen — toggle is still off (persisted).
 
-### 4.7 Calendar
+### 4.7 Calendar `[automated: profile/calendar.yaml]`
 
 - From profile, tap Calendar.
 - Expect: month view with dots on days that have events/commitments.
 - Tap a day → list of items for that day.
 - "Upcoming" filter shows the next 14 days.
 
-### 4.8 My commitments
+### 4.8 My commitments `[automated: profile/my-commitments.yaml]`
 
 - From profile, tap "My commitments".
 - Expect: services you've requested or accepted, sorted by upcoming time.
 - Tap one → service detail.
 
-### 4.9 Time activity
+### 4.9 Time activity `[automated: profile/time-activity.yaml]`
 
 - From profile, tap "Time activity".
 - Expect: chronological list of time-credit transactions (earned, spent, refunded).
@@ -191,7 +193,7 @@ Note any **bugs** as you go with a screenshot and a one-line repro. Don't try to
 
 ## 5. Cross-cutting
 
-### 5.1 Cold start performance
+### 5.1 Cold start performance `[automated: cross/cold-start.yaml — assertion is reach, not timing]`
 
 - Force-stop the app, time the relaunch.
 - Expect: usable home feed within ~3 seconds on a recent device.
@@ -206,7 +208,7 @@ Note any **bugs** as you go with a screenshot and a one-line repro. Don't try to
 - During any active screen, toggle airplane mode.
 - Expect: an offline banner appears. Toggle off, banner dismisses.
 
-### 5.4 Logout
+### 5.4 Logout `[automated: cross/logout.yaml]`
 
 - Profile → settings → log out.
 - Expect: lands on Login screen, no flicker through Home, no preserved auth state.

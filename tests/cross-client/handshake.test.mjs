@@ -14,18 +14,20 @@ test('web handshake request → mobile sees pending: user A on web posts an Offe
     status: 'Active',
     location_type: 'Online',
     duration: '1.00',
+    schedule_type: 'One-Time',
   });
   assert.equal(offer.status, 201, `offer create failed: ${JSON.stringify(offer.body)}`);
   const serviceId = offer.body.id;
 
-  // B requests a handshake on mobile.
-  const hs = await api('POST', '/api/handshakes/', mobileB, {
-    service: serviceId,
-    initial_message: 'cross-client request',
-  });
+  // B requests a handshake on mobile via the express-interest action.
+  // The flat `POST /api/handshakes/` create is intentionally not the public
+  // entry point — interest is recorded server-side via the action endpoint
+  // so the handshake row is initialised with the correct payer/state.
+  const hs = await api('POST', `/api/handshakes/services/${serviceId}/interest/`, mobileB);
   assert.equal(hs.status, 201, `handshake create failed: ${JSON.stringify(hs.body)}`);
   const handshakeId = hs.body.id;
-  assert.equal(hs.body.status, 'Pending');
+  // Server returns the model-level status which is lowercased ("pending").
+  assert.match(hs.body.status, /^pending$/i, `unexpected status ${hs.body.status}`);
 
   // Mobile B (the requester) lists own handshakes and sees the pending one.
   const mobileListing = await api('GET', '/api/handshakes/?role=requester', mobileB);

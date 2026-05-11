@@ -3,20 +3,25 @@ tags:
   - handshake
   - qr
 env:
-  # Participant joins the event via manual code entry — the camera-less fallback
-  # used when the camera permission is denied or the device lacks a camera.
-  # The code value comes from an env var so the team can paste a real token in
-  # before running, or wire this up with a backend pre-step.
-  TEST_EMAIL: participant@demo.com
+  # Participant joins the event via manual code entry — the camera-less
+  # fallback used when the camera permission is denied or the device lacks a
+  # camera. Pass a real QR token in with
+  # `maestro test -e QR_CODE=<token>` before running.
+  TEST_EMAIL: cem@demo.com
   TEST_PASSWORD: demo123
-  EVENT_TITLE: Demo Yoga Session
+  # Real event title from the demo seed.
+  EVENT_TITLE: Neighborhood Potluck Dinner Under the Stars
   QR_CODE: PASTE_A_VALID_TOKEN_HERE
 ---
 - runFlow: ../auth/login.yaml
 - tapOn:
-    text: "Home"
+    text: "Home(, tab,.*)?"
+- waitForAnimationToEnd:
+    timeout: 4000
+# Tap by literal event title — Maestro doesn't interpolate ${VAR} inside
+# matcher objects.
 - tapOn:
-    text: ${EVENT_TITLE}
+    text: "Neighborhood Potluck Dinner Under the Stars"
 - tapOn:
     text: "Check in"
 - tapOn:
@@ -26,6 +31,7 @@ env:
 - hideKeyboard
 - tapOn:
     text: "Submit"
-- assertVisible:
-    text: "Checked in"
+- extendedWaitUntil:
+    visible:
+      text: "(?i)checked in"
     timeout: 10000

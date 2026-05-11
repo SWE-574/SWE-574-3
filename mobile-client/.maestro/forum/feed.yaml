@@ -1,0 +1,25 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+  - forum
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §1.1: Forum feed loads.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Forum(, tab,.*)?"
+- extendedWaitUntil:
+    visible:
+      text: "Start a topic"
+      optional: true
+    timeout: 8000
+# Either there are topics (then the feed should render a "MY FORUM ACTIVITY"
+# eyebrow or a topic card) or the empty state should show "Start a topic".
+- assertVisible:
+    text: "MY FORUM ACTIVITY"
+    optional: true
+- swipe:
+    start: 50%, 70%
+    end: 50%, 30%

@@ -65,7 +65,7 @@ export async function api(method, path, session, body) {
 export const env = {
   USER_A_EMAIL: process.env.USER_A || 'elif@demo.com',
   USER_A_PASSWORD: process.env.USER_A_PASSWORD || 'demo123',
-  USER_B_EMAIL: process.env.USER_B || 'mert@demo.com',
+  USER_B_EMAIL: process.env.USER_B || 'cem@demo.com',
   USER_B_PASSWORD: process.env.USER_B_PASSWORD || 'demo123',
   BACKEND_URL,
 };

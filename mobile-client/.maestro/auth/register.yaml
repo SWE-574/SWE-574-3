@@ -2,25 +2,41 @@ appId: com.apiary.thehive
 tags:
   - auth
 env:
-  TEST_NEW_EMAIL: maestro+${RANDOM}@thehive.local
+  # Maestro does not interpolate shell ${RANDOM}, so the email + first name
+  # carry a fixed suffix per CI run. Pass a unique one with
+  # `maestro test -e TEST_NEW_EMAIL=foo@bar` if you need to re-run on a dirty
+  # backend where the previous run still owns the address.
+  TEST_NEW_EMAIL: maestro-register@thehive.local
+  TEST_NEW_FIRST_NAME: Maestro
+  TEST_NEW_LAST_NAME: Tester
   TEST_NEW_PASSWORD: TestPass123!
-  TEST_NEW_USERNAME: maestrouser${RANDOM}
 ---
 - launchApp:
     clearState: true
-- tapOn: "Sign in"
-    optional: true
+# Anonymous users land on Home. Reach the register form by going Profile →
+# "Create account" (logged-out Profile state has the Sign in / Create account
+# pair as primary CTAs).
 - tapOn:
-    text: "Sign up"
-- tapOn: "Email"
-- inputText: ${TEST_NEW_EMAIL}
-- tapOn: "Username"
-- inputText: ${TEST_NEW_USERNAME}
-- tapOn: "Password"
-- inputText: ${TEST_NEW_PASSWORD}
-- hideKeyboard
+    text: "Profile(, tab,.*)?"
 - tapOn:
     text: "Create account"
-- assertVisible:
-    text: "Verify"
-    timeout: 10000
+- tapOn: "Email *"
+- inputText: ${TEST_NEW_EMAIL}
+- tapOn: "First name"
+- inputText: ${TEST_NEW_FIRST_NAME}
+- tapOn: "Last name"
+- inputText: ${TEST_NEW_LAST_NAME}
+- tapOn: "Password * (min 8 characters)"
+- inputText: ${TEST_NEW_PASSWORD}
+- hideKeyboard
+# RegisterScreen has the heading "Create account" — only one "Sign up"
+# element (the submit button) is on the screen. The earlier index-1
+# assumption was wrong; tap by plain text.
+- tapOn:
+    text: "Sign up"
+# On successful registration the user is auto-signed-in and lands on Home;
+# the app currently does not gate behind a "verify your email" screen.
+- extendedWaitUntil:
+    visible:
+      text: "Home(, tab,.*)?"
+    timeout: 15000
