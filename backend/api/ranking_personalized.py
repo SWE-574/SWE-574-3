@@ -397,8 +397,16 @@ def score_for_you(services, viewer) -> list[tuple]:
         seconds_since = (now - last_seen) if last_seen else None
         recency = recency_penalty(seconds_since, half_life_hours)
 
+        # When the viewer enabled location, the candidate queryset annotates
+        # `proximity_factor` on each row (1.0 at the viewer's coordinates,
+        # 0.5 at the half-life distance, 0.5 flat for Online services so
+        # they stay proximity-neutral instead of out-ranking nearby
+        # in-person rows). Bake it into the hot_score input so proximity
+        # carries into the personalized blend; without this an Online
+        # service with high tag-overlap beats every nearby in-person card.
+        proximity_factor = float(getattr(svc, 'proximity_factor', 1.0))
         score, signals = blend_for_you_score(
-            hot_score=float(svc.hot_score or 0.0),
+            hot_score=float(svc.hot_score or 0.0) * proximity_factor,
             tag=tag,
             follow=follow,
             cooccur=cooccur,

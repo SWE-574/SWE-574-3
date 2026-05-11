@@ -219,10 +219,19 @@ function activeHandshakeLabel(status: Handshake["status"]): string {
   return activeAgreementParticipantLabel(status);
 }
 
+function isGroupOneTimeOffer(handshake: Handshake): boolean {
+  return (
+    handshake.service_type === "Offer" &&
+    handshake.schedule_type === "One-Time" &&
+    Number(handshake.max_participants ?? 1) > 1
+  );
+}
+
 function toExpectedAgreement(
   handshake: Handshake,
   currentUserName?: string,
   currentUserId?: string,
+  paidOutGroupServiceIds?: Set<string>,
 ): ExpectedAgreement | null {
   const hours = Number(handshake.provisioned_hours ?? 0);
   const isEvent = handshake.service_type === "Event";
@@ -235,6 +244,16 @@ function toExpectedAgreement(
   const isProvider = isEvent
     ? requesterId !== String(currentUserId ?? "")
     : handshake.is_current_user_provider === true;
+  // For one-time group offers the provider receives a single asymmetric
+  // payout on the first completion. Any still-active sibling on a service
+  // where that payout has already fired can no longer change the provider's
+  // balance, so zero out the expected delta and surface "No change" on it.
+  const providerSettled =
+    isProvider &&
+    !isEvent &&
+    isGroupOneTimeOffer(handshake) &&
+    handshake.service_id != null &&
+    paidOutGroupServiceIds?.has(String(handshake.service_id)) === true;
 
   return {
     id: handshake.id,
@@ -250,13 +269,16 @@ function toExpectedAgreement(
     counterpart_name: handshakeCounterpartName(handshake, currentUserName),
     counterpart_avatar_url: handshake.counterpart?.avatar_url ?? null,
     status: handshake.status,
-    reserved_delta: isProvider ? 0 : -hours,
-    expected_delta: isProvider ? hours : 0,
+    reserved_delta: providerSettled ? 0 : isProvider ? 0 : -hours,
+    expected_delta: providerSettled ? 0 : isProvider ? hours : 0,
     note: isEvent
       ? "Event session"
+      : providerSettled
+      ? "Provider already paid — no further change"
       : isProvider
       ? "Time expected after completion"
       : "Already reserved at acceptance",
+    provider_settled: providerSettled,
   };
 }
 
@@ -684,8 +706,26 @@ export default function TimeActivityScreen() {
   const loadAgreements = useCallback(async () => {
     try {
       const res = await listHandshakes({ page: 1, page_size: 100 });
-      const allAgreements = (res.results ?? [])
-        .map((handshake) => toExpectedAgreement(handshake, currentUserName, user?.id))
+      const handshakes = res.results ?? [];
+
+      // One-time group offers pay the provider once on the first completion.
+      // Track services where that payout has already happened so the remaining
+      // active siblings render as "No change" instead of promising further
+      // credit that will never arrive.
+      const paidOutGroupServiceIds = new Set<string>();
+      for (const h of handshakes) {
+        if (
+          h.service_id &&
+          isGroupOneTimeOffer(h) &&
+          h.is_current_user_provider === true &&
+          h.status === "completed"
+        ) {
+          paidOutGroupServiceIds.add(String(h.service_id));
+        }
+      }
+
+      const allAgreements = handshakes
+        .map((handshake) => toExpectedAgreement(handshake, currentUserName, user?.id, paidOutGroupServiceIds))
         .filter((item): item is ExpectedAgreement => item !== null);
       const nextAgreements = allAgreements
         .filter((agreement) => ACTIVE_HANDSHAKE_STATUSES.has(agreement.status as Handshake["status"]));
@@ -1309,19 +1349,22 @@ export default function TimeActivityScreen() {
                         {sectionOpen ? section.items.map((agreement, index) => {
                           const accent = roleAccent(agreement.is_current_user_provider);
                           const isGroupedAgreement = agreement.is_grouped_multi_use === true;
+                          const isProviderSettled = agreement.provider_settled === true;
                           const displayDelta =
                             agreement.expected_delta !== 0
                               ? agreement.expected_delta
                               : agreement.reserved_delta;
-                          const showTimeValue = agreement.service_type !== "Event" || displayDelta !== 0;
+                          const showTimeValue =
+                            isProviderSettled || agreement.service_type !== "Event" || displayDelta !== 0;
                           const valueColor =
                             displayDelta > 0
                               ? colors.GREEN
                               : displayDelta < 0
                                 ? colors.AMBER
                                 : colors.GRAY700;
-                          const valueNote =
-                            agreement.expected_delta !== 0
+                          const valueNote = isProviderSettled
+                            ? "Already settled"
+                            : agreement.expected_delta !== 0
                               ? "After completion"
                               : agreement.reserved_delta !== 0
                                 ? "Reserved now"
@@ -1468,7 +1511,11 @@ export default function TimeActivityScreen() {
                               {showTimeValue ? (
                                 <View style={styles.agreementRight}>
                                   <Text style={[styles.agreementValue, { color: valueColor }]}>
-                                    {displayDelta !== 0 ? formatAmount(displayDelta) : "No hours"}
+                                    {isProviderSettled
+                                      ? "No change"
+                                      : displayDelta !== 0
+                                        ? formatAmount(displayDelta)
+                                        : "No hours"}
                                   </Text>
                                   <Text style={styles.agreementNote}>{valueNote}</Text>
                                 </View>
@@ -1829,6 +1876,7 @@ export default function TimeActivityScreen() {
           {(selectedAgreementGroup?.participants ?? []).map((participant) => {
             const isEventParticipant =
               selectedAgreementGroup?.service_type === "Event" || participant.service_type === "Event";
+            const isParticipantSettled = participant.provider_settled === true;
             const delta = participant.expected_delta !== 0
               ? participant.expected_delta
               : participant.reserved_delta;
@@ -1868,7 +1916,11 @@ export default function TimeActivityScreen() {
                 </View>
                 {!isEventParticipant ? (
                   <Text style={styles.participantValue}>
-                    {delta !== 0 ? formatAmount(delta) : "0h"}
+                    {isParticipantSettled
+                      ? "No change"
+                      : delta !== 0
+                        ? formatAmount(delta)
+                        : "0h"}
                   </Text>
                 ) : null}
               </Pressable>
@@ -1915,9 +1967,6 @@ export default function TimeActivityScreen() {
           {(
             selectedTransactionGroup?.participants ?? []
           ).map((participant) => {
-            const delta = participant.expected_delta !== 0
-              ? participant.expected_delta
-              : participant.reserved_delta;
             const initial = participant.counterpart_name.trim().charAt(0).toUpperCase() || "?";
 
             return (
@@ -1952,9 +2001,6 @@ export default function TimeActivityScreen() {
                     {completedTransactionParticipantLabel()}
                   </Text>
                 </View>
-                <Text style={styles.participantValue}>
-                  {delta !== 0 ? formatAmount(delta) : "0h"}
-                </Text>
               </Pressable>
             );
           })}
