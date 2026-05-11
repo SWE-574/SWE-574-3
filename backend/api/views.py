@@ -2547,6 +2547,17 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
             # Browse's "All" mode opts out of the implicit skills filter so the
             # viewer sees the full active catalog instead of a skill-aware slice.
+            #
+            # CURRENT STATE (2026-05): the frontend Dashboard always sends
+            # `skip_onboarding=true` (see DashboardPage.tsx:544), so the
+            # implicit-skill-filter branch below is unreachable in production.
+            # The code is preserved as opt-in capability — if a future caller
+            # wants a skill-aware feed it just omits the flag. Eventual cleanup
+            # has two natural shapes: (a) invert the default — rename the param
+            # to `prefer_skills=true` so the opt-IN is explicit, or (b) delete
+            # `apply_onboarding_fallback` entirely and the `RANKING_ONBOARDING_*`
+            # settings with it. Not doing it now because the surface is inert
+            # and the cleanup belongs in its own focused PR.
             skip_onboarding_raw = self.request.query_params.get('skip_onboarding', '')
             skip_onboarding = (
                 str(skip_onboarding_raw).strip().lower() in {'1', 'true', 'yes'}
