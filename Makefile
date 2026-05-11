@@ -2,6 +2,7 @@
         setup setup-demo dev dev-all stop reset install migrate makemigrations lint build clean \
         mobile mobile-setup \
         mobile-build-android mobile-build-android-local mobile-build-android-emulator mobile-build-android-emulator-clean mobile-build-android-prod mobile-build-android-prod-clean mobile-build-ios mobile-build-preview \
+        setup-final-presentation \
         db-shell db-time db-time-reset \
         infra-up infra-down infra-reset infra-demo \
         docker-up docker-down docker-logs docker-build docker-reset docker-demo \
@@ -115,6 +116,11 @@ setup-demo: setup ## One-time local setup + seed demo data
 	$(call _log,"Seeding demo data...")
 	@cd backend && DJANGO_SETTINGS_MODULE=hive_project.settings $(PYEXEC) setup_demo.py
 	$(call _ok,"Demo data seeded. Login: elif@demo.com / demo123")
+
+setup-final-presentation: _check_env ## Seed final presentation scenario (run after setup-demo)
+	$(call _log,"Seeding final presentation scenario data...")
+	@cd backend && DJANGO_SETTINGS_MODULE=hive_project.settings $(PYEXEC) setup_final_presentation.py
+	$(call _ok,"Final presentation seed complete. Login: yusuf@demo.com / demo123")
 
 dev: _check_env ## Start local dev: infra + backend (8000) + frontend (5173)
 	@# Scope to LISTEN sockets so we kill the actual server processes only,
