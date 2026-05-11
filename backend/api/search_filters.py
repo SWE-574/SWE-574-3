@@ -13,7 +13,7 @@ from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
 from django.db.models import (
     Q, QuerySet, Case, When, Value, FloatField, Sum, Exists, OuterRef,
-    Subquery,
+    Subquery, F,
 )
 
 
@@ -62,51 +62,114 @@ class SearchStrategy(ABC):
 
 class LocationStrategy(SearchStrategy):
     """
-    Filter services by distance from user location using PostGIS.
+    Apply user location to the queryset.
+
+    Two modes:
+
+    1. Signal-only (lat + lng, no `distance` param). Annotate every row with
+       its distance from the viewer for downstream sorting / proximity_factor
+       weighting in composite_score. NO rows are filtered out -- the smooth
+       proximity decay does the ranking work.
+    2. Hard radius cutoff (lat + lng + `distance`). In-person rows beyond the
+       radius are excluded; online services (location IS NULL) stay visible
+       regardless of slider position.
+
+    The signal-only mode is the default for the YouTube-style Browse layout:
+    enabling location should rank-by-closeness without hiding far cards.
+    The radius cutoff is opt-in via the More-filters slider.
 
     Parameters:
         - lat: User's latitude
         - lng: User's longitude
-        - distance: Maximum distance in kilometers (default: 10)
+        - distance: Optional. Maximum distance in kilometers; when omitted,
+          the queryset is annotated only.
     """
 
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         lat = params.get('lat')
         lng = params.get('lng')
-        distance_km = params.get('distance', 10)
 
-        # Only apply if both lat and lng are provided
         if lat is None or lng is None:
             return queryset
 
         try:
             lat = float(lat)
             lng = float(lng)
-            distance_km = float(distance_km)
         except (ValueError, TypeError):
             return queryset
 
         # Create user location point (lng, lat order for PostGIS)
         user_location = Point(lng, lat, srid=4326)
 
-        # Filter by distance and annotate with calculated distance
-        # Only filter services that have a location set
-        queryset = queryset.filter(
-            location__isnull=False,
-            location__distance_lte=(user_location, D(km=distance_km))
-        ).annotate(
-            distance=Distance('location', user_location)
-        ).order_by('distance')
+        distance_param = params.get('distance')
+        distance_km: float | None = None
+        if distance_param is not None and distance_param != '':
+            try:
+                distance_km = float(distance_param)
+            except (ValueError, TypeError):
+                distance_km = None
 
-        return queryset
+        if distance_km is not None:
+            # Hard radius cutoff. In-person rows beyond `distance_km` drop;
+            # Online services (location IS NULL) stay visible -- otherwise a
+            # viewer with location enabled would lose every Online service the
+            # moment they narrowed the radius.
+            queryset = queryset.filter(
+                Q(location__isnull=True)
+                | Q(location__distance_lte=(user_location, D(km=distance_km)))
+            )
+
+        # Online services (location IS NULL) produce a NULL distance. PostgreSQL
+        # sorts NULLs FIRST under ASC by default, which used to put every Online
+        # row above every in-person row. Force NULLs to the end so the location
+        # filter actually surfaces the closest in-person services first.
+        return queryset.annotate(
+            distance=Distance('location', user_location)
+        ).order_by(F('distance').asc(nulls_last=True))
+
+
+def expand_tag_qids(tag_ids):
+    """Expand a set of Wikidata QIDs into the union of self + parents +
+    siblings, walking the local Tag table only (no Wikidata round-trips).
+
+    The expansion mirrors how viewers think about chip filters: picking
+    "Painting" surfaces Painting plus its peers under "Art" (Sculpture,
+    Drawing, ...) and the parent itself. Children are reached via the
+    `tags__parent_qid__in` clause at the call site, so this helper does
+    not enumerate descendants explicitly.
+
+    Returns a set of QID strings. Empty set if input is empty.
+    """
+    from .models import Tag
+
+    qids = {qid for qid in tag_ids if qid}
+    if not qids:
+        return set()
+
+    parents = set(
+        Tag.objects.filter(id__in=qids)
+        .exclude(parent_qid__isnull=True)
+        .values_list('parent_qid', flat=True)
+    )
+    if parents:
+        siblings = set(
+            Tag.objects.filter(parent_qid__in=parents).values_list('id', flat=True)
+        )
+    else:
+        siblings = set()
+    return qids | parents | siblings
 
 
 class TagStrategy(SearchStrategy):
     """
     Filter services by semantic tags (Wikidata IDs).
 
-    Supports hierarchical matching: a search for a parent tag QID will also
-    find services tagged with child tags (via parent_qid).
+    Hierarchical matching has two directions:
+      - parent -> children: services tagged with anything whose parent_qid
+        equals the requested qid.
+      - sibling expansion: when the requested qid has a parent in the local
+        Tag table, services tagged with peers under the same parent are
+        included too. Picking "Painting" surfaces Sculpture / Drawing.
 
     Parameters:
         - tags: List of tag IDs to filter by
@@ -123,9 +186,13 @@ class TagStrategy(SearchStrategy):
             tag_ids = list(tag_ids) + [single_tag]
 
         if tag_ids:
-            # Direct match OR parent_qid match (hierarchical traversal)
+            # Sibling expansion happens at filter time so the chip strip's
+            # "Painting" pick widens out to "Sculpture" / "Drawing" without
+            # any client-side change. Children are still reached via the
+            # parent_qid clause below.
+            expanded = expand_tag_qids(tag_ids)
             queryset = queryset.filter(
-                Q(tags__id__in=tag_ids) | Q(tags__parent_qid__in=tag_ids)
+                Q(tags__id__in=expanded) | Q(tags__parent_qid__in=expanded)
             ).distinct()
 
         # Entity type filtering
@@ -202,15 +269,62 @@ class TypeStrategy(SearchStrategy):
     Filter services by type (Offer, Need, or Event).
 
     Parameters:
-        - type: 'Offer', 'Need', or 'Event'
+        - type:  'Offer' | 'Need' | 'Event' (single value, legacy)
+        - types: list of valid types, e.g. ['Offer', 'Need'] — used by Browse
+                 when multiple type chips are active.
     """
 
+    VALID = {'Offer', 'Need', 'Event'}
+
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        types_list = [t for t in (params.get('types') or []) if t in self.VALID]
+        if types_list:
+            return queryset.filter(type__in=types_list)
+
         service_type = params.get('type')
-
-        if service_type and service_type in ['Offer', 'Need', 'Event']:
+        if service_type and service_type in self.VALID:
             queryset = queryset.filter(type=service_type)
+        return queryset
 
+
+class LocationTypeStrategy(SearchStrategy):
+    """
+    Filter services by location_type (Online / In-Person).
+
+    Parameters:
+        - location_types: list of values to keep. When empty or both values
+          are present, the filter is a no-op (equivalent to "all").
+    """
+
+    VALID = {'Online', 'In-Person'}
+
+    def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        values = [v for v in (params.get('location_types') or []) if v in self.VALID]
+        if not values or set(values) == self.VALID:
+            return queryset
+        return queryset.filter(location_type__in=values)
+
+
+class ScheduleFilterStrategy(SearchStrategy):
+    """
+    Filter services by schedule_type and/or weekend matching.
+
+    Parameters:
+        - schedule_type: 'One-Time' | 'Recurrent' (optional)
+        - weekend: bool — when true, restrict to services whose
+          schedule_details mention saturday / sunday / weekend.
+    """
+
+    VALID = {'One-Time', 'Recurrent'}
+
+    def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        schedule_type = params.get('schedule_type')
+        if schedule_type in self.VALID:
+            queryset = queryset.filter(schedule_type=schedule_type)
+        if params.get('weekend'):
+            queryset = queryset.filter(
+                schedule_details__iregex=r'(saturday|sunday|weekend)',
+            )
         return queryset
 
 
@@ -307,11 +421,13 @@ class SearchEngine:
     def __init__(self):
         """Initialize with default strategy order"""
         self.strategies: list[SearchStrategy] = [
-            TypeStrategy(),       # Filter by type first (most selective)
-            DateRangeStrategy(),  # Event-only: scheduled_time window
-            TagStrategy(),        # Then by tags
-            TextStrategy(),       # Then by text search
-            LocationStrategy(),   # Location last (adds ordering by distance)
+            TypeStrategy(),             # Filter by type first (most selective)
+            LocationTypeStrategy(),     # Online vs In-Person filter
+            ScheduleFilterStrategy(),   # schedule_type + weekend
+            DateRangeStrategy(),        # Event-only: scheduled_time window
+            TagStrategy(),              # Then by tags
+            TextStrategy(),             # Then by text search
+            LocationStrategy(),         # Location last (adds ordering by distance)
         ]
 
     def search(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:

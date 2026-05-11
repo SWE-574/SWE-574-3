@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -89,6 +91,11 @@ export default function ReportModal({
       animationType="slide"
       onRequestClose={handleClose}
     >
+      <KeyboardAvoidingView
+        style={styles.keyboardRoot}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+      >
       <Pressable style={styles.backdrop} onPress={handleClose}>
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.handle} />
@@ -107,7 +114,11 @@ export default function ReportModal({
             {subtitle}
           </Text>
 
-          <ScrollView style={styles.optionList} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.optionList}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             {options.map((opt) => (
               <Pressable
                 key={opt.value}
@@ -135,47 +146,51 @@ export default function ReportModal({
                 </Text>
               </Pressable>
             ))}
+
+            <TextInput
+              style={styles.descriptionInput}
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Additional details (optional)"
+              placeholderTextColor={colors.GRAY400}
+              multiline
+              maxLength={500}
+              textAlignVertical="top"
+              editable={!submitting}
+            />
+
+            <View style={styles.actions}>
+              <Pressable
+                style={[styles.cancelBtn]}
+                onPress={handleClose}
+                disabled={submitting}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
+                onPress={handleSubmit}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator size="small" color={colors.WHITE} />
+                ) : (
+                  <Text style={styles.submitBtnText}>Submit Report</Text>
+                )}
+              </Pressable>
+            </View>
           </ScrollView>
-
-          <TextInput
-            style={styles.descriptionInput}
-            value={description}
-            onChangeText={setDescription}
-            placeholder="Additional details (optional)"
-            placeholderTextColor={colors.GRAY400}
-            multiline
-            maxLength={500}
-            textAlignVertical="top"
-            editable={!submitting}
-          />
-
-          <View style={styles.actions}>
-            <Pressable
-              style={[styles.cancelBtn]}
-              onPress={handleClose}
-              disabled={submitting}
-            >
-              <Text style={styles.cancelBtnText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
-              onPress={handleSubmit}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <ActivityIndicator size="small" color={colors.WHITE} />
-              ) : (
-                <Text style={styles.submitBtnText}>Submit Report</Text>
-              )}
-            </Pressable>
-          </View>
         </Pressable>
       </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardRoot: {
+    flex: 1,
+  },
   backdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
@@ -186,8 +201,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 20,
-    paddingBottom: 32,
-    paddingTop: 12,
+    paddingBottom: 40,
+    paddingTop: 20,
   },
   handle: {
     width: 36,
@@ -224,13 +239,13 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   optionList: {
-    maxHeight: 260,
-    marginBottom: 14,
+    maxHeight: 360,
+    marginBottom: 0,
   },
   optionRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 11,
+    paddingVertical: 15,
     paddingHorizontal: 12,
     borderRadius: 10,
     borderWidth: 1,
@@ -272,7 +287,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.GRAY200,
     borderRadius: 10,
-    padding: 10,
+    padding: 13,
     fontSize: 14,
     color: colors.GRAY900,
     backgroundColor: colors.GRAY50,
@@ -285,7 +300,7 @@ const styles = StyleSheet.create({
   },
   cancelBtn: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 15,
     borderRadius: 10,
     backgroundColor: colors.GRAY100,
     alignItems: "center",
@@ -297,7 +312,7 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     flex: 2,
-    paddingVertical: 12,
+    paddingVertical: 15,
     borderRadius: 10,
     backgroundColor: colors.RED,
     alignItems: "center",

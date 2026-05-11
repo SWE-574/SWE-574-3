@@ -182,6 +182,16 @@ class TestRegisterCalendarCacheKey:
     level `cache.clear()` would wreck other workers' in-flight state.
     """
 
+    @pytest.fixture(autouse=True)
+    def clear_django_cache(self):
+        # Override the conftest-level autouse fixture for this class only.
+        # CI runs pytest-xdist against a shared Redis DB, where a parallel
+        # worker's `cache.clear()` would nuke this class's tracking set
+        # mid-read-modify-write and surface as a flaky empty-set assertion.
+        # uuid-prefixed user_ids already isolate this class's keys from
+        # other workers, so skipping the global clear is safe.
+        yield
+
     def test_register_two_keys_for_same_user_keeps_both(self):
         import uuid
         from django.core.cache import cache as django_cache

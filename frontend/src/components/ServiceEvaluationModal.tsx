@@ -213,27 +213,30 @@ export default function ServiceEvaluationModal({
       }
     }
 
-    // Upload photos. On failure keep the modal open so the user can adjust and retry.
+    // Upload photos. The evaluation itself has already persisted at this
+    // point, so a photo-upload failure must not block the success path or
+    // strand the user in the modal. Surface the failure as a non-blocking
+    // warning toast and close the modal as if the submission succeeded
+    // (NFR-14d). The user can retry attaching photos later via the
+    // Reviews tab without losing the trait/comment they already submitted.
     if (images.length > 0) {
       try {
         await reputationAPI.attachReviewImages(handshakeId, images)
       } catch (error) {
         const status = (error as { response?: { status?: number } })?.response?.status
         if (status === 413) {
-          toast.error('Photos could not be uploaded because the files are too large. Remove or replace them and try again.')
+          toast.error('Photo upload failed: files are too large. Your evaluation was saved without photos.')
         } else {
-          toast.error('Photo upload failed. Remove the images or try again.')
+          toast.error('Photo upload failed. Your evaluation was saved without photos — you can retry attaching them later.')
         }
-        setSubmitting(false)
-        return
       }
     }
 
     toast.success('Evaluation submitted. Thank you for your feedback!')
     await onSubmitted?.()
     reset()
-    onClose()
     setSubmitting(false)
+    onClose()
   }
 
   return (

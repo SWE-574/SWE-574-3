@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 import {
   createAcceptedOfferExchange,
-  getCurrentBalance,
+  expectBalanceToBe,
   openTimeActivity,
   pickUsersWithBalanceAtLeast,
   switchUser,
@@ -30,8 +30,7 @@ test('FR-07b: time activity keeps available hours separate from reserved accepte
 
   // The requester should see both the reduced available balance and the reserved-hours explanation.
   await switchUser(page, requester)
-  const currentBalance = await getCurrentBalance(page)
-  expect(currentBalance).toBe(startingBalance - 1)
+  await expectBalanceToBe(page, startingBalance - 1)
 
   await openTimeActivity(page)
   await expect(page.getByText('Active Agreements')).toBeVisible({ timeout: 15_000 })

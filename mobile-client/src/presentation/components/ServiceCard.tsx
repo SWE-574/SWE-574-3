@@ -12,6 +12,7 @@ import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import { formatGroupOfferDateTime } from "../../utils/eventUtils";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import SmartPill from "./SmartPill";
 
 function getInitials(firstName: string, lastName: string): string {
   const f = (firstName || "").trim().charAt(0) || "";
@@ -49,7 +50,8 @@ export default function ServiceCard({
     [service.user.first_name, service.user.last_name]
       .filter(Boolean)
       .join(" ") || "Unknown";
-  const isRecurring = service.schedule_type === "Recurrent";
+  const isRecurring =
+    service.type === "Event" && service.schedule_type === "Recurrent";
   const isFixedGroupOffer =
     service.type === "Offer" &&
     service.schedule_type === "One-Time" &&
@@ -147,6 +149,7 @@ export default function ServiceCard({
               <Text style={styles.newcomerBadgeText}>New</Text>
             </View>
           )}
+          <SmartPill service={service} />
         </View>
 
         <Text style={styles.description} numberOfLines={3}>

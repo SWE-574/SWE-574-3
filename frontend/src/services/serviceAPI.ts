@@ -12,15 +12,38 @@ export interface ServiceListParams {
   distance?: number
   search?: string
   type?: 'Offer' | 'Need' | 'Event'
+  // Repeated `type=` keys for multi-select (Browse). Backend honors `type__in`.
+  types?: ('Offer' | 'Need' | 'Event')[]
+  // Repeated `location_type=` keys for Online + In-Person multi-select.
+  location_types?: ('Online' | 'In-Person')[]
+  schedule_type?: 'One-Time' | 'Recurrent'
+  weekend?: boolean
   status?: string
   tags?: string[]
   page?: number
   page_size?: number
   user_id?: string
   explore_only?: boolean
+  exclude_own?: boolean
+  // Browse's "All" mode opts out of the implicit skill-based slice that
+  // `apply_onboarding_fallback` otherwise applies to onboarded viewers.
+  skip_onboarding?: boolean
   // FR-12c — only honored when type='Event'. ISO-8601 dates.
   date_from?: string
   date_to?: string
+}
+
+export interface RankingMeta {
+  phase3_injected_id: string | null
+  phase3_slot_index: number | null
+  exploration_rate: number
+  exploration_fired: boolean
+}
+
+export interface ServiceListPagedResponse {
+  results: Service[]
+  count: number
+  ranking_meta?: RankingMeta | null
 }
 
 export interface ServiceRankingDebugParams {
@@ -32,6 +55,8 @@ export interface ServiceRankingDebugParams {
   lng?: number
   distance?: number
   active_filter?: string
+  phase3_injected_id?: string | null
+  phase3_slot_index?: number | null
 }
 
 type ServiceListResponse = Service[] | { results: Service[]; count?: number }
@@ -78,12 +103,20 @@ export const serviceAPI = {
     if (params?.distance != null) queryParams.set('distance', String(params.distance))
     if (params?.search) queryParams.set('search', params.search)
     if (params?.type) queryParams.set('type', params.type)
+    if (params?.types?.length) params.types.forEach((t) => queryParams.append('type', t))
+    if (params?.location_types?.length) {
+      params.location_types.forEach((v) => queryParams.append('location_type', v))
+    }
+    if (params?.schedule_type) queryParams.set('schedule_type', params.schedule_type)
+    if (params?.weekend) queryParams.set('weekend', 'true')
     if (params?.status) queryParams.set('status', params.status)
     if (params?.tags?.length) params.tags.forEach(t => queryParams.append('tags', t))
     if (params?.page) queryParams.set('page', String(params.page))
     if (params?.page_size) queryParams.set('page_size', String(params.page_size))
     if (params?.user_id) queryParams.set('user', params.user_id)
     if (params?.explore_only) queryParams.set('explore_only', 'true')
+    if (params?.exclude_own) queryParams.set('exclude_own', 'true')
+    if (params?.skip_onboarding) queryParams.set('skip_onboarding', 'true')
     if (params?.date_from) queryParams.set('date_from', params.date_from)
     if (params?.date_to) queryParams.set('date_to', params.date_to)
 
@@ -93,6 +126,52 @@ export const serviceAPI = {
     })
     const data = res.data
     return Array.isArray(data) ? data : (data.results ?? [])
+  },
+
+  // Paged variant — returns the DRF page envelope so callers (Browse) can
+  // render a numbered pager. Same query params as `list()`.
+  listPaged: async (
+    params?: ServiceListParams,
+    signal?: AbortSignal,
+  ): Promise<ServiceListPagedResponse> => {
+    const queryParams = new URLSearchParams()
+    if (params?.sort) queryParams.set('sort', params.sort)
+    if (params?.lat != null) queryParams.set('lat', String(params.lat))
+    if (params?.lng != null) queryParams.set('lng', String(params.lng))
+    if (params?.distance != null) queryParams.set('distance', String(params.distance))
+    if (params?.search) queryParams.set('search', params.search)
+    if (params?.type) queryParams.set('type', params.type)
+    if (params?.types?.length) params.types.forEach((t) => queryParams.append('type', t))
+    if (params?.location_types?.length) {
+      params.location_types.forEach((v) => queryParams.append('location_type', v))
+    }
+    if (params?.schedule_type) queryParams.set('schedule_type', params.schedule_type)
+    if (params?.weekend) queryParams.set('weekend', 'true')
+    if (params?.status) queryParams.set('status', params.status)
+    if (params?.tags?.length) params.tags.forEach((t) => queryParams.append('tags', t))
+    if (params?.page) queryParams.set('page', String(params.page))
+    if (params?.page_size) queryParams.set('page_size', String(params.page_size))
+    if (params?.user_id) queryParams.set('user', params.user_id)
+    if (params?.explore_only) queryParams.set('explore_only', 'true')
+    if (params?.exclude_own) queryParams.set('exclude_own', 'true')
+    if (params?.skip_onboarding) queryParams.set('skip_onboarding', 'true')
+    if (params?.date_from) queryParams.set('date_from', params.date_from)
+    if (params?.date_to) queryParams.set('date_to', params.date_to)
+
+    const res = await apiClient.get<ServiceListResponse>('/services/', {
+      params: queryParams,
+      signal,
+    })
+    const data = res.data
+    if (Array.isArray(data)) {
+      return { results: data, count: data.length, ranking_meta: null }
+    }
+    const rankingMeta = (data as { ranking_meta?: RankingMeta | null }).ranking_meta
+    return {
+      results: data.results ?? [],
+      count: data.count ?? (data.results?.length ?? 0),
+      ranking_meta: rankingMeta ?? null,
+    }
   },
 
   get: async (id: string, signal?: AbortSignal): Promise<Service> => {
@@ -143,20 +222,6 @@ export const serviceAPI = {
     )
     const data = res.data
     return Array.isArray(data) ? data : (data.results ?? [])
-  },
-
-  setEndorsed: async (
-    serviceId: string,
-    endorsed: boolean,
-  ): Promise<{ is_endorsed: boolean; endorsement_count: number }> => {
-    const res = endorsed
-      ? await apiClient.post<{ is_endorsed: boolean; endorsement_count: number }>(
-          `/services/${serviceId}/endorse/`,
-        )
-      : await apiClient.delete<{ is_endorsed: boolean; endorsement_count: number }>(
-          `/services/${serviceId}/endorse/`,
-        )
-    return res.data
   },
 
   report: async (

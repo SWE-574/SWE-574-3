@@ -1,7 +1,17 @@
 #!/usr/bin/env python
 """
 Enhanced demo setup script for The Hive
-Creates authentic demo data with Turkish users, realistic services, and proper system workflows
+Creates authentic demo data with Turkish users, realistic services, and proper system workflows.
+
+Final demo balances (after all handshakes settle):
+
+  - Cem (cem@demo.com)       : 5.00h  ← pinned sub-10h fixture for FR-07i
+  - Other Turkish demo users : varies after handshakes settle
+  - Admin / superadmin       : 10.00h
+
+Cem is the canonical low-balance fixture: end-to-end flows that exercise
+"insufficient TimeBank balance" paths look him up explicitly so the spec
+is independent of how the wider seed evolves.
 """
 import os
 import django
@@ -11,7 +21,7 @@ if __name__ == "__main__":
     django.setup()
 
 from api.models import (
-    ChatMessage, Handshake, Notification, ReputationRep, Comment,
+    ChatMessage, ChatRoom, Handshake, Notification, ReputationRep, Comment,
     Service, Tag, User, UserBadge, ForumCategory, ForumTopic, ForumPost,
     Report, AdminAuditLog, ServiceMedia, PublicChatMessage, TransactionHistory,
     ServiceGroupChatMessage, NegativeRep, UserFollow,
@@ -1829,9 +1839,10 @@ def complete_seeded_handshake(handshake, *, completed_days_ago):
 
 
 def add_public_chat_messages(service, messages, base_time):
-    room = getattr(service, 'chat_room', None)
-    if room is None:
-        raise RuntimeError(f"Missing public chat room for service '{service.title}'")
+    room, _ = ChatRoom.objects.get_or_create(
+        related_service=service,
+        defaults={'name': f"Discussion: {service.title}", 'type': 'public'},
+    )
     for index, (sender, body) in enumerate(messages):
         PublicChatMessage.objects.create(
             room=room,
@@ -2421,6 +2432,71 @@ public_chat_scenarios = [
             (ayse, "Can we bring a recipe even if it is written from memory and not exact?"),
             (yasemin, "Please do. Those are usually the best stories."),
             (selin, "I am already looking forward to hearing everyone's family context around the recipes."),
+        ],
+    ),
+    (
+        selin_reading_event,
+        timezone.now() - timedelta(days=3),
+        [
+            (elif_user, "Should we read the book beforehand or just come and listen?"),
+            (selin, "Come as you are. We read together in the session."),
+            (cem, "Looking forward to it. I have been meaning to slow down with books again."),
+            (murat, "Same here. It feels rare to just sit and read with others."),
+        ],
+    ),
+    (
+        emre_walk_event,
+        timezone.now() - timedelta(days=2),
+        [
+            (can, "What is the meeting point exactly?"),
+            (emre, "We start at the Karaköy ferry dock, north exit. Hard to miss."),
+            (zeynep, "Should we bring anything? Water, snacks?"),
+            (emre, "Just comfortable shoes and curiosity. I will have a printed map."),
+        ],
+    ),
+    (
+        elif_photo_event,
+        timezone.now() - timedelta(days=4),
+        [
+            (cem, "Is this suitable for complete beginners with a camera?"),
+            (elif_user, "Absolutely. We focus on seeing, not technique."),
+            (ayse, "Can we use phones? I don't own a proper camera."),
+            (elif_user, "Phones are perfect. Some of my favorite shots are from a phone."),
+            (mehmet, "Really looking forward to this one."),
+        ],
+    ),
+    (
+        levent_music_event,
+        timezone.now() - timedelta(days=6),
+        [
+            (elif_user, "Do we need to prepare a song or just show up?"),
+            (levent, "Just show up. We will find something together."),
+            (yasemin, "I have not sung in front of anyone since school. A bit nervous."),
+            (levent, "That is exactly the spirit. No pressure, just neighbors."),
+            (burak, "Count me in. I will bring my guitar if that helps."),
+        ],
+    ),
+    (
+        yasemin_potluck_event,
+        timezone.now() - timedelta(days=1),
+        [
+            (elif_user, "Should we coordinate dishes so we don't all bring the same thing?"),
+            (yasemin, "Great idea. I will make a shared list in the chat. Who is bringing what?"),
+            (selin, "I can do a cold mezze plate."),
+            (mehmet, "I'll bring something from my neighborhood bakery."),
+            (levent, "I have a great lentil soup recipe I've been wanting to share."),
+            (ayse, "Perfect. I will bring dessert."),
+        ],
+    ),
+    (
+        elif_mending,
+        timezone.now() - timedelta(days=2),
+        [
+            (ayse, "I have a jacket with a broken zipper. Is that the kind of thing we can fix?"),
+            (elif_user, "Zippers are one of our specialties. Bring it along."),
+            (yasemin, "What about jeans with a worn knee? Is patching in scope?"),
+            (elif_user, "Definitely. Visible mending is actually quite beautiful when done well."),
+            (selin, "I love this. Fixing things instead of throwing them away."),
         ],
     ),
     (
@@ -3255,6 +3331,15 @@ add_group_chat_messages(demo_fest_done, [
     (zeynep, "Get well soon Cem, health comes first."),
 ], now - timedelta(days=4))
 print(f"  Created: {demo_fest_done.title} (completed, Ayse+Burak attended, Cem no-show, evaluation window open)")
+
+# FR-07i: pin Cem's final balance below the 10-hour threshold so E2E flows
+# that need a sub-10h demo account ("can't afford this Need" scenarios,
+# atomic-rollback checks) always have a deterministic fixture. Done after
+# every handshake-driven balance change so it isn't undone downstream.
+cem.refresh_from_db(fields=['timebank_balance'])
+cem.timebank_balance = Decimal('5.00')
+cem.save(update_fields=['timebank_balance'])
+print(f"  Pinned: Cem's TimeBank balance to 5.00h (FR-07i fixture)")
 
 print("\n" + "=" * 60)
 print("Demo setup complete!")

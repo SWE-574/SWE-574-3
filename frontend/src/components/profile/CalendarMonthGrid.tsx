@@ -193,29 +193,30 @@ const CalendarMonthGrid = ({
         </Flex>
       </Flex>
 
-      {/* Day of week labels */}
-      <Grid
-        templateColumns="repeat(7, 1fr)"
-        mb={2}
-        role="row"
-        aria-label="Day of week headers"
-      >
-        {DAY_LABELS.map((d) => (
-          <Box
-            key={d}
-            role="columnheader"
-            textAlign="center"
-            py="6px"
-          >
-            <Text fontSize="12px" fontWeight={800} color={GRAY400} letterSpacing="0.05em">
-              {d}
-            </Text>
-          </Box>
-        ))}
-      </Grid>
-
-      {/* Month grid */}
+      {/* Month grid — header row + week rows must live under one role="grid"
+          parent for `aria-required-parent` (axe critical) to pass. */}
       <Box role="grid" aria-label={format(currentMonth, 'MMMM yyyy')} ref={gridRef}>
+        {/* Day of week labels */}
+        <Grid
+          templateColumns="repeat(7, 1fr)"
+          mb={2}
+          role="row"
+          aria-label="Day of week headers"
+        >
+          {DAY_LABELS.map((d) => (
+            <Box
+              key={d}
+              role="columnheader"
+              textAlign="center"
+              py="6px"
+            >
+              <Text fontSize="12px" fontWeight={800} color={GRAY400} letterSpacing="0.05em">
+                {d}
+              </Text>
+            </Box>
+          ))}
+        </Grid>
+
         {weeks.map((week, wi) => (
           <Grid key={wi} templateColumns="repeat(7, 1fr)" role="row">
             {week.map((cell) => {

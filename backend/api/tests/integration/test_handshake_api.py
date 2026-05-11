@@ -436,26 +436,109 @@ class TestHandshakeViewSet:
             provider_initiated=True,
             requester_initiated=True
         )
-        
+
         client = AuthenticatedAPIClient()
         client.authenticate_user(provider)
-        
+
         response = client.post(f'/api/handshakes/{handshake.id}/confirm/')
         assert_api_response(response, 200)
-        
+
         handshake.refresh_from_db()
         assert handshake.provider_confirmed_complete is True
-        
+
         client.authenticate_user(requester)
         response = client.post(f'/api/handshakes/{handshake.id}/confirm/')
         assert_api_response(response, 200)
-        
+
         handshake.refresh_from_db()
         assert handshake.status == 'completed'
         assert handshake.receiver_confirmed_complete is True
-        
+
         provider.refresh_from_db()
         assert provider.timebank_balance > Decimal('5.00')
+
+    def test_group_offer_settles_provider_on_first_completion(self):
+        """End-to-end coverage for the asymmetric group-offer settlement.
+
+        Pays the provider on the FIRST completion, not the last (sgunes
+        review). Settlement is idempotent: completing handshake2 must not
+        produce a second transfer. Each receiver pays per seat (escrowed at
+        acceptance) and is not refunded when their own handshake completes —
+        the surplus is the documented system sink.
+        """
+        provider = UserFactory(timebank_balance=Decimal('0.00'))
+        receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('3.00'),
+            schedule_type='One-Time',
+            max_participants=2,
+        )
+        handshake1 = HandshakeFactory(
+            service=service, requester=receiver1, status='accepted',
+            provisioned_hours=Decimal('3.00'),
+            provider_initiated=True, requester_initiated=True,
+        )
+        handshake2 = HandshakeFactory(
+            service=service, requester=receiver2, status='accepted',
+            provisioned_hours=Decimal('3.00'),
+            provider_initiated=True, requester_initiated=True,
+        )
+
+        # Receivers pay upfront — emulate the provisioning that happens at
+        # approval time for accepted handshakes.
+        from api.utils import provision_timebank
+        provision_timebank(handshake1)
+        provision_timebank(handshake2)
+        receiver1.refresh_from_db()
+        receiver2.refresh_from_db()
+        assert receiver1.timebank_balance == Decimal('2.00')
+        assert receiver2.timebank_balance == Decimal('2.00')
+
+        client = AuthenticatedAPIClient()
+
+        # Both sides confirm handshake1 — provider settles on this completion.
+        client.authenticate_user(provider)
+        assert_api_response(client.post(f'/api/handshakes/{handshake1.id}/confirm/'), 200)
+        client.authenticate_user(receiver1)
+        assert_api_response(client.post(f'/api/handshakes/{handshake1.id}/confirm/'), 200)
+
+        handshake1.refresh_from_db()
+        provider.refresh_from_db()
+        assert handshake1.status == 'completed'
+        assert provider.timebank_balance == Decimal('3.00'), (
+            'Group offer must pay the provider on the first completion, not the last'
+        )
+        # The single transfer row already exists by this point.
+        assert TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).count() == 1
+
+        # Both sides confirm handshake2 — settlement must be idempotent.
+        client.authenticate_user(provider)
+        assert_api_response(client.post(f'/api/handshakes/{handshake2.id}/confirm/'), 200)
+        client.authenticate_user(receiver2)
+        assert_api_response(client.post(f'/api/handshakes/{handshake2.id}/confirm/'), 200)
+
+        handshake2.refresh_from_db()
+        provider.refresh_from_db()
+        receiver1.refresh_from_db()
+        receiver2.refresh_from_db()
+
+        assert handshake2.status == 'completed'
+        # Provider earns once; receivers are not refunded (system sink).
+        assert provider.timebank_balance == Decimal('3.00')
+        assert receiver1.timebank_balance == Decimal('2.00')
+        assert receiver2.timebank_balance == Decimal('2.00')
+        assert TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).count() == 1
     
     def test_request_and_approve_cancellation(self):
         """Accepted Offer/Need handshakes require a mutual cancellation approval."""
@@ -1413,7 +1496,7 @@ class TestMarkAttendedAndCompleteEvent:
     # complete-event
     # ------------------------------------------------------------------ #
 
-    def test_complete_event_moves_accepted_and_checked_in_to_no_show(self):
+    def test_complete_event_no_show_only_for_checked_in(self):
         organizer = UserFactory()
         p_accepted = UserFactory()
         p_checked_in = UserFactory()
@@ -1454,8 +1537,8 @@ class TestMarkAttendedAndCompleteEvent:
         h_checked_in.refresh_from_db()
         h_attended.refresh_from_db()
 
-        assert h_accepted.status == 'no_show'
-        assert h_checked_in.status == 'no_show'
+        assert h_accepted.status == 'accepted', 'accepted (never checked in) participants stay accepted — no penalty'
+        assert h_checked_in.status == 'no_show', 'checked_in participants who were not marked attended become no_show'
         assert h_attended.status == 'attended', 'attended participants must not be downgraded'
 
     def test_attended_participants_not_downgraded_during_completion(self):

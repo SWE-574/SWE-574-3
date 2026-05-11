@@ -48,6 +48,8 @@ test('FR-13i: pending requests do not consume capacity, but accepted capacity bl
   await acceptPendingHandshakeViaApi(page, {
     serviceId: created.id,
     requesterName: requesterOne.name,
+    owner,
+    requester: requesterOne,
   })
 
   await switchUser(page, requesterTwo)

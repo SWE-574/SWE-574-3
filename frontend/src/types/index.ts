@@ -165,6 +165,7 @@ export interface ServiceFormData {
   max_participants: number
   schedule_type: 'One-Time' | 'Recurrent'
   schedule_details?: string
+  recurrence_interval_days?: number | null
   tags?: string[]
   tag_names?: string[]
   scheduled_time?: string | null
@@ -195,6 +196,7 @@ export interface Service {
   participant_count: number
   schedule_type: 'One-Time' | 'Recurrent'
   schedule_details?: string
+  recurrence_interval_days?: number | null
   tags: Tag[]
   media?: ServiceMedia[]
   // Backend returns `user`; `provider` kept for compatibility
@@ -210,10 +212,7 @@ export interface Service {
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
   is_saved?: boolean
-  is_endorsed?: boolean
-  endorsement_count?: number
   is_dismissed?: boolean
-  is_endorsable?: boolean
   source?: 'tag_match' | 'explore_topup' | 'for_you' | 'explore' | null
   for_you_signals?: ForYouSignals | null
   explore_pool?: 'cold_start' | 'undershown_quality' | 'stale_recurring' | null
@@ -222,6 +221,10 @@ export interface Service {
   // consume these directly instead of re-deriving the date math (#267).
   edit_locked?: boolean
   edit_lock_reason?: string | null
+  // NFR-05d: optimistic-lock counter. Echo this back in the PATCH body so
+  // the server can reject stale-version writes with 409 instead of
+  // silently overwriting a concurrent owner edit.
+  version?: number
 }
 
 export interface ForYouSignals {
@@ -230,7 +233,6 @@ export interface ForYouSignals {
   cooccur: number
   recency_penalty: number
   engagement?: number
-  dismissed_similarity?: number
 }
 
 export interface EventEvaluationSummary {
@@ -264,30 +266,126 @@ export interface ServiceMedia {
   order?: number
 }
 
-export interface RecommendationDebugNode {
+export interface FeaturedServiceUser {
   id: string
-  label: string
-  tone: 'positive' | 'negative' | 'neutral'
+  first_name: string
+  last_name: string
+  avatar_url: string | null
 }
 
-export interface RecommendationDebugLink {
-  source: string
-  target: string
-  value: number
-  tone: 'positive' | 'negative' | 'neutral'
+export interface FeaturedServiceTag {
+  id: string
+  name: string
+}
+
+export interface FeaturedService {
+  id: string
+  title: string
+  type: 'Offer' | 'Need' | 'Event'
+  user: FeaturedServiceUser
+  tags: FeaturedServiceTag[]
+  participant_count: number
+  max_participants: number
+  location_area: string | null
+  created_at: string
+  // Only populated on the friends slice.
+  friend_count?: number
+  friend_names?: string[]
+}
+
+export interface FeaturedProvider {
+  id: string
+  first_name: string
+  last_name: string
+  avatar_url: string | null
+  completed_count: number
+  positive_rep_count: number
+}
+
+export interface FeaturedResponse {
+  trending: FeaturedService[]
+  friends: FeaturedService[]
+  top_providers: FeaturedProvider[]
+}
+
+export interface FeaturedChip {
+  qid: string
+  label: string
+  count: number
+}
+
+export interface FeaturedChipsResponse {
+  chips: FeaturedChip[]
 }
 
 export interface RecommendationDebugBreakdown {
   positive_count: number
   negative_count: number
   comment_count: number
-  numerator: number
-  age_hours: number
-  denominator: number
-  raw_hot_score: number
   capacity_ratio: number | null
   capacity_boost_applied: boolean
   social_reason: string
+}
+
+export type RecommendationDebugSortMode = 'composite' | 'chronological' | 'explore_only'
+
+export interface RecommendationDebugPhase1 {
+  active_filter: string
+  sort_mode: RecommendationDebugSortMode
+  client_reorder: boolean
+  distance_km: number | null
+  search_score: number
+  is_pinned: boolean
+  service_type: 'Offer' | 'Need' | 'Event'
+  location_type: 'In-Person' | 'Online'
+}
+
+export interface RecommendationDebugPhase2B {
+  hot_score: number
+  recomputed_hot_score: number
+  proximity_factor: number
+  proximity_half_life_km: number
+  distance_km: number | null
+  social_boost: number
+  weighted_social_boost: number
+  social_reason: string
+  composite_score: number
+}
+
+export interface RecommendationDebugSortNeighbour {
+  position: number
+  id: string
+  title: string
+  is_pinned: boolean
+  composite_score: number
+  created_at: string
+  is_selected: boolean
+}
+
+export interface RecommendationDebugSort {
+  sort_key: string
+  sort_mode: RecommendationDebugSortMode
+  this_card_key: {
+    is_pinned: boolean
+    composite_score: number
+    created_at: string
+  }
+  neighbours: RecommendationDebugSortNeighbour[]
+  pinned_count_in_list: number
+}
+
+export type RecommendationDebugDiagnosisClass =
+  | 'explore'
+  | 'trust'
+  | 'proximity'
+  | 'pin'
+  | 'tie'
+  | 'chronological'
+  | 'neutral'
+
+export interface RecommendationDebugDiagnosis {
+  class: RecommendationDebugDiagnosisClass
+  message: string
 }
 
 export interface RecommendationDebugFactorsService {
@@ -336,6 +434,9 @@ export interface RecommendationDebugPhase3 {
   cold_start_threshold: number
   undershown_quality_threshold: number
   undershown_stale_days: number
+  injected_on_this_request: boolean
+  injected_card_id: string | null
+  injected_slot_index: number | null
 }
 
 export interface RecommendationDebugSelectedService {
@@ -356,14 +457,14 @@ export interface RecommendationDebugSelectedService {
   participant_count: number
   max_participants: number
   factors: RecommendationDebugFactors
+  phase1: RecommendationDebugPhase1
+  phase2b: RecommendationDebugPhase2B
   phase3: RecommendationDebugPhase3
+  sort: RecommendationDebugSort
+  diagnosis: RecommendationDebugDiagnosis
   breakdown: RecommendationDebugBreakdown
   formula_lines: string[]
   notes: string[]
-  sankey: {
-    nodes: RecommendationDebugNode[]
-    links: RecommendationDebugLink[]
-  }
 }
 
 export interface RecommendationDebugResponse {
@@ -415,6 +516,7 @@ export interface Handshake {
   updated_at: string
   dispute_reason?: string
   notes?: string
+  cancellation_reason?: string
 }
 
 // ─── Chat & Message Types ─────────────────────────────────────────────────────

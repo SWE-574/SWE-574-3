@@ -1,6 +1,6 @@
 import React from 'react'
-import { Box, Flex, Grid, Text } from '@chakra-ui/react'
-import { FiCamera, FiClock, FiEdit2, FiFlag, FiMapPin, FiMessageSquare, FiStar } from 'react-icons/fi'
+import { Box, Flex, Grid, Spinner, Text } from '@chakra-ui/react'
+import { FiCamera, FiCheckCircle, FiClock, FiEdit2, FiMapPin, FiStar, FiUserPlus } from 'react-icons/fi'
 import { Link } from 'react-router-dom'
 import type { User, BadgeDetail } from '@/types'
 import HeroSurface from '@/components/ui/HeroSurface'
@@ -53,18 +53,19 @@ type Props = {
   compact?: boolean
   featuredBadges?: BadgeDetail[]
   onEditClick?: () => void
-  onMessageClick?: () => void
-  onReportClick?: () => void
   onAvatarClick?: () => void
   onBadgePickerOpen?: () => void
   followStats?: { followers: number; following: number }
   onFollowersClick?: () => void
   onFollowingClick?: () => void
-  reputationScore?: number
   completedExchanges?: number
   /** @deprecated Time balance is no longer shown in the hero — shown in sidebar instead */
   timeBalance?: number
   activeServicesCount?: number
+  /** Public profile: Follow / Unfollow beside the name */
+  onFollowPress?: () => void
+  isFollowing?: boolean
+  followActionLoading?: boolean
 }
 
 // ── Stat tile ────────────────────────────────────────────────────────────────────
@@ -112,8 +113,8 @@ function CommunityStatValue({
   if (followers == null && following == null) return '—'
 
   const items = [
-    { label: 'Followers', value: followers ?? 0, onClick: onFollowersClick },
-    { label: 'Following', value: following ?? 0, onClick: onFollowingClick },
+    { label: 'Followers', value: followers ?? 0, onClick: onFollowersClick, title: 'View followers' },
+    { label: 'Following', value: following ?? 0, onClick: onFollowingClick, title: 'View following' },
   ]
 
   return (
@@ -123,6 +124,8 @@ function CommunityStatValue({
           key={item.label}
           as="button"
           onClick={item.onClick}
+          title={item.onClick ? item.title : undefined}
+          aria-label={item.onClick ? item.title : undefined}
           textAlign="left"
           style={{
             background: 'transparent',
@@ -150,36 +153,46 @@ function HeroBtn({
   icon,
   children,
   primary = false,
+  loading = false,
+  'aria-label': ariaLabel,
 }: {
   onClick?: () => void
   icon: React.ReactNode
   children: React.ReactNode
   primary?: boolean
+  loading?: boolean
+  'aria-label'?: string
 }) {
+  const busy = Boolean(loading)
   return (
-    <Box
-      as="button"
-      onClick={onClick}
-      display="inline-flex"
-      alignItems="center"
-      gap="5px"
-      px="12px"
-      py="6px"
-      borderRadius="999px"
-      fontSize="11px"
-      fontWeight={700}
+    <button
+      type="button"
+      onClick={busy ? undefined : onClick}
+      disabled={busy}
+      aria-busy={busy}
+      aria-label={ariaLabel}
       style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '5px',
+        padding: '6px 12px',
+        borderRadius: '999px',
+        fontSize: '11px',
+        fontWeight: 700,
+        flexShrink: 0,
+        fontFamily: 'inherit',
         background: primary ? WHITE : 'rgba(255,255,255,0.2)',
         border: primary ? 'none' : '1px solid rgba(255,255,255,0.35)',
         color: primary ? GREEN : WHITE,
-        cursor: 'pointer',
+        cursor: busy ? 'wait' : 'pointer',
         backdropFilter: 'blur(4px)',
         transition: 'background 0.12s',
+        opacity: busy ? 0.88 : 1,
       }}
     >
-      {icon}
+      {busy ? <Spinner size="sm" color={primary ? GREEN : WHITE} /> : icon}
       {children}
-    </Box>
+    </button>
   )
 }
 
@@ -190,16 +203,16 @@ const ProfileHero = ({
   compact = false,
   featuredBadges = [],
   onEditClick,
-  onMessageClick,
-  onReportClick,
   onAvatarClick,
   onBadgePickerOpen,
   followStats,
   onFollowersClick,
   onFollowingClick,
-  reputationScore,
   completedExchanges,
   activeServicesCount,
+  onFollowPress,
+  isFollowing = false,
+  followActionLoading = false,
 }: Props) => {
   const displayName = `${user.first_name} ${user.last_name}`.trim() || user.email
   const initials = getInitials(user.first_name, user.last_name, user.email)
@@ -325,16 +338,46 @@ const ProfileHero = ({
             )}
           </Box>
 
-          {/* Name */}
-          <Text
-            fontSize={compact ? { base: '32px', md: '38px' } : { base: '34px', md: '40px' }}
-            fontWeight={900}
-            lineHeight={1}
+          {/* Name (+ Follow / Unfollow): inline — button starts right after name, single-line name + ellipsis when tight */}
+          <Flex
+            align="center"
+            justify="flex-start"
+            gap={2}
+            flexWrap="nowrap"
             mb={1.5}
-            style={{ color: WHITE }}
+            minW={0}
+            maxW="100%"
           >
-            {displayName}
-          </Text>
+            <Text
+              minW={0}
+              flexShrink={1}
+              lineClamp={1}
+              title={displayName}
+              fontSize={compact ? { base: '32px', md: '38px' } : { base: '34px', md: '40px' }}
+              fontWeight={900}
+              lineHeight={1.15}
+              style={{ color: WHITE }}
+            >
+              {displayName}
+            </Text>
+            {mode === 'public' && onFollowPress && (
+              <HeroBtn
+                primary={!isFollowing}
+                loading={followActionLoading}
+                aria-label={isFollowing ? 'Unfollow' : 'Follow'}
+                icon={
+                  isFollowing ? (
+                    <FiCheckCircle size={13} />
+                  ) : (
+                    <FiUserPlus size={13} />
+                  )
+                }
+                onClick={onFollowPress}
+              >
+                {isFollowing ? 'Unfollow' : 'Follow'}
+              </HeroBtn>
+            )}
+          </Flex>
 
           {/* Location meta strip */}
           {heroLocation && (
@@ -359,22 +402,13 @@ const ProfileHero = ({
           )}
 
           {/* Action row */}
-          <Flex gap={2} flexWrap="wrap">
-            {mode === 'own' ? (
+          {mode === 'own' && (
+            <Flex gap={2} flexWrap="wrap">
               <HeroBtn primary icon={<FiEdit2 size={13} />} onClick={onEditClick}>
                 Edit profile
               </HeroBtn>
-            ) : (
-              <>
-                <HeroBtn primary icon={<FiMessageSquare size={13} />} onClick={onMessageClick}>
-                  Message
-                </HeroBtn>
-                <HeroBtn icon={<FiFlag size={13} />} onClick={onReportClick}>
-                  Report
-                </HeroBtn>
-              </>
-            )}
-          </Flex>
+            </Flex>
+          )}
         </Box>
 
         {/* ── Stats strip ───────────────────────────────── */}
@@ -429,56 +463,45 @@ const ProfileHero = ({
                   label="Karma"
                   value={user.karma_score != null ? user.karma_score : '—'}
                 />
-                <StatTile
-                  label="Reputation"
-                  value={
-                    reputationScore != null
-                      ? (
-                        <Flex align="center" gap="4px">
-                          <FiStar size={16} style={{ color: '#FCD34D' }} />
-                          {reputationScore.toFixed(1)}
-                        </Flex>
-                      )
-                      : '—'
-                  }
-                />
+                <StatTile label="Member since" value={memberSince} />
                 <StatTile
                   label="Community"
                   value={<CommunityStatValue followers={followers} following={following} onFollowersClick={onFollowersClick} onFollowingClick={onFollowingClick} />}
                 />
-                <StatTile label="Member since" value={memberSince} />
               </>
             )}
           </Grid>
 
-          {/* View Time Activity link */}
-          <Box mb={2}>
-            <Link
-              to="/transaction-history"
-              style={{ textDecoration: 'none' }}
-            >
-              <Flex
-                align="center"
-                gap="5px"
-                display="inline-flex"
-                px="10px"
-                py="5px"
-                borderRadius="999px"
-                fontSize="11px"
-                fontWeight={600}
-                style={{
-                  background: 'rgba(255,255,255,0.15)',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  color: WHITE,
-                  cursor: 'pointer',
-                  backdropFilter: 'blur(4px)',
-                }}
+          {/* View Time Activity is only for own profile */}
+          {mode === 'own' && (
+            <Box mb={2}>
+              <Link
+                to="/transaction-history"
+                style={{ textDecoration: 'none' }}
               >
-                <FiClock size={11} />
-                View Time Activity →
-              </Flex>
-            </Link>
-          </Box>
+                <Flex
+                  align="center"
+                  gap="5px"
+                  display="inline-flex"
+                  px="10px"
+                  py="5px"
+                  borderRadius="999px"
+                  fontSize="11px"
+                  fontWeight={600}
+                  style={{
+                    background: 'rgba(255,255,255,0.15)',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    color: WHITE,
+                    cursor: 'pointer',
+                    backdropFilter: 'blur(4px)',
+                  }}
+                >
+                  <FiClock size={11} />
+                  View Time Activity →
+                </Flex>
+              </Link>
+            </Box>
+          )}
 
         </Box>
       </Grid>

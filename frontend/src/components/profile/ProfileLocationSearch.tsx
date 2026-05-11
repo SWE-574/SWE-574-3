@@ -4,7 +4,7 @@ import { FiCheckCircle, FiSearch, FiX } from 'react-icons/fi'
 import { searchLocations } from '@/utils/location'
 import {
   GRAY200, GRAY400, GRAY500, GRAY700, GRAY800,
-  GREEN, WHITE,
+  GREEN, RED, WHITE,
 } from '@/theme/tokens'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined
@@ -18,6 +18,7 @@ type Props = {
   label?: string
   placeholder?: string
   helperText?: string
+  isInvalid?: boolean
 }
 
 function formatCityDistrict(item: LocationSuggestion): string {
@@ -43,6 +44,7 @@ export default function ProfileLocationSearch({
   label = 'City / Location',
   placeholder = 'Search address, district, or city',
   helperText,
+  isInvalid = false,
 }: Props) {
   const [query, setQuery] = useState(value)
   const [results, setResults] = useState<LocationSuggestion[]>([])
@@ -113,10 +115,12 @@ export default function ProfileLocationSearch({
         align="center"
         gap={2}
         bg={WHITE}
-        border={`1px solid ${confirmed ? GREEN : GRAY200}`}
+        border={`1px solid ${isInvalid ? RED : confirmed ? GREEN : GRAY200}`}
         borderRadius="10px"
         px={3}
-        _focusWithin={{ borderColor: GREEN, boxShadow: `0 0 0 2px ${GREEN}18` }}
+        _focusWithin={isInvalid
+          ? { borderColor: RED, boxShadow: `0 0 0 2px ${RED}18` }
+          : { borderColor: GREEN, boxShadow: `0 0 0 2px ${GREEN}18` }}
       >
         {loading ? (
           <Spinner size="xs" color="gray.400" flexShrink={0} />
@@ -134,6 +138,7 @@ export default function ProfileLocationSearch({
           placeholder={MAPBOX_TOKEN ? placeholder : 'Mapbox token is not set'}
           disabled={!MAPBOX_TOKEN}
           aria-label={label}
+          aria-invalid={isInvalid || undefined}
           style={{
             flex: 1,
             border: 'none',

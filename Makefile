@@ -1,6 +1,8 @@
-.PHONY: help env env-local env-prod env-status \
-        setup setup-demo setup-final-presentation dev dev-all stop reset install migrate makemigrations lint build clean \
-        mobile mobile-setup mobile-build-android mobile-build-ios \
+.PHONY: help env \
+        setup setup-demo dev dev-all stop reset install migrate makemigrations lint build clean \
+        mobile mobile-setup \
+        mobile-build-android mobile-build-android-local mobile-build-ios mobile-build-preview \
+        setup-final-presentation \
         db-shell db-time db-time-reset \
         infra-up infra-down infra-reset infra-demo \
         docker-up docker-down docker-logs docker-build docker-reset docker-demo \
@@ -26,28 +28,9 @@ COMPOSE_INFRA  = docker compose -f docker-compose.infra.yml --env-file .env
 COMPOSE_DEV    = docker compose --env-file .env
 COMPOSE_PROD   = docker compose -f docker-compose.prod.yml --env-file .env
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  ENVIRONMENT PROFILES
-# ─────────────────────────────────────────────────────────────────────────────
-
-# MODE support: make dev MODE=prod  →  auto-switch before running
-ifdef MODE
-ifeq ($(MODE),prod)
-  _AUTO_SWITCH = @$(MAKE) --no-print-directory env-prod
-else ifeq ($(MODE),production)
-  _AUTO_SWITCH = @$(MAKE) --no-print-directory env-prod
-else ifeq ($(MODE),local)
-  _AUTO_SWITCH = @$(MAKE) --no-print-directory env-local
-else
-  $(error Unknown MODE '$(MODE)'. Use MODE=local or MODE=prod)
-endif
-else
-  _AUTO_SWITCH =
-endif
-
-# Guard: require .env (symlink or file)
+# Guard: require .env
 _check_env:
-	@test -f .env || (printf '\033[1;31mERROR: .env not found.\033[0m Run \033[1mmake env\033[0m to generate environment profiles.\n' && exit 1)
+	@test -f .env || (printf '\033[1;31mERROR: .env not found.\033[0m Run \033[1mmake env\033[0m to generate it.\n' && exit 1)
 
 -include .env
 export
@@ -66,37 +49,34 @@ export POSTGIS_IMAGE
 
 help: ## Show this help message
 	@echo ''
-	@printf '\033[1mUsage:\033[0m make [target] [MODE=local|prod]\n'
+	@printf '\033[1mUsage:\033[0m make [target]\n'
 	@echo ''
-	@echo '\033[1;4mGetting Started:\033[0m'
-	@grep -E '^(env|setup|setup-demo):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mGetting Started:\033[0m\n'
+	@grep -E '^(env|setup|setup-demo):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mEnvironment Profiles:\033[0m'
-	@grep -E '^env-(local|prod|status):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mLocal Development:\033[0m\n'
+	@grep -E '^(dev|dev-all|stop|reset|install|migrate|makemigrations|lint|build|clean):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mLocal Development:\033[0m'
-	@grep -E '^(dev|dev-all|stop|reset|install|migrate|makemigrations|lint|build|clean):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mMobile:\033[0m\n'
+	@grep -E '^mobile[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mMobile:\033[0m'
-	@grep -E '^mobile[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mDatabase:\033[0m\n'
+	@grep -E '^db-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mDatabase:\033[0m'
-	@grep -E '^db-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mInfra Only (PostGIS + Redis + MinIO):\033[0m\n'
+	@grep -E '^infra-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mInfra Only (PostGIS + Redis + MinIO):\033[0m'
-	@grep -E '^infra-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mDocker Dev (full stack in containers):\033[0m\n'
+	@grep -E '^docker-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mDocker Dev (full stack in containers):\033[0m'
-	@grep -E '^docker-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mDocker Prod (production stack):\033[0m\n'
+	@grep -E '^prod-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mDocker Prod (production stack):\033[0m'
-	@grep -E '^prod-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mShells:\033[0m\n'
+	@grep -E '^shell-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
-	@echo '\033[1;4mShells:\033[0m'
-	@grep -E '^shell-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
-	@echo ''
-	@echo '\033[1;4mTesting:\033[0m'
-	@grep -E '^(test|test-unit|test-integration|test-docker|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+	@printf '\033[1;4mTesting:\033[0m\n'
+	@grep -E '^(test|test-unit|test-integration|test-docker|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 
 
@@ -104,54 +84,8 @@ help: ## Show this help message
 #  ENVIRONMENT
 # ─────────────────────────────────────────────────────────────────────────────
 
-env: ## Interactive .env generator (creates local + production profiles)
+env: ## Interactive .env generator
 	@bash scripts/setup-env.sh
-
-env-local: ## Switch to local development profile
-	@if [ ! -f .env.local ]; then \
-	  printf '\033[1;31mERROR: .env.local not found.\033[0m Run \033[1mmake env\033[0m first.\n'; exit 1; \
-	fi
-	@rm -f .env
-	@ln -s .env.local .env
-	$(call _ok,"Switched to LOCAL profile")
-
-env-prod: ## Switch to production profile
-	@if [ ! -f .env.production ]; then \
-	  printf '\033[1;31mERROR: .env.production not found.\033[0m Run \033[1mmake env\033[0m first.\n'; exit 1; \
-	fi
-	@rm -f .env
-	@ln -s .env.production .env
-	$(call _ok,"Switched to PRODUCTION profile")
-
-env-status: ## Show active profile and config status
-	@echo ""
-	@if [ -L .env ]; then \
-	  target=$$(readlink .env); \
-	  if [ "$$target" = ".env.local" ]; then \
-	    printf '  Active profile: \033[1;32mlocal\033[0m (→ .env.local)\n'; \
-	  elif [ "$$target" = ".env.production" ]; then \
-	    printf '  Active profile: \033[1;33mproduction\033[0m (→ .env.production)\n'; \
-	  else \
-	    printf '  Active profile: \033[1;35mcustom\033[0m (→ %s)\n' "$$target"; \
-	  fi; \
-	elif [ -f .env ]; then \
-	  printf '  Active profile: \033[1;35mmanual .env file\033[0m (not a symlink)\n'; \
-	else \
-	  printf '  Active profile: \033[1;31mnone\033[0m — run \033[1mmake env\033[0m\n'; \
-	fi
-	@echo ""
-	@echo "  Profiles:"
-	@[ -f .env.local ]      && printf '    .env.local       \033[1;32m✓\033[0m\n' || printf '    .env.local       \033[0;90m✗ missing\033[0m\n'
-	@[ -f .env.production ] && printf '    .env.production  \033[1;32m✓\033[0m\n' || printf '    .env.production  \033[0;90m✗ missing\033[0m\n'
-	@echo ""
-	@if [ -f .env ]; then \
-	  printf '  Key values:\n'; \
-	  printf '    DB_HOST=%s\n' "$${DB_HOST:-<unset>}"; \
-	  printf '    DEBUG=%s\n' "$${DEBUG:-<unset>}"; \
-	  printf '    FRONTEND_URL=%s\n' "$${FRONTEND_URL:-<unset>}"; \
-	  printf '    EXPO_PUBLIC_API_URL=%s\n' "$${EXPO_PUBLIC_API_URL:-<unset>}"; \
-	  echo ""; \
-	fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -159,7 +93,6 @@ env-status: ## Show active profile and config status
 # ─────────────────────────────────────────────────────────────────────────────
 
 setup: _check_env ## One-time local setup: venv, deps, infra, migrate, mobile deps
-	$(_AUTO_SWITCH)
 	$(call _log,"[1/6] Python virtual environment...")
 	@test -d $(VENV) || $(PYTHON) -m venv $(VENV)
 	$(call _log,"[2/6] Installing backend dependencies...")
@@ -190,9 +123,10 @@ setup-final-presentation: _check_env ## Seed final presentation scenario (run af
 	$(call _ok,"Final presentation seed complete. Login: yusuf@demo.com / demo123")
 
 dev: _check_env ## Start local dev: infra + backend (8000) + frontend (5173)
-	$(_AUTO_SWITCH)
+	@# Scope to LISTEN sockets so we kill the actual server processes only,
+	@# not the browser tab that has an outbound connection open to 5173.
 	@for port in 8000 5173; do \
-	  pid=$$(lsof -ti tcp:$$port 2>/dev/null); \
+	  pid=$$(lsof -ti tcp:$$port -sTCP:LISTEN 2>/dev/null); \
 	  if [ -n "$$pid" ]; then \
 	    echo "  Killing process on port $$port (PID $$pid)..."; \
 	    kill -9 $$pid 2>/dev/null || true; \
@@ -215,9 +149,8 @@ dev: _check_env ## Start local dev: infra + backend (8000) + frontend (5173)
 	 wait
 
 dev-all: _check_env ## Start local dev: backend + frontend + mobile Expo server
-	$(_AUTO_SWITCH)
 	@for port in 8000 5173 8081; do \
-	  pid=$$(lsof -ti tcp:$$port 2>/dev/null); \
+	  pid=$$(lsof -ti tcp:$$port -sTCP:LISTEN 2>/dev/null); \
 	  if [ -n "$$pid" ]; then \
 	    echo "  Killing process on port $$port (PID $$pid)..."; \
 	    kill -9 $$pid 2>/dev/null || true; \
@@ -254,7 +187,6 @@ install: ## Install all dependencies (backend + frontend + mobile)
 	@cd mobile-client && npm install
 
 migrate: _check_env ## Run Django migrations (native, requires infra running)
-	$(_AUTO_SWITCH)
 	@cd backend && $(PYEXEC) manage.py migrate
 
 makemigrations: _check_env ## Create new Django migrations (use APP=<name> to scope)
@@ -284,7 +216,6 @@ clean: ## Clean generated files and caches
 # ─────────────────────────────────────────────────────────────────────────────
 
 mobile: _check_env ## Start Expo dev server for mobile
-	$(_AUTO_SWITCH)
 	$(call _log,"Starting Expo dev server...")
 	@cd mobile-client && npx expo start
 
@@ -293,11 +224,17 @@ mobile-setup: ## Install mobile dependencies
 	@cd mobile-client && npm install
 	$(call _ok,"Mobile setup complete.")
 
-mobile-build-android: ## EAS build for Android
-	@cd mobile-client && npx eas build --platform android
+mobile-build-android: ## EAS production build for Android (APK)
+	@cd mobile-client && npm run build:android
 
-mobile-build-ios: ## EAS build for iOS
-	@cd mobile-client && npx eas build --platform ios
+mobile-build-android-local: ## Local gradle release build (APK in android/app/build/outputs/apk/release/)
+	@cd mobile-client && npm run build:android:local
+
+mobile-build-ios: ## EAS production build for iOS
+	@cd mobile-client && npm run build:ios
+
+mobile-build-preview: ## EAS preview build for Android + iOS (internal distribution)
+	@cd mobile-client && npm run build:preview
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -342,7 +279,6 @@ db-time-reset: _check_env ## Restore DB container to real time (restarts contain
 # ─────────────────────────────────────────────────────────────────────────────
 
 infra-up: _check_env ## Start infra containers (db, redis, minio)
-	$(_AUTO_SWITCH)
 	$(call _log,"Starting infra...")
 	@$(COMPOSE_INFRA) up -d
 	@echo "  Waiting for database..."
@@ -465,7 +401,6 @@ test-assert-sweep: ## Lint guardrail: forbid raw status_code asserts and TestCas
 # ─────────────────────────────────────────────────────────────────────────────
 
 docker-up: _check_env ## Start the full Docker dev stack
-	$(_AUTO_SWITCH)
 	@$(COMPOSE_DEV) up -d
 	$(call _ok,"Docker dev stack running. http://localhost")
 
@@ -485,7 +420,6 @@ docker-reset: ## Stop Docker dev AND delete all data volumes
 	$(call _ok,"Docker dev stopped and volumes deleted.")
 
 docker-demo: _check_env ## Start Docker dev stack + seed demo data
-	$(_AUTO_SWITCH)
 	$(call _log,"Starting Docker dev environment...")
 	@$(COMPOSE_DEV) up -d --build
 	$(call _log,"Waiting for backend to be healthy...")
@@ -501,7 +435,6 @@ docker-demo: _check_env ## Start Docker dev stack + seed demo data
 # ─────────────────────────────────────────────────────────────────────────────
 
 prod-up: _check_env ## Start the production Docker stack
-	$(_AUTO_SWITCH)
 	$(call _log,"Starting production stack...")
 	@$(COMPOSE_PROD) up -d
 	$(call _ok,"Production stack running.")
@@ -513,7 +446,6 @@ prod-logs: ## Tail production Docker logs
 	@$(COMPOSE_PROD) logs -f
 
 prod-build: _check_env ## Build production Docker images
-	$(_AUTO_SWITCH)
 	@$(COMPOSE_PROD) build
 
 prod-reset: ## Stop production AND delete all data volumes
@@ -523,7 +455,6 @@ prod-reset: ## Stop production AND delete all data volumes
 	$(call _ok,"Production stopped and volumes deleted.")
 
 prod-demo: _check_env ## Start production stack + seed demo data
-	$(_AUTO_SWITCH)
 	$(call _log,"Starting production environment...")
 	@$(COMPOSE_PROD) up -d --build
 	$(call _log,"Waiting for backend to be healthy...")

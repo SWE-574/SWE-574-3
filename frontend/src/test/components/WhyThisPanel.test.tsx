@@ -43,21 +43,21 @@ describe('WhyThisPanel', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('lists matched user skill names when the tag signal is meaningful', () => {
-    const cooking = { id: 'Q1', name: 'Cooking', parent_qid: null } as Tag
-    const spanish = { id: 'Q2', name: 'Spanish', parent_qid: null } as Tag
+    const cooking = { id: 'Q1', name: 'Cooking', parent_qid: undefined } as Tag
+    const spanish = { id: 'Q2', name: 'Spanish', parent_qid: undefined } as Tag
     setUserSkills([cooking, spanish])
     renderPanel(
       { tag: 0.6, follow: 0, cooccur: 0, recency_penalty: 0 },
-      makeService({ tags: [cooking, spanish, { id: 'Q3', name: 'Other', parent_qid: null } as Tag] }),
+      makeService({ tags: [cooking, spanish, { id: 'Q3', name: 'Other', parent_qid: undefined } as Tag] }),
     )
     expect(screen.getByText(/Matches your interests: Cooking, Spanish/i)).toBeInTheDocument()
   })
 
   it('falls back to a generic interest line when no specific tag overlap is found', () => {
-    setUserSkills([{ id: 'QA', name: 'Yoga', parent_qid: null } as Tag])
+    setUserSkills([{ id: 'QA', name: 'Yoga', parent_qid: undefined } as Tag])
     renderPanel(
       { tag: 0.6, follow: 0, cooccur: 0, recency_penalty: 0 },
-      makeService({ tags: [{ id: 'QB', name: 'Climbing', parent_qid: null } as Tag] }),
+      makeService({ tags: [{ id: 'QB', name: 'Climbing', parent_qid: undefined } as Tag] }),
     )
     expect(screen.getByText(/^Matches your interests$/)).toBeInTheDocument()
   })

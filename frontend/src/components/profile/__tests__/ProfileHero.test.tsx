@@ -124,14 +124,14 @@ describe('ProfileHero — own mode', () => {
 })
 
 describe('ProfileHero — public mode', () => {
-  it('renders Message and Report buttons', () => {
+  it('does NOT render Message or Report buttons', () => {
     render(
       <Wrapper>
         <ProfileHero user={baseUser} mode="public" />
       </Wrapper>,
     )
-    expect(screen.getByText('Message')).toBeInTheDocument()
-    expect(screen.getByText('Report')).toBeInTheDocument()
+    expect(screen.queryByText('Message')).toBeNull()
+    expect(screen.queryByText('Report')).toBeNull()
   })
 
   it('does NOT render Edit profile button', () => {
@@ -143,24 +143,55 @@ describe('ProfileHero — public mode', () => {
     expect(screen.queryByText('Edit profile')).toBeNull()
   })
 
-  it('hides time balance tile and shows reputation instead', () => {
+  it('does NOT render View Time Activity link', () => {
     render(
       <Wrapper>
-        <ProfileHero user={baseUser} mode="public" reputationScore={4.7} />
+        <ProfileHero user={baseUser} mode="public" />
+      </Wrapper>,
+    )
+    expect(screen.queryByText('View Time Activity →')).toBeNull()
+  })
+
+  it('shows Member since in At a glance (no star reputation tile on public hero)', () => {
+    render(
+      <Wrapper>
+        <ProfileHero user={{ ...baseUser, date_joined: '2026-05-01T10:00:00Z' }} mode="public" />
       </Wrapper>,
     )
     expect(screen.queryByText('Time balance')).toBeNull()
-    expect(screen.getByText('Reputation')).toBeInTheDocument()
+    expect(screen.queryByText('Reputation')).toBeNull()
+    expect(screen.getByText('Member since')).toBeInTheDocument()
   })
 
-  it('calls onMessageClick when Message is clicked', () => {
-    const onMessageClick = vi.fn()
+  it('renders Follow beside the name when onFollowPress is set', () => {
+    const onFollow = vi.fn()
     render(
       <Wrapper>
-        <ProfileHero user={baseUser} mode="public" onMessageClick={onMessageClick} />
+        <ProfileHero
+          user={baseUser}
+          mode="public"
+          onFollowPress={onFollow}
+          isFollowing={false}
+        />
       </Wrapper>,
     )
-    fireEvent.click(screen.getByText('Message'))
-    expect(onMessageClick).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: /follow/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /follow/i }))
+    expect(onFollow).toHaveBeenCalledTimes(1)
   })
+
+  it('renders Unfollow beside the name when following', () => {
+    render(
+      <Wrapper>
+        <ProfileHero
+          user={baseUser}
+          mode="public"
+          onFollowPress={vi.fn()}
+          isFollowing
+        />
+      </Wrapper>,
+    )
+    expect(screen.getByRole('button', { name: /unfollow/i })).toBeInTheDocument()
+  })
+
 })

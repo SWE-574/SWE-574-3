@@ -170,14 +170,13 @@ describe('ProfileEditDrawer', () => {
       expect(toastSuccessMock).toHaveBeenCalledWith('Profile updated')
     })
 
-    // IMPORTANT 3: Assert diff — only changed fields are in the FormData payload
-    const formData = updateMeMock.mock.calls[0][0] as FormData
-    expect(formData).toBeInstanceOf(FormData)
-    const entries = Object.fromEntries(formData.entries())
-    expect(entries.first_name).toBe('NewFirstName')  // changed field present
-    expect(entries.last_name).toBeUndefined()         // unchanged → not in diff
-    expect(entries.bio).toBeUndefined()               // unchanged → not in diff
-    expect(entries.location).toBeUndefined()          // unchanged → not in diff
+    // Diff-only JSON payload when no avatar/banner files (multipart only when uploading images)
+    const payload = updateMeMock.mock.calls[0][0] as Record<string, unknown>
+    expect(payload).not.toBeInstanceOf(FormData)
+    expect(payload.first_name).toBe('NewFirstName')
+    expect(payload.last_name).toBeUndefined()
+    expect(payload.bio).toBeUndefined()
+    expect(payload.location).toBeUndefined()
   })
 
   it('shows discard confirmation when closing with unsaved changes', async () => {

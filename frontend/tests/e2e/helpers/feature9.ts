@@ -2,7 +2,7 @@ import { type Page } from '@playwright/test'
 
 import { type DemoUser } from './auth'
 import { createPendingOfferExchange, initiateOnlineHandshakeViaApi } from './feature8'
-import { switchUser } from './session'
+import { switchUserApi } from './loginAsApi'
 
 export async function createPendingOfferWithProposedDetails(page: Page, options: {
   owner: DemoUser
@@ -23,7 +23,7 @@ export async function createPendingOfferWithProposedDetails(page: Page, options:
     duration: options.duration ?? 1,
   })
 
-  await switchUser(page, options.owner)
+  await switchUserApi(page, options.owner)
   const handshakeId = await initiateOnlineHandshakeViaApi(page, {
     serviceTitle: pending.title,
     requesterName: options.requester.name,

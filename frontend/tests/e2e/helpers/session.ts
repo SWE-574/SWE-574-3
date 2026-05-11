@@ -16,5 +16,11 @@ export async function switchUser(page: Page, user: DemoUser): Promise<void> {
     })
   }
 
+  // Drop the previous user's /users/me/ route so the new identity isn't
+  // shadowed by a stale handler closing over the old user payload.
+  await page.unroute('**/api/users/me/').catch(() => {
+    /* nothing to unroute */
+  })
+
   await loginAs(page, user)
 }

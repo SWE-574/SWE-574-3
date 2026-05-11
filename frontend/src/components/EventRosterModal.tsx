@@ -2,9 +2,11 @@ import { type ReactNode, useState, useEffect, useRef, useCallback } from 'react'
 import { Box, Flex, Stack, Text } from '@chakra-ui/react'
 import { FiX, FiCheckCircle, FiAlertCircle, FiUsers } from 'react-icons/fi'
 import { QRCodeSVG } from 'qrcode.react'
+import { toast } from 'sonner'
 import type { Service } from '@/types'
 import type { Handshake } from '@/services/handshakeAPI'
 import { serviceAPI } from '@/services/serviceAPI'
+import { extractTopLevelDetail } from '@/utils/formErrors'
 
 import {
   GREEN, GREEN_LT,
@@ -53,8 +55,7 @@ export function EventRosterPanel({ service, handshakes, onComplete, onMarkAttend
   const active = handshakes.filter((handshake) => ['accepted', 'checked_in', 'attended', 'no_show'].includes(handshake.status))
   const checkedIn = active.filter((handshake) => handshake.status === 'checked_in').length
   const attended = active.filter((handshake) => handshake.status === 'attended').length
-  const registered = active.filter((handshake) => handshake.status === 'accepted').length
-  const willBeNoShow = registered + checkedIn
+  const willBeNoShow = checkedIn
 
   // ── QR token state ──
   const [qrData, setQrData] = useState<{ qr_payload: string; attendance_code: string; expires_at: string } | null>(null)
@@ -74,8 +75,15 @@ export function EventRosterPanel({ service, handshakes, onComplete, onMarkAttend
       if (msUntilExpiry > 0) {
         qrTimerRef.current = setTimeout(() => generateQr(), msUntilExpiry)
       }
-    } catch {
-      // silent — user can retry
+    } catch (err: unknown) {
+      // Backend rejects QR generation outside the 24-hour lockdown window
+      // (see EventHandshakeService.generate_qr_token). Surfacing the
+      // server's detail message tells the organizer why nothing happened
+      // instead of leaving the button stuck on "Generating…".
+      const data = (err as { response?: { data?: unknown } })?.response?.data
+      const detail = extractTopLevelDetail(data)
+        ?? (err instanceof Error ? err.message : null)
+      toast.error(detail || 'Could not generate the attendance QR. Please try again.')
     } finally {
       setQrLoading(false)
     }

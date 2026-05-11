@@ -28,16 +28,36 @@ export function navigateToNotificationTarget(
 ): void {
   const { type, related_handshake, related_service, related_service_type, related_user } = notification;
 
-  // New follower → follower's public profile
+  // New follower → follower's public profile (lives on Profile stack, not Home)
   if (type === 'user_followed' && related_user) {
-    navigation.navigate('Home', {
+    navigation.navigate('Profile', {
       screen: 'PublicProfile',
       params: { userId: related_user },
     });
     return;
   }
 
-  // Event notifications → ServiceDetail (even if related_handshake is present)
+  // Event chat message → PublicChat screen (not ServiceDetail)
+  if (type === 'chat_message' && related_service_type === 'Event' && related_service) {
+    navigation.navigate('Messages', { screen: 'MessagesList' });
+    navigation.navigate('Messages', {
+      screen: 'PublicChat',
+      params: { roomId: related_service },
+    });
+    return;
+  }
+
+  // Group offer/need chat message (no handshake link = group-level chat) → GroupChat screen
+  if (type === 'chat_message' && related_service && !related_handshake) {
+    navigation.navigate('Messages', { screen: 'MessagesList' });
+    navigation.navigate('Messages', {
+      screen: 'GroupChat',
+      params: { groupId: related_service },
+    });
+    return;
+  }
+
+  // All other event notifications → ServiceDetail
   if (related_service_type === 'Event' && related_service) {
     navigation.navigate('Home', {
       screen: 'ServiceDetail',
@@ -54,6 +74,9 @@ export function navigateToNotificationTarget(
     (type.startsWith('handshake_') || type === 'chat_message' || type === 'service_confirmation') &&
     related_handshake
   ) {
+    // Navigate to MessagesList first so it anchors the back-stack, then push Chat.
+    // This guarantees a back button even when the Messages tab was already showing Chat.
+    navigation.navigate('Messages', { screen: 'MessagesList' });
     navigation.navigate('Messages', {
       screen: 'Chat',
       params: { handshakeId: related_handshake, notificationId: notification.id },

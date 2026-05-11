@@ -5,7 +5,7 @@ import {
 import { FiX, FiUser, FiAlertCircle, FiTag, FiImage } from 'react-icons/fi'
 import { toast } from 'sonner'
 import type { User, BadgeProgress, Tag } from '@/types'
-import { userAPI, dataURLtoBlob } from '@/services/userAPI'
+import { userAPI, dataURLtoBlob, type UserUpdateData } from '@/services/userAPI'
 import { tagAPI } from '@/services/tagAPI'
 import { getErrorMessage } from '@/services/api'
 import ImageCropModal from '@/components/ImageCropModal'
@@ -140,6 +140,7 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
   const [bannerPreview, setBannerPreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [featuredBadgesError, setFeaturedBadgesError] = useState<string | null>(null)
+  const [identityFieldErrors, setIdentityFieldErrors] = useState<Record<string, string>>({})
   const [activeTab, setActiveTab] = useState<EditTab>(initialTab)
 
   // Crop modal
@@ -158,6 +159,7 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
       setAvatarPreview(null)
       setBannerPreview(null)
       setFeaturedBadgesError(null)
+      setIdentityFieldErrors({})
       setConfirmDiscard(false)
       setActiveTab(initialTab)
     }
@@ -223,6 +225,7 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
     if (!dirty) return
     setSaving(true)
     setFeaturedBadgesError(null)
+    setIdentityFieldErrors({})
     try {
       // Resolve skills to real DB tags
       const isUuid = (id: string) =>
@@ -231,56 +234,110 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
         form.skills.map((tag) => (isUuid(tag.id) ? tag : tagAPI.ensureInDb(tag))),
       )
 
-      // Build diff — only include changed fields
-      const fd = new FormData()
-      if (form.first_name !== (user.first_name || '')) fd.append('first_name', form.first_name)
-      if (form.last_name !== (user.last_name || '')) fd.append('last_name', form.last_name)
-      if (form.bio !== (user.bio || '')) fd.append('bio', form.bio)
-      if (form.location !== (user.location || '')) fd.append('location', form.location)
-      if (form.show_history !== (user.show_history ?? false)) fd.append('show_history', String(form.show_history))
-
-      // Skills
       const origSkillIds = (user.skills ?? []).map((t) => t.id).sort()
       const currSkillIds = resolvedSkills.map((t) => t.id).sort()
-      if (JSON.stringify(currSkillIds) !== JSON.stringify(origSkillIds)) {
-        resolvedSkills.forEach((t) => fd.append('skill_ids', t.id))
-      }
+      const skillsChanged = JSON.stringify(currSkillIds) !== JSON.stringify(origSkillIds)
 
-      // Featured badges
       const origBadges = user.featured_badges ?? []
-      if (JSON.stringify(form.featured_badges) !== JSON.stringify(origBadges)) {
-        form.featured_badges.forEach((id) => fd.append('featured_badges', id))
-        if (form.featured_badges.length === 0) {
-          // Explicit empty — send the field to clear it
-          fd.append('featured_badges', '')
+      const badgesChanged = JSON.stringify(form.featured_badges) !== JSON.stringify(origBadges)
+
+      const hasFiles = Boolean(avatarPreview || bannerPreview)
+
+      const appendScalarDiff = (fd: FormData) => {
+        if (form.first_name !== (user.first_name || '')) fd.append('first_name', form.first_name)
+        if (form.last_name !== (user.last_name || '')) fd.append('last_name', form.last_name)
+        if (form.bio !== (user.bio || '')) fd.append('bio', form.bio)
+        if (form.location !== (user.location || '')) fd.append('location', form.location)
+        if (form.show_history !== (user.show_history ?? false)) fd.append('show_history', String(form.show_history))
+      }
+
+      let updated: User
+
+      if (!hasFiles) {
+        const body: UserUpdateData = {}
+        if (form.first_name !== (user.first_name || '')) body.first_name = form.first_name
+        if (form.last_name !== (user.last_name || '')) body.last_name = form.last_name
+        if (form.bio !== (user.bio || '')) body.bio = form.bio
+        if (form.location !== (user.location || '')) body.location = form.location
+        if (form.show_history !== (user.show_history ?? false)) body.show_history = form.show_history
+        if (skillsChanged) body.skill_ids = resolvedSkills.map((t) => t.id)
+        if (badgesChanged) body.featured_badges = form.featured_badges
+        updated = await userAPI.updateMe(body)
+      } else {
+        const fd = new FormData()
+        appendScalarDiff(fd)
+        if (skillsChanged) {
+          if (resolvedSkills.length > 0) {
+            resolvedSkills.forEach((t) => fd.append('skill_ids', t.id))
+          } else {
+            // Same semantics as JSON [] — serializer skips blanks and clears skills
+            fd.append('skill_ids', '')
+          }
         }
+        if (badgesChanged) {
+          if (form.featured_badges.length > 0) {
+            form.featured_badges.forEach((id) => fd.append('featured_badges', id))
+          } else {
+            // Matches web FormData clear — '' normalizes to [] in validate_featured_badges
+            fd.append('featured_badges', '')
+          }
+        }
+        if (avatarPreview) {
+          const blob = dataURLtoBlob(avatarPreview)
+          fd.append('avatar', blob, 'avatar.jpg')
+        }
+        if (bannerPreview) {
+          const blob = dataURLtoBlob(bannerPreview)
+          fd.append('banner', blob, 'banner.jpg')
+        }
+        updated = await userAPI.updateMe(fd)
       }
 
-      // Avatar
-      if (avatarPreview) {
-        const blob = dataURLtoBlob(avatarPreview)
-        fd.append('avatar', blob, 'avatar.jpg')
-      }
-
-      // Banner / cover photo
-      if (bannerPreview) {
-        const blob = dataURLtoBlob(bannerPreview)
-        fd.append('banner', blob, 'banner.jpg')
-      }
-
-      const updated = await userAPI.updateMe(fd)
       onSaved(updated)
       toast.success('Profile updated')
       onClose()
     } catch (err) {
-      // Surface featured_badges validation errors
-      const raw = err as { response?: { data?: { featured_badges?: string[] } } }
-      const badgeErrors = raw?.response?.data?.featured_badges
-      if (badgeErrors && badgeErrors.length > 0) {
+      // Surface backend validation errors per field, routing the user to the
+      // tab that owns the offending input so silent failures cannot hide.
+      const raw = err as {
+        response?: {
+          data?: Record<string, unknown> & {
+            field_errors?: Record<string, unknown>
+          }
+        }
+      }
+      const data = raw?.response?.data ?? {}
+      const fieldErrors = (data.field_errors ?? {}) as Record<string, unknown>
+      const pickFirst = (key: string): string | null => {
+        const top = data[key]
+        const nested = fieldErrors[key]
+        const source = Array.isArray(top) ? top : Array.isArray(nested) ? nested : null
+        if (!source) return null
+        const first = source.find((v) => typeof v === 'string')
+        return typeof first === 'string' ? first : null
+      }
+
+      const badgeError = pickFirst('featured_badges')
+      const identityErrors: Record<string, string> = {}
+      for (const key of ['first_name', 'last_name', 'bio', 'location'] as const) {
+        const msg = pickFirst(key)
+        if (msg) identityErrors[key] = msg
+      }
+
+      if (badgeError) {
         setActiveTab('showcase')
-        setFeaturedBadgesError(badgeErrors.join(' '))
-      } else {
+        setFeaturedBadgesError(badgeError)
+      }
+      if (Object.keys(identityErrors).length > 0) {
+        if (!badgeError) setActiveTab('identity')
+        setIdentityFieldErrors(identityErrors)
+      }
+      if (!badgeError && Object.keys(identityErrors).length === 0) {
         toast.error(getErrorMessage(err))
+      } else {
+        // Also surface a top-line toast so the user notices the failure even
+        // before scanning the offending tab.
+        toast.error('Please fix the highlighted fields and try again.')
       }
     } finally {
       setSaving(false)
@@ -495,11 +552,17 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
                   value={form.first_name}
                   onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
                   bg={GRAY50}
-                  borderColor={GRAY200}
+                  borderColor={identityFieldErrors.first_name ? RED : GRAY200}
                   borderRadius="8px"
                   fontSize="13px"
                   aria-label="First name"
+                  aria-invalid={!!identityFieldErrors.first_name}
                 />
+                {identityFieldErrors.first_name && (
+                  <Text fontSize="11px" color={RED} mt="4px" data-testid="profile-error-first_name">
+                    {identityFieldErrors.first_name}
+                  </Text>
+                )}
               </Box>
               <Box flex={1}>
                 <FieldLabel>Last name</FieldLabel>
@@ -507,11 +570,17 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
                   value={form.last_name}
                   onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
                   bg={GRAY50}
-                  borderColor={GRAY200}
+                  borderColor={identityFieldErrors.last_name ? RED : GRAY200}
                   borderRadius="8px"
                   fontSize="13px"
                   aria-label="Last name"
+                  aria-invalid={!!identityFieldErrors.last_name}
                 />
+                {identityFieldErrors.last_name && (
+                  <Text fontSize="11px" color={RED} mt="4px" data-testid="profile-error-last_name">
+                    {identityFieldErrors.last_name}
+                  </Text>
+                )}
               </Box>
             </Flex>
             <Box mb={3}>
@@ -536,7 +605,13 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
                 label="City / Location"
                 placeholder="Search city, district, or address"
                 helperText="Choose a Mapbox result so your public location stays consistent."
+                isInvalid={!!identityFieldErrors.location}
               />
+              {identityFieldErrors.location && (
+                <Text fontSize="11px" color={RED} mt="4px" data-testid="profile-error-location">
+                  {identityFieldErrors.location}
+                </Text>
+              )}
             </Box>
           </DrawerSection>}
           </Box>
@@ -557,14 +632,20 @@ const ProfileEditDrawer = ({ isOpen, onClose, user, badgeProgress, initialTab = 
                 placeholder="Tell others about yourself…"
                 rows={4}
                 bg={GRAY50}
-                borderColor={GRAY200}
+                borderColor={identityFieldErrors.bio ? RED : GRAY200}
                 borderRadius="8px"
                 fontSize="13px"
                 resize="vertical"
                 aria-label="Bio"
                 aria-describedby="bio-counter"
+                aria-invalid={!!identityFieldErrors.bio}
               />
               <Text id="bio-counter" srOnly>{form.bio.length} of 280 characters used</Text>
+              {identityFieldErrors.bio && (
+                <Text fontSize="11px" color={RED} mt="4px" data-testid="profile-error-bio">
+                  {identityFieldErrors.bio}
+                </Text>
+              )}
             </Box>
           </DrawerSection>}
           </Box>

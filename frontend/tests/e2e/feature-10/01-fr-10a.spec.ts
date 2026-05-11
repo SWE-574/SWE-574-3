@@ -1,15 +1,14 @@
 import { test, expect } from '@playwright/test'
-import { loginAs, expectToast, USERS } from '../helpers'
+import { loginAs, expectToast, openServiceFromDashboard, USERS } from '../helpers'
 
 const TARGET_SERVICE = 'Watercolor Postcards for the Community Board'
 
 test('FR-10a: pending exchange opens a private requester-provider chat thread', async ({ page }) => {
   // Create or reuse the requester-provider relationship from the service detail.
   await loginAs(page, USERS.can)
-  await page.goto('/dashboard')
-  await expect(page.getByText(TARGET_SERVICE).first()).toBeVisible({ timeout: 20_000 })
-  await page.getByText(TARGET_SERVICE).first().click()
-  await expect(page).toHaveURL(/\/service-detail\//)
+  // Use the dashboard search rather than scrolling — the seed item is not
+  // guaranteed to be on the first page of curated cards.
+  await openServiceFromDashboard(page, TARGET_SERVICE)
 
   const requestButton = page.getByRole('button', { name: /Request this Service|Offer to Help/i })
   const viewChatButton = page.getByRole('button', { name: /View Chat/i })

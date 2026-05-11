@@ -1,13 +1,15 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
 import { Box, Button, Flex, Portal, Spinner, Text } from '@chakra-ui/react'
-import { FiCode, FiX } from 'react-icons/fi'
+import { FiBarChart2, FiX } from 'react-icons/fi'
 
 import type { Service } from '@/types'
 
-const STORAGE_KEY = 'dashboard-recommendation-debug-open'
-const RecommendationDebugPanel = lazy(() => import('@/components/RecommendationDebugPanel'))
+const STORAGE_KEY = 'dashboard-recommendation-showcase-open'
+const RecommendationShowcasePanel = lazy(() =>
+  import('@/components/RecommendationShowcasePanel'),
+)
 
-export default function RecommendationDebugBar({
+export default function RecommendationShowcaseBar({
   services,
   hoveredServiceId,
   activeFilter,
@@ -15,6 +17,8 @@ export default function RecommendationDebugBar({
   lat,
   lng,
   distance,
+  phase3InjectedId = null,
+  phase3SlotIndex = null,
 }: {
   services: Service[]
   hoveredServiceId: string | null
@@ -23,6 +27,8 @@ export default function RecommendationDebugBar({
   lat?: number
   lng?: number
   distance?: number
+  phase3InjectedId?: string | null
+  phase3SlotIndex?: number | null
 }) {
   const [isOpen, setIsOpen] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -66,7 +72,7 @@ export default function RecommendationDebugBar({
               </Box>
             )}
           >
-            <RecommendationDebugPanel
+            <RecommendationShowcasePanel
               services={services}
               hoveredServiceId={hoveredServiceId}
               activeFilter={activeFilter}
@@ -74,6 +80,8 @@ export default function RecommendationDebugBar({
               lat={lat}
               lng={lng}
               distance={distance}
+              phase3InjectedId={phase3InjectedId}
+              phase3SlotIndex={phase3SlotIndex}
             />
           </Suspense>
         ) : null}
@@ -85,10 +93,13 @@ export default function RecommendationDebugBar({
           borderRadius="full"
           boxShadow="0 14px 40px rgba(15, 23, 42, 0.22)"
           onClick={handleToggle}
+          aria-label="Toggle recommendation showcase"
         >
           <Flex align="center" gap={2}>
-            <FiCode size={14} />
-            <Text fontSize="xs" fontWeight="800">{isOpen ? 'Debug on' : 'Debug off'}</Text>
+            <FiBarChart2 size={14} />
+            <Text fontSize="xs" fontWeight="800">
+              {isOpen ? 'Showcase on' : 'Why these picks?'}
+            </Text>
             {isOpen ? <FiX size={12} /> : null}
           </Flex>
         </Button>

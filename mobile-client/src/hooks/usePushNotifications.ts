@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
+import { InteractionManager, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
@@ -34,32 +34,45 @@ export function usePushNotifications(
   const tokenRef = useRef<string | null>(null);
   const notificationListenerRef = useRef<Notifications.Subscription | null>(null);
   const responseListenerRef = useRef<Notifications.Subscription | null>(null);
+  // Mirror navigationRef into a ref so the response-listener effect does NOT
+  // depend on navigationRef's identity. Pre-fix the effect re-fired when the
+  // ref changed (cold-start init / hot reload), and the cleanup → re-attach
+  // sequence stacked listeners — one push then fired N navigations (#453).
+  const navigationRefHolder = useRef(navigationRef);
+  useEffect(() => {
+    navigationRefHolder.current = navigationRef;
+  }, [navigationRef]);
 
   const handleNotificationResponse = useCallback(
     (response: Notifications.NotificationResponse) => {
       const data = response.notification.request.content.data;
-      if (!data?.type || !navigationRef) return;
+      const currentNav = navigationRefHolder.current;
+      if (!data?.type || !currentNav) return;
 
       useNotificationStore.getState().fetchUnreadCount();
 
-      navigateToNotificationTarget(
-        {
-          id: data.notification_id as string,
-          type: data.type as any,
-          title: '',
-          message: '',
-          is_read: false,
-          related_handshake: (data.related_handshake as string) ?? null,
-          related_service: (data.related_service as string) ?? null,
-          related_service_type: (data.related_service_type as 'Offer' | 'Need' | 'Event') ?? null,
-          related_report: (data.related_report as string) ?? null,
-          related_user: (data.related_user as string) ?? null,
-          created_at: '',
-        },
-        navigationRef,
-      );
+      try {
+        navigateToNotificationTarget(
+          {
+            id: data.notification_id as string,
+            type: data.type as any,
+            title: '',
+            message: '',
+            is_read: false,
+            related_handshake: (data.related_handshake as string) ?? null,
+            related_service: (data.related_service as string) ?? null,
+            related_service_type: (data.related_service_type as 'Offer' | 'Need' | 'Event') ?? null,
+            related_report: (data.related_report as string) ?? null,
+            related_user: (data.related_user as string) ?? null,
+            created_at: '',
+          },
+          currentNav,
+        );
+      } catch (e) {
+        console.warn('[usePushNotifications] navigate from notification failed', e);
+      }
     },
-    [navigationRef],
+    [],
   );
 
   const registerForPushNotifications = useCallback(async () => {
@@ -131,8 +144,12 @@ export function usePushNotifications(
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    notificationListenerRef.current =
-      Notifications.addNotificationReceivedListener((received) => {
+    // Defensive: if a previous subscription survived a hot reload or a
+    // double-mount, tear it down before attaching a new one.
+    notificationListenerRef.current?.remove();
+
+    const subscription = Notifications.addNotificationReceivedListener(
+      (received) => {
         // Sync unread count when a push arrives while app is open.
         useNotificationStore.getState().fetchUnreadCount();
 
@@ -152,26 +169,44 @@ export function usePushNotifications(
               }
             : undefined,
         });
-      });
+      },
+    );
+    notificationListenerRef.current = subscription;
 
     return () => {
-      notificationListenerRef.current?.remove();
+      subscription.remove();
+      if (notificationListenerRef.current === subscription) {
+        notificationListenerRef.current = null;
+      }
     };
   }, [isAuthenticated]);
 
-  // Listen for notification taps (user interacted with a notification — app in foreground or background)
+  // Listen for notification taps (user interacted with a notification — app in
+  // foreground or background). Effect keyed only on isAuthenticated; the
+  // listener reads navigationRef out of navigationRefHolder so a navigationRef
+  // identity change does not stack a second subscription on top of the first.
+  // handleNotificationResponse is intentionally captured by closure, NOT in
+  // the dep array — its stable identity (useCallback([])) is the contract.
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    responseListenerRef.current =
-      Notifications.addNotificationResponseReceivedListener((response) => {
+    responseListenerRef.current?.remove();
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      (response) => {
         handleNotificationResponse(response);
-      });
+      },
+    );
+    responseListenerRef.current = subscription;
 
     return () => {
-      responseListenerRef.current?.remove();
+      subscription.remove();
+      if (responseListenerRef.current === subscription) {
+        responseListenerRef.current = null;
+      }
     };
-  }, [isAuthenticated, navigationRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   // Handle cold-start: app was killed and user tapped a notification to open it.
   // addNotificationResponseReceivedListener fires too late in this case, so we
@@ -180,12 +215,27 @@ export function usePushNotifications(
   useEffect(() => {
     if (!isAuthenticated || !navigationRef) return;
 
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
     Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (!response) return;
-      handleNotificationResponse(response);
+      if (!response || cancelled) return;
+      // Defer until the tab navigator has mounted; immediate navigate on cold
+      // start can leave a blank white screen.
+      timeoutId = setTimeout(() => {
+        InteractionManager.runAfterInteractions(() => {
+          if (cancelled) return;
+          handleNotificationResponse(response);
+        });
+      }, 400);
       // Clear so navigating back to the app normally doesn't re-trigger this.
       Notifications.dismissAllNotificationsAsync().catch(() => {});
     });
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
     // Only run once per authenticated session
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);

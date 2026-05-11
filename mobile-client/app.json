@@ -20,7 +20,8 @@
         "aps-environment": "production"
       },
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": ["remote-notification"],
+        "NSLocationWhenInUseUsageDescription": "The Hive uses your location to rank nearby services higher and to show distance for in-person listings."
       }
     },
     "android": {

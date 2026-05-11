@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Box, Flex, Text } from '@chakra-ui/react'
 import { toast } from 'sonner'
 import { FiPlus, FiArrowUp, FiArrowDown, FiStar, FiCheckCircle, FiLock } from 'react-icons/fi'
@@ -10,7 +11,10 @@ import {
   WHITE,
 } from '@/theme/tokens'
 
-// ── Tooltip (simple CSS-driven, no Chakra Tooltip to avoid portal issues) ─────
+const TOOLTIP_MAX_W = 240
+const VIEW_MARGIN = 10
+
+// ── Tooltip: portal + fixed position so HeroSurface overflow:hidden does not clip ──
 function BadgeTooltip({
   badge,
   children,
@@ -20,9 +24,78 @@ function BadgeTooltip({
   children: React.ReactNode
   placement?: 'top' | 'bottom'
 }) {
+  const triggerRef = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
+  const [fixedStyle, setFixedStyle] = useState<React.CSSProperties | null>(null)
+
+  const updatePosition = useCallback(() => {
+    const el = triggerRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    let left = rect.left + rect.width / 2 - TOOLTIP_MAX_W / 2
+    left = Math.max(VIEW_MARGIN, Math.min(left, window.innerWidth - TOOLTIP_MAX_W - VIEW_MARGIN))
+
+    if (placement === 'bottom') {
+      setFixedStyle({
+        position: 'fixed',
+        top: rect.bottom + 8,
+        left,
+        width: TOOLTIP_MAX_W,
+        zIndex: 10000,
+      })
+    } else {
+      setFixedStyle({
+        position: 'fixed',
+        top: rect.top - 8,
+        left,
+        width: TOOLTIP_MAX_W,
+        zIndex: 10000,
+        transform: 'translateY(-100%)',
+      })
+    }
+  }, [placement])
+
+  useLayoutEffect(() => {
+    if (!visible) return
+    updatePosition()
+    const onMove = () => updatePosition()
+    window.addEventListener('resize', onMove)
+    window.addEventListener('scroll', onMove, true)
+    return () => {
+      window.removeEventListener('resize', onMove)
+      window.removeEventListener('scroll', onMove, true)
+    }
+  }, [visible, updatePosition, badge.name, badge.description])
+
+  const tooltipBody = (
+    <Box
+      bg={GRAY800}
+      color={WHITE}
+      borderRadius="10px"
+      px={3}
+      py="10px"
+      minW="180px"
+      maxW={`${TOOLTIP_MAX_W}px`}
+      w="100%"
+      boxShadow="0 8px 24px rgba(0,0,0,0.22)"
+      pointerEvents="none"
+      style={{ wordBreak: 'break-word' }}
+    >
+      <Text fontSize="12px" fontWeight={800} mb="4px">{badge.name}</Text>
+      <Text fontSize="11px" color="rgba(255,255,255,0.75)" lineHeight={1.5} mb="6px">
+        {badge.description}
+      </Text>
+      {badge.earned_at && (
+        <Text fontSize="10px" color="rgba(255,255,255,0.5)">
+          Earned {new Date(badge.earned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+        </Text>
+      )}
+    </Box>
+  )
+
   return (
     <Box
+      ref={triggerRef}
       position="relative"
       display="inline-flex"
       onMouseEnter={() => setVisible(true)}
@@ -31,34 +104,10 @@ function BadgeTooltip({
       onBlur={() => setVisible(false)}
     >
       {children}
-      {visible && (
-        <Box
-          position="absolute"
-          top={placement === 'bottom' ? 'calc(100% + 8px)' : undefined}
-          bottom={placement === 'top' ? 'calc(100% + 8px)' : undefined}
-          left="50%"
-          style={{ transform: 'translateX(-50%)', zIndex: 4500 }}
-          bg={GRAY800}
-          color={WHITE}
-          borderRadius="10px"
-          px={3}
-          py="10px"
-          minW="180px"
-          maxW="240px"
-          boxShadow="0 8px 24px rgba(0,0,0,0.22)"
-          pointerEvents="none"
-        >
-          <Text fontSize="12px" fontWeight={800} mb="4px">{badge.name}</Text>
-          <Text fontSize="11px" color="rgba(255,255,255,0.75)" lineHeight={1.5} mb="6px">
-            {badge.description}
-          </Text>
-          {badge.earned_at && (
-            <Text fontSize="10px" color="rgba(255,255,255,0.5)">
-              Earned {new Date(badge.earned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-            </Text>
-          )}
-        </Box>
-      )}
+      {visible &&
+        fixedStyle &&
+        typeof document !== 'undefined' &&
+        createPortal(<Box style={fixedStyle}>{tooltipBody}</Box>, document.body)}
     </Box>
   )
 }

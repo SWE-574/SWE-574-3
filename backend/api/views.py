@@ -23,7 +23,7 @@ from datetime import timedelta
 import logging
 import os
 import bleach
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +126,43 @@ def get_cookie_settings(httponly: bool = True) -> dict:
     }
 
 
+def _is_jwt_shape(value: str) -> bool:
+    """Cheap structural check: a JWT is three base64url segments separated by '.'.
+
+    Used as the last-line guard in ``_set_auth_cookies``. The cookie writer
+    refuses anything that does not match the JWT grammar so attacker-supplied
+    cookie attributes (``HttpOnly=``, ``; Secure``, newlines, …) cannot be
+    smuggled in by abusing the value field. Real signature/blacklist
+    verification is handled upstream by SimpleJWT — this is the structural
+    fallback.
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    parts = value.split('.')
+    if len(parts) != 3:
+        return False
+    allowed = set(
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    )
+    return all(part and set(part).issubset(allowed) for part in parts)
+
+
 def _set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
-    """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS."""
+    """Attach JWT tokens as cookies to the response. Both HttpOnly to mitigate XSS.
+
+    Both arguments must be server-issued JWTs. The structural ``_is_jwt_shape``
+    guard prevents attacker-supplied input from ever flowing into a
+    ``Set-Cookie`` header even if a caller forgets to validate upstream
+    (CodeQL ``py/cookie-injection``). Callers that originate the value from a
+    request payload must validate it through ``RefreshToken``/``AccessToken``
+    first and pass the re-serialised ``str()`` of the resulting object.
+    """
+    if not _is_jwt_shape(access_token) or not _is_jwt_shape(refresh_token):
+        # Refuse to write a malformed token to a cookie. Surfacing a 500 here
+        # is safer than emitting a tainted Set-Cookie; in practice the only
+        # call sites are server-controlled, so this branch is unreachable in
+        # normal flows.
+        raise ValueError('Refusing to set auth cookie from non-JWT value.')
     response.set_cookie('access_token', access_token, **get_cookie_settings(httponly=True))
     response.set_cookie('refresh_token', refresh_token, **get_cookie_settings(httponly=True))
 
@@ -166,10 +201,19 @@ def _require_verified_email(request, action_clause: str = 'to continue'):
 ADMIN_ROLES = frozenset(('admin', 'super_admin', 'moderator'))
 
 
-def log_admin_action(admin_user, action_type: str, target_entity: str, target_obj, reason: str = '') -> None:
-    """Best-effort admin audit logging for moderation actions."""
+def log_admin_action(admin_user, action_type: str, target_entity: str, target_obj, reason: str = '') -> Optional['AdminAuditLog']:
+    """Best-effort admin audit logging for moderation actions.
+
+    Returns the persisted ``AdminAuditLog`` row so the caller can surface
+    the new entry inline in the action response (NFR-03b: spares the
+    moderation UI a follow-up GET /api/admin/audit-logs/, which previously
+    raced the writer in setups where the audit list reads from a follower
+    replica). Returns ``None`` only when the persistence step itself
+    raised — moderation actions still succeed in that case, but the
+    response simply won't carry the inline log row.
+    """
     try:
-        AdminAuditLog.objects.create(
+        return AdminAuditLog.objects.create(
             admin=admin_user,
             action_type=action_type,
             target_entity=target_entity,
@@ -178,6 +222,7 @@ def log_admin_action(admin_user, action_type: str, target_entity: str, target_ob
         )
     except Exception as exc:
         logger.warning('Admin audit log failed for %s (%s): %s', action_type, target_entity, exc)
+        return None
 
 
 def _send_email_async(to_email: str, subject: str, html: str) -> None:
@@ -571,7 +616,13 @@ class CustomTokenRefreshView(TokenRefreshView):
 
         validated = serializer.validated_data
         new_access = validated.get('access', '')
-        new_refresh = validated.get('refresh', refresh_token_val)
+        # When SimpleJWT rotated, ``validated['refresh']`` is the freshly issued
+        # token; otherwise (ROTATE_REFRESH_TOKENS=False) we re-serialise the
+        # already-verified token through ``RefreshToken`` so the cookie value
+        # is constructed from the server-side token object instead of being
+        # piped straight from ``request.data`` / ``request.COOKIES``
+        # (CodeQL ``py/cookie-injection``).
+        new_refresh = validated.get('refresh') or str(RefreshToken(refresh_token_val))
 
         response = Response({'access': new_access, 'refresh': new_refresh}, status=status.HTTP_200_OK)
         _set_auth_cookies(response, new_access, new_refresh)
@@ -1164,14 +1215,51 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             to_attr='_profile_event_handshakes',
         )
         
+        user_badges_prefetch = Prefetch(
+            'user__badges',
+            queryset=UserBadge.objects.select_related('badge')
+        )
+        capacity_handshakes_prefetch = Prefetch(
+            'handshakes',
+            queryset=Handshake.objects.filter(
+                status__in=['pending', 'accepted', 'completed', 'reported', 'paused', 'checked_in', 'attended', 'no_show']
+            ).only('id', 'service_id', 'status'),
+            to_attr='capacity_handshakes',
+        )
+
         # Filter services by visibility - admins can see all, others only visible
         is_admin = self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES
+        services_queryset = (
+            Service.objects
+            .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
+            .select_related('user', 'event_evaluation_summary')
+            .prefetch_related(
+                'tags',
+                user_badges_prefetch,
+                Prefetch('media', queryset=ServiceMedia.objects.order_by('display_order', 'created_at')),
+                capacity_handshakes_prefetch,
+            )
+        )
+        if self.request.user.is_authenticated:
+            from .models import SavedService, ServiceDismissal
+            services_queryset = services_queryset.annotate(
+                is_saved_anno=Exists(
+                    SavedService.objects.filter(
+                        user=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_dismissed_anno=Exists(
+                    ServiceDismissal.objects.filter(
+                        viewer=self.request.user, service=OuterRef('pk'),
+                    ),
+                ),
+            )
         if is_admin:
-            services_prefetch = Prefetch('services', queryset=Service.objects.prefetch_related('tags'))
+            services_prefetch = Prefetch('services', queryset=services_queryset)
         else:
             services_prefetch = Prefetch(
                 'services',
-                queryset=Service.objects.filter(is_visible=True).exclude(status='Cancelled').prefetch_related('tags')
+                queryset=services_queryset.filter(is_visible=True).exclude(status='Cancelled')
             )
 
         return (
@@ -1545,6 +1633,15 @@ class UserHistoryView(APIView):
             'service', 'service__user', 'requester'
         ).order_by('-updated_at')[:50]  # Limit to last 50
         
+        # Pre-fetch handshake IDs where the target user already submitted a review,
+        # so we can set evaluation_pending=False for those without per-row queries.
+        reviewed_handshake_ids = set(
+            ReputationRep.objects.filter(
+                handshake__in=completed_handshakes,
+                giver=target_user,
+            ).values_list('handshake_id', flat=True)
+        )
+
         history = []
         for handshake in completed_handshakes:
             provider, receiver = get_provider_and_receiver(handshake)
@@ -1577,8 +1674,13 @@ class UserHistoryView(APIView):
                 'partner_avatar_url': partner.avatar_url,
                 'completed_date': handshake.updated_at,
                 'was_provider': was_provider,
-                # For events: True when the attendee's evaluation window is still open.
-                'evaluation_pending': handshake.service.type == 'Event' and handshake.status == 'attended',
+                # For events: True only for attendees (not the organizer) with an open evaluation window.
+                'evaluation_pending': (
+                    handshake.service.type == 'Event'
+                    and handshake.status == 'attended'
+                    and not was_provider
+                    and handshake.id not in reviewed_handshake_ids
+                ),
             })
 
         # Include owner-completed events that currently have no qualifying
@@ -2067,9 +2169,17 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'page_size': request.query_params.get('page_size'),
             'user': request.query_params.get('user'),
             'is_admin': str(is_admin),  # Different cache for admin vs non-admin
+            # Per-viewer: is_saved, smart-pill signals, and future personalization
+            # must not leak across users sharing the same filter/page cache entry.
+            'viewer': (
+                str(request.user.id)
+                if request.user.is_authenticated
+                else 'anon'
+            ),
         }
         
         sort_param = request.query_params.get('sort', 'latest')
+        user_param = request.query_params.get('user')
         # Don't cache location-based queries (results vary by user location).
         # Also skip cache for hot-sort by authenticated users -- social boost is per-user.
         # And skip cache when sort=hot AND exploration is enabled, since Phase 3
@@ -2083,6 +2193,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         explore_only_param = request.query_params.get('explore_only', '').lower() in ('1', 'true', 'yes')
         use_cache = not (
             (request.query_params.get('lat') and request.query_params.get('lng'))
+            or user_param
             or (sort_param == 'hot' and request.user.is_authenticated)
             or sort_param == 'for_you'
             or explore_enabled
@@ -2116,16 +2227,41 @@ class ServiceViewSet(viewsets.ModelViewSet):
         # Phase 3 (FR-17i / #316): mix in an exploration candidate at the
         # configured slot for hot-sorted requests. The candidate is drawn from
         # cold-start, under-shown-quality, and stale-recurring sub-buckets.
+        phase3_injected_id: str | None = None
+        phase3_slot_index: int | None = None
         if page is not None and explore_enabled and should_explore(request):
             explore_pool = list(queryset[:200])  # cap pool size for the eligibility query
             explore = select_exploration_candidate(explore_pool, request.user if request.user.is_authenticated else None)
             if explore is not None and explore not in page:
                 slot = getattr(_ranking_settings, 'RANKING_EXPLORATION_SLOT_INDEX', 5)
                 page = inject_exploration_slot(page, explore, slot_index=slot)
+                phase3_injected_id = str(explore.id)
+                phase3_slot_index = slot
+
+        # Smart-pill plumbing: attach for_you_signals + source on the regular
+        # browse path so the frontend can render
+        # a small "why" pill ("Matches your interests" / "From your network" /
+        # "Hidden gem"). The score itself is unused here -- we keep the hot
+        # ordering -- but the per-card signals come from the same scorer the
+        # /for_you path uses, so labels stay consistent across surfaces.
+        if page is not None and request.user.is_authenticated:
+            self._attach_smart_pill_signals(page, request.user, phase3_injected_id)
 
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = paginator.get_paginated_response(serializer.data)
+            # Surface Phase 3 injection state so the recommendation showcase
+            # bar can mark the injected card and so callers can pass the same
+            # id back to the debug-ranking endpoint for the diagnosis line.
+            if isinstance(response.data, dict):
+                response.data['ranking_meta'] = {
+                    'phase3_injected_id': phase3_injected_id,
+                    'phase3_slot_index': phase3_slot_index,
+                    'exploration_rate': float(
+                        getattr(_ranking_settings, 'RANKING_EXPLORATION_RATE', 0.20)
+                    ) if explore_enabled else 0.0,
+                    'exploration_fired': phase3_injected_id is not None,
+                }
             if use_cache:
                 cache_service_list(cache_key_params, response.data, ttl=CACHE_TTL_SHORT)
             return response
@@ -2194,6 +2330,30 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'results': serializer.data,
         })
 
+    def _attach_smart_pill_signals(self, page, viewer, phase3_injected_id):
+        """Stamp `for_you_signals` and `source` on each service for the Browse
+        smart pill. `explore_pool` is only set on the `explore_only` list path.
+        """
+        from .ranking_personalized import score_for_you
+
+        if not page:
+            return
+        try:
+            scored = score_for_you(list(page), viewer)
+        except Exception:
+            scored = []
+        signal_map = {triple[0].id: triple[2] for triple in scored}
+        # explore_pool is only set on ?explore_only=true (see _list_explore_only).
+        # Regular browse must leave it unset so serializers emit null (#480 tests).
+        for svc in page:
+            svc.for_you_signals = signal_map.get(svc.id)
+            if phase3_injected_id and str(svc.id) == phase3_injected_id:
+                svc.source = 'explore_topup'
+            elif svc.for_you_signals:
+                svc.source = 'for_you'
+            else:
+                svc.source = None
+
     def _list_for_you(self, request):
         """For You feed (#481). Re-rank top hot candidates with viewer-specific
         signals; cap at RANKING_FOR_YOU_LIMIT; record impressions for the
@@ -2261,6 +2421,22 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     @track_performance
     def get_queryset(self):
+        # Owner edits/deletes and owner-only event management actions must
+        # work for services in any status (Agreed/Completed/Cancelled/hidden)
+        # and regardless of the list-time visibility/search filters below,
+        # which would otherwise hide the resource and produce a misleading
+        # 404. Authorization is enforced in the respective action methods
+        # (perform_update / destroy / EventHandshakeService.* checks).
+        if self.action in (
+            'update', 'partial_update', 'destroy',
+            'generate_qr_token', 'get_qr_token',
+        ):
+            return (
+                Service.objects
+                .select_related('user', 'event_evaluation_summary')
+                .prefetch_related('tags')
+            )
+        user_param = self.request.query_params.get('user')
         # Use Prefetch object to optimize nested user badges query
         user_badges_prefetch = Prefetch(
             'user__badges',
@@ -2277,8 +2453,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
         )
 
         # Base queryset with optimizations (annotate comment_count to avoid N+1 in list)
+        visible_statuses = ['Active', 'Agreed'] if user_param else ['Active']
         queryset = (
-            Service.objects.filter(status='Active')
+            Service.objects.filter(status__in=visible_statuses)
             .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
             .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
@@ -2289,11 +2466,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
             )
         )
 
-        # Save / Endorse / Dismiss / Endorsable list-time annotations so the
-        # serializer's per-viewer fields don't fire one query per service in
-        # list responses. Detail view uses the per-row fallback in the
-        # serializer (one query is fine there).
-        from .models import Endorsement, SavedService, ServiceDismissal
+        # Save / Dismiss list-time annotations so the serializer's per-viewer
+        # fields don't fire one query per service in list responses. Detail
+        # view uses the per-row fallback in the serializer (one query is fine
+        # there).
+        from .models import SavedService, ServiceDismissal
         if self.request.user.is_authenticated:
             queryset = queryset.annotate(
                 is_saved_anno=Exists(
@@ -2301,40 +2478,12 @@ class ServiceViewSet(viewsets.ModelViewSet):
                         user=self.request.user, service=OuterRef('pk'),
                     ),
                 ),
-                is_endorsed_anno=Exists(
-                    Endorsement.objects.filter(
-                        endorser=self.request.user, service=OuterRef('pk'),
-                    ),
-                ),
                 is_dismissed_anno=Exists(
                     ServiceDismissal.objects.filter(
                         viewer=self.request.user, service=OuterRef('pk'),
                     ),
                 ),
-                is_endorsable_anno=Exists(
-                    Handshake.objects.filter(
-                        requester=self.request.user,
-                        service=OuterRef('pk'),
-                        status='completed',
-                    ),
-                ),
             )
-        endorsement_count_subquery = (
-            Endorsement.objects
-            .filter(service=OuterRef('pk'))
-            .order_by()
-            .values('service')
-            .annotate(c=Count('id'))
-            .values('c')
-        )
-        from django.db.models import IntegerField
-        from django.db.models.functions import Coalesce
-        queryset = queryset.annotate(
-            endorsement_count_anno=Coalesce(
-                Subquery(endorsement_count_subquery, output_field=IntegerField()),
-                Value(0, output_field=IntegerField()),
-            ),
-        )
 
         # Filter by visibility - admins can see all, others only visible
         if not (self.request.user.is_authenticated and self.request.user.role in ADMIN_ROLES):
@@ -2344,13 +2493,26 @@ class ServiceViewSet(viewsets.ModelViewSet):
         search_engine = SearchEngine()
         search_params = {
             'type': self.request.query_params.get('type'),
+            # Repeated `type=` (Browse multi-select) is honored when present.
+            'types': self.request.query_params.getlist('type'),
+            # Repeated `location_type=` for Online / In-Person multi-select.
+            'location_types': self.request.query_params.getlist('location_type'),
+            'schedule_type': self.request.query_params.get('schedule_type'),
+            'weekend': str(
+                self.request.query_params.get('weekend', '')
+            ).strip().lower() in {'1', 'true', 'yes'},
             'tag': self.request.query_params.get('tag'),
             'tags': self.request.query_params.getlist('tags'),
             'search': self.request.query_params.get('search'),
             'entity_type': self.request.query_params.get('entity_type'),
             'lat': self.request.query_params.get('lat'),
             'lng': self.request.query_params.get('lng'),
-            'distance': self.request.query_params.get('distance', 10),
+            # No default radius -- LocationStrategy treats missing distance as
+            # signal-only (annotate + order, no hard cutoff). The previous
+            # default of 10 silently filtered out any service beyond 10 km
+            # whenever location was enabled. Distance is now opt-in via the
+            # More-filters slider; the frontend sends it explicitly when on.
+            'distance': self.request.query_params.get('distance'),
             # FR-12c — event date-range filter (only fires when type=Event).
             'date_from': self.request.query_params.get('date_from'),
             'date_to': self.request.query_params.get('date_to'),
@@ -2362,37 +2524,60 @@ class ServiceViewSet(viewsets.ModelViewSet):
             # Surface the field-level error instead of swallowing it.
             raise drf_serializers.ValidationError({exc.field: exc.message})
 
-        user_param = self.request.query_params.get('user')
-
-        # Onboarding tag fallback (#478): when an onboarded viewer with
-        # declared skills hits the feed without an explicit tag filter,
-        # prefer services tagged with their skills and top up from the
-        # explore pool when too few match. Annotates `source` for the UI.
-        # Skipped when ?user= is set: profile pages must show every active
-        # service the owner has, regardless of whether the tags overlap the
-        # viewer's declared skills.
-        explicit_tag = (
-            self.request.query_params.get('tag')
-            or self.request.query_params.getlist('tags')
-        )
-        if not explicit_tag and not user_param:
-            from .ranking import apply_onboarding_fallback
-            queryset, _ = apply_onboarding_fallback(
-                queryset,
-                self.request.user,
-                getattr(settings, 'RANKING_ONBOARDING_MIN_RESULTS', 10),
+        # The feed-shaping filters below (onboarding tag fallback,
+        # explore_only, exclude_own) only make sense for the list view —
+        # they reshape the public catalogue. Detail actions like retrieve
+        # or @action(detail=True) endpoints (generate_qr_token,
+        # complete_event, cancel_event, …) target a specific pk and must
+        # not have their target silently dropped by feed shaping, or the
+        # caller sees a misleading 404. Status + is_visible filtering
+        # above still applies so genuinely non-public services 404 as they
+        # should.
+        if self.action == 'list':
+            # Onboarding tag fallback (#478): when an onboarded viewer with
+            # declared skills hits the feed without an explicit tag filter,
+            # prefer services tagged with their skills and top up from the
+            # explore pool when too few match. Annotates `source` for the UI.
+            # Skipped when ?user= is set: profile pages must show every active
+            # service the owner has, regardless of whether the tags overlap the
+            # viewer's declared skills.
+            explicit_tag = (
+                self.request.query_params.get('tag')
+                or self.request.query_params.getlist('tags')
             )
+            # Browse's "All" mode opts out of the implicit skills filter so the
+            # viewer sees the full active catalog instead of a skill-aware slice.
+            skip_onboarding_raw = self.request.query_params.get('skip_onboarding', '')
+            skip_onboarding = (
+                str(skip_onboarding_raw).strip().lower() in {'1', 'true', 'yes'}
+            )
+            if not explicit_tag and not user_param and not skip_onboarding:
+                from .ranking import apply_onboarding_fallback
+                queryset, _ = apply_onboarding_fallback(
+                    queryset,
+                    self.request.user,
+                    getattr(settings, 'RANKING_ONBOARDING_MIN_RESULTS', 10),
+                )
 
-        # explore_only=true (#480): restrict the feed to Phase 3 eligible
-        # services (cold-start, undershown quality, stale recurring) so the
-        # mobile "Try something new" carousel can fetch them in one call.
-        explore_only_raw = self.request.query_params.get('explore_only', '')
-        if str(explore_only_raw).strip().lower() in {'1', 'true', 'yes'}:
-            from .ranking import _eligible_exploration
-            sample = list(queryset[:200])
-            cold, under, stale = _eligible_exploration(sample)
-            eligible_ids = [s.id for s in (*cold, *under, *stale)]
-            queryset = queryset.filter(id__in=eligible_ids)
+            # explore_only=true (#480): restrict the feed to Phase 3 eligible
+            # services (cold-start, undershown quality, stale recurring) so the
+            # mobile "Try something new" carousel can fetch them in one call.
+            explore_only_raw = self.request.query_params.get('explore_only', '')
+            if str(explore_only_raw).strip().lower() in {'1', 'true', 'yes'}:
+                from .ranking import _eligible_exploration
+                sample = list(queryset[:200])
+                cold, under, stale = _eligible_exploration(sample)
+                eligible_ids = [s.id for s in (*cold, *under, *stale)]
+                queryset = queryset.filter(id__in=eligible_ids)
+
+            # Optional `exclude_own` toggle — Browse uses this so the viewer
+            # never sees their own services in the discovery feed.
+            exclude_own_raw = self.request.query_params.get('exclude_own', '')
+            if (
+                str(exclude_own_raw).strip().lower() in {'1', 'true', 'yes'}
+                and self.request.user.is_authenticated
+            ):
+                queryset = queryset.exclude(user=self.request.user)
 
         # Filter by owner user (for profile pages)
         if user_param:
@@ -2446,13 +2631,30 @@ class ServiceViewSet(viewsets.ModelViewSet):
             half_life_km = getattr(settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0)
             if proximity_active and half_life_km > 0:
                 # PostGIS Distance annotation is in metres (srid=4326).
-                proximity_expr = ExpressionWrapper(
+                # Online services have `location IS NULL` and therefore a
+                # NULL distance. The previous fix here Coalesced NULL → 0 m
+                # which gave Online rows proximity_factor=1.0 (the maximum)
+                # so they out-ranked legitimately-nearby in-person rows.
+                # Treat Online as proximity-neutral instead: a factor of 0.5
+                # (the value an in-person row at the half-life distance
+                # would get) so Online competes on hot_score without an
+                # unearned proximity boost, and without being banished to
+                # the bottom either.
+                inperson_proximity = ExpressionWrapper(
                     Value(1.0, output_field=FloatField()) / (
                         Value(1.0, output_field=FloatField())
                         + F('distance') / Value(
                             1000.0 * half_life_km, output_field=FloatField()
                         )
                     ),
+                    output_field=FloatField(),
+                )
+                proximity_expr = Case(
+                    When(
+                        location__isnull=True,
+                        then=Value(0.5, output_field=FloatField()),
+                    ),
+                    default=inperson_proximity,
                     output_field=FloatField(),
                 )
             else:
@@ -2492,8 +2694,24 @@ class ServiceViewSet(viewsets.ModelViewSet):
             # Non-hot sorts with a location: distance-only ordering, as before.
             queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         else:
-            # Default: sort by latest (created_at descending)
-            queryset = queryset.order_by('-is_pinned', '-created_at')
+            # Default: pinned first, then a small boost for services from
+            # users the viewer follows (FR-19e), then newest. The follow
+            # boost only kicks in for authenticated viewers; anonymous
+            # viewers fall back to plain pinned + recency.
+            if self.request.user.is_authenticated:
+                from .models import UserFollow
+                queryset = queryset.annotate(
+                    is_from_followed_user=Exists(
+                        UserFollow.objects.filter(
+                            follower=self.request.user,
+                            following=OuterRef('user_id'),
+                        )
+                    ),
+                ).order_by(
+                    '-is_pinned', '-is_from_followed_user', '-created_at',
+                )
+            else:
+                queryset = queryset.order_by('-is_pinned', '-created_at')
 
         return queryset
 
@@ -2591,7 +2809,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         """Return a single service regardless of status so owners and participants
-        can view Agreed/Completed/Cancelled services from their history."""
+        can view Agreed/Completed/Cancelled services from their history.
+
+        NFR-13a: the detail page hit a 2 s budget on Docker CI because the
+        serializer was issuing a per-card query for `comment_count`,
+        `is_saved`, and `is_dismissed` even on the single-row detail route.
+        Annotate those alongside the prefetches so the request is constant
+        in the number of related objects rather than O(comments + saves +
+        dismissals)."""
         user_badges_prefetch = Prefetch(
             'user__badges',
             queryset=UserBadge.objects.select_related('badge')
@@ -2605,6 +2830,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         )
         queryset = (
             Service.objects
+            .annotate(comment_count=Count('comments', filter=Q(comments__is_deleted=False)))
             .select_related('user', 'event_evaluation_summary')
             .prefetch_related(
                 'tags',
@@ -2613,6 +2839,25 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 capacity_handshakes_prefetch,
             )
         )
+
+        # Per-viewer annotations match the list path so the serializer's
+        # is_saved / is_dismissed methods read an annotation instead of
+        # firing one query per service.
+        from .models import SavedService, ServiceDismissal
+        if request.user.is_authenticated:
+            queryset = queryset.annotate(
+                is_saved_anno=Exists(
+                    SavedService.objects.filter(
+                        user=request.user, service=OuterRef('pk'),
+                    ),
+                ),
+                is_dismissed_anno=Exists(
+                    ServiceDismissal.objects.filter(
+                        viewer=request.user, service=OuterRef('pk'),
+                    ),
+                ),
+            )
+
         instance = get_object_or_404(queryset, pk=kwargs['pk'])
 
         # For You click attribution (#481): when the detail page is reached
@@ -2720,12 +2965,84 @@ class ServiceViewSet(viewsets.ModelViewSet):
         
         return response
     
+    def partial_update(self, request, *args, **kwargs):
+        # Optimistic locking gate (NFR-05d). Two owner sessions editing
+        # different fields would otherwise last-write-wins. Clients echo
+        # the `version` they read on GET; we compare it to the persisted
+        # value under SELECT FOR UPDATE so a concurrent writer that
+        # already incremented the row produces a 409 instead of silently
+        # overwriting their changes.
+        client_version = request.data.get('version', None) if hasattr(request, 'data') else None
+        if client_version is not None:
+            try:
+                client_version_int = int(client_version)
+            except (TypeError, ValueError):
+                return create_error_response(
+                    'version must be an integer.',
+                    code=ErrorCodes.VALIDATION_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            with transaction.atomic():
+                instance = self.get_object()
+                # Re-read under FOR UPDATE so concurrent writers serialize
+                # on this row for the duration of the patch.
+                locked = (
+                    Service.objects.select_for_update()
+                    .filter(pk=instance.pk)
+                    .values_list('version', flat=True)
+                    .first()
+                )
+                if locked is None:
+                    return create_error_response(
+                        'Service was removed.',
+                        code=ErrorCodes.NOT_FOUND,
+                        status_code=status.HTTP_404_NOT_FOUND,
+                    )
+                if locked != client_version_int:
+                    return Response(
+                        {
+                            'detail': (
+                                'This listing was updated elsewhere — reload to see '
+                                'the latest changes.'
+                            ),
+                            'code': ErrorCodes.VERSION_CONFLICT,
+                            'current_version': locked,
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                # Strip `version` from the payload so it doesn't appear in
+                # the serializer's input (it's read-only on the wire and
+                # the increment happens in perform_update).
+                if hasattr(request.data, '_mutable'):
+                    was_mutable = request.data._mutable
+                    request.data._mutable = True
+                    request.data.pop('version', None)
+                    request.data._mutable = was_mutable
+                else:
+                    try:
+                        request.data.pop('version', None)
+                    except (AttributeError, KeyError, TypeError):
+                        pass
+                return super().partial_update(request, *args, **kwargs)
+        # No version supplied — preserve the legacy last-write-wins
+        # contract for older clients (and admin tooling) that don't
+        # round-trip the field.
+        return super().partial_update(request, *args, **kwargs)
+
     def perform_update(self, serializer):
         service = serializer.instance
         if service.user != self.request.user and getattr(self.request.user, 'role', None) != 'admin':
             raise PermissionDenied('Attempting to modify another user\'s service')
 
         is_admin = getattr(self.request.user, 'role', None) == 'admin'
+
+        # Only Active services are editable. Once a service is Agreed, Completed,
+        # Cancelled or otherwise locked, surface a clear 403 instead of the
+        # misleading 404 that the list-time visibility filter used to produce.
+        if service.status != 'Active' and not is_admin:
+            raise PermissionDenied(
+                f'This service can no longer be edited (status: {service.status}).'
+            )
 
         if service.type == 'Event' and not is_admin:
             if service.is_in_lockdown_window:
@@ -2747,6 +3064,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
         changed_fields = self._changed_service_fields(service, serializer)
         super().perform_update(serializer)
+        # Bump the optimistic-lock counter (NFR-05d). F() expression keeps
+        # the increment atomic even if two writers slip past the FOR UPDATE
+        # gate (e.g. legacy clients that don't send `version`).
+        Service.objects.filter(pk=service.pk).update(version=F('version') + 1)
+        service.refresh_from_db(fields=['version'])
         if changed_fields:
             self._notify_service_edit_subscribers(service, changed_fields)
         invalidate_service_lists()
@@ -2863,8 +3185,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
     )
     def saved(self, request):
         """List the viewer's saved services, newest first (#483)."""
-        from .models import Endorsement, SavedService
-        from django.db.models import BooleanField, DateTimeField, IntegerField
+        from .models import SavedService
+        from django.db.models import BooleanField, DateTimeField
 
         user_badges_prefetch = Prefetch(
             'user__badges',
@@ -2882,14 +3204,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
             .filter(user=request.user, service=OuterRef('pk'))
             .values('created_at')[:1]
         )
-        endorsement_count_sq = (
-            Endorsement.objects
-            .filter(service=OuterRef('pk'))
-            .order_by()
-            .values('service')
-            .annotate(c=Count('id'))
-            .values('c')
-        )
         queryset = (
             Service.objects
             .filter(savers__user=request.user)
@@ -2903,15 +3217,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
             .annotate(
                 comment_count=Count('comments', filter=Q(comments__is_deleted=False)),
                 is_saved_anno=Value(True, output_field=BooleanField()),
-                is_endorsed_anno=Exists(
-                    Endorsement.objects.filter(
-                        endorser=request.user, service=OuterRef('pk'),
-                    ),
-                ),
-                endorsement_count_anno=Coalesce(
-                    Subquery(endorsement_count_sq, output_field=IntegerField()),
-                    Value(0, output_field=IntegerField()),
-                ),
                 saved_at=Subquery(saved_at_sq, output_field=DateTimeField()),
             )
             .order_by('-saved_at')
@@ -2922,39 +3227,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response(serializer.data)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
-
-    @action(
-        detail=True,
-        methods=['post', 'delete'],
-        url_path='endorse',
-        permission_classes=[permissions.IsAuthenticated],
-    )
-    def endorse(self, request, pk=None):
-        """Toggle a public endorsement of the service's provider (#483).
-
-        Endorsements are public. Their integration into Wilson quality is a
-        planned follow-up; this PR ships the model, endpoints, and counts.
-        """
-        from .models import Endorsement
-
-        service = self.get_object()
-        if service.user_id == request.user.id:
-            return Response(
-                {'detail': 'You cannot endorse your own service.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if request.method == 'DELETE':
-            Endorsement.objects.filter(
-                endorser=request.user, service=service,
-            ).delete()
-            count = Endorsement.objects.filter(service=service).count()
-            return Response({'is_endorsed': False, 'endorsement_count': count})
-
-        Endorsement.objects.get_or_create(
-            endorser=request.user, service=service,
-        )
-        count = Endorsement.objects.filter(service=service).count()
-        return Response({'is_endorsed': True, 'endorsement_count': count})
 
     @action(detail=True, methods=['post'], url_path='toggle-visibility')
     def toggle_visibility(self, request, pk=None):
@@ -3318,12 +3590,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['get'],
         url_path='debug-ranking-availability',
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[permissions.IsAuthenticated],
     )
     def debug_ranking_availability(self, request):
-        # Admin-only per #371. The PlatformSetting flag remains as a master
-        # on/off but is now redundant with the IsAdminUser gate; left for
-        # backwards compatibility with the existing admin UI toggle.
+        # Recommendation Showcase: gated solely by the PlatformSetting toggle
+        # so a moderator can flip it on for the whole community at once.
         platform_settings = PlatformSetting.get_solo()
         return Response({'enabled': platform_settings.ranking_debug_enabled})
 
@@ -3331,16 +3602,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['post'],
         url_path='debug-ranking',
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[permissions.IsAuthenticated],
     )
     def debug_ranking(self, request):
-        # Admin-only per #371. Optional simulated_user_id lets an admin compute
-        # the payload from another user's perspective (read-only -- no access to
-        # the simulated user's messages, settings, or other private state).
+        # Open to any authenticated user once the moderator turns the showcase
+        # on. simulated_user_id stays admin-only because it'd otherwise leak
+        # another user's tag overlap and follow signal.
         platform_settings = PlatformSetting.get_solo()
         if not platform_settings.ranking_debug_enabled:
             return create_error_response(
-                'Ranking debug is currently disabled by an administrator.',
+                'Ranking showcase is currently disabled by a moderator.',
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN,
             )
@@ -3364,6 +3635,18 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 return None
 
         simulated_user_id = request.data.get('simulated_user_id')
+        # `simulated_user_id` would expose another user's tag overlap and
+        # follow graph, so keep it admin-only even when the showcase is open
+        # for everyone else.
+        if simulated_user_id and getattr(request.user, 'role', None) not in ADMIN_ROLES:
+            simulated_user_id = None
+
+        injected_id_raw = request.data.get('phase3_injected_id')
+        slot_index_raw = request.data.get('phase3_slot_index')
+        try:
+            slot_index = int(slot_index_raw) if slot_index_raw not in (None, '') else None
+        except (TypeError, ValueError):
+            slot_index = None
 
         payload = build_service_debug_payload(
             service_ids=service_ids,
@@ -3376,6 +3659,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
             lng=_to_float(request.data.get('lng')),
             distance=_to_float(request.data.get('distance')),
             active_filter=(request.data.get('active_filter') or 'all').strip() or 'all',
+            phase3_injected_id=str(injected_id_raw) if injected_id_raw else None,
+            phase3_slot_index=slot_index,
         )
         response = Response(payload)
         response['X-Ranking-Debug-Debounce'] = '300'
@@ -3756,6 +4041,12 @@ class HandshakeViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [UserRateThrottle]
     pagination_class = StandardResultsSetPagination
+    # Handshakes are never row-deleted via the API; lifecycle is driven by
+    # state-transition actions (cancel / deny / complete). Removing DELETE
+    # (and the unused PUT/PATCH on the detail route) keeps the
+    # CASCADE on ``Report.related_handshake`` unreachable from any HTTP
+    # path so the moderation trail cannot be wiped by a participant.
+    http_method_names = ['get', 'post', 'head', 'options']
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -5680,7 +5971,7 @@ class AdminUserViewSet(viewsets.ViewSet):
             message=request.data.get('message', 'You have received a formal warning from an administrator.'),
         )
 
-        log_admin_action(
+        audit_entry = log_admin_action(
             request.user,
             'warn_user',
             'user',
@@ -5688,7 +5979,13 @@ class AdminUserViewSet(viewsets.ViewSet):
             request.data.get('message', ''),
         )
 
-        return Response({'status': 'success', 'message': 'Warning issued'})
+        # NFR-03b: surface the appended audit-log row inline so moderation
+        # consoles don't have to chase a follow-up GET that may race the
+        # writer behind a follower replica.
+        payload = {'status': 'success', 'message': 'Warning issued'}
+        if audit_entry is not None:
+            payload['audit_log'] = AdminAuditLogSerializer(audit_entry).data
+        return Response(payload)
 
     @action(detail=True, methods=['post'], url_path='ban', throttle_classes=[ConfirmationThrottle])
     def ban_user(self, request, pk=None):
@@ -6319,7 +6616,7 @@ class PublicChatViewSet(viewsets.ViewSet):
         has_active_hs = Handshake.objects.filter(
             service=service,
             requester=user,
-            status__in=['accepted', 'checked_in', 'attended'],
+            status__in=['accepted', 'checked_in', 'attended', 'completed', 'no_show'],
         ).exists()
         if has_active_hs:
             return None
@@ -7068,21 +7365,37 @@ class ForumCategoryViewSet(viewsets.ModelViewSet):
 
         # Annotate counts and last_activity inline so the serializer doesn't fan
         # out into per-category queries. Subqueries keep this O(1) total.
+        # Soft-deleted topics (and posts on them) are excluded from these counts
+        # for every caller, including staff. Staff still see inactive categories
+        # (toggled above), but the counts here describe the public surface —
+        # admin moderation goes through AdminReportViewSet, which references the
+        # surviving Report rows directly, so surfacing soft-deleted topics in
+        # category aggregates would be misleading rather than useful.
         latest_post_at = (
             ForumPost.objects
-            .filter(topic__category=OuterRef('pk'), is_deleted=False)
+            .filter(
+                topic__category=OuterRef('pk'),
+                topic__is_deleted=False,
+                is_deleted=False,
+            )
             .order_by('-created_at')
             .values('created_at')[:1]
         )
         latest_topic_at = (
             ForumTopic.objects
-            .filter(category=OuterRef('pk'))
+            .filter(category=OuterRef('pk'), is_deleted=False)
             .order_by('-created_at')
             .values('created_at')[:1]
         )
         queryset = queryset.annotate(
-            topic_count_annotated=Count('topics', distinct=True),
-            post_count_annotated=Count('topics__posts', filter=Q(topics__posts__is_deleted=False), distinct=True),
+            topic_count_annotated=Count(
+                'topics', filter=Q(topics__is_deleted=False), distinct=True
+            ),
+            post_count_annotated=Count(
+                'topics__posts',
+                filter=Q(topics__posts__is_deleted=False, topics__is_deleted=False),
+                distinct=True,
+            ),
             last_activity_annotated=Coalesce(
                 Greatest(Subquery(latest_post_at), Subquery(latest_topic_at)),
                 Subquery(latest_post_at),
@@ -7190,7 +7503,15 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
     
     def get_queryset(self):
+        # Hide soft-deleted topics from the public list/retrieve. Reports filed
+        # against them still reference the row in the database; only the public
+        # surface is suppressed. Staff/admin callers see soft-deleted topics so
+        # they can navigate to a specific deleted topic and review its content
+        # for moderation (the destroy/edit/pin/lock/report paths still 404 on
+        # soft-deleted rows because they query is_deleted=False directly).
         queryset = ForumTopic.objects.select_related('author', 'category')
+        if not self.request.user.is_staff:
+            queryset = queryset.filter(is_deleted=False)
 
         # Filter by category if provided
         category_slug = self.request.query_params.get('category')
@@ -7278,14 +7599,14 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, pk=None):
         """Update a forum topic (author or admin only)"""
         try:
-            topic = ForumTopic.objects.get(pk=pk)
+            topic = ForumTopic.objects.get(pk=pk, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Check permissions
         if topic.author != request.user and not request.user.is_staff:
             return create_error_response(
@@ -7293,28 +7614,35 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
-        
+
         # Only allow editing title and body
         allowed_fields = {'title', 'body'}
         update_data = {k: v for k, v in request.data.items() if k in allowed_fields}
-        
+
         serializer = self.get_serializer(topic, data=update_data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
-    
+
     @track_performance
     def destroy(self, request, pk=None):
-        """Delete a forum topic (author or admin only)"""
+        """Soft-delete a forum topic (author or admin only).
+
+        The topic row is preserved (with is_deleted=True) so that any
+        Report.reported_forum_topic rows pointing at it survive — the
+        FK uses on_delete=CASCADE, so a hard delete would wipe the
+        moderation trail. The topic is hidden from public list/detail
+        querysets via the is_deleted=False filter.
+        """
         try:
-            topic = ForumTopic.objects.get(pk=pk)
+            topic = ForumTopic.objects.get(pk=pk, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
-        
+
         # Check permissions
         if topic.author != request.user and not request.user.is_staff:
             return create_error_response(
@@ -7322,8 +7650,11 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
                 code=ErrorCodes.PERMISSION_DENIED,
                 status_code=status.HTTP_403_FORBIDDEN
             )
-        
-        topic.delete()
+
+        # Soft delete — preserve reports filed against this topic.
+        topic.is_deleted = True
+        topic.deleted_at = timezone.now()
+        topic.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
         return Response(status=status.HTTP_204_NO_CONTENT)
     
     @action(detail=True, methods=['post'])
@@ -7331,30 +7662,30 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     def pin(self, request, pk=None):
         """Pin or unpin a topic (admin only)"""
         try:
-            topic = ForumTopic.objects.get(pk=pk)
+            topic = ForumTopic.objects.get(pk=pk, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
                 code=ErrorCodes.NOT_FOUND,
                 status_code=status.HTTP_404_NOT_FOUND
             )
-        
+
         topic.is_pinned = not topic.is_pinned
         topic.save(update_fields=['is_pinned'])
 
         if request.user.role in ADMIN_ROLES:
             state = 'Pinned' if topic.is_pinned else 'Unpinned'
             log_admin_action(request.user, 'pin_topic', 'forum_topic', topic, state)
-        
+
         serializer = self.get_serializer(topic)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
     @track_performance
     def lock(self, request, pk=None):
         """Lock or unlock a topic (admin only)"""
         try:
-            topic = ForumTopic.objects.get(pk=pk)
+            topic = ForumTopic.objects.get(pk=pk, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
@@ -7377,7 +7708,7 @@ class ForumTopicViewSet(viewsets.ModelViewSet):
     def report(self, request, pk=None):
         """Report a forum topic for moderation."""
         try:
-            topic = ForumTopic.objects.get(pk=pk, category__is_active=True)
+            topic = ForumTopic.objects.get(pk=pk, category__is_active=True, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
@@ -7454,6 +7785,7 @@ class ForumActivityView(APIView):
         topic_queryset = ForumTopic.objects.filter(
             author=request.user,
             category__is_active=True,
+            is_deleted=False,
         )
         open_topic_queryset = (
             topic_queryset
@@ -7468,6 +7800,7 @@ class ForumActivityView(APIView):
                 'my_replies': ForumPost.objects.filter(
                     topic__author=request.user,
                     topic__category__is_active=True,
+                    topic__is_deleted=False,
                     is_deleted=False,
                 ).count(),
                 'open_topics': topic_queryset.filter(is_locked=False).count(),
@@ -7506,7 +7839,11 @@ class ForumPostViewSet(viewsets.ViewSet):
         from .serializers import ForumRecentPostSerializer
 
         posts = (
-            ForumPost.objects.filter(is_deleted=False, topic__category__is_active=True)
+            ForumPost.objects.filter(
+                is_deleted=False,
+                topic__category__is_active=True,
+                topic__is_deleted=False,
+            )
             .select_related('author', 'topic', 'topic__category')
             .order_by('-created_at')
         )
@@ -7525,7 +7862,7 @@ class ForumPostViewSet(viewsets.ViewSet):
     def list(self, request, topic_id=None):
         """List posts in a forum topic"""
         try:
-            topic = ForumTopic.objects.get(pk=topic_id, category__is_active=True)
+            topic = ForumTopic.objects.get(pk=topic_id, category__is_active=True, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
@@ -7551,7 +7888,7 @@ class ForumPostViewSet(viewsets.ViewSet):
     def create(self, request, topic_id=None):
         """Create a new post in a forum topic"""
         try:
-            topic = ForumTopic.objects.get(pk=topic_id, category__is_active=True)
+            topic = ForumTopic.objects.get(pk=topic_id, category__is_active=True, is_deleted=False)
         except ForumTopic.DoesNotExist:
             return create_error_response(
                 'Topic not found',
@@ -7654,7 +7991,11 @@ class ForumPostViewSet(viewsets.ViewSet):
     def report(self, request, pk=None):
         """Report a forum post/reply for moderation."""
         try:
-            post = ForumPost.objects.select_related('topic', 'author').get(pk=pk, topic__category__is_active=True)
+            post = ForumPost.objects.select_related('topic', 'author').get(
+                pk=pk,
+                topic__category__is_active=True,
+                topic__is_deleted=False,
+            )
         except ForumPost.DoesNotExist:
             return create_error_response(
                 'Post not found',

@@ -134,11 +134,15 @@ class User(AbstractUser):
         ids = self.featured_badges
         if not isinstance(ids, list):
             raise ValidationError({'featured_badges': ['Must be a list.']})
-        if len(ids) > 2:
-            raise ValidationError({'featured_badges': ['At most 2 featured badges are allowed.']})
         for entry in ids:
             if not isinstance(entry, str):
                 raise ValidationError({'featured_badges': ['All entries must be strings.']})
+        # Normalize multipart noise: FormData may submit '' as a list item; strip empties
+        # before max-count / uniqueness checks (matches serializer validate_featured_badges).
+        ids = [e.strip() for e in ids if e.strip()]
+        self.featured_badges = ids
+        if len(ids) > 2:
+            raise ValidationError({'featured_badges': ['At most 2 featured badges are allowed.']})
         if len(ids) != len(set(ids)):
             raise ValidationError({'featured_badges': ['Duplicate badge IDs are not allowed.']})
         if ids:
@@ -297,6 +301,15 @@ class Service(models.Model):
     schedule_type = models.CharField(max_length=10, choices=SCHEDULE_CHOICES)
     schedule_details = models.TextField(blank=True, null=True)
     scheduled_time = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Event start time (required for Events)')
+    recurrence_interval_days = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            'For recurring Events only. When the organizer marks a recurring '
+            'Event as completed, a fresh copy is auto-created with '
+            'scheduled_time shifted forward by this many days.'
+        ),
+    )
     event_completed_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text='Timestamp when organizer marked an event as completed')
     tags = models.ManyToManyField(Tag, blank=True)
     hot_score = models.FloatField(default=0.0, db_index=True, help_text='Ranking score for hot/trending services')
@@ -314,6 +327,16 @@ class Service(models.Model):
     requires_qr_checkin = models.BooleanField(
         default=False,
         help_text='Require QR code scan or attendance code for attendance verification (Events only)',
+    )
+    version = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            'Optimistic-lock counter (NFR-05d). Incremented atomically inside '
+            'ServiceViewSet.partial_update on every successful PATCH. Clients '
+            'echo the value they read on GET back in the PATCH body; a '
+            'mismatch returns 409 instead of silently overwriting a concurrent '
+            'edit.'
+        ),
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -425,8 +448,13 @@ class Service(models.Model):
             if self._state.adding or self.created_at is None:
                 defer_hot_score_calculation = True
             else:
-                from .ranking import calculate_hot_score
-                self.hot_score = calculate_hot_score(self)
+                # Dispatch by type so events use the velocity/organiser_quality
+                # formula instead of the Offer/Need formula. Without this,
+                # newly-created events stored an inflated score derived from
+                # the organiser's Offer/Need rep history (issue: events with
+                # zero event-feedback were ranking like seasoned offers).
+                from .ranking import calculate_score_for
+                self.hot_score = calculate_score_for(self)
                 if update_fields is not None:
                     update_fields_set = set(update_fields)
                     update_fields_set.add('hot_score')
@@ -435,8 +463,8 @@ class Service(models.Model):
         super().save(*args, **kwargs)
 
         if defer_hot_score_calculation:
-            from .ranking import calculate_hot_score
-            self.hot_score = calculate_hot_score(self)
+            from .ranking import calculate_score_for
+            self.hot_score = calculate_score_for(self)
             super().save(update_fields=['hot_score'])
 
     def __str__(self):
@@ -1137,6 +1165,11 @@ class ForumTopic(models.Model):
     body = models.TextField(max_length=10000)
     is_pinned = models.BooleanField(default=False, help_text='Pinned topics appear at the top')
     is_locked = models.BooleanField(default=False, help_text='Locked topics cannot receive new posts')
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text='Soft delete flag. Hides topic from public views while preserving moderation history (reports).',
+    )
+    deleted_at = models.DateTimeField(null=True, blank=True, help_text='When the topic was soft-deleted')
     view_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1150,6 +1183,7 @@ class ForumTopic(models.Model):
             models.Index(fields=['category', '-is_pinned', '-created_at']),
             models.Index(fields=['author', 'created_at']),
             models.Index(fields=['category', 'is_pinned']),
+            models.Index(fields=['category', 'is_deleted', '-created_at']),
         ]
 
 
@@ -1375,38 +1409,6 @@ class SavedService(models.Model):
         return f'SavedService({self.user_id}, {self.service_id})'
 
 
-class Endorsement(models.Model):
-    """Public endorsement of a service's provider (#483 Endorse).
-
-    A viewer can endorse a service to publicly say 'I vouch for this provider'.
-    Counts are visible on the service card; integration into ranking
-    (Wilson quality / Phase 2 factor) is a planned follow-up so this PR keeps
-    the ranking math untouched.
-    """
-    endorser = models.ForeignKey(
-        'User', on_delete=models.CASCADE, related_name='endorsements_given',
-    )
-    service = models.ForeignKey(
-        Service, on_delete=models.CASCADE, related_name='endorsements',
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=['endorser', 'service'], name='endorsement_unique',
-            ),
-        ]
-        indexes = [
-            models.Index(fields=['service', '-created_at']),
-            models.Index(fields=['endorser', '-created_at']),
-        ]
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f'Endorsement({self.endorser_id}, {self.service_id})'
-
-
 class ServiceDismissal(models.Model):
     """Per-viewer dismissal of a service surfaced in Pulse / For You.
 
@@ -1438,6 +1440,7 @@ class ServiceDismissal(models.Model):
         return f'ServiceDismissal({self.viewer_id}, {self.service_id})'
 
 
+
 class ActivityEvent(models.Model):
     """Append-only timeline of platform activity that powers the activity feed.
 
@@ -1451,7 +1454,6 @@ class ActivityEvent(models.Model):
     HANDSHAKE_ACCEPTED = 'handshake_accepted'
     HANDSHAKE_COMPLETED = 'handshake_completed'
     USER_FOLLOWED = 'user_followed'
-    SERVICE_ENDORSED = 'service_endorsed'
     EVENT_FILLING_UP = 'event_filling_up'
     NEW_NEIGHBOR = 'new_neighbor'
     VERB_CHOICES = [
@@ -1459,7 +1461,6 @@ class ActivityEvent(models.Model):
         (HANDSHAKE_ACCEPTED, 'handshake_accepted'),
         (HANDSHAKE_COMPLETED, 'handshake_completed'),
         (USER_FOLLOWED, 'user_followed'),
-        (SERVICE_ENDORSED, 'service_endorsed'),
         (EVENT_FILLING_UP, 'event_filling_up'),
         (NEW_NEIGHBOR, 'new_neighbor'),
     ]

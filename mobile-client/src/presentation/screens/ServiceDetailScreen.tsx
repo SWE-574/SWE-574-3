@@ -69,7 +69,7 @@ import { formatTimeAgo } from "../../utils/formatTimeAgo";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "../../constants/colors";
 import ImagePreviewModal from "../components/ImagePreviewModal";
-import SaveEndorseButtons from "../components/SaveEndorseButtons";
+import SaveButton from "../components/SaveButton";
 import { ChatEvaluationModal } from "../components/chat/ChatEvaluationModal";
 import { EventEvaluationSummaryCard } from "../components/service/EventEvaluationSummaryCard";
 import ServiceCommentsSection from "../components/service/ServiceCommentsSection";
@@ -723,7 +723,7 @@ export default function ServiceDetailScreen() {
           try {
             await deleteService(service.id);
             if (service.type === "Need") {
-              await refreshUser();
+              await refreshUser({ force: true });
             }
             Alert.alert("Removed", "The listing has been removed.");
             navigation.navigate("Home", { screen: "HomeFeed" } as never);
@@ -1326,7 +1326,7 @@ export default function ServiceDetailScreen() {
             </View>
           </View>
 
-          <SaveEndorseButtons
+          <SaveButton
             service={service}
             isOwner={isOwner}
             onChange={(patch) =>
@@ -1589,14 +1589,19 @@ export default function ServiceDetailScreen() {
               </View>
             );
 
-            if (status === "cancelled") return (
-              <View style={styles.sectionBlock}>
-                <View style={styles.dangerBanner}>
-                  <Ionicons name="close-circle" size={20} color={colors.RED} />
-                  <Text style={[styles.bannerText, { color: colors.RED }]}>Removed from event</Text>
+            if (status === "cancelled") {
+              const userLeft = myEventHandshake?.cancellation_reason === "user_left";
+              return (
+                <View style={styles.sectionBlock}>
+                  <View style={styles.dangerBanner}>
+                    <Ionicons name="close-circle" size={20} color={colors.RED} />
+                    <Text style={[styles.bannerText, { color: colors.RED }]}>
+                      {userLeft ? "You left this event" : "Removed from event"}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            );
+              );
+            }
 
             if (status === "attended") return (
               <View style={styles.sectionBlock}>

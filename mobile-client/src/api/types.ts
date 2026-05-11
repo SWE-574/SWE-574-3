@@ -128,6 +128,7 @@ export interface ForYouSignals {
   follow: number;
   cooccur: number;
   recency_penalty: number;
+  engagement?: number;
 }
 
 export interface Service {
@@ -146,6 +147,7 @@ export interface Service {
   schedule_type?: ScheduleType;
   schedule_details?: string | null;
   scheduled_time?: string | null;
+  recurrence_interval_days?: number | null;
   participant_count?: number;
   created_at: string;
   tags: Tag[];
@@ -154,11 +156,10 @@ export interface Service {
   is_visible?: boolean;
   is_pinned?: boolean;
   is_saved?: boolean;
-  is_endorsed?: boolean;
-  endorsement_count?: number;
   is_newcomer_owner?: boolean;
-  source?: "tag_match" | "explore_topup" | "for_you" | null;
+  source?: "tag_match" | "explore_topup" | "for_you" | "explore" | null;
   for_you_signals?: ForYouSignals | null;
+  explore_pool?: "cold_start" | "undershown_quality" | "stale_recurring" | null;
   requires_qr_checkin?: boolean;
   session_exact_location?: string | null;
   session_exact_location_lat?: string | null;

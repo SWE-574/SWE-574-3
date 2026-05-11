@@ -7,10 +7,9 @@ import RecommendationCard from '@/components/pulse/RecommendationCard'
 import system from '@/theme'
 import type { Service } from '@/types'
 
-const { setSavedMock, setEndorsedMock, setDismissedMock, expressInterestMock } =
+const { setSavedMock, setDismissedMock, expressInterestMock } =
   vi.hoisted(() => ({
     setSavedMock: vi.fn(),
-    setEndorsedMock: vi.fn(),
     setDismissedMock: vi.fn(),
     expressInterestMock: vi.fn(),
   }))
@@ -18,7 +17,6 @@ const { setSavedMock, setEndorsedMock, setDismissedMock, expressInterestMock } =
 vi.mock('@/services/serviceAPI', () => ({
   serviceAPI: {
     setSaved: setSavedMock,
-    setEndorsed: setEndorsedMock,
     expressInterest: expressInterestMock,
   },
 }))
@@ -35,8 +33,6 @@ function makeService(overrides: Partial<Service> = {}): Service {
     title: 'Beginner chess coaching',
     type: 'Offer',
     is_saved: false,
-    is_endorsed: false,
-    is_endorsable: false,
     for_you_signals: { tag: 0.7, follow: 0, cooccur: 0, recency_penalty: 0 },
     user: {
       id: 'u-1',
@@ -61,7 +57,6 @@ function renderCard(service: Service, lane: 'hero' | 'for_you' = 'for_you') {
 describe('RecommendationCard', () => {
   beforeEach(() => {
     setSavedMock.mockReset().mockResolvedValue({ is_saved: true })
-    setEndorsedMock.mockReset().mockResolvedValue({ is_endorsed: true, endorsement_count: 1 })
     setDismissedMock.mockReset().mockResolvedValue({ is_dismissed: true })
     expressInterestMock.mockReset().mockResolvedValue({ id: 'hs-1', status: 'pending' })
   })
@@ -73,19 +68,6 @@ describe('RecommendationCard', () => {
     renderCard(makeService())
     expect(screen.getByText(/Beginner chess coaching/)).toBeInTheDocument()
     expect(screen.getByText(/For you/i)).toBeInTheDocument()
-  })
-
-  it('shows the Endorse button only when is_endorsable is true', () => {
-    const { rerender } = renderCard(makeService({ is_endorsable: false }))
-    expect(screen.queryByLabelText(/^Endorse$/i)).not.toBeInTheDocument()
-    rerender(
-      <ChakraProvider value={system}>
-        <MemoryRouter>
-          <RecommendationCard service={makeService({ is_endorsable: true })} lane="for_you" />
-        </MemoryRouter>
-      </ChakraProvider>,
-    )
-    expect(screen.getByLabelText(/^Endorse$/i)).toBeInTheDocument()
   })
 
   it('toggles save with optimistic update', async () => {

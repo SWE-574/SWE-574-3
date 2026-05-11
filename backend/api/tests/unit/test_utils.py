@@ -228,6 +228,12 @@ class TestCompleteTimebankTransfer:
         ).exists()
 
     def test_group_one_time_offer_transfers_only_once_and_all_receivers_pay(self):
+        """Group one-time offer pays the provider on the FIRST completion.
+
+        Settlement is idempotent: completing handshake2 must not produce a
+        second transfer. Receivers pay per seat on accept and are not
+        refunded on completion (asymmetric system sink).
+        """
         provider = UserFactory(timebank_balance=Decimal('0.00'))
         receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
         receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
@@ -251,7 +257,8 @@ class TestCompleteTimebankTransfer:
         receiver1.refresh_from_db()
         receiver2.refresh_from_db()
 
-        assert provider.timebank_balance == Decimal('0.00')
+        # Provider is paid on the first completion, not the last.
+        assert provider.timebank_balance == Decimal('3.00')
         assert receiver1.timebank_balance == Decimal('2.00')
         assert receiver2.timebank_balance == Decimal('2.00')
 
@@ -262,6 +269,7 @@ class TestCompleteTimebankTransfer:
         receiver1.refresh_from_db()
         receiver2.refresh_from_db()
 
+        # Idempotent: balance unchanged, no second transfer row.
         assert provider.timebank_balance == Decimal('3.00')
         assert receiver1.timebank_balance == Decimal('2.00')
         assert receiver2.timebank_balance == Decimal('2.00')
@@ -270,6 +278,104 @@ class TestCompleteTimebankTransfer:
             transaction_type='transfer',
             handshake__service=service,
         ).count() == 1
+
+    def test_group_one_time_offer_trailing_cancel_only_refunds_the_canceller(self):
+        """Trailing cancellation refunds the canceller and is a no-op for
+        the provider.
+
+        After the first-completion settlement (sgunes review), the provider
+        is already paid by the time anyone cancels. The cancellation path
+        therefore only needs to release escrow for the cancelling receiver
+        and emit no second transfer.
+        """
+        provider = UserFactory(timebank_balance=Decimal('0.00'))
+        receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver3 = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('3.00'),
+            schedule_type='One-Time',
+            max_participants=3,
+        )
+        handshake1 = HandshakeFactory(service=service, requester=receiver1, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake2 = HandshakeFactory(service=service, requester=receiver2, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake3 = HandshakeFactory(service=service, requester=receiver3, status='accepted', provisioned_hours=Decimal('3.00'))
+
+        provision_timebank(handshake1)
+        provision_timebank(handshake2)
+        provision_timebank(handshake3)
+
+        with transaction.atomic():
+            complete_timebank_transfer(handshake1)
+
+        provider.refresh_from_db()
+        # First completion already settled the provider.
+        assert provider.timebank_balance == Decimal('3.00')
+
+        with transaction.atomic():
+            complete_timebank_transfer(handshake2)
+
+        provider.refresh_from_db()
+        # Second completion is idempotent — balance unchanged.
+        assert provider.timebank_balance == Decimal('3.00')
+
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake3)
+
+        provider.refresh_from_db()
+        receiver3.refresh_from_db()
+        handshake3.refresh_from_db()
+
+        # Cancellation refunds the trailing receiver only; provider is unchanged.
+        assert handshake3.status == 'cancelled'
+        assert receiver3.timebank_balance == Decimal('5.00')
+        assert provider.timebank_balance == Decimal('3.00')
+        assert TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).count() == 1
+
+    def test_group_one_time_offer_skips_payout_when_no_one_completed(self):
+        """If every participant cancels before completing, the provider must
+        not be paid. The payout is only owed when at least one receiver
+        actually completed the service.
+        """
+        provider = UserFactory(timebank_balance=Decimal('0.00'))
+        receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('3.00'),
+            schedule_type='One-Time',
+            max_participants=2,
+        )
+        handshake1 = HandshakeFactory(service=service, requester=receiver1, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake2 = HandshakeFactory(service=service, requester=receiver2, status='accepted', provisioned_hours=Decimal('3.00'))
+
+        provision_timebank(handshake1)
+        provision_timebank(handshake2)
+
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake1)
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake2)
+
+        provider.refresh_from_db()
+        receiver1.refresh_from_db()
+        receiver2.refresh_from_db()
+
+        assert provider.timebank_balance == Decimal('0.00')
+        assert receiver1.timebank_balance == Decimal('5.00')
+        assert receiver2.timebank_balance == Decimal('5.00')
+        assert not TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).exists()
 
 
 @pytest.mark.django_db

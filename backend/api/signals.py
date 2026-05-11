@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 
 from django.contrib.auth.signals import user_logged_in, user_login_failed
@@ -205,14 +206,6 @@ def emit_activity_for_new_neighbor(sender, instance, created, **kwargs):
         )
 
 
-# NOTE: producer for ActivityEvent.SERVICE_ENDORSED is intentionally not
-# wired here. The Endorsement model lives on the #494 social-mechanics
-# branch; once it merges into dev, the producer should be added here as a
-# post_save receiver that creates an event with verb=SERVICE_ENDORSED,
-# actor=endorsement.endorser, service=endorsement.service. The verb is
-# already declared on ActivityEvent so the migration sets up the enum.
-
-
 @receiver(post_save, sender=UserFollow)
 def emit_activity_for_user_follow(sender, instance, created, **kwargs):
     """Emit an ActivityEvent when a follow edge is created so a viewer can
@@ -246,11 +239,112 @@ def invalidate_tag_cache(sender, instance, **kwargs):
     invalidate_on_tag_change()
 
 
+_QID_PATTERN = re.compile(r'^Q\d+$')
+
+
+@receiver(post_save, sender=Tag)
+def enrich_tag_with_wikidata_metadata(sender, instance, created, raw=False, **kwargs):
+    """Backfill Tag.parent_qid + depth + entity_type via Wikidata.
+
+    Skips when parent_qid is already populated (idempotent), when raw=True
+    (loaddata / fixtures), and swallows any Wikidata failure so a
+    Service.save can never block on a flaky Wikidata response. The 1h
+    search cache and 24h claims cache make repeat calls cheap.
+
+    Two paths:
+      * QID-shaped tag id (Q12345) -> straight to claims fetch.
+      * Free-text name -> resolve to a likely QID via wbsearchentities,
+        then claims fetch. New non-QID tags now self-heal so the sibling
+        expansion in TagStrategy reaches them.
+    """
+    if raw:
+        return
+    if instance.parent_qid:
+        return
+    try:
+        from .wikidata import (
+            fetch_wikidata_claims, resolve_entity_type, search_wikidata_items,
+        )
+
+        qid = instance.id if _QID_PATTERN.match(str(instance.id or '')) else None
+        if qid is None and instance.name:
+            results = search_wikidata_items(instance.name, limit=1)
+            if results:
+                candidate = results[0].get('id') or ''
+                if _QID_PATTERN.match(candidate):
+                    qid = candidate
+        if qid is None:
+            return
+
+        claims = fetch_wikidata_claims(qid)
+        if not claims:
+            return
+        ancestry = (claims.get('instance_of') or []) + (claims.get('subclass_of') or [])
+        parent_qid = ancestry[0] if ancestry else None
+        entity_type = resolve_entity_type(qid)
+
+        update_fields = {}
+        if parent_qid and not instance.parent_qid:
+            update_fields['parent_qid'] = parent_qid
+            update_fields['depth'] = 1
+        if entity_type and not instance.entity_type:
+            update_fields['entity_type'] = entity_type
+        if update_fields:
+            # update() avoids re-firing the post_save signal we're inside.
+            Tag.objects.filter(pk=instance.pk).update(**update_fields)
+    except Exception:
+        logger.exception("Tag enrichment failed for tag %s", instance.pk)
+
+
 @receiver([post_save, post_delete], sender=Handshake)
 def invalidate_handshake_cache(sender, instance, **kwargs):
     """Invalidate caches when handshake changes."""
     from .models import Handshake
     invalidate_on_handshake_change(instance)
+
+
+# Statuses that move the Phase 2 inputs: 'completed' feeds hours_exchanged on
+# Offer/Need (via _compute_service_factors); 'accepted'/'checked_in'/'attended'
+# feed rsvps_last_7d on Events (via _compute_event_factors). 'no_show' flips
+# the capacity_multiplier ratio for both formulas.
+_HOT_SCORE_RELEVANT_STATUSES = {
+    'completed', 'accepted', 'checked_in', 'attended', 'no_show',
+}
+
+# Handshake fields that actually feed the hot_score formula. Saves that touch
+# only fields outside this set (e.g. evaluation_window_* timestamps written by
+# process_feedback_windows or test helpers) must not trigger a recompute,
+# because the formula has time-sensitive components and would produce a
+# different score even though no ranking input changed (#618).
+_HOT_SCORE_RELEVANT_FIELDS = {'status', 'provisioned_hours'}
+
+
+@receiver([post_save, post_delete], sender=Handshake)
+def update_hot_score_on_handshake_change(sender, instance, **kwargs):
+    """Recompute the parent service's hot_score on RSVP / completion changes.
+
+    Without this, an event's velocity (rsvps_last_7d) and an offer's activity
+    (hours_exchanged) drifted between rep changes -- the only other path that
+    triggered a recompute. Demo data showed events ranking on stale stored
+    scores derived from the wrong formula; this closes the feedback loop so
+    every Phase 2 input feeds the persisted score in real time.
+    """
+    if instance.status not in _HOT_SCORE_RELEVANT_STATUSES:
+        return
+    # If the caller passed an explicit `update_fields`, only recompute when
+    # one of the fields that actually feeds the formula is in the set.
+    # Post-delete doesn't have update_fields, so this branch is post_save-only.
+    update_fields = kwargs.get('update_fields')
+    if update_fields is not None and not (
+        set(update_fields) & _HOT_SCORE_RELEVANT_FIELDS
+    ):
+        return
+    service = getattr(instance, 'service', None)
+    if service is None:
+        return
+    if service.pk in _services_being_deleted():
+        return
+    _update_service_hot_score(service)
 
 
 _service_deletes_in_flight = threading.local()

@@ -9,7 +9,7 @@ import {
   extractServiceId,
   requestOfferFromDetail,
 } from './feature5'
-import { switchUser } from './session'
+import { loginAsApi, switchUserApi } from './loginAsApi'
 
 const BALANCE_CANDIDATES: DemoUser[] = [
   USERS.elif,
@@ -177,6 +177,55 @@ export async function openTimeActivity(page: Page): Promise<void> {
   await expect(page.getByText(/^Time Activity$/).first()).toBeVisible({ timeout: 15_000 })
 }
 
+/**
+ * Poll {@link getCurrentBalance} until it equals {@link expected}.
+ *
+ * Backend balance updates are atomic per-request, but the test may have
+ * already read a stale value the moment the API responded (e.g. before
+ * post-commit signals fire). This helper retries the read for up to
+ * `timeout` ms before failing.
+ */
+export async function expectBalanceToBe(
+  page: Page,
+  expected: number,
+  timeout = 10_000,
+): Promise<void> {
+  await expect
+    .poll(async () => getCurrentBalance(page), { timeout })
+    .toBe(expected)
+}
+
+/**
+ * Poll the ledger until a transaction matching {@link predicate} is found.
+ *
+ * Returns the matching ledger row. Useful right after a flow that emits a
+ * ledger entry (transfer / refund / earn) where the entry may lag the
+ * action by a tick.
+ */
+export async function findLedgerTransaction(
+  page: Page,
+  predicate: (transaction: LedgerTransaction) => boolean,
+  options: { direction?: 'all' | 'credit' | 'debit'; timeout?: number } = {},
+): Promise<LedgerTransaction> {
+  const direction = options.direction ?? 'all'
+  const timeout = options.timeout ?? 10_000
+  let lastSeen: LedgerTransaction[] = []
+
+  await expect
+    .poll(async () => {
+      const page1 = await listTransactions(page, direction)
+      lastSeen = page1.results
+      return page1.results.some(predicate)
+    }, { timeout })
+    .toBeTruthy()
+
+  const match = lastSeen.find(predicate)
+  if (!match) {
+    throw new Error('findLedgerTransaction: predicate matched once but match disappeared')
+  }
+  return match
+}
+
 export async function pickUsersWithBalanceAtLeast(
   page: Page,
   minInclusive: number,
@@ -190,11 +239,15 @@ export async function pickUsersWithBalanceAtLeast(
   for (const user of BALANCE_CANDIDATES) {
     if (blocked.has(user.email)) continue
 
+    // API-fixture login: this loop touches up to 9 demo users in sequence
+    // and the form-login navigation cost dominates. The balance read uses
+    // the live backend either way, so the cached /users/me/ stub does not
+    // affect the assertion.
     if (firstLogin) {
-      await loginAs(page, user)
+      await loginAsApi(page, user)
       firstLogin = false
     } else {
-      await switchUser(page, user)
+      await switchUserApi(page, user)
     }
 
     const balance = await getCurrentBalance(page)
@@ -216,6 +269,10 @@ export async function createAcceptedOfferExchange(page: Page, options: {
   requester: DemoUser
   title?: string
   duration?: number
+  /** Listing location_type. Defaults to online to preserve every legacy
+   * caller; FR-13m / #300 callers pass `'in-person'` so the manual
+   * Mark-as-Complete fallback's eligibility gate matches. */
+  location?: 'online' | 'in-person'
 }): Promise<{
   title: string
   detailUrl: string
@@ -228,18 +285,20 @@ export async function createAcceptedOfferExchange(page: Page, options: {
     title,
     description: `Playwright creates ${title} for Feature 7 verification.`,
     duration: options.duration ?? 1,
-    online: true,
+    online: options.location !== 'in-person',
   })
   const serviceId = extractServiceId(detailUrl)
 
-  await switchUser(page, options.requester)
+  await switchUserApi(page, options.requester)
   await page.goto(detailUrl)
   await requestOfferFromDetail(page)
 
-  await switchUser(page, options.owner)
+  await switchUserApi(page, options.owner)
   await acceptPendingHandshakeViaApi(page, {
     serviceId,
     requesterName: options.requester.name,
+    owner: options.owner,
+    requester: options.requester,
   })
 
   return { title, detailUrl, serviceId }
@@ -269,16 +328,18 @@ export async function createAcceptedGroupOfferExchanges(page: Page, options: {
   const serviceId = extractServiceId(detailUrl)
 
   for (const requester of options.requesters) {
-    await switchUser(page, requester)
+    await switchUserApi(page, requester)
     await page.goto(detailUrl)
     await requestOfferFromDetail(page)
   }
 
-  await switchUser(page, options.owner)
   for (const requester of options.requesters) {
+    await switchUserApi(page, options.owner)
     await acceptPendingHandshakeViaApi(page, {
       serviceId,
       requesterName: requester.name,
+      owner: options.owner,
+      requester,
     })
   }
 
@@ -349,7 +410,7 @@ export async function completeOfferExchange(page: Page, options: {
   requester: DemoUser
   serviceTitle: string
 }): Promise<void> {
-  await switchUser(page, options.owner)
+  await switchUserApi(page, options.owner)
   const handshakeId = await findHandshakeId(page, {
     serviceTitle: options.serviceTitle,
     requesterName: options.requester.name,
@@ -357,7 +418,7 @@ export async function completeOfferExchange(page: Page, options: {
   })
   await confirmHandshakeViaApi(page, handshakeId)
 
-  await switchUser(page, options.requester)
+  await switchUserApi(page, options.requester)
   await confirmHandshakeViaApi(page, handshakeId)
 }
 

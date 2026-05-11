@@ -98,6 +98,7 @@ class TestLeaveEvent:
         hs = EventHandshakeService.join_event(service, user)
         result = EventHandshakeService.leave_event(hs, user)
         assert result.status == 'cancelled'
+        assert result.cancellation_reason == 'user_left'
 
     def test_leave_during_lockdown_raises(self):
         service = _event_service(hours_until_start=12)  # within 24h
@@ -198,11 +199,22 @@ class TestCompleteEvent:
         service.refresh_from_db()
         assert service.status == 'Completed'
 
-    def test_unchecked_participants_become_no_show(self):
+    def test_accepted_participants_remain_accepted_on_completion(self):
         organizer = UserFactory()
         service = _event_service(organizer=organizer)
         user = UserFactory()
         hs = EventHandshakeService.join_event(service, user)
+
+        EventHandshakeService.complete_event(service, organizer)
+        hs.refresh_from_db()
+        assert hs.status == 'accepted'
+
+    def test_checked_in_without_mark_attended_becomes_no_show(self):
+        organizer = UserFactory()
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        user = UserFactory()
+        hs = EventHandshakeService.join_event(service, user)
+        EventHandshakeService.checkin(hs, user)
 
         EventHandshakeService.complete_event(service, organizer)
         hs.refresh_from_db()
@@ -265,8 +277,9 @@ class TestCompleteEvent:
         user = UserFactory()
 
         for _ in range(3):
-            svc = _event_service(organizer=organizer)
-            EventHandshakeService.join_event(svc, user)
+            svc = _event_service(organizer=organizer, hours_until_start=12)
+            hs = EventHandshakeService.join_event(svc, user)
+            EventHandshakeService.checkin(hs, user)
             EventHandshakeService.complete_event(svc, organizer)
 
         user.refresh_from_db()
@@ -277,8 +290,9 @@ class TestCompleteEvent:
     def test_no_show_count_increments(self):
         organizer = UserFactory()
         user = UserFactory()
-        service = _event_service(organizer=organizer)
-        EventHandshakeService.join_event(service, user)
+        service = _event_service(organizer=organizer, hours_until_start=12)
+        hs = EventHandshakeService.join_event(service, user)
+        EventHandshakeService.checkin(hs, user)
 
         EventHandshakeService.complete_event(service, organizer)
         user.refresh_from_db()
@@ -287,9 +301,10 @@ class TestCompleteEvent:
     def test_no_show_updated_at_is_set(self):
         """Bulk update of handshakes must update the updated_at timestamp."""
         organizer = UserFactory()
-        service = _event_service(organizer=organizer)
+        service = _event_service(organizer=organizer, hours_until_start=12)
         user = UserFactory()
         hs = EventHandshakeService.join_event(service, user)
+        EventHandshakeService.checkin(hs, user)
         old_ts = hs.updated_at
 
         EventHandshakeService.complete_event(service, organizer)
@@ -434,6 +449,24 @@ class TestGenerateQRToken:
         service = _event_service(organizer=organizer, hours_until_start=12)
         assert not service.requires_qr_checkin
         with pytest.raises(ValueError, match='does not require'):
+            EventHandshakeService.generate_qr_token(service, organizer)
+
+    def test_cannot_generate_outside_lockdown_window(self):
+        """Pin the 24-hour lockdown gate.
+
+        Generation must raise ``ValueError`` with the user-readable message
+        when the event is more than 24h away. The frontend depends on this
+        exact message to surface "Could not generate the attendance QR" via
+        the ServerError toast (EventRosterModal); silently swallowing the
+        error in the FE used to leave the button stuck on "Generating...".
+        """
+        organizer = UserFactory()
+        service = _qr_event(organizer=organizer, hours_until_start=48)
+        assert not service.is_in_lockdown_window
+        with pytest.raises(
+            ValueError,
+            match='QR token can only be generated within 24 hours',
+        ):
             EventHandshakeService.generate_qr_token(service, organizer)
 
 

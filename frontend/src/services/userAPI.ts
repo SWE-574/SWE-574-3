@@ -47,6 +47,8 @@ export interface UserUpdateData {
   banner_url?: string
   /** List of tag IDs (UUID strings or "custom:<name>") to set as user skills */
   skill_ids?: string[]
+  /** Showcase badge IDs (max 2); send `[]` to clear in JSON, or append `featured_badges` as '' in FormData (clears). */
+  featured_badges?: string[]
 }
 
 /** Convert a base64 data URL → Blob so it can be sent as a file */

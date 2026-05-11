@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { Box, Flex, Text } from '@chakra-ui/react'
+import { Box, Flex, Text, useBreakpointValue } from '@chakra-ui/react'
 import {
   FiBookmark,
-  FiActivity,
   FiMessageSquare,
   FiUser,
   FiBell,
@@ -144,6 +143,10 @@ const Navbar = () => {
   const location  = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const mobileRef = useRef<HTMLDivElement>(null)
+  // Match Chakra's `md` breakpoint (768px). `false` on first SSR/hydration
+  // pass so the desktop trigger keeps its testid in tests that boot before
+  // the breakpoint resolves.
+  const isMobile = useBreakpointValue({ base: true, md: false }) ?? false
 
   const handleLogout = () => { logout(); navigate('/') }
 
@@ -201,7 +204,6 @@ const Navbar = () => {
             position="absolute" left="50%" style={{ transform: 'translateX(-50%)' }}
           >
             <NavLink to="/dashboard" icon={<FiGrid size={15} />} active={p === '/dashboard'}>Browse</NavLink>
-            <NavLink to="/pulse" icon={<FiActivity size={15} />} active={p === '/pulse' || p === '/activity'}>Pulse</NavLink>
             <NavLink to="/forum" icon={<FiMessageCircle size={15} />} active={p.startsWith('/forum')}>Forum</NavLink>
             <NavLink to="/messages" icon={<FiMessageSquare size={15} />} active={p === '/messages' || p.startsWith('/messages/')}>Messages</NavLink>
           </Flex>
@@ -295,7 +297,7 @@ const Navbar = () => {
                 <Dropdown
                   trigger={
                     <Flex
-                      data-testid="user-menu-trigger"
+                      data-testid={isMobile ? undefined : 'user-menu-trigger'}
                       align="center" gap="6px" p="5px" borderRadius="10px"
                       style={{ cursor: 'pointer', transition: 'background 0.15s' }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GRAY100 }}
@@ -333,9 +335,12 @@ const Navbar = () => {
                 </Dropdown>
               </Box>
 
-              {/* Mobile hamburger */}
+              {/* Mobile hamburger — also serves as the user menu trigger
+                  on small viewports (the desktop avatar dropdown is hidden). */}
               <Box
                 as="button" display={{ base: 'flex', md: 'none' }}
+                data-testid={isMobile ? 'user-menu-trigger' : undefined}
+                aria-label="Open menu"
                 alignItems="center" justifyContent="center"
                 w="36px" h="36px" borderRadius="10px"
                 bg={mobileOpen ? GRAY100 : 'transparent'}
@@ -421,7 +426,6 @@ const Navbar = () => {
           {/* Nav links */}
           <Box mb={2}>
             <MobileNavLink to="/dashboard" icon={<FiGrid size={16} />} active={p === '/dashboard'} onClick={() => setMobileOpen(false)}>Browse</MobileNavLink>
-            <MobileNavLink to="/pulse" icon={<FiActivity size={16} />} active={p === '/pulse' || p === '/activity'} onClick={() => setMobileOpen(false)}>Pulse</MobileNavLink>
             <MobileNavLink to="/forum" icon={<FiMessageCircle size={16} />} active={p.startsWith('/forum')} onClick={() => setMobileOpen(false)}>Forum</MobileNavLink>
             <MobileNavLink to="/messages" icon={<FiMessageSquare size={16} />} active={p === '/messages' || p.startsWith('/messages/')} onClick={() => setMobileOpen(false)}>Messages</MobileNavLink>
             <MobileNavLink to="/notifications" icon={<FiBell size={16} />} active={p === '/notifications'} onClick={() => setMobileOpen(false)}>Notifications</MobileNavLink>

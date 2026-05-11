@@ -47,6 +47,8 @@ export interface UserProfileRequest {
   banner_url?: string;
   notification_preferences?: NotificationPreferences;
   featured_badges?: string[];
+  /** Tag IDs (Wikidata QIDs or UUID tags) — same as web `skill_ids` */
+  skill_ids?: string[];
 }
 
 // Notification preference categories surfaced in the mobile settings screen

@@ -15,6 +15,8 @@ from api.models import Service, Tag
 from api.search_filters import (
     SearchStrategy,
     LocationStrategy,
+    LocationTypeStrategy,
+    ScheduleFilterStrategy,
     TagStrategy,
     TextStrategy,
     TypeStrategy,
@@ -116,42 +118,62 @@ class TestLocationStrategy:
     def test_location_strategy_filters_by_distance(self):
         """Test LocationStrategy filters services within specified distance."""
         queryset = Service.objects.filter(status='Active')
-        
+
         # Search from Besiktas center with 10km radius
         params = {
             'lat': 41.0422,
             'lng': 29.0089,
             'distance': 10
         }
-        
+
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
-        
-        # Should include Besiktas and Kadikoy (within 10km), but not Ankara or online
-        assert len(result_list) == 2
+
+        # Should include Besiktas and Kadikoy (within 10km), and Online
+        # services (no location is not subject to the geo filter), but
+        # not Ankara.
         titles = [s.title for s in result_list]
         assert 'Besiktas Service' in titles
         assert 'Kadikoy Service' in titles
+        assert 'Online Service' in titles
         assert 'Ankara Service' not in titles
-        assert 'Online Service' not in titles
-    
+
     def test_location_strategy_with_small_radius(self):
         """Test LocationStrategy with small radius only returns nearby services."""
         queryset = Service.objects.filter(status='Active')
-        
+
         # Search from Besiktas center with 2km radius
         params = {
             'lat': 41.0422,
             'lng': 29.0089,
             'distance': 2
         }
-        
+
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
-        
-        # Should only include Besiktas service
-        assert len(result_list) == 1
-        assert result_list[0].title == 'Besiktas Service'
+
+        # Should include Besiktas (within 2km) and the Online service
+        # (no location, not subject to the geo filter). Kadikoy and Ankara
+        # are filtered out by distance.
+        titles = [s.title for s in result_list]
+        assert 'Besiktas Service' in titles
+        assert 'Online Service' in titles
+        assert 'Kadikoy Service' not in titles
+        assert 'Ankara Service' not in titles
+
+    def test_location_strategy_keeps_online_services(self):
+        """Online services (location IS NULL) bypass the distance filter."""
+        queryset = Service.objects.filter(status='Active')
+
+        params = {'lat': 41.0422, 'lng': 29.0089, 'distance': 1}
+
+        result_list = list(self.strategy.apply(queryset, params))
+
+        titles = [s.title for s in result_list]
+        # Even with a 1km radius the Online service must still be visible.
+        assert 'Online Service' in titles
+        # In-Person services beyond 1km must still be filtered out.
+        assert 'Ankara Service' not in titles
     
     def test_location_strategy_orders_by_distance(self):
         """Test LocationStrategy orders results by distance (nearest first)."""
@@ -204,16 +226,73 @@ class TestLocationStrategy:
         """Test LocationStrategy handles partial location params."""
         queryset = Service.objects.filter(status='Active')
         original_count = queryset.count()
-        
+
         # Only lat provided
         params = {'lat': 41.0422}
         result = self.strategy.apply(queryset, params)
         assert result.count() == original_count
-        
+
         # Only lng provided
         params = {'lng': 29.0089}
         result = self.strategy.apply(queryset, params)
         assert result.count() == original_count
+
+    def test_search_engine_signal_only_when_distance_omitted(self):
+        """End-to-end via SearchEngine: a request with lat/lng but no
+        distance must pass through every strategy without losing rows. This
+        guards against the views.py default that previously injected
+        `distance=10` even when the client didn't send it.
+        """
+        engine = SearchEngine()
+        queryset = Service.objects.filter(status='Active')
+        original_count = queryset.count()
+
+        # `distance` deliberately absent. Mirrors the params dict views.py
+        # constructs after the fix (distance is None when missing).
+        params = {
+            'lat': 41.0422,
+            'lng': 29.0089,
+            'distance': None,
+            'tags': [],
+            'type': None,
+            'types': [],
+            'location_types': [],
+            'schedule_type': None,
+            'weekend': False,
+            'tag': None,
+            'search': None,
+            'entity_type': None,
+            'date_from': None,
+            'date_to': None,
+        }
+        result = engine.search(queryset, params)
+        result_titles = [s.title for s in result]
+        # All services -- including Ankara, far outside any reasonable radius
+        # -- still surface. LocationStrategy only annotates when distance
+        # is missing.
+        assert len(result_titles) == original_count
+        assert 'Ankara Service' in result_titles
+
+    def test_location_strategy_signal_only_when_no_distance(self):
+        """When lat/lng are present without `distance`, the queryset must
+        keep every row (no hard radius cutoff). The viewer asked for the
+        location SIGNAL only -- ranking should weight by closeness via the
+        composite_score's smooth proximity_factor, not exclude far rows.
+        """
+        queryset = Service.objects.filter(status='Active')
+        original_count = queryset.count()
+
+        params = {'lat': 41.0422, 'lng': 29.0089}
+        result = self.strategy.apply(queryset, params)
+        result_list = list(result)
+
+        # Every active row must still be present, including Ankara which is
+        # ~350km away. The annotate() and order_by('distance') still fire.
+        assert len(result_list) == original_count
+        titles = [s.title for s in result_list]
+        assert 'Ankara Service' in titles
+        assert 'Besiktas Service' in titles
+        assert 'Online Service' in titles
 
 
 @pytest.mark.unit
@@ -337,6 +416,42 @@ class TestTagStrategy:
         
         assert result.count() == original_count
     
+    def test_tag_strategy_sibling_expansion(self):
+        """Picking a child tag surfaces sibling-tagged services via the
+        expand_tag_qids helper. Painting and Sculpture both share Art as a
+        parent_qid; picking Painting should bring Sculpture-tagged services
+        along, in addition to the children of Painting (none here).
+        """
+        art = Tag.objects.create(id='Q735', name='Art')
+        painting = Tag.objects.create(id='Q11629', name='Painting', parent_qid='Q735')
+        sculpture = Tag.objects.create(id='Q11634', name='Sculpture', parent_qid='Q735')
+
+        painting_service = Service.objects.create(
+            user=self.user,
+            title='Watercolour intro',
+            description='', type='Offer', duration=Decimal('1.00'),
+            location_type='Online', max_participants=1, schedule_type='One-Time',
+        )
+        painting_service.tags.add(painting)
+
+        sculpture_service = Service.objects.create(
+            user=self.user,
+            title='Clay basics',
+            description='', type='Offer', duration=Decimal('1.00'),
+            location_type='Online', max_participants=1, schedule_type='One-Time',
+        )
+        sculpture_service.tags.add(sculpture)
+
+        params = {'tag': 'Q11629'}  # Painting alone
+        result = self.strategy.apply(Service.objects.filter(status='Active'), params)
+        titles = [s.title for s in result]
+
+        assert 'Watercolour intro' in titles
+        assert 'Clay basics' in titles, (
+            'sibling expansion failed: picking Painting should also surface '
+            'Sculpture-tagged services'
+        )
+
     def test_tag_strategy_nonexistent_tag(self):
         """Test TagStrategy with non-existent tag returns empty."""
         queryset = Service.objects.filter(status='Active')
@@ -577,8 +692,127 @@ class TestTypeStrategy:
         params = {'type': 'Invalid'}
         
         result = self.strategy.apply(queryset, params)
-        
+
         # Invalid type is ignored, all services returned
+        assert result.count() == 2
+
+    def test_type_strategy_filters_by_multiple_types(self):
+        """`types=[...]` filters with type__in (used by Browse multi-select)."""
+        Service.objects.create(
+            user=self.user, title='Need Service', description='need',
+            type='Need', duration=Decimal('1.00'),
+            location_type='Online', max_participants=1, schedule_type='One-Time',
+        )
+        queryset = Service.objects.filter(status='Active')
+        result = self.strategy.apply(queryset, {'types': ['Offer', 'Need']})
+        types = sorted(set(s.type for s in result))
+        assert types == ['Need', 'Offer']
+
+    def test_type_strategy_ignores_invalid_values_in_list(self):
+        """Unknown values in `types` are dropped before filtering."""
+        queryset = Service.objects.filter(status='Active')
+        result = self.strategy.apply(queryset, {'types': ['Offer', 'Bogus']})
+        assert all(s.type == 'Offer' for s in result)
+
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestLocationTypeStrategy:
+    """Test cases for LocationTypeStrategy."""
+
+    def setup_method(self, method):
+        self.user = User.objects.create_user(
+            email='loc-type@test.com', password='x', first_name='T', last_name='U',
+            timebank_balance=Decimal('10.00'),
+        )
+        self.online = Service.objects.create(
+            user=self.user, title='Online Service', description='d',
+            type='Offer', duration=Decimal('1.00'), location_type='Online',
+            max_participants=1, schedule_type='One-Time',
+        )
+        self.in_person = Service.objects.create(
+            user=self.user, title='IRL Service', description='d',
+            type='Offer', duration=Decimal('1.00'), location_type='In-Person',
+            max_participants=1, schedule_type='One-Time',
+        )
+        self.strategy = LocationTypeStrategy()
+
+    def test_keeps_only_online(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'location_types': ['Online']},
+        )
+        titles = [s.title for s in result]
+        assert 'Online Service' in titles
+        assert 'IRL Service' not in titles
+
+    def test_keeps_only_in_person(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'location_types': ['In-Person']},
+        )
+        titles = [s.title for s in result]
+        assert 'IRL Service' in titles
+        assert 'Online Service' not in titles
+
+    def test_both_values_is_noop(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'location_types': ['Online', 'In-Person']},
+        )
+        assert result.count() == 2
+
+    def test_empty_is_noop(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'), {'location_types': []},
+        )
+        assert result.count() == 2
+
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestScheduleFilterStrategy:
+    """Test cases for ScheduleFilterStrategy."""
+
+    def setup_method(self, method):
+        self.user = User.objects.create_user(
+            email='sched@test.com', password='x', first_name='T', last_name='U',
+            timebank_balance=Decimal('10.00'),
+        )
+        self.one_time = Service.objects.create(
+            user=self.user, title='Once', description='d', type='Offer',
+            duration=Decimal('1.00'), location_type='Online',
+            max_participants=1, schedule_type='One-Time',
+            schedule_details='Tuesday 18:00',
+        )
+        self.recurrent = Service.objects.create(
+            user=self.user, title='Weekly', description='d', type='Offer',
+            duration=Decimal('1.00'), location_type='Online',
+            max_participants=1, schedule_type='Recurrent',
+            schedule_details='Every Sunday 10:00',
+        )
+        self.strategy = ScheduleFilterStrategy()
+
+    def test_filters_by_schedule_type(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'schedule_type': 'Recurrent'},
+        )
+        titles = [s.title for s in result]
+        assert titles == ['Weekly']
+
+    def test_weekend_matches_schedule_details(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'), {'weekend': True},
+        )
+        titles = [s.title for s in result]
+        assert 'Weekly' in titles  # 'Sunday' matches
+        assert 'Once' not in titles
+
+    def test_no_params_is_noop(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'), {},
+        )
         assert result.count() == 2
 
 
@@ -681,20 +915,22 @@ class TestSearchEngine:
     def test_search_engine_with_location(self):
         """Test SearchEngine with location filter."""
         queryset = Service.objects.filter(status='Active')
-        
+
         # Search near Besiktas with small radius
         params = {
             'lat': 41.0422,
             'lng': 29.0089,
             'distance': 2
         }
-        
+
         result = self.search_engine.search(queryset, params)
-        result_list = list(result)
-        
-        # Only Besiktas service should be in 2km radius
-        assert len(result_list) == 1
-        assert result_list[0].title == 'Python Programming'
+        titles = [s.title for s in result]
+
+        # In-Person services within 2km plus Online services (no location,
+        # not subject to the geo filter).
+        assert 'Python Programming' in titles  # In Besiktas, within 2km
+        assert 'Need Help with Python' in titles  # Online — bypasses filter
+        assert 'Cooking Class' not in titles  # Kadikoy is ~7km away
     
     def test_search_engine_all_filters(self):
         """Test SearchEngine with all filters combined."""
