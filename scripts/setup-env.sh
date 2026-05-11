@@ -61,14 +61,20 @@ if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
     echo "Keeping existing $ENV_FILE."
     exit 0
   fi
-  # Resolve symlink to a real file before backing up.
   if [[ -L "$ENV_FILE" ]]; then
-    cp -L "$ENV_FILE" "${ENV_FILE}.bak"
+    if [[ -e "$ENV_FILE" ]]; then
+      # Live symlink: copy through to the real file.
+      cp -L "$ENV_FILE" "${ENV_FILE}.bak"
+      echo "  Backed up $ENV_FILE (-> $(readlink "$ENV_FILE")) → ${ENV_FILE}.bak"
+    else
+      # Broken symlink: nothing to copy; just remove and note the target.
+      warn "  (existing $ENV_FILE is a broken symlink → $(readlink "$ENV_FILE"); nothing to back up)"
+    fi
     rm "$ENV_FILE"
   else
     cp "$ENV_FILE" "${ENV_FILE}.bak"
+    echo "  Backed up $ENV_FILE → ${ENV_FILE}.bak"
   fi
-  echo "  Backed up $ENV_FILE → ${ENV_FILE}.bak"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

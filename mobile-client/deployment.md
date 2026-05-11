@@ -64,7 +64,9 @@ cd mobile-client
 npm run build:android:local
 ```
 
-Produces an unsigned-but-installable release APK at `mobile-client/android/app/build/outputs/apk/release/app-release.apk`. Requires Android SDK, JDK 17, and the `android/` folder populated by `npm run prebuild` (already in the repo). Useful for sideloading on a test device without going through EAS.
+Produces a release APK at `mobile-client/android/app/build/outputs/apk/release/app-release.apk`. Requires Android SDK, JDK 17, and the `android/` folder populated by `npm run prebuild` (already in the repo). Useful for sideloading on a test device without going through EAS.
+
+The APK is currently signed with the debug keystore (`android/app/build.gradle` → `release { signingConfig signingConfigs.debug }`), so it's fine for sideloading and internal QA but **not** suitable for Play Store distribution. For store-ready APKs, use `npm run build:android` (EAS handles signing) or wire a release keystore into `signingConfigs.release` first.
 
 ### iOS notes
 
