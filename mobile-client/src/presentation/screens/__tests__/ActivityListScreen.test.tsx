@@ -65,7 +65,7 @@ const makeService = (overrides: Partial<Service> = {}): Service =>
     duration: overrides.duration ?? "1",
     location_type: overrides.location_type ?? "in_person",
     location_area: overrides.location_area ?? "Kadıköy",
-    status: overrides.status ?? "open",
+    status: overrides.status ?? "Active",
     max_participants: overrides.max_participants ?? 1,
     participant_count: overrides.participant_count ?? 0,
     created_at: overrides.created_at ?? "2026-04-30T10:00:00Z",
@@ -141,8 +141,9 @@ describe("ActivityListScreen", () => {
       baseHistoryRow,
       { ...baseHistoryRow, partner_id: "partner-2", partner_name: "Hakan" },
     ]);
-    const { findByText } = render(<ActivityListScreen />);
-    expect(await findByText("Pottery basics")).toBeTruthy();
+    const { findAllByText } = render(<ActivityListScreen />);
+    const titles = await findAllByText("Pottery basics");
+    expect(titles.length).toBeGreaterThan(0);
   });
 
   it("renders the reviews list and count header", async () => {

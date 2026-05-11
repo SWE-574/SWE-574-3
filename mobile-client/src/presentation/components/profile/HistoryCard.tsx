@@ -56,7 +56,7 @@ export default function HistoryCard({
 
       <Pressable
         onPress={(event) => {
-          event.stopPropagation();
+          event?.stopPropagation?.();
           onPressParticipants?.();
         }}
         accessibilityRole="button"
