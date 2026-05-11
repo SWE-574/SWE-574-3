@@ -36,7 +36,8 @@ Run all commands from `mobile-client/`.
 
 ```bash
 npm run build:android          # EAS cloud, production APK
-npm run build:android:local    # Local gradle release APK (android/app/build/outputs/apk/release/)
+npm run build:android:local    # Local gradle release APK, picks up backend URL + Mapbox token from .env
+npm run build:android:emulator # Same APK, but forces EXPO_PUBLIC_API_URL=http://10.0.2.2:8000/api for the Android emulator
 npm run build:ios              # EAS cloud, production iOS
 npm run build:preview          # EAS cloud, preview build (Android + iOS)
 ```
@@ -81,6 +82,27 @@ To embed the Mapbox token in this APK, pass it on the command line (the value is
 ```bash
 EXPO_PUBLIC_MAPBOX_TOKEN=pk.YOUR_TOKEN npm run build:android:local
 ```
+
+If you used `make env` and a Mapbox token is already in `.env`, the token is picked up automatically — no inline export needed.
+
+#### Quick recipes
+
+```bash
+# Emulator + local backend (the demo path)
+npm run build:android:emulator
+
+# Real device on the same LAN as your dev machine + local backend
+# (EXPO_PUBLIC_API_URL in .env already points at http://<LAN_IP>:8000/api)
+npm run build:android:local
+
+# Prod-shaped APK without going through EAS (sideloadable; signed with the
+# debug keystore, so suitable for internal QA, not Play Store)
+EXPO_PUBLIC_API_URL=https://apiary.selmangunes.com/api \
+EXPO_PUBLIC_MAPBOX_TOKEN=pk.YOUR_PROD_TOKEN \
+  npm run build:android:local
+```
+
+The third recipe is the answer to "I want a production-config APK without using EAS." It's the same gradle command, just with env vars pointing at the production backend and a production Mapbox token. The APK lands at the usual `android/app/build/outputs/apk/release/app-release.apk` path. For Play Store distribution, swap the debug keystore signing for a real release keystore in `android/app/build.gradle`'s `signingConfigs.release` (or use `npm run build:android`, which EAS signs for you).
 
 Without a token the Map tab shows a "Map unavailable" fallback. If the value is already in the repo-root `.env` (set by `make env`) you can skip the inline export — `app.config.ts` falls back to `.env` if `process.env` is empty.
 
