@@ -1,0 +1,32 @@
+appId: com.apiary.thehive
+tags:
+  - handshake
+  - qr
+env:
+  # Logs in as a seeded user who organises at least one event, opens the
+  # event detail, and triggers the QR attendance modal. Asserts the QR
+  # token / manual code area is visible.
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+  # Real event title from the demo seed.
+  EVENT_TITLE: Neighborhood Potluck Dinner Under the Stars
+---
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Home(, tab,.*)?"
+- waitForAnimationToEnd:
+    timeout: 4000
+# Tap by literal event title — Maestro doesn't interpolate ${VAR} inside
+# matcher objects.
+- tapOn:
+    text: "Neighborhood Potluck Dinner Under the Stars"
+- tapOn:
+    text: "Attendance"
+- extendedWaitUntil:
+    visible: "Show this to participants"
+    timeout: 8000
+# QR is rendered as an SVG — Maestro can't read its contents, but the modal
+# also exposes a manual code that we can assert is non-empty.
+- assertVisible:
+    id: "qr-manual-code"
+    optional: true

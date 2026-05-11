@@ -1017,6 +1017,7 @@ export default function MessagesScreen() {
             </View>
 
             <FlatList
+              testID="messages-list"
               data={listData}
               renderItem={renderItem}
               keyExtractor={keyExtractor}

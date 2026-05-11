@@ -1,0 +1,21 @@
+appId: com.apiary.thehive
+tags:
+  - map
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §3.1: Map renders.
+# Markers/clusters live inside a Mapbox WebView so we cannot match them
+# directly; the assertion is that the Map tab does not crash on entry and
+# the surrounding chrome is visible.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Map(, tab,.*)?"
+- extendedWaitUntil:
+    visible:
+      text: "Map(, tab,.*)?"
+    timeout: 10000
+# Give the WebView time to bundle without asserting anything visual inside it.
+- waitForAnimationToEnd:
+    timeout: 4000
