@@ -804,8 +804,32 @@ SPECTACULAR_SETTINGS = {
             },
         },
     },
-    # Tag descriptions for the WebSocket section
+    # Preserve the order in which operations are declared rather than sorting alphabetically;
+    # we tag operations by domain so the natural file order is also the natural docs order.
+    'SORT_OPERATIONS': False,
+    # Tag descriptions. Every operation should carry exactly one of these tags.
     'TAGS': [
+        {'name': 'Auth', 'description': 'Registration, login, refresh, logout, password and email verification flows.'},
+        {'name': 'Users', 'description': 'User profile read / update, calendar, history, badges, verified reviews.'},
+        {'name': 'Social', 'description': 'Follow / unfollow and follower / following listings.'},
+        {'name': 'Services', 'description': 'Offer and Need listings: CRUD, visibility, media, event lifecycle actions.'},
+        {'name': 'Comments', 'description': 'Service-listing comments (read path; writes happen via reputation).'},
+        {'name': 'Handshakes', 'description': 'Exchange lifecycle between provider and requester.'},
+        {'name': 'Events', 'description': 'Event-specific actions: join, leave, check-in, mark-attended, appeal-no-show.'},
+        {'name': 'Chats', 'description': 'Private 1-to-1, public, and group chats over HTTP. Live transport is documented under WebSocket.'},
+        {'name': 'Forum', 'description': 'Discussion forum categories, topics, posts, and activity summaries.'},
+        {'name': 'Notifications', 'description': 'In-app and push notifications.'},
+        {'name': 'Reputation', 'description': 'Positive and negative reputation entries.'},
+        {'name': 'Reviews', 'description': 'Verified post-transaction reviews.'},
+        {'name': 'Transactions', 'description': 'TimeBank transaction history for the current user.'},
+        {'name': 'Tags', 'description': 'Listing tags (Wikidata-style identifiers).'},
+        {'name': 'Wikidata', 'description': 'Wikidata search proxy used by the tag picker.'},
+        {'name': 'Activity', 'description': 'Cross-user activity feed.'},
+        {'name': 'Pulse', 'description': 'Personal stats and visit tracking.'},
+        {'name': 'Featured', 'description': 'Featured / discovery surfaces.'},
+        {'name': 'Admin', 'description': 'Moderation, reports, user management, audit log, platform settings.'},
+        {'name': 'System', 'description': 'Health check and metrics.'},
+        {'name': 'E2E', 'description': 'Testing helpers gated by DJANGO_E2E. Not part of the production surface.'},
         {'name': 'WebSocket', 'description': 'Real-time WebSocket endpoints (use ws:// or wss://, not HTTP).'},
     ],
 }

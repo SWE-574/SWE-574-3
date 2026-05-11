@@ -8,7 +8,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse, inline_serializer
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiExample, OpenApiParameter, OpenApiResponse, inline_serializer
+from drf_spectacular.types import OpenApiTypes
 from rest_framework import serializers as drf_serializers
 from django.db import transaction, IntegrityError
 from django.shortcuts import get_object_or_404
@@ -576,6 +577,25 @@ def _build_event_comments_history(organizer: User, request=None) -> list[dict]:
 
     return list(grouped.values())
 
+@extend_schema_view(
+    post=extend_schema(
+        tags=['Auth'],
+        summary='Refresh access token',
+        description=(
+            'Exchanges a valid refresh token for a new access / refresh token pair. '
+            'The refresh token is read from the `refresh_token` cookie when present, '
+            'otherwise from the `refresh` field in the request body. New tokens are '
+            'set on the response as cookies as well as returned in the JSON body.'
+        ),
+        responses={
+            200: inline_serializer('TokenRefreshResponse', {
+                'access': drf_serializers.CharField(),
+                'refresh': drf_serializers.CharField(),
+            }),
+            401: OpenApiResponse(description='Refresh token missing, invalid, or the user no longer exists.'),
+        },
+    ),
+)
 class CustomTokenRefreshView(TokenRefreshView):
     """Custom token refresh: reads refresh token from cookie (or body), sets new cookies."""
 
@@ -628,6 +648,34 @@ class CustomTokenRefreshView(TokenRefreshView):
         _set_auth_cookies(response, new_access, new_refresh)
         return response
 
+@extend_schema_view(
+    post=extend_schema(
+        tags=['Auth'],
+        summary='Login (obtain JWT pair)',
+        description=(
+            'Authenticates a user by email + password and returns a JWT access / refresh '
+            'pair. Tokens are also set as cookies (`access_token`, `refresh_token`) so '
+            'browser clients do not have to handle them manually. Repeated failed attempts '
+            'lock the account for 30 minutes.'
+        ),
+        request=inline_serializer('LoginRequest', {
+            'email': drf_serializers.EmailField(),
+            'password': drf_serializers.CharField(),
+        }),
+        responses={
+            200: OpenApiResponse(description='Login successful; access / refresh tokens returned and set as cookies, plus a `user` summary.'),
+            401: OpenApiResponse(description='Invalid credentials.'),
+            423: OpenApiResponse(description='Account temporarily locked after repeated failures.'),
+        },
+        examples=[
+            OpenApiExample(
+                'Login request',
+                value={'email': 'user@example.com', 'password': 'hunter2'},
+                request_only=True,
+            ),
+        ],
+    ),
+)
 class CustomTokenObtainPairView(TokenObtainPairView):
     MAX_FAILED_ATTEMPTS = 5
     LOCKOUT_DURATION_MINUTES = 30
@@ -1062,10 +1110,26 @@ class ResendVerificationView(APIView):
         )
 
 
+@extend_schema_view(
+    post=extend_schema(
+        tags=['Auth'],
+        summary='Register',
+        description=(
+            'Creates a new user, seeds their TimeBank balance, and returns a JWT pair '
+            'plus a user summary. Tokens are also set as cookies. Rate-limited to '
+            '20 requests per hour per IP.'
+        ),
+        responses={
+            201: OpenApiResponse(description='User created; access / refresh tokens returned and set as cookies.'),
+            400: OpenApiResponse(description='Validation error (invalid email, weak password, missing fields).'),
+            429: OpenApiResponse(description='Rate limit exceeded.'),
+        },
+    ),
+)
 class UserRegistrationView(generics.CreateAPIView):
     """
     User Registration Endpoint
-    
+
     Allows new users to register for The Hive platform.
     
     **Request Format:**
@@ -1133,6 +1197,11 @@ class UserRegistrationView(generics.CreateAPIView):
         _set_auth_cookies(response, access_token, refresh_token)
         return response
 
+@extend_schema_view(
+    get=extend_schema(tags=['Users'], summary='Get user profile'),
+    put=extend_schema(tags=['Users'], summary='Replace user profile'),
+    patch=extend_schema(tags=['Users'], summary='Update user profile'),
+)
 class UserProfileView(generics.RetrieveUpdateAPIView):
     """
     User Profile Management
@@ -1321,6 +1390,13 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         return UserProfileSerializer
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Users'],
+        summary='List my filed reports',
+        description='Paginated list of moderation reports the current user filed.',
+    ),
+)
 class MyReportsView(generics.ListAPIView):
     """
     Reports filed by the current user.
@@ -1346,6 +1422,17 @@ class MyReportsView(generics.ListAPIView):
         )
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Users'],
+        summary='My calendar',
+        description='Authenticated user\'s scheduled service sessions and events in a date window (defaults to today → today+365d, capped at 3650 days).',
+        parameters=[
+            OpenApiParameter('from', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Inclusive window start (YYYY-MM-DD). Defaults to today.'),
+            OpenApiParameter('to', OpenApiTypes.DATE, OpenApiParameter.QUERY, description='Inclusive window end (YYYY-MM-DD). Defaults to today+365d.'),
+        ],
+    ),
+)
 class MeCalendarView(APIView):
     """
     GET /api/users/me/calendar/?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -1573,6 +1660,13 @@ class MeCalendarView(APIView):
         }
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Users'],
+        summary='User transaction history',
+        description='Completed exchanges for a user. Returns empty for others if the target has `show_history=False`.',
+    ),
+)
 class UserHistoryView(APIView):
     """
     User Transaction History
@@ -1719,6 +1813,13 @@ class UserHistoryView(APIView):
         return Response(serializer.data)
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Users'],
+        summary='Badge / achievement progress',
+        description='Per-achievement progress map for the target user (self only — others receive a redacted view).',
+    ),
+)
 class UserBadgeProgressView(APIView):
     """
     User Badge/Achievement Progress
@@ -1770,6 +1871,16 @@ class UserBadgeProgressView(APIView):
         return Response(progress)
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Reviews'],
+        summary='Verified reviews received',
+        description='Reviews written about the target user from completed exchanges. Supports `role=provider` or `role=receiver`.',
+        parameters=[
+            OpenApiParameter('role', OpenApiTypes.STR, OpenApiParameter.QUERY, enum=['provider', 'receiver'], required=False),
+        ],
+    ),
+)
 class UserVerifiedReviewsView(APIView):
     """
     User Verified Reviews
@@ -1897,7 +2008,7 @@ class UserFollowView(APIView):
         responses={
             201: OpenApiResponse(description='Created with message and follow relationship payload.'),
         },
-        tags=['Users'],
+        tags=['Social'],
     )
     def post(self, request, id):
         try:
@@ -1958,7 +2069,7 @@ class UserFollowView(APIView):
         responses={
             200: OpenApiResponse(description='Unfollowed successfully.'),
         },
-        tags=['Users'],
+        tags=['Social'],
     )
     def delete(self, request, id):
         try:
@@ -2058,7 +2169,7 @@ class UserFollowersListView(APIView):
         summary='List followers',
         description='Returns user summaries for accounts that follow the given user.',
         responses={200: OpenApiResponse(description='JSON array of user summary objects.')},
-        tags=['Users'],
+        tags=['Social'],
     )
     def get(self, request, id):
         return _user_follow_list_response(request, id, 'followers')
@@ -2078,12 +2189,44 @@ class UserFollowingListView(APIView):
         summary='List following',
         description='Returns user summaries for accounts followed by the given user.',
         responses={200: OpenApiResponse(description='JSON array of user summary objects.')},
-        tags=['Users'],
+        tags=['Social'],
     )
     def get(self, request, id):
         return _user_follow_list_response(request, id, 'following')
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Services'], summary='List services', description='Paginated list with search, filter, sort, and ranking phases applied.'),
+    create=extend_schema(tags=['Services'], summary='Create service'),
+    retrieve=extend_schema(tags=['Services'], summary='Get service'),
+    update=extend_schema(tags=['Services'], summary='Replace service (owner)'),
+    partial_update=extend_schema(tags=['Services'], summary='Update service (owner)'),
+    destroy=extend_schema(tags=['Services'], summary='Soft-cancel service'),
+    save_service=extend_schema(tags=['Services'], summary='Save / unsave a service', description='POST to save, DELETE to remove the bookmark. Returns the new `is_saved` state.'),
+    dismiss=extend_schema(tags=['Services'], summary='Dismiss / undismiss a service', description='Per-viewer "Not interested" flag. Hides the service from the personalised feed.'),
+    saved=extend_schema(tags=['Services'], summary='List saved services'),
+    toggle_visibility=extend_schema(tags=['Admin'], summary='Admin: toggle visibility'),
+    pin_event=extend_schema(tags=['Events'], summary='Admin: pin / unpin event'),
+    complete_event=extend_schema(tags=['Events'], summary='Organiser: complete event'),
+    set_primary_media=extend_schema(tags=['Services'], summary='Owner: set primary cover media'),
+    cancel_event=extend_schema(tags=['Events'], summary='Organiser: cancel event'),
+    generate_qr_token=extend_schema(tags=['Events'], summary='Organiser: generate event QR token'),
+    get_qr_token=extend_schema(tags=['Events'], summary='Get current event QR token'),
+    for_you_metrics=extend_schema(tags=['Services'], summary='For-you ranking metrics'),
+    debug_ranking_availability=extend_schema(
+        tags=['Services'],
+        summary='Debug: ranking availability flag',
+        description='Internal ranking debug probe. Not part of the final-release public surface.',
+        deprecated=True,
+    ),
+    debug_ranking=extend_schema(
+        tags=['Services'],
+        summary='Debug: ranking payload',
+        description='Internal ranking debug probe. Not part of the final-release public surface.',
+        deprecated=True,
+    ),
+    report_service=extend_schema(tags=['Services'], summary='Report a service listing'),
+)
 class ServiceViewSet(viewsets.ModelViewSet):
     """
     Service Management
@@ -3751,6 +3894,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
         return Response({'status': 'success', 'report_id': str(report.id)}, status=201)
 
+@extend_schema_view(
+    list=extend_schema(tags=['Tags'], summary='List tags', parameters=[OpenApiParameter('search', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Case-insensitive partial match on tag name.')]),
+    create=extend_schema(tags=['Tags'], summary='Create tag'),
+    retrieve=extend_schema(tags=['Tags'], summary='Get tag'),
+    update=extend_schema(tags=['Tags'], summary='Replace tag'),
+    partial_update=extend_schema(tags=['Tags'], summary='Update tag'),
+    destroy=extend_schema(tags=['Tags'], summary='Delete tag'),
+)
 class TagViewSet(viewsets.ModelViewSet):
     """
     Tag Management
@@ -3841,6 +3992,13 @@ class TagViewSet(viewsets.ModelViewSet):
         super().perform_destroy(instance)
         invalidate_tag_list()
 
+@extend_schema_view(
+    post=extend_schema(
+        tags=['Handshakes'],
+        summary='Express interest in a service',
+        description='Canonical entrypoint that creates (or returns) a `Handshake` between the requester and the service owner. Idempotent per (requester, service).',
+    ),
+)
 class ExpressInterestView(APIView):
     """
     Express Interest in a Service
@@ -3965,6 +4123,39 @@ class ExpressInterestView(APIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Handshakes'], summary='List handshakes'),
+    create=extend_schema(
+        tags=['Handshakes'],
+        summary='Create handshake (deprecated)',
+        description='Deprecated DRF default create. Use `POST /api/services/{id}/interest/` instead.',
+        deprecated=True,
+    ),
+    retrieve=extend_schema(tags=['Handshakes'], summary='Get handshake'),
+    express_interest=extend_schema(
+        tags=['Handshakes'],
+        summary='Express interest (deprecated alias)',
+        description='Deprecated duplicate of `POST /api/services/{id}/interest/`. Kept for legacy clients.',
+        deprecated=True,
+    ),
+    initiate_handshake=extend_schema(tags=['Handshakes'], summary='Provider: submit session details'),
+    approve_handshake=extend_schema(tags=['Handshakes'], summary='Requester: approve proposed details'),
+    request_changes=extend_schema(tags=['Handshakes'], summary='Requester: request changes'),
+    decline_handshake=extend_schema(tags=['Handshakes'], summary='Receiver: decline'),
+    accept_handshake=extend_schema(tags=['Handshakes'], summary='Provider: accept interest (Need flow)'),
+    deny_handshake=extend_schema(tags=['Handshakes'], summary='Provider: deny interest'),
+    cancel_handshake=extend_schema(tags=['Handshakes'], summary='Cancel pending handshake'),
+    request_cancellation=extend_schema(tags=['Handshakes'], summary='Request mutual cancellation'),
+    approve_cancellation_request=extend_schema(tags=['Handshakes'], summary='Approve cancellation request'),
+    reject_cancellation_request=extend_schema(tags=['Handshakes'], summary='Reject cancellation request'),
+    confirm_completion=extend_schema(tags=['Handshakes'], summary='Confirm completion / adjust hours'),
+    report_issue=extend_schema(tags=['Handshakes'], summary='Report a handshake issue'),
+    join_event=extend_schema(tags=['Events'], summary='RSVP / join an event'),
+    leave_event=extend_schema(tags=['Events'], summary='Leave an event'),
+    checkin=extend_schema(tags=['Events'], summary='Event check-in'),
+    mark_attended=extend_schema(tags=['Events'], summary='Organiser: mark attendance'),
+    appeal_no_show=extend_schema(tags=['Events'], summary='Appeal a no-show ruling'),
+)
 class HandshakeViewSet(viewsets.ModelViewSet):
     """
     Handshake Management
@@ -4603,6 +4794,11 @@ class HandshakeViewSet(viewsets.ModelViewSet):
         return Response({'status': 'success', 'report_id': str(report.id)}, status=status.HTTP_201_CREATED)
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Chats'], summary='List private conversations'),
+    retrieve=extend_schema(tags=['Chats'], summary='Get messages for a handshake'),
+    create=extend_schema(tags=['Chats'], summary='Send a private message'),
+)
 class ChatViewSet(viewsets.ViewSet):
     """
     Chat and Messaging
@@ -4988,6 +5184,15 @@ class ChatViewSet(viewsets.ViewSet):
         serializer = ChatMessageSerializer(message)
         return Response(serializer.data, status=201)
 
+@extend_schema_view(
+    list=extend_schema(tags=['Notifications'], summary='List notifications'),
+    retrieve=extend_schema(tags=['Notifications'], summary='Get notification'),
+    mark_all_read=extend_schema(tags=['Notifications'], summary='Mark all read'),
+    mark_read=extend_schema(tags=['Notifications'], summary='Mark one read'),
+    unread_count=extend_schema(tags=['Notifications'], summary='Unread count'),
+    register_push_token=extend_schema(tags=['Notifications'], summary='Register Expo push token'),
+    deregister_push_token=extend_schema(tags=['Notifications'], summary='Deactivate push token'),
+)
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Notification Management
@@ -5095,6 +5300,15 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         DevicePushToken.objects.filter(token=token, user=request.user).update(is_active=False)
         return Response({'status': 'deregistered'})
 
+@extend_schema_view(
+    list=extend_schema(tags=['Reputation'], summary='List reputation rows'),
+    create=extend_schema(tags=['Reputation'], summary='Submit positive reputation'),
+    retrieve=extend_schema(tags=['Reputation'], summary='Get reputation row'),
+    update=extend_schema(tags=['Reputation'], summary='Replace reputation row'),
+    partial_update=extend_schema(tags=['Reputation'], summary='Update reputation row'),
+    destroy=extend_schema(tags=['Reputation'], summary='Delete reputation row'),
+    add_review=extend_schema(tags=['Reviews'], summary='Add verified review text'),
+)
 class ReputationViewSet(viewsets.ModelViewSet):
     """
     Reputation Management
@@ -5307,6 +5521,12 @@ class ReputationViewSet(viewsets.ModelViewSet):
 
         return Response(CommentSerializer(comment).data, status=status.HTTP_201_CREATED)
 
+@extend_schema_view(
+    list=extend_schema(tags=['Admin'], summary='List moderation reports'),
+    retrieve=extend_schema(tags=['Admin'], summary='Get moderation report'),
+    resolve_report=extend_schema(tags=['Admin'], summary='Resolve / dismiss report'),
+    pause_handshake=extend_schema(tags=['Admin'], summary='Pause related handshake'),
+)
 class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Admin Report Management
@@ -5787,6 +6007,16 @@ class AdminReportViewSet(viewsets.ReadOnlyModelViewSet):
             'handshake_status': handshake.status
         })
 
+@extend_schema_view(
+    list=extend_schema(tags=['Admin'], summary='List users (admin)'),
+    retrieve=extend_schema(tags=['Admin'], summary='Get user (admin)'),
+    warn_user=extend_schema(tags=['Admin'], summary='Issue warning'),
+    ban_user=extend_schema(tags=['Admin'], summary='Ban user'),
+    unban_user=extend_schema(tags=['Admin'], summary='Unban user'),
+    adjust_karma=extend_schema(tags=['Admin'], summary='Adjust karma'),
+    transactions=extend_schema(tags=['Admin'], summary='List user transactions (admin)'),
+    assign_role=extend_schema(tags=['Admin'], summary='Assign role'),
+)
 class AdminUserViewSet(viewsets.ViewSet):
     """
     Admin User Management
@@ -6259,6 +6489,12 @@ class AdminUserViewSet(viewsets.ViewSet):
         })
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Admin'], summary='List comments (admin)'),
+    retrieve=extend_schema(tags=['Admin'], summary='Get comment (admin)'),
+    remove_comment=extend_schema(tags=['Admin'], summary='Soft-remove comment'),
+    restore_comment=extend_schema(tags=['Admin'], summary='Restore comment'),
+)
 class AdminCommentViewSet(viewsets.ViewSet):
     """Admin-only moderation endpoints for service comments/reviews."""
     permission_classes = [permissions.IsAuthenticated]
@@ -6355,6 +6591,10 @@ class AdminCommentViewSet(viewsets.ViewSet):
         return Response(serializer.data)
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Admin'], summary='List admin audit log entries'),
+    retrieve=extend_schema(tags=['Admin'], summary='Get audit log entry'),
+)
 class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """Admin-only read access to moderation audit entries."""
 
@@ -6379,6 +6619,10 @@ class AdminAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         return queryset.order_by('-created_at')
 
 
+@extend_schema_view(
+    get=extend_schema(tags=['Admin'], summary='Get platform settings'),
+    patch=extend_schema(tags=['Admin'], summary='Update platform settings'),
+)
 class AdminSettingsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -6410,6 +6654,10 @@ class AdminSettingsView(APIView):
         serializer.save()
         return Response(serializer.data)
 
+@extend_schema_view(
+    list=extend_schema(tags=['Transactions'], summary='List my transactions'),
+    retrieve=extend_schema(tags=['Transactions'], summary='Get one of my transactions'),
+)
 class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Transaction History
@@ -6538,6 +6786,16 @@ class TransactionHistoryViewSet(viewsets.ReadOnlyModelViewSet):
         }
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Wikidata'],
+        summary='Wikidata search proxy',
+        description='Server-side helper that proxies a search query to Wikidata. Used by the tag picker so the client never hits Wikidata directly.',
+        parameters=[
+            OpenApiParameter('q', OpenApiTypes.STR, OpenApiParameter.QUERY, description='Search term.', required=True),
+        ],
+    ),
+)
 class WikidataSearchView(APIView):
     """
     Wikidata Search Proxy
@@ -6602,6 +6860,10 @@ class WikidataSearchView(APIView):
         return Response(results)
 
 
+@extend_schema_view(
+    retrieve=extend_schema(tags=['Chats'], summary='Get public chat messages'),
+    create=extend_schema(tags=['Chats'], summary='Post to a public chat'),
+)
 class PublicChatViewSet(viewsets.ViewSet):
     """
     Public Chat Room API
@@ -6764,6 +7026,10 @@ class PublicChatViewSet(viewsets.ViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema_view(
+    retrieve=extend_schema(tags=['Chats'], summary='Get group chat messages'),
+    create=extend_schema(tags=['Chats'], summary='Post to a group chat'),
+)
 class GroupChatViewSet(viewsets.ViewSet):
     """
     Private group chat for Offer/Need services with max_participants > 1.
@@ -6999,6 +7265,12 @@ class GroupChatViewSet(viewsets.ViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Comments'], summary='List comments on a service'),
+    create=extend_schema(tags=['Comments'], summary='Create comment on a service'),
+    partial_update=extend_schema(tags=['Comments'], summary='Update comment'),
+    destroy=extend_schema(tags=['Comments'], summary='Delete comment'),
+)
 class CommentViewSet(viewsets.ViewSet):
     """
     Comment Management for Services
@@ -7137,6 +7409,7 @@ class CommentViewSet(viewsets.ViewSet):
             status_code=status.HTTP_405_METHOD_NOT_ALLOWED
         )
 
+    @extend_schema(tags=['Comments'], summary='Handshakes reviewable by the viewer')
     @track_performance
     def reviewable_handshakes(self, request, service_id=None):
         """
@@ -7187,6 +7460,13 @@ class CommentViewSet(viewsets.ViewSet):
         return Response({'handshakes': result})
 
 
+@extend_schema_view(
+    create=extend_schema(
+        tags=['Reputation'],
+        summary='Submit negative reputation',
+        description='Standalone endpoint (not under `{pk}`) for submitting a negative reputation entry. Window-gated by handshake completion.',
+    ),
+)
 class NegativeRepViewSet(viewsets.ViewSet):
     """
     Negative Reputation Management
@@ -7341,6 +7621,13 @@ class NegativeRepViewSet(viewsets.ViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Forum'], summary='List forum categories'),
+    retrieve=extend_schema(tags=['Forum'], summary='Get forum category'),
+    create=extend_schema(tags=['Forum'], summary='Create forum category'),
+    partial_update=extend_schema(tags=['Forum'], summary='Update forum category'),
+    destroy=extend_schema(tags=['Forum'], summary='Delete forum category'),
+)
 class ForumCategoryViewSet(viewsets.ModelViewSet):
     """
     Forum Categories API
@@ -7482,6 +7769,16 @@ class ForumCategoryViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Forum'], summary='List forum topics'),
+    retrieve=extend_schema(tags=['Forum'], summary='Get forum topic'),
+    create=extend_schema(tags=['Forum'], summary='Create forum topic'),
+    partial_update=extend_schema(tags=['Forum'], summary='Update forum topic'),
+    destroy=extend_schema(tags=['Forum'], summary='Delete forum topic'),
+    pin=extend_schema(tags=['Forum'], summary='Pin / unpin topic'),
+    lock=extend_schema(tags=['Forum'], summary='Lock / unlock topic'),
+    report=extend_schema(tags=['Forum'], summary='Report topic'),
+)
 class ForumTopicViewSet(viewsets.ModelViewSet):
     """
     Forum Topics API
@@ -7820,6 +8117,14 @@ class ForumActivityView(APIView):
         )
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Forum'], summary='List posts in a topic'),
+    create=extend_schema(tags=['Forum'], summary='Create post in a topic'),
+    partial_update=extend_schema(tags=['Forum'], summary='Update post'),
+    destroy=extend_schema(tags=['Forum'], summary='Soft-delete post'),
+    restore=extend_schema(tags=['Forum'], summary='Restore a soft-deleted post'),
+    report=extend_schema(tags=['Forum'], summary='Report a post'),
+)
 class ForumPostViewSet(viewsets.ViewSet):
     """
     Forum Posts API
@@ -7844,6 +8149,7 @@ class ForumPostViewSet(viewsets.ViewSet):
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
 
+    @extend_schema(tags=['Forum'], summary='Recent posts across forum')
     @track_performance
     def recent(self, request):
         """List most recent posts across all active categories/topics."""
@@ -8060,6 +8366,14 @@ class ForumPostViewSet(viewsets.ViewSet):
 # These endpoints are ONLY available when DJANGO_E2E=1 (non-production).
 # They allow Playwright tests to set deterministic user state.
 
+@extend_schema_view(
+    post=extend_schema(
+        tags=['E2E'],
+        summary='Set timebank balance (E2E)',
+        description='Deprecated test helper. Only active when `DJANGO_E2E=1`. Not part of the production API surface.',
+        deprecated=True,
+    ),
+)
 class E2ESetBalanceView(APIView):
     """
     Set the authenticated user's timebank balance to an exact value.
@@ -8111,6 +8425,13 @@ class E2ESetBalanceView(APIView):
         })
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Social'],
+        summary='Suggested users to follow',
+        description='Server-ranked list of users the authenticated viewer is likely to want to follow.',
+    ),
+)
 class SuggestedUsersView(generics.ListAPIView):
     """Discover people to follow.
 
@@ -8167,6 +8488,16 @@ class SuggestedUsersView(generics.ListAPIView):
         return qs.order_by('-_shared_skills', '-karma_score', '-date_joined')
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Activity'],
+        summary='Activity feed',
+        description='Chronological feed of activity events from followed users and (when location is known) actors within the proximity window.',
+        parameters=[
+            OpenApiParameter('days', OpenApiTypes.INT, OpenApiParameter.QUERY, description='Window length in days (1–90, default 14).'),
+        ],
+    ),
+)
 class ActivityFeedView(generics.ListAPIView):
     """Activity feed (#482).
 
@@ -8337,6 +8668,9 @@ class ActivityFeedView(generics.ListAPIView):
             ev._completed_handshake = latest_by_key.get((ev.service_id, ev.actor_id))
 
 
+@extend_schema_view(
+    get=extend_schema(tags=['Pulse'], summary='Personal stats (visits, hours, streaks)'),
+)
 class PulseStatsView(APIView):
     """GET /api/pulse/stats/ — counts that drive the personal stats row.
 
@@ -8414,6 +8748,9 @@ class PulseStatsView(APIView):
         })
 
 
+@extend_schema_view(
+    post=extend_schema(tags=['Pulse'], summary='Record a visit event'),
+)
 class PulseVisitView(APIView):
     """POST /api/pulse/visit/ — records that the viewer just opened Pulse.
 
