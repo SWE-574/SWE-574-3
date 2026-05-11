@@ -1,0 +1,24 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+- runFlow: ../auth/login.yaml
+# After login (entered via Profile tab) we may still be on Profile; explicitly
+# navigate to Home before tapping a service card.
+- tapOn:
+    text: "Home(, tab,.*)?"
+- waitForAnimationToEnd:
+    timeout: 4000
+# Tap a specific seeded Offer that elif does NOT own. Tapping by index has
+# two problems: (1) the demo feed surfaces elif's own cards near the top
+# (no Request button on a self-owned service), and (2) ranking re-orders
+# results so index 0 is not stable. The Bosphorus Sunrise Walk is a known
+# seed offer owned by another user — safe to request a handshake on.
+- tapOn:
+    text: "Bosphorus Sunrise Walk.*"
+- extendedWaitUntil:
+    visible: "Request"
+    timeout: 10000

@@ -212,7 +212,6 @@ export interface Service {
   hot_score?: number
   event_evaluation_summary?: EventEvaluationSummary | null
   is_saved?: boolean
-  is_dismissed?: boolean
   source?: 'tag_match' | 'explore_topup' | 'for_you' | 'explore' | null
   for_you_signals?: ForYouSignals | null
   explore_pool?: 'cold_start' | 'undershown_quality' | 'stale_recurring' | null
@@ -264,48 +263,6 @@ export interface ServiceMedia {
   file_url: string
   media_type: 'image' | 'video'
   order?: number
-}
-
-export interface FeaturedServiceUser {
-  id: string
-  first_name: string
-  last_name: string
-  avatar_url: string | null
-}
-
-export interface FeaturedServiceTag {
-  id: string
-  name: string
-}
-
-export interface FeaturedService {
-  id: string
-  title: string
-  type: 'Offer' | 'Need' | 'Event'
-  user: FeaturedServiceUser
-  tags: FeaturedServiceTag[]
-  participant_count: number
-  max_participants: number
-  location_area: string | null
-  created_at: string
-  // Only populated on the friends slice.
-  friend_count?: number
-  friend_names?: string[]
-}
-
-export interface FeaturedProvider {
-  id: string
-  first_name: string
-  last_name: string
-  avatar_url: string | null
-  completed_count: number
-  positive_rep_count: number
-}
-
-export interface FeaturedResponse {
-  trending: FeaturedService[]
-  friends: FeaturedService[]
-  top_providers: FeaturedProvider[]
 }
 
 export interface FeaturedChip {

@@ -7,10 +7,9 @@ import RecommendationCard from '@/components/pulse/RecommendationCard'
 import system from '@/theme'
 import type { Service } from '@/types'
 
-const { setSavedMock, setDismissedMock, expressInterestMock } =
+const { setSavedMock, expressInterestMock } =
   vi.hoisted(() => ({
     setSavedMock: vi.fn(),
-    setDismissedMock: vi.fn(),
     expressInterestMock: vi.fn(),
   }))
 
@@ -18,12 +17,6 @@ vi.mock('@/services/serviceAPI', () => ({
   serviceAPI: {
     setSaved: setSavedMock,
     expressInterest: expressInterestMock,
-  },
-}))
-
-vi.mock('@/services/pulseAPI', () => ({
-  pulseAPI: {
-    setDismissed: setDismissedMock,
   },
 }))
 
@@ -57,7 +50,6 @@ function renderCard(service: Service, lane: 'hero' | 'for_you' = 'for_you') {
 describe('RecommendationCard', () => {
   beforeEach(() => {
     setSavedMock.mockReset().mockResolvedValue({ is_saved: true })
-    setDismissedMock.mockReset().mockResolvedValue({ is_dismissed: true })
     expressInterestMock.mockReset().mockResolvedValue({ id: 'hs-1', status: 'pending' })
   })
   afterEach(() => {
@@ -101,21 +93,23 @@ describe('RecommendationCard', () => {
     expect(panel.textContent).toMatch(/trending in your area/i)
   })
 
-  it('dismiss invokes pulseAPI and triggers the onDismissed callback', async () => {
-    const onDismissed = vi.fn()
+  it('unsave triggers the onRemoved callback so the parent list can drop the card', async () => {
+    const onRemoved = vi.fn()
+    setSavedMock.mockReset().mockResolvedValue({ is_saved: false })
     render(
       <ChakraProvider value={system}>
         <MemoryRouter>
           <RecommendationCard
-            service={makeService()}
+            service={makeService({ is_saved: true })}
             lane="for_you"
-            onDismissed={onDismissed}
+            onRemoved={onRemoved}
           />
         </MemoryRouter>
       </ChakraProvider>,
     )
-    fireEvent.click(screen.getByLabelText(/Not interested/i))
-    await waitFor(() => expect(setDismissedMock).toHaveBeenCalledWith('svc-1', true))
-    await waitFor(() => expect(onDismissed).toHaveBeenCalledWith('svc-1'))
+    // The save button is labelled "Unsave" while is_saved=true.
+    fireEvent.click(screen.getByLabelText(/Unsave/i))
+    await waitFor(() => expect(setSavedMock).toHaveBeenCalledWith('svc-1', false))
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledWith('svc-1'))
   })
 })

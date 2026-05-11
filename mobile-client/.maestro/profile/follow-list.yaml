@@ -1,0 +1,19 @@
+appId: com.apiary.thehive
+tags:
+  - profile
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §4.4: Follow list (followers / following).
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Profile(, tab,.*)?"
+- tapOn:
+    text: "Followers"
+# FollowListScreen header reads "Followers" or "Following" depending on
+# the source tap. Assert the same case-insensitive token survives.
+- extendedWaitUntil:
+    visible:
+      text: "(?i)followers|following"
+    timeout: 8000

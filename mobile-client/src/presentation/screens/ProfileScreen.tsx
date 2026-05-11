@@ -540,6 +540,9 @@ export default function ProfileScreen() {
       {menuOpen ? (
         <View style={styles.overflowMenu}>
           <Pressable
+            testID="profile-overflow"
+            accessibilityRole="button"
+            accessibilityLabel="Profile menu"
             onPress={() => {
               setMenuOpen(false);
               navigation.navigate("ProfileEdit", { initialTab: "identity" });
@@ -548,6 +551,7 @@ export default function ProfileScreen() {
               styles.overflowMenuItem,
               pressed && styles.pressed,
             ]}
+
           >
             <Ionicons name="settings-outline" size={17} color={colors.GRAY700} />
             <Text style={styles.overflowMenuText}>Settings</Text>
@@ -580,6 +584,20 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
       ) : null}
+      <TouchableOpacity
+        testID="profile-notifications-bell"
+        accessibilityRole="button"
+        accessibilityLabel="Open notifications"
+        onPress={() => (navigation as any).navigate("Notifications")}
+        style={styles.notificationButton}
+      >
+        <Ionicons
+          name="notifications-outline"
+          size={22}
+          color={colors.GREEN}
+        />
+        <NotificationBadge count={unreadCount} />
+      </TouchableOpacity>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}

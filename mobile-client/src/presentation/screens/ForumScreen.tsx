@@ -728,7 +728,13 @@ export default function ForumScreen() {
       />
 
       {isAuthenticated ? (
-        <Pressable style={styles.fab} onPress={openCreateTopic}>
+        <Pressable
+          testID="forum-create-topic"
+          accessibilityRole="button"
+          accessibilityLabel="Create a new topic"
+          style={styles.fab}
+          onPress={openCreateTopic}
+        >
           <Ionicons name="add" size={28} color={colors.WHITE} />
         </Pressable>
       ) : null}

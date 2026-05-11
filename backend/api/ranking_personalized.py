@@ -94,28 +94,6 @@ def engagement_signal(
     return len(intersection) / len(union)
 
 
-def dismissed_similarity(
-    service_tag_qids: set, dismissed_tag_qids: set,
-) -> float:
-    """Jaccard overlap between the candidate's tags and the aggregate tag
-    set of services the viewer has dismissed.
-
-    Used as a soft penalty in the blend; the existing hard exclusion in
-    the list view still removes the exact dismissed services from the
-    candidate set, so this only affects services *like* the dismissed
-    ones.
-
-    Returns a value in [0, 1].
-    """
-    if not dismissed_tag_qids or not service_tag_qids:
-        return 0.0
-    intersection = service_tag_qids & dismissed_tag_qids
-    union = service_tag_qids | dismissed_tag_qids
-    if not union:
-        return 0.0
-    return len(intersection) / len(union)
-
-
 def follow_affinity(service, boosts: dict) -> float:
     """Return the social proximity boost for the service's owner.
     Boosts come from api.services.get_social_proximity_boosts(viewer_id):

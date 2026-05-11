@@ -1,0 +1,23 @@
+appId: com.apiary.thehive
+tags:
+  - handshake
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+- runFlow: ../browse/home-to-detail.yaml
+- tapOn:
+    text: "Request"
+- tapOn:
+    text: "Message"
+    optional: true
+- inputText: "Maestro test handshake request"
+- hideKeyboard
+- tapOn:
+    text: "Send"
+# The mobile UI capitalises "Pending"; assertion is case-insensitive so the
+# server's lowercase `pending` does not break the flow if the label moves.
+- extendedWaitUntil:
+    visible:
+      text: "(?i)pending"
+    timeout: 10000

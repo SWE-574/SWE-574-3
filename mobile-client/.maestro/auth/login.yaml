@@ -1,0 +1,31 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+  - auth
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+- launchApp:
+    clearState: true
+# Anonymous users land on Home (browse mode). Login lives inside the Profile
+# tab's logged-out state; tap the tab, then "Sign in" to reach the form.
+- tapOn:
+    text: "Profile(, tab,.*)?"
+    optional: true
+- tapOn:
+    text: "Sign in"
+- tapOn: "Email"
+- inputText: ${TEST_EMAIL}
+- tapOn: "Password"
+- inputText: ${TEST_PASSWORD}
+- hideKeyboard
+# Two "Sign in" elements exist on this screen — the page heading at index 0
+# and the submit button at index 1. Tap the button.
+- tapOn:
+    text: "Sign in"
+    index: 1
+- extendedWaitUntil:
+    visible:
+      text: "Home(, tab,.*)?"
+    timeout: 15000

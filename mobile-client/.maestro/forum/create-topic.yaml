@@ -1,0 +1,41 @@
+appId: com.apiary.thehive
+tags:
+  - forum
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+  TOPIC_TITLE: Maestro forum topic
+  TOPIC_BODY: This topic was created by the Maestro forum/create-topic.yaml smoke flow. Safe to delete after the run completes.
+---
+# Manual test plan §1.3: Create a topic.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Forum(, tab,.*)?"
+# The Forum feed shows topics with a "+" FAB / header button when there are
+# already topics ("Start a topic" is only the empty-state CTA). The header
+# title is "New Topic" once the create screen opens.
+- tapOn:
+    text: "Start a topic"
+    optional: true
+- tapOn:
+    id: "forum-create-topic"
+    optional: true
+- tapOn:
+    text: "New Topic"
+    optional: true
+- extendedWaitUntil:
+    visible: "Start a new topic"
+    timeout: 8000
+- tapOn: "What do you want to discuss?"
+- inputText: ${TOPIC_TITLE}
+- tapOn: "Share your thoughts, question, or story..."
+- inputText: ${TOPIC_BODY}
+- hideKeyboard
+- tapOn:
+    text: "Post Topic"
+# Maestro env-var interpolation only works in primitive scalars; inline the
+# literal title for the post-create assertion.
+- extendedWaitUntil:
+    visible:
+      text: "Maestro forum topic"
+    timeout: 12000
