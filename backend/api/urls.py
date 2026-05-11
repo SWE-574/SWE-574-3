@@ -169,7 +169,8 @@ def health_check(request):
     description='Aggregate platform counts for the admin dashboard. Requires moderator / admin / super_admin role.',
     responses={
         200: OpenApiResponse(description='Metrics payload.'),
-        403: OpenApiResponse(description='Caller is not a moderator / admin / super_admin.'),
+        401: OpenApiResponse(description='Missing or invalid JWT.'),
+        403: OpenApiResponse(description='Authenticated but not a moderator / admin / super_admin.'),
     },
 )
 @api_view(['GET'])
