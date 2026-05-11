@@ -14,6 +14,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from api.tests.helpers.factories import UserFactory, ServiceFactory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 def _make_qr_event(organizer, hours_from_now=6):
@@ -47,7 +48,7 @@ class TestGenerateQRTokenEndpoint:
         client.force_authenticate(user=organizer)
         resp = client.post(f'/api/services/{event.id}/generate-qr-token/')
 
-        assert resp.status_code == 200, resp.content
+        assert_api_response(resp, 200)
         body = resp.json()
         assert body['token']
         assert body['attendance_code']
@@ -62,7 +63,7 @@ class TestGenerateQRTokenEndpoint:
         client.force_authenticate(user=other)
         resp = client.post(f'/api/services/{event.id}/generate-qr-token/')
 
-        assert resp.status_code == 403
+        assert_problem_detail(resp, 403)
 
     def test_anonymous_gets_401(self):
         organizer = UserFactory()
@@ -71,7 +72,7 @@ class TestGenerateQRTokenEndpoint:
         client = APIClient()
         resp = client.post(f'/api/services/{event.id}/generate-qr-token/')
 
-        assert resp.status_code == 401
+        assert_problem_detail(resp, 401)
 
     def test_offer_service_gets_400(self):
         organizer = UserFactory()
@@ -81,7 +82,7 @@ class TestGenerateQRTokenEndpoint:
         client.force_authenticate(user=organizer)
         resp = client.post(f'/api/services/{offer.id}/generate-qr-token/')
 
-        assert resp.status_code == 400
+        assert_problem_detail(resp, 400)
 
     def test_outside_lockdown_window_gets_400(self):
         """Far-future event must be rejected with 400, not 404."""
@@ -92,7 +93,7 @@ class TestGenerateQRTokenEndpoint:
         client.force_authenticate(user=organizer)
         resp = client.post(f'/api/services/{event.id}/generate-qr-token/')
 
-        assert resp.status_code == 400
+        assert_problem_detail(resp, 400)
 
     def test_missing_event_returns_404(self):
         """Sanity: a genuinely missing pk still 404s."""
@@ -104,7 +105,7 @@ class TestGenerateQRTokenEndpoint:
             '/api/services/00000000-0000-0000-0000-000000000000/generate-qr-token/'
         )
 
-        assert resp.status_code == 404
+        assert_problem_detail(resp, 404)
 
 
 @pytest.mark.django_db
@@ -123,7 +124,7 @@ class TestGetQRTokenEndpoint:
 
         resp = client.get(f'/api/services/{event.id}/qr-token/')
 
-        assert resp.status_code == 200, resp.content
+        assert_api_response(resp, 200)
         body = resp.json()
         assert body['token']
         assert body['attendance_code']
