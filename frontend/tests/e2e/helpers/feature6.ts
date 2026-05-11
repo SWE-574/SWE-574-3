@@ -46,8 +46,9 @@ export async function createNeed(page: Page, options: {
 
 export async function getCurrentBalance(page: Page): Promise<number> {
   const balance = await page.evaluate(async () => {
-    const response = await fetch('/api/users/me/', {
+    const response = await fetch(`/api/users/me/?_=${Date.now()}`, {
       credentials: 'include',
+      cache: 'no-store',
     })
 
     if (!response.ok) {
@@ -62,10 +63,25 @@ export async function getCurrentBalance(page: Page): Promise<number> {
 }
 
 export async function expectNavbarBalance(page: Page, expectedBalance: number): Promise<void> {
-  const escaped = expectedBalance.toFixed(1).replace('.', '\\.')
-  await expect(page.getByText(new RegExp(`^${escaped}h$`)).first()).toBeVisible({
+  const formatted = Number.isInteger(expectedBalance)
+    ? `${expectedBalance}(?:\\.0)?`
+    : expectedBalance.toFixed(1).replace('.', '\\.')
+  const balanceText = page.getByRole('button', {
+    name: new RegExp(`⏱\\s*${formatted}h`),
+  }).first()
+
+  await expect.poll(async () => getCurrentBalance(page), {
     timeout: 10_000,
-  })
+  }).toBe(expectedBalance)
+
+  try {
+    await expect(balanceText).toBeVisible({ timeout: 2_000 })
+  } catch {
+    // Force a profile bootstrap when the SPA is still rendering the previous
+    // in-memory user snapshot after a fast service create/delete transition.
+    await page.reload({ waitUntil: 'load' })
+    await expect(balanceText).toBeVisible({ timeout: 10_000 })
+  }
 }
 
 export async function loginAsUserWithBalanceBelow(

@@ -11,7 +11,8 @@ from api.models import (
     Service, Tag, Handshake, ChatMessage, ReputationRep,
     Comment, NegativeRep, TransactionHistory, Badge, UserBadge,
     ForumCategory, ForumTopic, ForumPost, ServiceMedia, ServiceGroupChatMessage,
-    Notification,
+    ChatRoom, PublicChatMessage, Notification,
+    SavedService, ServiceDismissal,
 )
 
 User = get_user_model()
@@ -30,6 +31,11 @@ class UserFactory(factory.django.DjangoModelFactory):
     karma_score = 0
     role = 'member'
     is_active = True
+    # Default to verified so tests of normal flows (offer/need/event create,
+    # express interest, join event, etc.) succeed out of the box. Tests that
+    # exercise the verification gate or the email-verification flow itself
+    # explicitly pass `is_verified=False`.
+    is_verified = True
 
     @classmethod
     def _create(cls, model_class, *args, **kwargs):
@@ -128,6 +134,24 @@ class ServiceGroupChatMessageFactory(factory.django.DjangoModelFactory):
     body = factory.Faker('sentence')
 
 
+class ChatRoomFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = ChatRoom
+
+    name = factory.Faker('sentence', nb_words=3)
+    type = 'public'
+    related_service = factory.SubFactory(ServiceFactory)
+
+
+class PublicChatMessageFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = PublicChatMessage
+
+    room = factory.SubFactory(ChatRoomFactory)
+    sender = factory.SubFactory(UserFactory)
+    body = factory.Faker('sentence')
+
+
 class ReputationRepFactory(factory.django.DjangoModelFactory):
     """Factory for creating ReputationRep instances"""
     class Meta:
@@ -177,6 +201,7 @@ class TransactionHistoryFactory(factory.django.DjangoModelFactory):
     transaction_type = factory.Iterator(['transfer', 'provision', 'refund'])
     amount = Decimal('2.00')
     balance_after = Decimal('5.00')
+    service = None
     handshake = factory.SubFactory(HandshakeFactory)
     description = factory.Faker('sentence')
 
@@ -251,3 +276,23 @@ class NotificationFactory(factory.django.DjangoModelFactory):
     title = factory.Faker('sentence', nb_words=4)
     message = factory.Faker('sentence', nb_words=8)
     is_read = False
+
+
+class SavedServiceFactory(factory.django.DjangoModelFactory):
+    """Factory for creating SavedService (private bookmark) instances"""
+    class Meta:
+        model = SavedService
+
+    user = factory.SubFactory(UserFactory)
+    service = factory.SubFactory(ServiceFactory)
+
+
+class ServiceDismissalFactory(factory.django.DjangoModelFactory):
+    """Factory for creating ServiceDismissal (private "Not interested") instances"""
+    class Meta:
+        model = ServiceDismissal
+
+    viewer = factory.SubFactory(UserFactory)
+    service = factory.SubFactory(ServiceFactory)
+
+

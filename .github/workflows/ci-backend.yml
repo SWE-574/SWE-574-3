@@ -15,6 +15,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - { name: unit,        marker: unit,        workers: "-n auto" }
+          - { name: integration, marker: integration, workers: "-n 2"    }
+    name: test (${{ matrix.suite.name }})
 
     services:
       db:
@@ -161,12 +168,16 @@ jobs:
 
       - name: Audit Python dependencies
         working-directory: backend
-        # Temporary unblock: CVE-2026-4539 currently affects the latest available
-        # Pygments release (2.19.2), so there is no patch version to upgrade to yet.
+        # Temporary unblocks — both advisories have no stable patch release yet:
+        #   - CVE-2026-4539: latest Pygments (2.19.2) is still affected.
+        #   - CVE-2026-42304: Twisted DoS in twisted.names; the only fix is in
+        #     26.4.0rc2 (release candidate). We pull twisted in transitively via
+        #     daphne/channels and do not expose twisted.names, so impact is nil.
         run: >
           .venv/bin/pip-audit
           --skip-editable
           --ignore-vuln CVE-2026-4539
+          --ignore-vuln CVE-2026-42304
 
       - name: Run migrations
         working-directory: backend
@@ -180,26 +191,65 @@ jobs:
         working-directory: backend
         run: .venv/bin/python manage.py migrate --check
 
-      - name: Run tests
+      - name: Run tests (${{ matrix.suite.name }})
         working-directory: backend
+        env:
+          PYTEST_MARK: ${{ matrix.suite.marker }}
+          PYTEST_WORKERS: ${{ matrix.suite.workers }}
         run: |
           mkdir -p tests/reports/coverage
-          .venv/bin/pytest -c pytest-ci.ini
+          .venv/bin/pytest -c pytest-ci.ini -m "$PYTEST_MARK" $PYTEST_WORKERS
 
       - name: Upload JUnit report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-junit
+          name: backend-junit-${{ matrix.suite.name }}
           path: backend/tests/reports/junit.xml
 
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-coverage
+          name: backend-coverage-${{ matrix.suite.name }}
           path: backend/tests/reports/coverage/
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/tests/reports/coverage/coverage.xml
+          flags: backend-${{ matrix.suite.name }}
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Stop MinIO
         if: always()
         run: docker rm -f ci_minio || true
+
+  assert-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    name: assert-sweep guardrail
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install libcst
+        run: pip install "libcst>=1.4"
+
+      - name: Run codemod in --check mode
+        working-directory: backend
+        run: python -m scripts.codemods.sweep_status_assertions --check api/tests/integration/
+
+      - name: Forbid TestCase subclasses in unit tests
+        working-directory: backend
+        run: |
+          set -e
+          if grep -rEn 'class \w+\((TestCase|APITestCase|TransactionTestCase|HypothesisTestCase)\)' api/tests/unit/ --include='*.py' 2>/dev/null; then
+            echo "::error::TestCase subclasses found in api/tests/unit/."
+            exit 1
+          fi

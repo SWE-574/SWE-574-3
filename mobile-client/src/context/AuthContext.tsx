@@ -1,27 +1,74 @@
 /**
  * Auth context: current user, login, register, logout, and session restore.
+ *
+ * Offline-aware:
+ *  - The signed-in shell is cached on disk via `saveCurrentUser` and
+ *    re-hydrated immediately on cold start so the app does not block on a
+ *    network round-trip.
+ *  - Network failures during `getMe` do NOT log the user out — they only
+ *    set `isStale` so the UI can show a "showing cached data" hint. Only an
+ *    HTTP 401 from `/auth/refresh/` clears the session.
  */
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { UserSummary } from "../api/types";
 import * as authApi from "../api/auth";
 import { useNotificationStore } from "../store/useNotificationStore";
+import { initConnectivity } from "../store/connectivityStore";
 import type { LoginRequest, RegisterRequest } from "../api/auth";
 import { getMe } from "../api/users";
 import { getStoredTokens } from "../api/storage";
-import { setAuthTokens, getRefreshToken } from "../api/client";
+import {
+  setAuthTokens,
+  getAuthToken,
+  getRefreshToken,
+  ApiNetworkError,
+} from "../api/client";
+import {
+  saveCurrentUser,
+  readCurrentUser,
+  clearCurrentUser,
+  clearAllUserCaches,
+} from "../cache/offlineCache";
+import {
+  isCurrentAuthSession,
+  nextAuthSessionGeneration,
+  shouldSkipSoftUserRefresh,
+} from "../utils/authRefresh";
 
 interface AuthState {
   user: UserSummary | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  /** True when `user` came from the disk cache and hasn't been confirmed by the server yet. */
+  isStale: boolean;
 }
 
 interface AuthContextValue extends AuthState {
   login: (body: LoginRequest) => Promise<void>;
   register: (body: RegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
-  refreshUser: () => Promise<void>;
+  refreshUser: (options?: { force?: boolean }) => Promise<void>;
+}
+
+let inFlightUserRequest: Promise<UserSummary> | null = null;
+let lastConfirmedUserAt = 0;
+
+async function getMeSingleFlight(): Promise<UserSummary> {
+  if (inFlightUserRequest) return inFlightUserRequest;
+
+  inFlightUserRequest = getMe().finally(() => {
+    inFlightUserRequest = null;
+  });
+
+  return inFlightUserRequest;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -29,87 +76,206 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isStale, setIsStale] = useState(false);
+  const sessionGenerationRef = useRef(0);
 
-  const refreshUser = useCallback(async () => {
+  const persistUser = useCallback((u: UserSummary) => {
+    // Drop stale API results if the session was cleared while getMe was in flight
+    // (e.g. user logged out during ProfileScreen useFocusEffect → refreshUser).
+    if (!getAuthToken()) return;
+    setUser(u);
+    setIsStale(false);
+    lastConfirmedUserAt = Date.now();
     try {
-      const u = await getMe();
-      setUser(u);
+      saveCurrentUser(u);
     } catch {
-      const refresh = getRefreshToken();
-      if (refresh) {
-        try {
-          await authApi.refresh({ refresh });
-          const u = await getMe();
-          setUser(u);
-        } catch {
-          await authApi.logout();
-          setUser(null);
-        }
-      } else {
-        await authApi.logout();
-        setUser(null);
+      /* cache write failures are non-fatal */
+    }
+  }, []);
+
+  const clearSessionLocal = useCallback(async (prevUserId: string | null) => {
+    sessionGenerationRef.current = nextAuthSessionGeneration(sessionGenerationRef.current);
+    setUser(null);
+    setIsStale(false);
+    lastConfirmedUserAt = 0;
+    inFlightUserRequest = null;
+    clearCurrentUser();
+    if (prevUserId) {
+      try {
+        clearAllUserCaches(prevUserId);
+      } catch {
+        /* best-effort cache wipe */
       }
     }
   }, []);
 
-  const login = useCallback(async (body: LoginRequest) => {
-    await authApi.login(body);
-    await refreshUser();
-  }, [refreshUser]);
+  const refreshUser = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force ?? false;
+    const startedSessionGeneration = sessionGenerationRef.current;
+    if (
+      shouldSkipSoftUserRefresh({
+        force,
+        lastConfirmedAt: lastConfirmedUserAt,
+        now: Date.now(),
+      })
+    ) {
+      return;
+    }
 
-  const register = useCallback(async (body: RegisterRequest) => {
-    await authApi.register(body);
-    await refreshUser();
-  }, [refreshUser]);
+    try {
+      const u = await getMeSingleFlight();
+      if (!isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
+      persistUser(u);
+    } catch (err) {
+      if (err instanceof ApiNetworkError) {
+        // Network blip — keep the (possibly cached) user and signal stale.
+        setIsStale(true);
+        return;
+      }
+      // HTTP failure: try once with refresh, then give up.
+      const refresh = getRefreshToken();
+      if (refresh) {
+        try {
+          await authApi.refresh({ refresh });
+          if (!isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
+          const u = await getMeSingleFlight();
+          if (!isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
+          persistUser(u);
+          return;
+        } catch (refreshErr) {
+          if (refreshErr instanceof ApiNetworkError) {
+            setIsStale(true);
+            return;
+          }
+          // fallthrough to logout
+        }
+      }
+      if (!isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
+      const prevId = user?.id ?? null;
+      await authApi.logout();
+      await clearSessionLocal(prevId);
+    }
+  }, [persistUser, clearSessionLocal, user]);
+
+  const login = useCallback(
+    async (body: LoginRequest) => {
+      await authApi.login(body);
+      await refreshUser({ force: true });
+    },
+    [refreshUser],
+  );
+
+  const register = useCallback(
+    async (body: RegisterRequest) => {
+      await authApi.register(body);
+      await refreshUser({ force: true });
+    },
+    [refreshUser],
+  );
 
   const logout = useCallback(async () => {
-    await authApi.logout();
-    useNotificationStore.getState().reset();
-    setUser(null);
-  }, []);
+    const prevId = user?.id ?? null;
+    // Clear React state first so the navigator immediately drops back to the
+    // logged-out tree even if downstream cleanup hits an exception (e.g. a
+    // SecureStore error or a notification-store reset that throws). The
+    // earlier order awaited token storage and the notification reset before
+    // touching `user`; if either threw, the screen stayed on the cached
+    // profile and the viewer appeared still signed in.
+    // clearSessionLocal also bumps sessionGenerationRef synchronously, so any
+    // in-flight refreshUser race becomes a no-op (same effect as a separate
+    // pre-bump).
+    await clearSessionLocal(prevId);
+    try {
+      await authApi.logout();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[AuthContext] logout token clear failed', err);
+    }
+    try {
+      useNotificationStore.getState().reset();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[AuthContext] notification store reset failed', err);
+    }
+  }, [user, clearSessionLocal]);
 
   useEffect(() => {
     let cancelled = false;
+    initConnectivity();
 
     async function restoreSession() {
+      const startedSessionGeneration = sessionGenerationRef.current;
       const tokens = await getStoredTokens();
-      if (!tokens || cancelled) {
+      if (!tokens || cancelled || !isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) {
         setIsLoading(false);
         return;
       }
       setAuthTokens(tokens.access, tokens.refresh);
+
+      // Hydrate from cached snapshot first so the shell renders immediately.
+      const cached = await readCurrentUser();
+      if (cached && !cancelled && isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) {
+        setUser(cached.data);
+        setIsStale(true);
+        setIsLoading(false);
+      }
+
       try {
-        const u = await getMe();
-        if (!cancelled) setUser(u);
-      } catch {
+        const u = await getMeSingleFlight();
+        if (cancelled || !isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) return;
+        // Different user than cached? wipe the previous user's caches.
+        if (cached && cached.data.id !== u.id) {
+          try {
+            clearAllUserCaches(cached.data.id);
+          } catch {
+            /* best-effort */
+          }
+        }
+        persistUser(u);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiNetworkError) {
+          // Stay signed in with whatever we have. The connectivity listener
+          // will trigger a refresh on reconnect via `useCachedFetch`.
+          setIsStale(Boolean(cached));
+          return;
+        }
+        // HTTP error: try refresh once.
         const refresh = getRefreshToken();
-        if (refresh && !cancelled) {
+        if (refresh) {
           try {
             await authApi.refresh({ refresh });
-            const u = await getMe();
-            if (!cancelled) setUser(u);
-          } catch {
-            await authApi.logout();
-            if (!cancelled) setUser(null);
+            const u = await getMeSingleFlight();
+            if (!cancelled && isCurrentAuthSession(startedSessionGeneration, sessionGenerationRef.current)) persistUser(u);
+            return;
+          } catch (refreshErr) {
+            if (cancelled) return;
+            if (refreshErr instanceof ApiNetworkError) {
+              setIsStale(Boolean(cached));
+              return;
+            }
+            // refresh itself failed with HTTP — only now we log out.
           }
-        } else if (!cancelled) {
-          await authApi.logout();
-          setUser(null);
         }
+        const prevId = cached?.data.id ?? null;
+        await authApi.logout();
+        if (!cancelled) await clearSessionLocal(prevId);
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-      if (!cancelled) setIsLoading(false);
     }
 
     restoreSession();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [persistUser, clearSessionLocal]);
 
   const value: AuthContextValue = {
     user,
     isLoading,
     isAuthenticated: !!user,
+    isStale,
     login,
     register,
     logout,

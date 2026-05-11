@@ -73,5 +73,11 @@ describe("auth", () => {
       await logout();
       expect(storage.clearStoredTokens).toHaveBeenCalled();
     });
+
+    it("still resolves when SecureStore clear fails (session cleared in memory)", async () => {
+      (storage.clearStoredTokens as jest.Mock).mockRejectedValueOnce(new Error("secure store"));
+      await expect(logout()).resolves.toBeUndefined();
+      expect(storage.clearStoredTokens).toHaveBeenCalled();
+    });
   });
 });

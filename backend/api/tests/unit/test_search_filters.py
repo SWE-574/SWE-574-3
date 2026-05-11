@@ -7,7 +7,6 @@ including location-based, tag-based, text-based, and type-based filtering.
 import pytest
 from decimal import Decimal
 from datetime import timedelta
-from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
 from django.utils import timezone
@@ -16,6 +15,8 @@ from api.models import Service, Tag
 from api.search_filters import (
     SearchStrategy,
     LocationStrategy,
+    LocationTypeStrategy,
+    ScheduleFilterStrategy,
     TagStrategy,
     TextStrategy,
     TypeStrategy,
@@ -40,10 +41,12 @@ except ImportError:
 User = get_user_model()
 
 
-class LocationStrategyTestCase(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestLocationStrategy:
     """Test cases for LocationStrategy."""
     
-    def setUp(self):
+    def setup_method(self, method):
         """Set up test data with services at different locations."""
         self.user = User.objects.create_user(
             email='testuser@test.com',
@@ -115,42 +118,62 @@ class LocationStrategyTestCase(TestCase):
     def test_location_strategy_filters_by_distance(self):
         """Test LocationStrategy filters services within specified distance."""
         queryset = Service.objects.filter(status='Active')
-        
+
         # Search from Besiktas center with 10km radius
         params = {
             'lat': 41.0422,
             'lng': 29.0089,
             'distance': 10
         }
-        
+
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
-        
-        # Should include Besiktas and Kadikoy (within 10km), but not Ankara or online
-        self.assertEqual(len(result_list), 2)
+
+        # Should include Besiktas and Kadikoy (within 10km), and Online
+        # services (no location is not subject to the geo filter), but
+        # not Ankara.
         titles = [s.title for s in result_list]
-        self.assertIn('Besiktas Service', titles)
-        self.assertIn('Kadikoy Service', titles)
-        self.assertNotIn('Ankara Service', titles)
-        self.assertNotIn('Online Service', titles)
-    
+        assert 'Besiktas Service' in titles
+        assert 'Kadikoy Service' in titles
+        assert 'Online Service' in titles
+        assert 'Ankara Service' not in titles
+
     def test_location_strategy_with_small_radius(self):
         """Test LocationStrategy with small radius only returns nearby services."""
         queryset = Service.objects.filter(status='Active')
-        
+
         # Search from Besiktas center with 2km radius
         params = {
             'lat': 41.0422,
             'lng': 29.0089,
             'distance': 2
         }
-        
+
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
-        
-        # Should only include Besiktas service
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Besiktas Service')
+
+        # Should include Besiktas (within 2km) and the Online service
+        # (no location, not subject to the geo filter). Kadikoy and Ankara
+        # are filtered out by distance.
+        titles = [s.title for s in result_list]
+        assert 'Besiktas Service' in titles
+        assert 'Online Service' in titles
+        assert 'Kadikoy Service' not in titles
+        assert 'Ankara Service' not in titles
+
+    def test_location_strategy_keeps_online_services(self):
+        """Online services (location IS NULL) bypass the distance filter."""
+        queryset = Service.objects.filter(status='Active')
+
+        params = {'lat': 41.0422, 'lng': 29.0089, 'distance': 1}
+
+        result_list = list(self.strategy.apply(queryset, params))
+
+        titles = [s.title for s in result_list]
+        # Even with a 1km radius the Online service must still be visible.
+        assert 'Online Service' in titles
+        # In-Person services beyond 1km must still be filtered out.
+        assert 'Ankara Service' not in titles
     
     def test_location_strategy_orders_by_distance(self):
         """Test LocationStrategy orders results by distance (nearest first)."""
@@ -167,10 +190,10 @@ class LocationStrategyTestCase(TestCase):
         result_list = list(result)
         
         # Besiktas should be first (closest), then Kadikoy, then Ankara
-        self.assertGreaterEqual(len(result_list), 3)
-        self.assertEqual(result_list[0].title, 'Besiktas Service')
-        self.assertEqual(result_list[1].title, 'Kadikoy Service')
-        self.assertEqual(result_list[2].title, 'Ankara Service')
+        assert len(result_list) >= 3
+        assert result_list[0].title == 'Besiktas Service'
+        assert result_list[1].title == 'Kadikoy Service'
+        assert result_list[2].title == 'Ankara Service'
     
     def test_location_strategy_no_location_params(self):
         """Test LocationStrategy returns unchanged queryset when no location params."""
@@ -181,7 +204,7 @@ class LocationStrategyTestCase(TestCase):
         
         result = self.strategy.apply(queryset, params)
         
-        self.assertEqual(result.count(), original_count)
+        assert result.count() == original_count
     
     def test_location_strategy_invalid_coords(self):
         """Test LocationStrategy handles invalid coordinates gracefully."""
@@ -197,28 +220,87 @@ class LocationStrategyTestCase(TestCase):
         result = self.strategy.apply(queryset, params)
         
         # Should return unchanged queryset
-        self.assertEqual(result.count(), original_count)
+        assert result.count() == original_count
     
     def test_location_strategy_partial_params(self):
         """Test LocationStrategy handles partial location params."""
         queryset = Service.objects.filter(status='Active')
         original_count = queryset.count()
-        
+
         # Only lat provided
         params = {'lat': 41.0422}
         result = self.strategy.apply(queryset, params)
-        self.assertEqual(result.count(), original_count)
-        
+        assert result.count() == original_count
+
         # Only lng provided
         params = {'lng': 29.0089}
         result = self.strategy.apply(queryset, params)
-        self.assertEqual(result.count(), original_count)
+        assert result.count() == original_count
+
+    def test_search_engine_signal_only_when_distance_omitted(self):
+        """End-to-end via SearchEngine: a request with lat/lng but no
+        distance must pass through every strategy without losing rows. This
+        guards against the views.py default that previously injected
+        `distance=10` even when the client didn't send it.
+        """
+        engine = SearchEngine()
+        queryset = Service.objects.filter(status='Active')
+        original_count = queryset.count()
+
+        # `distance` deliberately absent. Mirrors the params dict views.py
+        # constructs after the fix (distance is None when missing).
+        params = {
+            'lat': 41.0422,
+            'lng': 29.0089,
+            'distance': None,
+            'tags': [],
+            'type': None,
+            'types': [],
+            'location_types': [],
+            'schedule_type': None,
+            'weekend': False,
+            'tag': None,
+            'search': None,
+            'entity_type': None,
+            'date_from': None,
+            'date_to': None,
+        }
+        result = engine.search(queryset, params)
+        result_titles = [s.title for s in result]
+        # All services -- including Ankara, far outside any reasonable radius
+        # -- still surface. LocationStrategy only annotates when distance
+        # is missing.
+        assert len(result_titles) == original_count
+        assert 'Ankara Service' in result_titles
+
+    def test_location_strategy_signal_only_when_no_distance(self):
+        """When lat/lng are present without `distance`, the queryset must
+        keep every row (no hard radius cutoff). The viewer asked for the
+        location SIGNAL only -- ranking should weight by closeness via the
+        composite_score's smooth proximity_factor, not exclude far rows.
+        """
+        queryset = Service.objects.filter(status='Active')
+        original_count = queryset.count()
+
+        params = {'lat': 41.0422, 'lng': 29.0089}
+        result = self.strategy.apply(queryset, params)
+        result_list = list(result)
+
+        # Every active row must still be present, including Ankara which is
+        # ~350km away. The annotate() and order_by('distance') still fire.
+        assert len(result_list) == original_count
+        titles = [s.title for s in result_list]
+        assert 'Ankara Service' in titles
+        assert 'Besiktas Service' in titles
+        assert 'Online Service' in titles
 
 
-class TagStrategyTestCase(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestTagStrategy:
     """Test cases for TagStrategy."""
     
-    def setUp(self):
+    def setup_method(self, method):
         """Set up test data with services and tags."""
         self.user = User.objects.create_user(
             email='testuser@test.com',
@@ -292,10 +374,10 @@ class TagStrategyTestCase(TestCase):
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
         
-        self.assertEqual(len(result_list), 2)
+        assert len(result_list) == 2
         titles = [s.title for s in result_list]
-        self.assertIn('Programming Help', titles)
-        self.assertIn('Garden Programming', titles)
+        assert 'Programming Help' in titles
+        assert 'Garden Programming' in titles
     
     def test_tag_strategy_filters_by_multiple_tags(self):
         """Test TagStrategy filters by multiple tags (OR logic)."""
@@ -306,11 +388,11 @@ class TagStrategyTestCase(TestCase):
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
         
-        self.assertEqual(len(result_list), 3)
+        assert len(result_list) == 3
         titles = [s.title for s in result_list]
-        self.assertIn('Programming Help', titles)
-        self.assertIn('Cooking Class', titles)
-        self.assertIn('Garden Programming', titles)
+        assert 'Programming Help' in titles
+        assert 'Cooking Class' in titles
+        assert 'Garden Programming' in titles
     
     def test_tag_strategy_no_tags_param(self):
         """Test TagStrategy returns unchanged queryset when no tags specified."""
@@ -321,7 +403,7 @@ class TagStrategyTestCase(TestCase):
         
         result = self.strategy.apply(queryset, params)
         
-        self.assertEqual(result.count(), original_count)
+        assert result.count() == original_count
     
     def test_tag_strategy_empty_tags_list(self):
         """Test TagStrategy with empty tags list."""
@@ -332,8 +414,44 @@ class TagStrategyTestCase(TestCase):
         
         result = self.strategy.apply(queryset, params)
         
-        self.assertEqual(result.count(), original_count)
+        assert result.count() == original_count
     
+    def test_tag_strategy_sibling_expansion(self):
+        """Picking a child tag surfaces sibling-tagged services via the
+        expand_tag_qids helper. Painting and Sculpture both share Art as a
+        parent_qid; picking Painting should bring Sculpture-tagged services
+        along, in addition to the children of Painting (none here).
+        """
+        art = Tag.objects.create(id='Q735', name='Art')
+        painting = Tag.objects.create(id='Q11629', name='Painting', parent_qid='Q735')
+        sculpture = Tag.objects.create(id='Q11634', name='Sculpture', parent_qid='Q735')
+
+        painting_service = Service.objects.create(
+            user=self.user,
+            title='Watercolour intro',
+            description='', type='Offer', duration=Decimal('1.00'),
+            location_type='Online', max_participants=1, schedule_type='One-Time',
+        )
+        painting_service.tags.add(painting)
+
+        sculpture_service = Service.objects.create(
+            user=self.user,
+            title='Clay basics',
+            description='', type='Offer', duration=Decimal('1.00'),
+            location_type='Online', max_participants=1, schedule_type='One-Time',
+        )
+        sculpture_service.tags.add(sculpture)
+
+        params = {'tag': 'Q11629'}  # Painting alone
+        result = self.strategy.apply(Service.objects.filter(status='Active'), params)
+        titles = [s.title for s in result]
+
+        assert 'Watercolour intro' in titles
+        assert 'Clay basics' in titles, (
+            'sibling expansion failed: picking Painting should also surface '
+            'Sculpture-tagged services'
+        )
+
     def test_tag_strategy_nonexistent_tag(self):
         """Test TagStrategy with non-existent tag returns empty."""
         queryset = Service.objects.filter(status='Active')
@@ -342,13 +460,15 @@ class TagStrategyTestCase(TestCase):
         
         result = self.strategy.apply(queryset, params)
         
-        self.assertEqual(result.count(), 0)
+        assert result.count() == 0
 
 
-class TextStrategyTestCase(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestTextStrategy:
     """Test cases for TextStrategy."""
     
-    def setUp(self):
+    def setup_method(self, method):
         """Set up test data for text search."""
         self.user = User.objects.create_user(
             email='testuser@test.com',
@@ -405,8 +525,8 @@ class TextStrategyTestCase(TestCase):
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
         
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Piano Lessons')
+        assert len(result_list) == 1
+        assert result_list[0].title == 'Piano Lessons'
     
     def test_text_strategy_searches_description(self):
         """Test TextStrategy searches in description."""
@@ -417,8 +537,8 @@ class TextStrategyTestCase(TestCase):
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
         
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Web Development Help')
+        assert len(result_list) == 1
+        assert result_list[0].title == 'Web Development Help'
     
     def test_text_strategy_searches_tags(self):
         """Test TextStrategy searches in tag names."""
@@ -429,8 +549,8 @@ class TextStrategyTestCase(TestCase):
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
         
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Web Development Help')
+        assert len(result_list) == 1
+        assert result_list[0].title == 'Web Development Help'
     
     def test_text_strategy_case_insensitive(self):
         """Test TextStrategy search is case insensitive."""
@@ -441,8 +561,8 @@ class TextStrategyTestCase(TestCase):
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
         
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Piano Lessons')
+        assert len(result_list) == 1
+        assert result_list[0].title == 'Piano Lessons'
     
     def test_text_strategy_partial_match(self):
         """Test TextStrategy partial matching."""
@@ -454,10 +574,10 @@ class TextStrategyTestCase(TestCase):
         result_list = list(result)
         
         # Should match both "Web Development" (title) and "web of plants" (description)
-        self.assertEqual(len(result_list), 2)
+        assert len(result_list) == 2
         titles = [s.title for s in result_list]
-        self.assertIn('Web Development Help', titles)
-        self.assertIn('Garden Care', titles)
+        assert 'Web Development Help' in titles
+        assert 'Garden Care' in titles
     
     def test_text_strategy_no_search_param(self):
         """Test TextStrategy returns unchanged queryset when no search."""
@@ -468,7 +588,7 @@ class TextStrategyTestCase(TestCase):
         
         result = self.strategy.apply(queryset, params)
         
-        self.assertEqual(result.count(), original_count)
+        assert result.count() == original_count
     
     def test_text_strategy_empty_search(self):
         """Test TextStrategy with empty search string."""
@@ -479,7 +599,7 @@ class TextStrategyTestCase(TestCase):
         
         result = self.strategy.apply(queryset, params)
         
-        self.assertEqual(result.count(), original_count)
+        assert result.count() == original_count
     
     def test_text_strategy_no_matches(self):
         """Test TextStrategy with search term that matches nothing."""
@@ -489,13 +609,15 @@ class TextStrategyTestCase(TestCase):
         
         result = self.strategy.apply(queryset, params)
         
-        self.assertEqual(result.count(), 0)
+        assert result.count() == 0
 
 
-class TypeStrategyTestCase(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestTypeStrategy:
     """Test cases for TypeStrategy."""
     
-    def setUp(self):
+    def setup_method(self, method):
         """Set up test data with different service types."""
         self.user = User.objects.create_user(
             email='testuser@test.com',
@@ -538,8 +660,8 @@ class TypeStrategyTestCase(TestCase):
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
         
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Offer Service')
+        assert len(result_list) == 1
+        assert result_list[0].title == 'Offer Service'
     
     def test_type_strategy_filters_needs(self):
         """Test TypeStrategy filters for Need type."""
@@ -550,8 +672,8 @@ class TypeStrategyTestCase(TestCase):
         result = self.strategy.apply(queryset, params)
         result_list = list(result)
         
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Need Service')
+        assert len(result_list) == 1
+        assert result_list[0].title == 'Need Service'
     
     def test_type_strategy_no_type_param(self):
         """Test TypeStrategy returns all when no type specified."""
@@ -561,7 +683,7 @@ class TypeStrategyTestCase(TestCase):
         
         result = self.strategy.apply(queryset, params)
         
-        self.assertEqual(result.count(), 2)
+        assert result.count() == 2
     
     def test_type_strategy_invalid_type(self):
         """Test TypeStrategy ignores invalid type."""
@@ -570,15 +692,136 @@ class TypeStrategyTestCase(TestCase):
         params = {'type': 'Invalid'}
         
         result = self.strategy.apply(queryset, params)
-        
+
         # Invalid type is ignored, all services returned
-        self.assertEqual(result.count(), 2)
+        assert result.count() == 2
+
+    def test_type_strategy_filters_by_multiple_types(self):
+        """`types=[...]` filters with type__in (used by Browse multi-select)."""
+        Service.objects.create(
+            user=self.user, title='Need Service', description='need',
+            type='Need', duration=Decimal('1.00'),
+            location_type='Online', max_participants=1, schedule_type='One-Time',
+        )
+        queryset = Service.objects.filter(status='Active')
+        result = self.strategy.apply(queryset, {'types': ['Offer', 'Need']})
+        types = sorted(set(s.type for s in result))
+        assert types == ['Need', 'Offer']
+
+    def test_type_strategy_ignores_invalid_values_in_list(self):
+        """Unknown values in `types` are dropped before filtering."""
+        queryset = Service.objects.filter(status='Active')
+        result = self.strategy.apply(queryset, {'types': ['Offer', 'Bogus']})
+        assert all(s.type == 'Offer' for s in result)
 
 
-class SearchEngineTestCase(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestLocationTypeStrategy:
+    """Test cases for LocationTypeStrategy."""
+
+    def setup_method(self, method):
+        self.user = User.objects.create_user(
+            email='loc-type@test.com', password='x', first_name='T', last_name='U',
+            timebank_balance=Decimal('10.00'),
+        )
+        self.online = Service.objects.create(
+            user=self.user, title='Online Service', description='d',
+            type='Offer', duration=Decimal('1.00'), location_type='Online',
+            max_participants=1, schedule_type='One-Time',
+        )
+        self.in_person = Service.objects.create(
+            user=self.user, title='IRL Service', description='d',
+            type='Offer', duration=Decimal('1.00'), location_type='In-Person',
+            max_participants=1, schedule_type='One-Time',
+        )
+        self.strategy = LocationTypeStrategy()
+
+    def test_keeps_only_online(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'location_types': ['Online']},
+        )
+        titles = [s.title for s in result]
+        assert 'Online Service' in titles
+        assert 'IRL Service' not in titles
+
+    def test_keeps_only_in_person(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'location_types': ['In-Person']},
+        )
+        titles = [s.title for s in result]
+        assert 'IRL Service' in titles
+        assert 'Online Service' not in titles
+
+    def test_both_values_is_noop(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'location_types': ['Online', 'In-Person']},
+        )
+        assert result.count() == 2
+
+    def test_empty_is_noop(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'), {'location_types': []},
+        )
+        assert result.count() == 2
+
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestScheduleFilterStrategy:
+    """Test cases for ScheduleFilterStrategy."""
+
+    def setup_method(self, method):
+        self.user = User.objects.create_user(
+            email='sched@test.com', password='x', first_name='T', last_name='U',
+            timebank_balance=Decimal('10.00'),
+        )
+        self.one_time = Service.objects.create(
+            user=self.user, title='Once', description='d', type='Offer',
+            duration=Decimal('1.00'), location_type='Online',
+            max_participants=1, schedule_type='One-Time',
+            schedule_details='Tuesday 18:00',
+        )
+        self.recurrent = Service.objects.create(
+            user=self.user, title='Weekly', description='d', type='Offer',
+            duration=Decimal('1.00'), location_type='Online',
+            max_participants=1, schedule_type='Recurrent',
+            schedule_details='Every Sunday 10:00',
+        )
+        self.strategy = ScheduleFilterStrategy()
+
+    def test_filters_by_schedule_type(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'),
+            {'schedule_type': 'Recurrent'},
+        )
+        titles = [s.title for s in result]
+        assert titles == ['Weekly']
+
+    def test_weekend_matches_schedule_details(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'), {'weekend': True},
+        )
+        titles = [s.title for s in result]
+        assert 'Weekly' in titles  # 'Sunday' matches
+        assert 'Once' not in titles
+
+    def test_no_params_is_noop(self):
+        result = self.strategy.apply(
+            Service.objects.filter(status='Active'), {},
+        )
+        assert result.count() == 2
+
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestSearchEngine:
     """Test cases for SearchEngine (composite strategy)."""
     
-    def setUp(self):
+    def setup_method(self, method):
         """Set up test data for search engine tests."""
         self.user = User.objects.create_user(
             email='testuser@test.com',
@@ -651,8 +894,8 @@ class SearchEngineTestCase(TestCase):
         result = self.search_engine.search(queryset, params)
         result_list = list(result)
         
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Python Programming')
+        assert len(result_list) == 1
+        assert result_list[0].title == 'Python Programming'
     
     def test_search_engine_text_and_tags(self):
         """Test SearchEngine with text and tag filters."""
@@ -667,25 +910,27 @@ class SearchEngineTestCase(TestCase):
         result_list = list(result)
         
         # Both Python services have programming tag
-        self.assertEqual(len(result_list), 2)
+        assert len(result_list) == 2
     
     def test_search_engine_with_location(self):
         """Test SearchEngine with location filter."""
         queryset = Service.objects.filter(status='Active')
-        
+
         # Search near Besiktas with small radius
         params = {
             'lat': 41.0422,
             'lng': 29.0089,
             'distance': 2
         }
-        
+
         result = self.search_engine.search(queryset, params)
-        result_list = list(result)
-        
-        # Only Besiktas service should be in 2km radius
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Python Programming')
+        titles = [s.title for s in result]
+
+        # In-Person services within 2km plus Online services (no location,
+        # not subject to the geo filter).
+        assert 'Python Programming' in titles  # In Besiktas, within 2km
+        assert 'Need Help with Python' in titles  # Online — bypasses filter
+        assert 'Cooking Class' not in titles  # Kadikoy is ~7km away
     
     def test_search_engine_all_filters(self):
         """Test SearchEngine with all filters combined."""
@@ -704,8 +949,8 @@ class SearchEngineTestCase(TestCase):
         result_list = list(result)
         
         # Only Python Programming matches: Offer, has programming tag, has "Python" in title, has location
-        self.assertEqual(len(result_list), 1)
-        self.assertEqual(result_list[0].title, 'Python Programming')
+        assert len(result_list) == 1
+        assert result_list[0].title == 'Python Programming'
     
     def test_search_engine_no_params(self):
         """Test SearchEngine with no params returns all services."""
@@ -716,13 +961,15 @@ class SearchEngineTestCase(TestCase):
         
         result = self.search_engine.search(queryset, params)
         
-        self.assertEqual(result.count(), original_count)
+        assert result.count() == original_count
 
 
-class ServiceLocationFieldTestCase(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestServiceLocationField:
     """Test cases for Service model location field auto-population."""
     
-    def setUp(self):
+    def setup_method(self, method):
         """Set up test user."""
         self.user = User.objects.create_user(
             email='testuser@test.com',
@@ -747,9 +994,9 @@ class ServiceLocationFieldTestCase(TestCase):
             schedule_type='One-Time'
         )
         
-        self.assertIsNotNone(service.location)
-        self.assertEqual(service.location.x, 29.0089)  # lng
-        self.assertEqual(service.location.y, 41.0422)  # lat
+        assert service.location is not None
+        assert service.location.x == 29.0089  # lng
+        assert service.location.y == 41.0422  # lat
     
     def test_location_auto_populated_on_update(self):
         """Test location field is updated when lat/lng changes."""
@@ -765,7 +1012,7 @@ class ServiceLocationFieldTestCase(TestCase):
         )
         
         # Initially no location
-        self.assertIsNone(service.location)
+        assert service.location is None
         
         # Update with lat/lng
         service.location_lat = Decimal('41.0422')
@@ -773,9 +1020,9 @@ class ServiceLocationFieldTestCase(TestCase):
         service.save()
         
         service.refresh_from_db()
-        self.assertIsNotNone(service.location)
-        self.assertEqual(service.location.x, 29.0089)
-        self.assertEqual(service.location.y, 41.0422)
+        assert service.location is not None
+        assert service.location.x == 29.0089
+        assert service.location.y == 41.0422
     
     def test_location_null_when_no_coords(self):
         """Test location field is null when no coordinates provided."""
@@ -790,7 +1037,7 @@ class ServiceLocationFieldTestCase(TestCase):
             schedule_type='One-Time'
         )
         
-        self.assertIsNone(service.location)
+        assert service.location is None
     
     def test_location_cleared_when_coords_removed(self):
         """Test location field is cleared when coordinates are removed."""
@@ -807,7 +1054,7 @@ class ServiceLocationFieldTestCase(TestCase):
             schedule_type='One-Time'
         )
         
-        self.assertIsNotNone(service.location)
+        assert service.location is not None
         
         # Remove coordinates
         service.location_lat = None
@@ -815,7 +1062,7 @@ class ServiceLocationFieldTestCase(TestCase):
         service.save()
         
         service.refresh_from_db()
-        self.assertIsNone(service.location)
+        assert service.location is None
     
     def test_location_updated_with_update_fields(self):
         """Test location field is updated when save() is called with update_fields."""
@@ -833,7 +1080,7 @@ class ServiceLocationFieldTestCase(TestCase):
         )
         
         original_location = service.location
-        self.assertIsNotNone(original_location)
+        assert original_location is not None
         
         # Update only location_lat with update_fields
         service.location_lat = Decimal('40.0000')
@@ -841,9 +1088,9 @@ class ServiceLocationFieldTestCase(TestCase):
         
         service.refresh_from_db()
         # Verify location was also updated (not just location_lat)
-        self.assertIsNotNone(service.location)
-        self.assertEqual(service.location.y, 40.0)  # lat changed
-        self.assertEqual(service.location.x, 29.0089)  # lng unchanged
+        assert service.location is not None
+        assert service.location.y == 40.0  # lat changed
+        assert service.location.x == 29.0089  # lng unchanged
     
     def test_location_updated_with_update_fields_lng_only(self):
         """Test location field is updated when only location_lng is in update_fields."""
@@ -866,9 +1113,9 @@ class ServiceLocationFieldTestCase(TestCase):
         
         service.refresh_from_db()
         # Verify location was also updated
-        self.assertIsNotNone(service.location)
-        self.assertEqual(service.location.y, 41.0422)  # lat unchanged
-        self.assertEqual(service.location.x, 30.0)  # lng changed
+        assert service.location is not None
+        assert service.location.y == 41.0422  # lat unchanged
+        assert service.location.x == 30.0  # lng changed
     
     def test_location_not_added_when_unrelated_update_fields(self):
         """Test location field is not added to update_fields when lat/lng not included."""
@@ -892,13 +1139,15 @@ class ServiceLocationFieldTestCase(TestCase):
         service.save(update_fields=['title'])
         
         service.refresh_from_db()
-        self.assertEqual(service.title, 'Updated Title')
+        assert service.title == 'Updated Title'
         # Location should remain unchanged
-        self.assertEqual(service.location.x, original_location.x)
-        self.assertEqual(service.location.y, original_location.y)
+        assert service.location.x == original_location.x
+        assert service.location.y == original_location.y
 
 
-class ServiceViewSetOrderingTestCase(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestServiceViewSetOrdering:
     """
     API-level tests for ServiceViewSet ordering behavior.
     
@@ -907,14 +1156,14 @@ class ServiceViewSetOrderingTestCase(TestCase):
     - No lat/lng params are provided
     """
     
-    def setUp(self):
+    def setup_method(self, method):
         """Set up test data with services at different times."""
         from rest_framework.test import APIClient
         from django.utils import timezone
         import time
         
         self.client = APIClient()
-        
+
         self.user = User.objects.create_user(
             email='testuser@test.com',
             password='testpass123',
@@ -977,25 +1226,25 @@ class ServiceViewSetOrderingTestCase(TestCase):
             'lng': '29.0089'
         })
         
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         results = self._get_results(response)
         
         # Should be ordered by -created_at (newer first)
-        self.assertGreaterEqual(len(results), 2)
-        self.assertEqual(results[0]['title'], 'Newer Service')
-        self.assertEqual(results[1]['title'], 'Older Service')
+        assert len(results) >= 2
+        assert results[0]['title'] == 'Newer Service'
+        assert results[1]['title'] == 'Older Service'
     
     def test_no_lat_lng_applies_created_at_ordering(self):
         """Test that missing lat/lng params result in -created_at ordering."""
         response = self.client.get('/api/services/')
         
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         results = self._get_results(response)
         
         # Should be ordered by -created_at (newer first)
-        self.assertGreaterEqual(len(results), 2)
-        self.assertEqual(results[0]['title'], 'Newer Service')
-        self.assertEqual(results[1]['title'], 'Older Service')
+        assert len(results) >= 2
+        assert results[0]['title'] == 'Newer Service'
+        assert results[1]['title'] == 'Older Service'
     
     def test_valid_lat_lng_applies_distance_ordering(self):
         """Test that valid lat/lng params result in distance ordering."""
@@ -1006,13 +1255,13 @@ class ServiceViewSetOrderingTestCase(TestCase):
             'distance': '50'  # Wide enough to include both services
         })
         
-        self.assertEqual(response.status_code, 200)
+        assert response.status_code == 200
         results = self._get_results(response)
         
         # Should be ordered by distance (Besiktas service closer)
-        self.assertGreaterEqual(len(results), 2)
-        self.assertEqual(results[0]['title'], 'Older Service')  # In Besiktas, closer
-        self.assertEqual(results[1]['title'], 'Newer Service')  # In Kadikoy, farther
+        assert len(results) >= 2
+        assert results[0]['title'] == 'Older Service'  # In Besiktas, closer
+        assert results[1]['title'] == 'Newer Service'  # In Kadikoy, farther
 
 
 # ---------------------------------------------------------------------------
@@ -1021,7 +1270,9 @@ class ServiceViewSetOrderingTestCase(TestCase):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.xfail(reason="FR-12c: DateRangeStrategy not yet implemented", strict=False)
-class DateRangeStrategyTestCase(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestDateRangeStrategy:
     """
     TDD tests for DateRangeStrategy.
 
@@ -1030,7 +1281,7 @@ class DateRangeStrategyTestCase(TestCase):
     (filter events by scheduled date window).
     """
 
-    def setUp(self):
+    def setup_method(self, method):
         if _DateRangeStrategy is None:
             pytest.xfail("DateRangeStrategy not yet implemented — FR-12c")
 
@@ -1073,16 +1324,16 @@ class DateRangeStrategyTestCase(TestCase):
         tomorrow = timezone.now() + timedelta(days=1)
         result = self.strategy.apply(self.qs, {'date_from': tomorrow.date().isoformat()})
         titles = list(result.values_list('title', flat=True))
-        self.assertNotIn('Past Event', titles)
-        self.assertIn('Near Future Event', titles)
+        assert 'Past Event' not in titles
+        assert 'Near Future Event' in titles
 
     def test_date_to_excludes_events_after_window(self):
         """date_to should filter out events scheduled after that date."""
         cutoff = timezone.now() + timedelta(days=7)
         result = self.strategy.apply(self.qs, {'date_to': cutoff.date().isoformat()})
         titles = list(result.values_list('title', flat=True))
-        self.assertNotIn('Far Future Event', titles)
-        self.assertIn('Near Future Event', titles)
+        assert 'Far Future Event' not in titles
+        assert 'Near Future Event' in titles
 
     def test_combined_date_window(self):
         """date_from + date_to should return only events inside the window."""
@@ -1090,9 +1341,9 @@ class DateRangeStrategyTestCase(TestCase):
         date_to = (timezone.now() + timedelta(days=7)).date().isoformat()
         result = self.strategy.apply(self.qs, {'date_from': date_from, 'date_to': date_to})
         titles = list(result.values_list('title', flat=True))
-        self.assertIn('Near Future Event', titles)
-        self.assertNotIn('Past Event', titles)
-        self.assertNotIn('Far Future Event', titles)
+        assert 'Near Future Event' in titles
+        assert 'Past Event' not in titles
+        assert 'Far Future Event' not in titles
 
     def test_events_without_scheduled_time_excluded(self):
         """Events with no scheduled_time should be excluded when a date filter is active."""
@@ -1107,21 +1358,21 @@ class DateRangeStrategyTestCase(TestCase):
         date_from = timezone.now().date().isoformat()
         result = self.strategy.apply(self.qs, {'date_from': date_from})
         titles = list(result.values_list('title', flat=True))
-        self.assertNotIn('No Schedule Event', titles)
+        assert 'No Schedule Event' not in titles
 
     def test_no_params_is_noop(self):
         """Passing no date params should return the original queryset unchanged."""
         result = self.strategy.apply(self.qs, {})
-        self.assertEqual(result.count(), self.qs.count())
+        assert result.count() == self.qs.count()
 
     def test_invalid_date_from_raises_value_error(self):
         """An unparseable date_from string should raise ValueError."""
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             self.strategy.apply(self.qs, {'date_from': 'not-a-date'})
 
     def test_invalid_date_to_raises_value_error(self):
         """An unparseable date_to string should raise ValueError."""
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             self.strategy.apply(self.qs, {'date_to': 'not-a-date'})
 
     def test_single_day_window(self):
@@ -1133,7 +1384,7 @@ class DateRangeStrategyTestCase(TestCase):
         }
         result = self.strategy.apply(self.qs, params)
         for svc in result:
-            self.assertEqual(svc.scheduled_time.date(), target_date)
+            assert svc.scheduled_time.date() == target_date
 
 
 # ---------------------------------------------------------------------------
@@ -1141,7 +1392,9 @@ class DateRangeStrategyTestCase(TestCase):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.xfail(reason="FR-17g: WeightedSearchEngine not yet implemented", strict=False)
-class TestSearchWeighting(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestSearchWeighting:
     """
     TDD tests for weighted search result ordering (FR-17g, FR-SEA-01).
 
@@ -1150,7 +1403,7 @@ class TestSearchWeighting(TestCase):
     with no scored ordering — WeightedSearchEngine and weight constants do not exist.
     """
 
-    def setUp(self):
+    def setup_method(self, method):
         if _WeightedSearchEngine is None:
             pytest.xfail("WeightedSearchEngine not yet implemented — FR-17g")
 
@@ -1217,18 +1470,20 @@ class TestSearchWeighting(TestCase):
         title_idx = pks.index(self.title_match.pk)
         tag_idx = pks.index(self.tag_match.pk)
         desc_idx = pks.index(self.description_match.pk)
-        self.assertLess(title_idx, tag_idx)
-        self.assertLess(tag_idx, desc_idx)
+        assert title_idx < tag_idx
+        assert tag_idx < desc_idx
 
     def test_weight_constants_are_defined(self):
         """TITLE_WEIGHT and TAG_WEIGHT constants must be defined in search_filters."""
-        self.assertIsNotNone(TITLE_WEIGHT)
-        self.assertIsNotNone(TAG_WEIGHT)
+        assert TITLE_WEIGHT is not None
+        assert TAG_WEIGHT is not None
         self.assertGreater(TITLE_WEIGHT, TAG_WEIGHT, "Title weight must exceed tag weight")
 
 
 @pytest.mark.xfail(reason="FR-12c: DateRangeStrategy not yet implemented", strict=False)
-class DateRangeStrategyTestCase(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestDateRangeStrategy:
     """
     Unit tests for DateRangeStrategy (FR-12c).
 
@@ -1238,7 +1493,7 @@ class DateRangeStrategyTestCase(TestCase):
     but the strategy itself is type-agnostic.
     """
 
-    def setUp(self):
+    def setup_method(self, method):
         self.user = User.objects.create_user(
             email='daterange@test.com',
             password='testpass123',
@@ -1327,10 +1582,10 @@ class DateRangeStrategyTestCase(TestCase):
         result = self.strategy.apply(qs, {'date_from': future_date})
         titles = self._event_titles(result)
 
-        self.assertIn('Near Future Event', titles)
-        self.assertIn('Far Future Event', titles)
-        self.assertNotIn('Past Event', titles)
-        self.assertNotIn('Today Event', titles)
+        assert 'Near Future Event' in titles
+        assert 'Far Future Event' in titles
+        assert 'Past Event' not in titles
+        assert 'Today Event' not in titles
 
     def test_date_to_excludes_events_after_that_date(self):
         """FR-12c: date_to filters out events scheduled after the given date."""
@@ -1340,10 +1595,10 @@ class DateRangeStrategyTestCase(TestCase):
         result = self.strategy.apply(qs, {'date_to': cutoff_date})
         titles = self._event_titles(result)
 
-        self.assertIn('Past Event', titles)
-        self.assertIn('Today Event', titles)
-        self.assertIn('Near Future Event', titles)
-        self.assertNotIn('Far Future Event', titles)
+        assert 'Past Event' in titles
+        assert 'Today Event' in titles
+        assert 'Near Future Event' in titles
+        assert 'Far Future Event' not in titles
 
     def test_date_from_and_date_to_together_form_window(self):
         """FR-12c: date_from + date_to combined returns only events in the window."""
@@ -1354,10 +1609,10 @@ class DateRangeStrategyTestCase(TestCase):
         result = self.strategy.apply(qs, {'date_from': date_from, 'date_to': date_to})
         titles = self._event_titles(result)
 
-        self.assertIn('Near Future Event', titles)
-        self.assertNotIn('Past Event', titles)
-        self.assertNotIn('Today Event', titles)
-        self.assertNotIn('Far Future Event', titles)
+        assert 'Near Future Event' in titles
+        assert 'Past Event' not in titles
+        assert 'Today Event' not in titles
+        assert 'Far Future Event' not in titles
 
     def test_services_without_scheduled_time_excluded_when_date_filter_active(self):
         """FR-12c: services with no scheduled_time are excluded when date filter is set."""
@@ -1366,7 +1621,7 @@ class DateRangeStrategyTestCase(TestCase):
 
         result = self.strategy.apply(qs, {'date_from': date_from})
 
-        self.assertNotIn(self.offer_no_date, list(result))
+        assert self.offer_no_date not in list(result)
 
     def test_no_params_returns_queryset_unchanged(self):
         """FR-12c: empty params — DateRangeStrategy is a no-op."""
@@ -1375,20 +1630,20 @@ class DateRangeStrategyTestCase(TestCase):
 
         result = self.strategy.apply(qs, {})
 
-        self.assertEqual(result.count(), original_count)
+        assert result.count() == original_count
 
     def test_invalid_date_from_raises_400_compatible_error(self):
         """FR-12c: invalid date string should raise ValueError (caller converts to 400)."""
         qs = Service.objects.filter(status='Active')
 
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             self.strategy.apply(qs, {'date_from': 'not-a-date'})
 
     def test_invalid_date_to_raises_400_compatible_error(self):
         """FR-12c: invalid date_to should raise ValueError (caller converts to 400)."""
         qs = Service.objects.filter(status='Active')
 
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             self.strategy.apply(qs, {'date_to': 'not-a-date'})
 
     def test_date_from_equal_to_date_to_returns_single_day_window(self):
@@ -1399,6 +1654,67 @@ class DateRangeStrategyTestCase(TestCase):
         result = self.strategy.apply(qs, {'date_from': today, 'date_to': today})
         titles = self._event_titles(result)
 
-        self.assertIn('Today Event', titles)
-        self.assertNotIn('Near Future Event', titles)
-        self.assertNotIn('Far Future Event', titles)
+        assert 'Today Event' in titles
+        assert 'Near Future Event' not in titles
+        assert 'Far Future Event' not in titles
+
+
+# ---------------------------------------------------------------------------
+# FR-17g / FR-SEA-01 -- weighted search ordering (#306, #324)
+# ---------------------------------------------------------------------------
+
+from api.search_filters import (
+    DESC_WEIGHT,
+    SOCIAL_PROXIMITY_WEIGHT,
+    TAG_WEIGHT,
+    TITLE_WEIGHT,
+    TextStrategy,
+)
+from api.tests.helpers.factories import ServiceFactory, TagFactory
+
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestTextStrategyWeighting:
+    """Title (1.0) > tag (0.8) > description (0.4) ordering."""
+
+    def setup_method(self, method):
+        self.strategy = TextStrategy()
+
+    def _ordered_ids(self, query):
+        return [s.id for s in self.strategy.apply(Service.objects.all(), {'search': query})]
+
+    def test_named_weight_constants_exist(self):
+        assert TITLE_WEIGHT == 1.0
+        assert TAG_WEIGHT == 0.8
+        assert DESC_WEIGHT == 0.4
+        assert SOCIAL_PROXIMITY_WEIGHT == 0.0
+
+    def test_title_match_outranks_description_match(self):
+        title_hit = ServiceFactory(
+            title='Carpentry weekend', description='Other content', status='Active',
+        )
+        desc_hit = ServiceFactory(
+            title='Other content', description='Carpentry weekend', status='Active',
+        )
+        ordered = self._ordered_ids('carpentry')
+        assert title_hit.id in ordered
+        assert desc_hit.id in ordered
+        assert ordered.index(title_hit.id) < ordered.index(desc_hit.id)
+
+    def test_tag_match_outranks_description_match(self):
+        tag = TagFactory(name='carpentry')
+        tag_hit = ServiceFactory(title='Other', description='Other', status='Active')
+        tag_hit.tags.add(tag)
+        desc_hit = ServiceFactory(
+            title='Other', description='carpentry stuff', status='Active',
+        )
+        ordered = self._ordered_ids('carpentry')
+        assert tag_hit.id in ordered
+        assert desc_hit.id in ordered
+        assert ordered.index(tag_hit.id) < ordered.index(desc_hit.id)
+
+    def test_no_match_excluded(self):
+        ServiceFactory(title='Pottery class', description='Clay work', status='Active')
+        ordered = self._ordered_ids('carpentry')
+        assert ordered == []

@@ -9,8 +9,10 @@ import {
 } from "react-native";
 import type { Service } from "../../api/types";
 import { formatTimeAgo } from "../../utils/formatTimeAgo";
+import { formatGroupOfferDateTime, isNearlyFull } from "../../utils/eventUtils";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import SmartPill from "./SmartPill";
 
 function getInitials(firstName: string, lastName: string): string {
   const f = (firstName || "").trim().charAt(0) || "";
@@ -39,16 +41,23 @@ export default function ServiceCard({
   const isGroupListing =
     service.type === "Event" ||
     (service.type === "Offer" && service.max_participants > 1);
-  const participantCount = service.participant_count ?? 0;
-  const maxParticipants = service.max_participants ?? 0;
-  const capacityRatio = maxParticipants > 0 ? participantCount / maxParticipants : 0;
-  const isNearlyFull = isGroupListing && capacityRatio >= 0.75 && capacityRatio < 1.0;
+  const showNearlyFull =
+    isGroupListing &&
+    isNearlyFull(
+      service.max_participants ?? 0,
+      service.participant_count ?? 0,
+    );
   const initials = getInitials(service.user.first_name, service.user.last_name);
   const displayName =
     [service.user.first_name, service.user.last_name]
       .filter(Boolean)
       .join(" ") || "Unknown";
-  const isRecurring = service.schedule_type === "Recurrent";
+  const isRecurring =
+    service.type === "Event" && service.schedule_type === "Recurrent";
+  const isFixedGroupOffer =
+    service.type === "Offer" &&
+    service.schedule_type === "One-Time" &&
+    service.max_participants > 1;
 
   return (
     <View style={[styles.card, style]}>
@@ -90,9 +99,16 @@ export default function ServiceCard({
 
       <View style={styles.body}>
         <View style={styles.userRow}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
+          {service.user.avatar_url ? (
+            <Image
+              source={{ uri: service.user.avatar_url }}
+              style={styles.avatar}
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
+          )}
           <View style={styles.userMeta}>
             <Text style={styles.userName}>{displayName}</Text>
             <Text style={styles.timeAgo}>
@@ -121,15 +137,17 @@ export default function ServiceCard({
               {service.type === "Offer"
                 ? "Offer"
                 : service.type === "Need"
-                  ? "Want"
+                  ? "Need"
                   : "Event"}
             </Text>
           </View>
-          {isNearlyFull && (
-            <View style={styles.nearlyFullBadge}>
-              <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
-            </View>
-          )}
+          {/* "Rising newcomer" / for_you / explore_pool flavours are
+              rendered through SmartPill, mirroring the web SmartPill
+              priority chain. The capacity-scarcity "Nearly Full" pill
+              lives at the bottom-left of the footer instead, opposite
+              the participant counter, so it does not crowd the name
+              row. */}
+          <SmartPill service={service} />
         </View>
 
         <Text style={styles.description} numberOfLines={3}>
@@ -165,6 +183,18 @@ export default function ServiceCard({
               <Text style={styles.tagText}>{service.schedule_details}</Text>
             </View>
           )}
+          {isFixedGroupOffer && service.scheduled_time && (
+            <View style={styles.tag}>
+              <Ionicons
+                name="calendar-clear-outline"
+                size={14}
+                color={colors.GRAY500}
+              />
+              <Text style={styles.tagText}>
+                {formatGroupOfferDateTime(service.scheduled_time)}
+              </Text>
+            </View>
+          )}
           {isRecurring && (
             <View style={[styles.tag, styles.tagRecurring]}>
               <Ionicons name="repeat-outline" size={18} color={colors.PURPLE} />
@@ -186,13 +216,26 @@ export default function ServiceCard({
         )}
 
         <View style={styles.footer}>
-          <Ionicons name="people-outline" size={16} color={colors.GRAY500} />
+          {/* Left slot: time-sensitive capacity cue. Renders opposite the
+              participant counter so the "Nearly Full" badge stays close to
+              the "3/4" figure it describes, instead of crowding the name
+              row up top. */}
+          <View style={styles.footerLeft}>
+            {showNearlyFull && (
+              <View style={styles.nearlyFullBadge}>
+                <Text style={styles.nearlyFullBadgeText}>Nearly Full</Text>
+              </View>
+            )}
+          </View>
 
-          <Text style={styles.participantCount}>
-            {service.participant_count
-              ? service.participant_count + "/" + service.max_participants
-              : "0/" + service.max_participants}
-          </Text>
+          <View style={styles.footerRight}>
+            <Ionicons name="people-outline" size={16} color={colors.GRAY500} />
+            <Text style={styles.participantCount}>
+              {service.participant_count
+                ? service.participant_count + "/" + service.max_participants
+                : "0/" + service.max_participants}
+            </Text>
+          </View>
         </View>
       </View>
     </View>
@@ -308,6 +351,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: colors.GRAY100,
   },
   avatarText: {
     fontSize: 12,
@@ -381,7 +426,16 @@ const styles = StyleSheet.create({
   },
   footer: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  footerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 1,
+  },
+  footerRight: {
+    flexDirection: "row",
     alignItems: "center",
   },
   participantCount: {

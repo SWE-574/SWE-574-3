@@ -6,7 +6,7 @@ import { useNotificationStore } from '@/store/useNotificationStore'
 import { NotificationItem } from '@/components/NotificationItem'
 import type { Notification } from '@/types'
 import {
-  GRAY100, GRAY200, GRAY500, GRAY900,
+  GRAY50, GRAY100, GRAY200, GRAY500, GRAY900,
   GREEN, GREEN_LT, WHITE,
 } from '@/theme/tokens'
 
@@ -36,20 +36,38 @@ const NotificationsPage = () => {
   const handleClick = useCallback(
     (notification: Notification) => {
       if (!notification.is_read) markAsRead(notification.id)
-      const isFeedbackNotif = notification.type === 'positive_rep'
-      if (notification.related_service && isFeedbackNotif) {
+      if (notification.type === 'user_followed' && notification.related_user) {
+        navigate(`/public-profile/${notification.related_user}`)
+      } else if (notification.related_report && notification.type === 'new_report') {
+        navigate(`/admin?tab=reports&reportId=${notification.related_report}`)
+      } else if (
+        notification.type === 'report_received'
+        || notification.type === 'report_resolved'
+        || notification.type === 'report_dismissed'
+      ) {
+        navigate('/profile?tab=reports')
+      } else if (notification.type === 'chat_message' && notification.related_service_type === 'Event' && notification.related_service) {
+        navigate(`/service-detail/${notification.related_service}?tab=chat`)
+      } else if (notification.related_service_type === 'Event' && notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)
+      } else if (notification.related_service && notification.type === 'positive_rep') {
+        navigate(`/service-detail/${notification.related_service}`)
+      } else if (notification.type === 'chat_message' && !notification.related_handshake && notification.related_service) {
+        navigate(`/messages?group=${notification.related_service}`)
       } else if (notification.related_handshake) {
-        navigate(`/messages?handshake=${notification.related_handshake}`)
+        navigate(`/messages/${notification.related_handshake}`)
       } else if (notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)
+      } else {
+        navigate('/notifications')
       }
     },
     [markAsRead, navigate],
   )
 
   return (
-    <Box maxW="640px" mx="auto" py="32px" px="16px">
+    <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto">
+      <Box maxW="640px" mx="auto" py="32px" px="16px">
       {/* Header */}
       <Flex align="center" justify="space-between" mb="24px">
         <Flex align="center" gap="10px">
@@ -157,6 +175,7 @@ const NotificationsPage = () => {
       <Text fontSize="12px" color={GRAY500} textAlign="center" mt="16px">
         Notifications older than 90 days may be removed
       </Text>
+      </Box>
     </Box>
   )
 }

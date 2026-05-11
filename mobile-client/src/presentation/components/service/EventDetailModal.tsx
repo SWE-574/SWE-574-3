@@ -29,6 +29,8 @@ type Props = {
   onJoinEvent: () => void;
   onLeaveEvent: () => void;
   onCheckinEvent: () => void;
+  onOpenQRScanner?: () => void;
+  onShowQRCode?: () => void;
   onEditEvent: () => void;
   onCancelEvent: () => void;
   onTogglePinEvent: () => void;
@@ -132,6 +134,8 @@ export default function EventDetailModal({
   onJoinEvent,
   onLeaveEvent,
   onCheckinEvent,
+  onOpenQRScanner,
+  onShowQRCode,
   onEditEvent,
   onCancelEvent,
   onTogglePinEvent,
@@ -444,25 +448,47 @@ export default function EventDetailModal({
                       </View>
 
                       {participantLockdown ? (
-                        <TouchableOpacity
-                          style={styles.joinButton}
-                          onPress={onCheckinEvent}
-                          disabled={participantActionLoading}
-                          activeOpacity={0.88}
-                        >
-                          {participantActionLoading ? (
-                            <ActivityIndicator size="small" color={colors.WHITE} />
-                          ) : (
-                            <>
-                              <Ionicons
-                                name="log-in-outline"
-                                size={16}
-                                color={colors.WHITE}
-                              />
-                              <Text style={styles.joinButtonText}>Check In</Text>
-                            </>
-                          )}
-                        </TouchableOpacity>
+                        service.requires_qr_checkin ? (
+                          <TouchableOpacity
+                            style={styles.joinButton}
+                            onPress={onOpenQRScanner}
+                            disabled={participantActionLoading}
+                            activeOpacity={0.88}
+                          >
+                            {participantActionLoading ? (
+                              <ActivityIndicator size="small" color={colors.WHITE} />
+                            ) : (
+                              <>
+                                <Ionicons
+                                  name="qr-code-outline"
+                                  size={16}
+                                  color={colors.WHITE}
+                                />
+                                <Text style={styles.joinButtonText}>Scan QR / Enter Code</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.joinButton}
+                            onPress={onCheckinEvent}
+                            disabled={participantActionLoading}
+                            activeOpacity={0.88}
+                          >
+                            {participantActionLoading ? (
+                              <ActivityIndicator size="small" color={colors.WHITE} />
+                            ) : (
+                              <>
+                                <Ionicons
+                                  name="log-in-outline"
+                                  size={16}
+                                  color={colors.WHITE}
+                                />
+                                <Text style={styles.joinButtonText}>Check In</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        )
                       ) : (
                         <TouchableOpacity
                           style={styles.leaveButton}
@@ -603,7 +629,7 @@ export default function EventDetailModal({
                           </View>
                         </View>
 
-                        {status === "checked_in" ? (
+                        {(status === "checked_in" || (service.requires_qr_checkin && status === "accepted")) ? (
                           <TouchableOpacity
                             style={styles.markButton}
                             onPress={() => onMarkAttended(handshake.id)}
@@ -635,6 +661,17 @@ export default function EventDetailModal({
                   );
                 })
               )}
+
+              {service.requires_qr_checkin && service.status === "Active" && isOwner ? (
+                <TouchableOpacity
+                  style={[styles.completeButton, { backgroundColor: colors.AMBER, marginBottom: 10 }]}
+                  onPress={onShowQRCode}
+                  activeOpacity={0.88}
+                >
+                  <Ionicons name="qr-code-outline" size={16} color={colors.WHITE} />
+                  <Text style={styles.completeButtonText}>Show Attendance QR</Text>
+                </TouchableOpacity>
+              ) : null}
 
               {(service.status === "Active" || service.status === "Agreed") ? (
                 <TouchableOpacity
@@ -694,8 +731,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 14,
+    paddingTop: 18,
+    paddingBottom: 22,
   },
   scrollArea: {
     flex: 1,
@@ -754,7 +791,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.GRAY200,
@@ -773,8 +810,8 @@ const styles = StyleSheet.create({
     color: colors.WHITE,
   },
   content: {
-    paddingTop: 8,
-    paddingBottom: 16,
+    paddingTop: 12,
+    paddingBottom: 22,
     flexGrow: 1,
     gap: 14,
   },
@@ -847,7 +884,7 @@ const styles = StyleSheet.create({
     borderColor: colors.GRAY200,
     backgroundColor: colors.WHITE,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 13,
   },
   secondaryActionButtonText: {
     fontSize: 13,
@@ -863,7 +900,7 @@ const styles = StyleSheet.create({
     borderColor: `${colors.RED}20`,
     backgroundColor: colors.WHITE,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 13,
   },
   secondaryDangerButtonText: {
     fontSize: 13,
@@ -901,7 +938,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: colors.AMBER_LT,
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingVertical: 11,
   },
   pinButtonText: {
     fontSize: 12,
@@ -916,7 +953,7 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 34,
+    paddingVertical: 40,
     paddingHorizontal: 18,
     borderRadius: 16,
     borderWidth: 1,
@@ -957,7 +994,7 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     marginTop: 8,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 7,
     borderRadius: 999,
   },
   badgeNeutral: {
@@ -984,7 +1021,7 @@ const styles = StyleSheet.create({
   },
   markButton: {
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 13,
     borderRadius: 12,
     backgroundColor: colors.GREEN,
     minWidth: 108,
@@ -1018,7 +1055,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    paddingVertical: 15,
+    paddingVertical: 18,
     borderRadius: 16,
     backgroundColor: "#1D4ED8",
   },
@@ -1153,13 +1190,13 @@ const styles = StyleSheet.create({
   footerRow: {
     flexDirection: "row",
     gap: 10,
-    paddingTop: 12,
+    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: colors.GRAY100,
   },
   footerPrimaryButton: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 52,
     borderRadius: 14,
     backgroundColor: colors.GREEN,
     flexDirection: "row",

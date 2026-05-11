@@ -33,13 +33,18 @@ test.describe('Self-profile (FR-02a)', () => {
       await expect(page.getByRole('img', { name: displayName }).first()).toBeVisible()
     }
 
-    // Join date in header: "Joined {year}" (year depends on seed date_joined vs today)
-    await expect(page.getByText(/^Joined \d{4}$/)).toBeVisible()
+    // Join date in profile hero is rendered as a "Member since" stat tile
+    // with a "Mon YYYY" value (e.g. "May 2026"). Assert the label is visible
+    // and that *some* stat tile shows a month-year value.
+    await expect(page.getByText('Member since').first()).toBeVisible()
+    await expect(
+      page.getByText(/^[A-Z][a-z]{2,8} \d{4}$/).first(),
+    ).toBeVisible()
 
-    // Bio (read mode): section is shown when profile has bio.
-    await expect(page.getByText('About')).toBeVisible()
+    // Bio is rendered inline in the hero (no "About" section header on the
+    // own-profile view) when present.
     if (me.bio) {
-      await expect(page.getByText(String(me.bio))).toBeVisible()
+      await expect(page.getByText(String(me.bio)).first()).toBeVisible()
     }
   })
 })

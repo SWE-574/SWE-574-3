@@ -4,6 +4,8 @@ export const colors = {
   BLUE_TR: "rgba(30, 64, 175, 0.5)", // blue-800 %50 opacity
   GREEN_LT: "#F0FDF4", // emerald-50
   GREEN_MD: "#D1FAE5", // emerald-100
+  TEAL: "#0D9488", // teal-600 (scheduled_commitment accent)
+  TEAL_LT: "#F0FDFA", // teal-50 tint background
   YELLOW: "#F8C84A", // brand yellow
   YELLOW_LT: "rgba(248, 200, 74, 0.8)", // brand yellow %80 opacity
   AMBER: "#D97706", // amber-600

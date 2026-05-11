@@ -12,6 +12,8 @@ export type AchievementsSectionProps = {
   completedIds: string[];
   maxItems?: number;
   onViewAll?: () => void;
+  /** Inside ProfileAccordionSection — hide duplicate header / margins */
+  embedded?: boolean;
 };
 
 function getDisplayName(id: string): string {
@@ -68,40 +70,43 @@ export default function AchievementsSection({
   completedIds,
   maxItems = 8,
   onViewAll,
+  embedded = false,
 }: AchievementsSectionProps) {
   const list = ACHIEVEMENT_ORDER.filter((id) =>
     completedIds.includes(id),
   ).slice(0, maxItems);
 
   return (
-    <View style={styles.sectionCard}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.headerIconWrap}>
-            <Ionicons name="ribbon-outline" size={18} color={colors.PURPLE} />
+    <View style={[styles.sectionCard, embedded && styles.sectionCardEmbedded]}>
+      {!embedded ? (
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <View style={styles.headerIconWrap}>
+              <Ionicons name="ribbon-outline" size={18} color={colors.PURPLE} />
+            </View>
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>Achievements</Text>
+              <Text style={styles.subtitle}>Milestones unlocked in the community</Text>
+            </View>
           </View>
-          <View style={styles.headerCopy}>
-            <Text style={styles.title}>Achievements</Text>
-            <Text style={styles.subtitle}>Milestones unlocked in the community</Text>
-          </View>
-        </View>
-        <View style={styles.headerRight}>
-          <View style={styles.countPill}>
-            <Text style={styles.countPillText}>{completedIds.length}</Text>
-          </View>
-          <TouchableOpacity
-            onPress={onViewAll}
-            disabled={!onViewAll}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Text
-              style={[styles.viewAll, !onViewAll && styles.viewAllDisabled]}
+          <View style={styles.headerRight}>
+            <View style={styles.countPill}>
+              <Text style={styles.countPillText}>{completedIds.length}</Text>
+            </View>
+            <TouchableOpacity
+              onPress={onViewAll}
+              disabled={!onViewAll}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              View all
-            </Text>
-          </TouchableOpacity>
+              <Text
+                style={[styles.viewAll, !onViewAll && styles.viewAllDisabled]}
+              >
+                View all
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      ) : null}
       <View style={styles.list}>
         {list.map((id, index) => {
           const name = getDisplayName(id);
@@ -131,6 +136,17 @@ export default function AchievementsSection({
           );
         })}
       </View>
+      {embedded && onViewAll ? (
+        <TouchableOpacity
+          style={styles.embeddedFooter}
+          onPress={onViewAll}
+          accessibilityRole="button"
+          accessibilityLabel="View all achievements"
+        >
+          <Text style={styles.embeddedFooterText}>View all achievements</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.GREEN} />
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -149,6 +165,31 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 2,
+  },
+  sectionCardEmbedded: {
+    marginHorizontal: 0,
+    marginTop: 0,
+    marginBottom: 0,
+    padding: 12,
+    borderRadius: 12,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
+  embeddedFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.GRAY200,
+  },
+  embeddedFooterText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.GREEN,
   },
   header: {
     flexDirection: "row",

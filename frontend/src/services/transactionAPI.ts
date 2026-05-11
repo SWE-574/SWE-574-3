@@ -1,7 +1,7 @@
 import apiClient from './api'
 import type { PaginatedTransactionResponse, Transaction, TransactionSummary } from '@/types'
 
-export type TransactionDirection = 'all' | 'credit' | 'debit'
+export type TransactionDirection = 'all' | 'credit' | 'debit' | 'reservation'
 
 const EMPTY_SUMMARY: TransactionSummary = {
   current_balance: 0,
@@ -19,7 +19,7 @@ function normalizeTransaction(transaction: Transaction): Transaction {
 
 export const transactionAPI = {
   list: async (
-    params: { page?: number; direction?: TransactionDirection } = {},
+    params: { page?: number; page_size?: number; direction?: TransactionDirection } = {},
     signal?: AbortSignal,
   ): Promise<PaginatedTransactionResponse> => {
     const res = await apiClient.get<PaginatedTransactionResponse | Transaction[]>(
@@ -27,6 +27,7 @@ export const transactionAPI = {
       {
         params: {
           page: params.page ?? 1,
+          page_size: params.page_size,
           direction: params.direction ?? 'all',
         },
         signal,

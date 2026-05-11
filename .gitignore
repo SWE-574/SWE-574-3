@@ -211,6 +211,8 @@ frontend/.env.production
 # Docker / local env
 .env
 .env.local
+.env.production
+.env.*.bak
 
 # Marimo
 marimo/_static/

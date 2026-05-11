@@ -1,13 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
-  Alert,
   Image,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -22,38 +27,51 @@ import {
 } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
-import { Ionicons, SimpleLineIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import type { ProfileStackParamList } from "../../navigation/ProfileStack";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
-import { listServices } from "../../api/services";
-import {
-  getUserHistory,
-  getVerifiedReviews,
-  type ProfileReview,
-} from "../../api/users";
+import { listSavedServices, listServices } from "../../api/services";
 import {
   EMPTY_SUMMARY,
   listTransactions,
   type TransactionSummary,
 } from "../../api/transactions";
+import {
+  getUserHistory,
+  getVerifiedReviews,
+  type ProfileReview,
+} from "../../api/users";
 import type { Service, UserHistoryItem } from "../../api/types";
 import {
   groupHistoryItems,
   isOwnHistoryItem,
 } from "../../utils/historyGrouping";
 import {
-  activityCardAccent,
   formatHours,
   formatShortDate,
   getInitials,
 } from "../../utils/profileFormatters";
+import { isOngoingProfileService } from "../../utils/profileServices";
 import AchievementsSection from "../components/AchievementsSection";
 import ProfileSkillsSection from "../components/ProfileSkillsSection";
-import ProfileListingStatsRow from "../components/ProfileListingStatsRow";
 import NotificationBadge from "../components/NotificationBadge";
 import { useNotificationStore } from "../../store/useNotificationStore";
+import ProfileHero from "../components/profile/ProfileHero";
+import ProfileAccordionSection from "../components/profile/ProfileAccordionSection";
+import UpcomingScheduleCard from "../components/profile/UpcomingScheduleCard";
+import TimeBalanceCard from "../components/profile/TimeBalanceCard";
+import HorizontalCardCarousel from "../components/profile/HorizontalCardCarousel";
+import ActivityServiceCard from "../components/profile/ActivityServiceCard";
+import HistoryCard, {
+  type HistoryEntry,
+} from "../components/profile/HistoryCard";
+import ReviewCard from "../components/profile/ReviewCard";
+import ScreenTopBar from "../components/ScreenTopBar";
+import type { ActivityCategory } from "./ActivityListScreen";
+
+const ACTIVITY_PREVIEW_LIMIT = 5;
 
 type ProfileHomeNavigation = CompositeNavigationProp<
   NativeStackNavigationProp<ProfileStackParamList, "ProfileHome">,
@@ -70,17 +88,11 @@ type EditableProfile = {
   banner_url: string;
 };
 
-const DEFAULT_BANNER_URI =
-  "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80";
-const DEFAULT_AVATAR_URI =
-  "https://api.dicebear.com/9.x/avataaars/png?seed=profile";
-
-type ProfileTabKey = "offers" | "needs" | "events" | "history" | "reviews";
-
-function safeNumber(value: string | number | undefined | null): number {
-  const next = Number(value ?? 0);
-  return Number.isFinite(next) ? next : 0;
-}
+// Profile activity tabs and the `ActivityList` route param share the same
+// five categories; tie them together so the route navigate call below is
+// type-safe (#627 review).
+type ProfileTabKey = ActivityCategory;
+type ShowcaseTabKey = "portfolio" | "skills" | "achievements";
 
 export default function ProfileScreen() {
   const { user, logout, refreshUser } = useAuth();
@@ -92,19 +104,25 @@ export default function ProfileScreen() {
     [insets.top, insets.bottom],
   );
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isBioExpanded, setIsBioExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<ProfileTabKey>("offers");
   const [activeServices, setActiveServices] = useState<Service[]>([]);
+  const [savedServices, setSavedServices] = useState<Service[]>([]);
   const [historyItems, setHistoryItems] = useState<UserHistoryItem[]>([]);
   const [reviews, setReviews] = useState<ProfileReview[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [timeSummary, setTimeSummary] =
+    useState<TransactionSummary>(EMPTY_SUMMARY);
+  const [timeSummaryLoading, setTimeSummaryLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<
-    ReturnType<typeof groupHistoryItems>[number] | null
-  >(null);
-  const [timeSummary, setTimeSummary] = useState<TransactionSummary>(EMPTY_SUMMARY);
+  const [scheduleExpanded, setScheduleExpanded] = useState(false);
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const [savedExpanded, setSavedExpanded] = useState(false);
+  const [showcaseExpanded, setShowcaseExpanded] = useState(false);
+  const [showcaseTab, setShowcaseTab] =
+    useState<ShowcaseTabKey>("portfolio");
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedHistoryEntry, setSelectedHistoryEntry] =
+    useState<HistoryEntry | null>(null);
 
   const initialForm = useMemo<EditableProfile>(
     () => ({
@@ -124,140 +142,99 @@ export default function ProfileScreen() {
   const [form, setForm] = useState<EditableProfile>(initialForm);
 
   useEffect(() => {
-    if (!isEditing) {
-      setForm(initialForm);
-    }
-  }, [initialForm, isEditing]);
+    setForm(initialForm);
+  }, [initialForm]);
 
   const profileUserId = user?.id;
   useFocusEffect(
     useCallback(() => {
       if (!profileUserId) return;
-      void refreshUser();
+      void refreshUser({ force: false });
     }, [profileUserId, refreshUser]),
   );
 
-  useEffect(() => {
-    if (!user?.id) return;
-    const ownerId = String(user.id);
-    let cancelled = false;
+  // Track which owner the most recent fetch was started for. When the user
+  // logs out (or switches accounts) mid-flight we drop the stale completion
+  // instead of clobbering the cleared-out state. Replaces the unused
+  // `cancelled` flag that previously did nothing (#627 review).
+  const lastFetchOwnerRef = useRef<string | null>(null);
 
-    setActiveServices([]);
-    listServices({ user: ownerId, page_size: 50 })
-      .then((res) => {
-        if (cancelled) return;
-        const rows = res.results ?? [];
-        setActiveServices(rows.filter((service) => service.is_visible !== false));
-      })
-      .catch(() => {
-        if (!cancelled) setActiveServices([]);
-      });
+  const fetchAll = useCallback(
+    async (ownerId: string) => {
+      lastFetchOwnerRef.current = ownerId;
 
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
+      const [servicesRes, summaryRes, savedRes, historyRes, reviewsRes] =
+        await Promise.allSettled([
+          listServices({ user: ownerId, page_size: 50 }),
+          listTransactions({ page_size: 1 }),
+          listSavedServices(),
+          getUserHistory(ownerId),
+          getVerifiedReviews(ownerId, { page: 1, page_size: 20 }),
+        ]);
+
+      // Stale completion — user changed (or logged out) while we were
+      // in flight; bail before overwriting the new state.
+      if (lastFetchOwnerRef.current !== ownerId) return;
+
+      if (servicesRes.status === "fulfilled") {
+        const rows = servicesRes.value.results ?? [];
+        setActiveServices(rows.filter((s) => s.is_visible !== false));
+      } else {
+        setActiveServices([]);
+      }
+
+      setTimeSummary(
+        summaryRes.status === "fulfilled"
+          ? summaryRes.value.summary ?? EMPTY_SUMMARY
+          : EMPTY_SUMMARY,
+      );
+      setTimeSummaryLoading(false);
+
+      setSavedServices(
+        savedRes.status === "fulfilled" ? savedRes.value.results ?? [] : [],
+      );
+
+      setHistoryItems(historyRes.status === "fulfilled" ? historyRes.value : []);
+
+      setReviews(
+        reviewsRes.status === "fulfilled" ? reviewsRes.value.results ?? [] : [],
+      );
+      setReviewsLoading(false);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!user?.id) {
-      setHistoryItems([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    getUserHistory(String(user.id))
-      .then((rows) => {
-        if (!cancelled) setHistoryItems(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setHistoryItems([]);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!user?.id) {
+      lastFetchOwnerRef.current = null;
+      setActiveServices([]);
       setTimeSummary(EMPTY_SUMMARY);
-      return;
-    }
-
-    let cancelled = false;
-
-    listTransactions({ page: 1, page_size: 1, direction: "all" })
-      .then((res) => {
-        if (!cancelled) {
-          setTimeSummary(res.summary ?? EMPTY_SUMMARY);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTimeSummary(EMPTY_SUMMARY);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!user?.id) {
+      setTimeSummaryLoading(false);
+      setSavedServices([]);
+      setHistoryItems([]);
       setReviews([]);
+      setReviewsLoading(false);
       return;
     }
-
-    let cancelled = false;
+    setTimeSummaryLoading(true);
     setReviewsLoading(true);
+    fetchAll(String(user.id)).catch(() => {
+      /* fetchAll swallows individual errors */
+    });
+  }, [user?.id, fetchAll]);
 
-    getVerifiedReviews(String(user.id), { page: 1, page_size: 20 })
-      .then((response) => {
-        if (!cancelled) {
-          setReviews(response.results ?? []);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setReviews([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setReviewsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
-
-  const handleChange = (key: keyof EditableProfile, value: string) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const handleCancelEdit = () => {
-    setForm(initialForm);
-    setIsEditing(false);
-  };
-
-  const handleSave = async () => {
+  const handleRefresh = useCallback(async () => {
+    if (!user?.id) return;
+    setRefreshing(true);
     try {
-      setIsSaving(true);
-
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      setIsEditing(false);
-      Alert.alert("Profile updated", "Your profile changes have been saved.");
-    } catch {
-      Alert.alert("Error", "Could not save your profile.");
+      await Promise.all([
+        refreshUser({ force: true }).catch(() => undefined),
+        fetchAll(String(user.id)),
+      ]);
     } finally {
-      setIsSaving(false);
+      setRefreshing(false);
     }
-  };
+  }, [user?.id, refreshUser, fetchAll]);
 
   if (!user) {
     return (
@@ -306,9 +283,7 @@ export default function ProfileScreen() {
   };
 
   const fullName = `${form.first_name} ${form.last_name}`.trim();
-  const activeListingServices = activeServices.filter(
-    (service) => service.status === "Active",
-  );
+  const activeListingServices = activeServices.filter(isOngoingProfileService);
   const offerServices = activeListingServices.filter(
     (service) => service.type === "Offer",
   );
@@ -331,11 +306,6 @@ export default function ProfileScreen() {
     historyItems.filter(isOwnHistoryItem),
   ).length;
 
-  const balance = safeNumber(
-    timeSummary.current_balance || typedUser.timebank_balance,
-  );
-  const hasLongBio = form.bio.trim().length > 120;
-  const showBioToggle = hasLongBio && !isEditing;
   const tabItems: Array<{ key: ProfileTabKey; label: string; count: number }> = [
     { key: "offers", label: "Offers", count: offerServices.length },
     { key: "needs", label: "Needs", count: needServices.length },
@@ -344,165 +314,170 @@ export default function ProfileScreen() {
     { key: "reviews", label: "Reviews", count: reviews.length },
   ];
 
-  const renderServiceTab = (services: Service[], emptyText: string) => {
-    if (!services.length) {
-      return (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>Nothing here yet</Text>
-          <Text style={styles.emptyStateText}>{emptyText}</Text>
-        </View>
-      );
-    }
+  const activityTotalBadge = tabItems.reduce((sum, t) => sum + t.count, 0);
 
-    return services.map((service) => (
-      <Pressable
-        key={service.id}
-        accessibilityRole="button"
-        accessibilityLabel={`Open service ${service.title}`}
-        onPress={() => navigation.navigate("ServiceDetail", { id: service.id })}
-        style={({ pressed }) => [
-          styles.serviceCardPressable,
-          pressed && styles.pressed,
-        ]}
-      >
-        <ProfileActivityServiceCard service={service} />
-      </Pressable>
-    ));
-  };
+  const mergedAchievementIds = [
+    ...new Set([
+      ...(typedUser.achievements ?? []),
+      ...(typedUser.badges ?? []),
+    ]),
+  ];
 
-  const renderHistoryTab = () => {
-    if (!ownHistoryEntries.length) {
-      return (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>No completed history yet</Text>
-          <Text style={styles.emptyStateText}>
-            Finished exchanges on your services will show up here.
-          </Text>
-        </View>
-      );
-    }
+  const showcaseTabs: Array<{ key: ShowcaseTabKey; label: string; count: number }> = [
+    {
+      key: "portfolio",
+      label: "Portfolio",
+      count: typedUser.portfolio_images?.length ?? 0,
+    },
+    {
+      key: "skills",
+      label: "Skills",
+      count: typedUser.skills?.length ?? 0,
+    },
+    {
+      key: "achievements",
+      label: "Achievements",
+      count: mergedAchievementIds.length,
+    },
+  ];
 
-    return ownHistoryEntries.map((entry) => (
-      <Pressable
-        key={entry.key}
-        accessibilityRole="button"
-        accessibilityLabel={`Open history item ${entry.serviceTitle}`}
-        onPress={() => navigation.navigate("ServiceDetail", { id: entry.serviceId })}
-        style={({ pressed }) => [
-          styles.historyCard,
-          pressed && styles.pressed,
-        ]}
-      >
-        <View style={styles.historyCardHeader}>
-          <View style={styles.historyCardTitleWrap}>
-            <Text style={styles.historyCardTitle}>{entry.serviceTitle}</Text>
-            <Text style={styles.historyCardMeta}>
-              With {entry.partnerName} · {formatShortDate(entry.completedDate)}
-            </Text>
-          </View>
-          <View style={styles.historyHoursPill}>
-            <Text style={styles.historyHoursPillText}>{formatHours(entry.duration)}</Text>
-          </View>
-        </View>
-        <View style={styles.historyCardFooter}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`View participants for ${entry.serviceTitle}`}
-            onPress={(event) => {
-              event.stopPropagation();
-              setSelectedHistoryEntry(entry);
-            }}
-            style={({ pressed }) => [
-              styles.historyFooterAction,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.historyFooterText}>
-              {entry.useCount} participant{entry.useCount !== 1 ? "s" : ""}
-            </Text>
-            <Ionicons
-              name="chevron-forward"
-              size={15}
-              color={colors.GRAY400}
-            />
-          </Pressable>
-        </View>
-      </Pressable>
-    ));
-  };
+  const showcaseTotalBadge = showcaseTabs.reduce(
+    (sum, t) => sum + t.count,
+    0,
+  );
+
+  const renderEmpty = (title: string, body: string) => (
+    <View style={styles.emptyStateCard}>
+      <Text style={styles.emptyStateTitle}>{title}</Text>
+      <Text style={styles.emptyStateText}>{body}</Text>
+    </View>
+  );
+
+  const renderServiceTab = (services: Service[], emptyText: string) => (
+    <HorizontalCardCarousel
+      items={services}
+      keyExtractor={(s) => s.id}
+      maxItems={ACTIVITY_PREVIEW_LIMIT}
+      onViewMore={
+        services.length > ACTIVITY_PREVIEW_LIMIT
+          ? () => navigation.navigate("ActivityList", { category: activeTab })
+          : undefined
+      }
+      renderItem={(s) => (
+        <ActivityServiceCard
+          service={s}
+          onPress={() => navigation.navigate("ServiceDetail", { id: s.id })}
+        />
+      )}
+      emptyContent={renderEmpty("Nothing here yet", emptyText)}
+    />
+  );
+
+  const renderHistoryTab = () => (
+    <HorizontalCardCarousel
+      items={ownHistoryEntries}
+      keyExtractor={(entry) => entry.key}
+      maxItems={ACTIVITY_PREVIEW_LIMIT}
+      cardHeight={140}
+      onViewMore={
+        ownHistoryEntries.length > ACTIVITY_PREVIEW_LIMIT
+          ? () => navigation.navigate("ActivityList", { category: "history" })
+          : undefined
+      }
+      renderItem={(entry) => (
+        <HistoryCard
+          entry={entry}
+          onPress={() =>
+            navigation.navigate("ServiceDetail", { id: entry.serviceId })
+          }
+          onPressParticipants={() => setSelectedHistoryEntry(entry)}
+        />
+      )}
+      emptyContent={renderEmpty(
+        "No completed history yet",
+        "Finished exchanges on your services will show up here.",
+      )}
+    />
+  );
 
   const renderReviewsTab = () => {
     if (reviewsLoading) {
-      return (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateText}>Reviews are loading...</Text>
-        </View>
+      return renderEmpty("Reviews are loading...", "Hold on while we fetch your reviews.");
+    }
+    return (
+      <HorizontalCardCarousel
+        items={reviews}
+        keyExtractor={(review) => review.id}
+        maxItems={ACTIVITY_PREVIEW_LIMIT}
+        cardHeight={170}
+        onViewMore={
+          reviews.length > ACTIVITY_PREVIEW_LIMIT
+            ? () => navigation.navigate("ActivityList", { category: "reviews" })
+            : undefined
+        }
+        renderItem={(review) => <ReviewCard review={review} />}
+        emptyContent={renderEmpty(
+          "No reviews yet",
+          "Verified reviews from completed exchanges will appear here.",
+        )}
+      />
+    );
+  };
+
+  const renderPortfolioTab = () => {
+    const images = typedUser.portfolio_images ?? [];
+    if (!images.length) {
+      return renderEmpty(
+        "No portfolio yet",
+        "Showcase your work by adding images to your portfolio in profile settings.",
       );
     }
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.portfolioRow}
+      >
+        {images.map((imageUrl, index) => (
+          <Image
+            key={`${imageUrl}-${index}`}
+            source={{ uri: imageUrl }}
+            style={styles.portfolioImage}
+          />
+        ))}
+      </ScrollView>
+    );
+  };
 
-    if (!reviews.length) {
-      return (
-        <View style={styles.emptyStateCard}>
-          <Text style={styles.emptyStateTitle}>No reviews yet</Text>
-          <Text style={styles.emptyStateText}>
-            Verified reviews from completed exchanges will appear here.
-          </Text>
-        </View>
+  const renderSkillsTab = () => {
+    if (!typedUser.skills?.length) {
+      return renderEmpty(
+        "No skills yet",
+        "Add the topics you most often share so others can discover your offers.",
       );
     }
+    return <ProfileSkillsSection skills={typedUser.skills} embedded />;
+  };
 
-    return reviews.map((review) => (
-      <View key={review.id} style={styles.reviewCard}>
-        <View style={styles.reviewHeader}>
-          {review.user_avatar_url ? (
-            <Image
-              source={{ uri: review.user_avatar_url }}
-              style={styles.reviewAvatarImage}
-            />
-          ) : (
-            <View style={styles.reviewAvatar}>
-              <Text style={styles.reviewAvatarText}>
-                {(review.user_name || "?").slice(0, 1).toUpperCase()}
-              </Text>
-            </View>
-          )}
-          <View style={styles.reviewHeaderText}>
-            <Text style={styles.reviewAuthor}>{review.user_name || "Community member"}</Text>
-            <Text style={styles.reviewMeta}>
-              {review.service_title || "Exchange review"} · {formatShortDate(review.created_at)}
-            </Text>
-          </View>
-          {review.is_verified_review ? (
-            <View style={styles.reviewVerifiedPill}>
-              <Text style={styles.reviewVerifiedText}>Verified</Text>
-            </View>
-          ) : null}
-        </View>
-        <Text style={styles.reviewBody}>{review.body}</Text>
-        <View style={styles.reviewFooter}>
-          {review.handshake_hours ? (
-            <View style={styles.reviewInfoChip}>
-              <Ionicons name="time-outline" size={12} color={colors.GREEN} />
-              <Text style={styles.reviewInfoChipText}>
-                {formatHours(review.handshake_hours)}
-              </Text>
-            </View>
-          ) : null}
-          {review.reply_count ? (
-            <View style={styles.reviewInfoChip}>
-              <Ionicons
-                name="chatbubble-outline"
-                size={12}
-                color={colors.PURPLE}
-              />
-              <Text style={styles.reviewInfoChipText}>
-                {review.reply_count} replies
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      </View>
-    ));
+  const renderAchievementsTab = () => (
+    <AchievementsSection
+      completedIds={mergedAchievementIds}
+      onViewAll={
+        user?.id
+          ? () =>
+              navigation.navigate("AchievementsList", {
+                userId: user.id,
+              })
+          : undefined
+      }
+      embedded
+    />
+  );
+
+  const renderShowcaseTab = () => {
+    if (showcaseTab === "portfolio") return renderPortfolioTab();
+    if (showcaseTab === "skills") return renderSkillsTab();
+    return renderAchievementsTab();
   };
 
   const renderActiveTab = () => {
@@ -536,328 +511,183 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
+      <ScreenTopBar
+        title="Profile"
+        right={
+          <View style={styles.topBarActions}>
+            <Pressable
+              testID="profile-overflow"
+              onPress={() => setMenuOpen((prev) => !prev)}
+              style={({ pressed }) => [
+                styles.topBarIconButton,
+                pressed && styles.pressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Profile menu"
+            >
+              <Ionicons
+                name="ellipsis-horizontal"
+                size={20}
+                color={colors.GRAY700}
+              />
+            </Pressable>
+            <TouchableOpacity
+              testID="profile-notifications-bell"
+              onPress={() => (navigation as any).navigate("Notifications")}
+              style={styles.topBarIconButton}
+              accessibilityRole="button"
+              accessibilityLabel="Open notifications"
+            >
+              <Ionicons
+                name="notifications-outline"
+                size={20}
+                color={colors.GREEN}
+              />
+              <NotificationBadge count={unreadCount} />
+            </TouchableOpacity>
+          </View>
+        }
+      />
+
       {menuOpen ? (
         <Pressable
           style={styles.menuBackdrop}
           onPress={() => setMenuOpen(false)}
         />
       ) : null}
-      {user ? (
-        <>
+      {menuOpen ? (
+        <View style={styles.overflowMenu}>
           <Pressable
-            onPress={() => setMenuOpen((prev) => !prev)}
-            style={styles.overflowButton}
+            testID="profile-overflow-settings"
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            onPress={() => {
+              setMenuOpen(false);
+              navigation.navigate("ProfileEdit", { initialTab: "identity" });
+            }}
+            style={({ pressed }) => [
+              styles.overflowMenuItem,
+              pressed && styles.pressed,
+            ]}
           >
-            <Ionicons
-              name="ellipsis-horizontal"
-              size={20}
-              color={colors.GRAY700}
-            />
+            <Ionicons name="settings-outline" size={17} color={colors.GRAY700} />
+            <Text style={styles.overflowMenuText}>Settings</Text>
           </Pressable>
-          {menuOpen ? (
-            <View style={styles.overflowMenu}>
-              <Pressable
-                onPress={() => {
-                  setMenuOpen(false);
-                  setIsEditing(true);
-                }}
-                style={({ pressed }) => [
-                  styles.overflowMenuItem,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Ionicons name="settings-outline" size={17} color={colors.GRAY700} />
-                <Text style={styles.overflowMenuText}>Settings</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setMenuOpen(false);
-                  navigation.navigate("TimeActivity");
-                }}
-                style={({ pressed }) => [
-                  styles.overflowMenuItem,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Ionicons name="time-outline" size={17} color={colors.GRAY700} />
-                <Text style={styles.overflowMenuText}>Time Activity</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  setMenuOpen(false);
-                  void logout();
-                }}
-                style={({ pressed }) => [
-                  styles.overflowMenuItem,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Ionicons name="log-out-outline" size={17} color={colors.RED} />
-                <Text style={styles.overflowMenuDangerText}>Log out</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </>
+          <Pressable
+            testID="profile-overflow-commitments"
+            accessibilityRole="button"
+            accessibilityLabel="My commitments"
+            onPress={() => {
+              setMenuOpen(false);
+              navigation.navigate("MyCommitments");
+            }}
+            style={({ pressed }) => [
+              styles.overflowMenuItem,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="checkmark-done-outline" size={17} color={colors.GRAY700} />
+            <Text style={styles.overflowMenuText}>My commitments</Text>
+          </Pressable>
+          <Pressable
+            testID="profile-overflow-logout"
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+            onPress={() => {
+              setMenuOpen(false);
+              void logout();
+            }}
+            style={({ pressed }) => [
+              styles.overflowMenuItem,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="log-out-outline" size={17} color={colors.RED} />
+            <Text style={styles.overflowMenuDangerText}>Log out</Text>
+          </Pressable>
+        </View>
       ) : null}
-      <TouchableOpacity
-        onPress={() => (navigation as any).navigate("Notifications")}
-        style={styles.notificationButton}
-      >
-        <Ionicons
-          name="notifications-outline"
-          size={22}
-          color={colors.GREEN}
-        />
-        <NotificationBadge count={unreadCount} />
-      </TouchableOpacity>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.heroCard}>
-          <Image
-            source={{ uri: form.banner_url || DEFAULT_BANNER_URI }}
-            style={styles.banner}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.GREEN}
+            colors={[colors.GREEN]}
           />
-
-          <View style={styles.avatarWrapper}>
-            <Image
-              source={{ uri: form.avatar_url || DEFAULT_AVATAR_URI }}
-              style={styles.avatar}
-            />
-          </View>
-
-          <View style={styles.profileHeaderContent}>
-            {!isEditing ? (
-              <>
-                <View style={styles.nameRow}>
-                  <Text style={styles.name}>{fullName || "Unnamed User"}</Text>
-                  {typedUser.is_verified ? (
-                    <View style={styles.verifiedBadge}>
-                      <Text style={styles.verifiedBadgeText}>Verified</Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                <View style={styles.followMetaRow}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="View your followers"
-                    onPress={() => {
-                      if (!user?.id) return;
-                      navigation.navigate("FollowList", {
-                        userId: String(user.id),
-                        kind: "followers",
-                      });
-                    }}
-                  >
-                    <Text style={styles.followMetaLink}>
-                      {typedUser.followers_count ?? 0} followers
-                    </Text>
-                  </Pressable>
-                  <Text style={styles.followMetaDot}> · </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="View users you follow"
-                    onPress={() => {
-                      if (!user?.id) return;
-                      navigation.navigate("FollowList", {
-                        userId: String(user.id),
-                        kind: "following",
-                      });
-                    }}
-                  >
-                    <Text style={styles.followMetaLink}>
-                      {typedUser.following_count ?? 0} following
-                    </Text>
-                  </Pressable>
-                </View>
-
-                {form.location ? (
-                  <View style={styles.locationRow}>
-                    <Ionicons
-                      name="location-outline"
-                      size={14}
-                      color={colors.GRAY500}
-                    />
-                    <Text style={styles.location}>{form.location}</Text>
-                  </View>
-                ) : null}
-
-                {form.bio ? (
-                  <>
-                    <Text
-                      style={styles.bio}
-                      numberOfLines={isBioExpanded ? undefined : 2}
-                    >
-                      {form.bio}
-                    </Text>
-                    {showBioToggle ? (
-                      <Pressable
-                        onPress={() => setIsBioExpanded((prev) => !prev)}
-                        style={({ pressed }) => pressed && styles.pressed}
-                      >
-                        <Text style={styles.bioToggle}>
-                          {isBioExpanded ? "Less" : "Read more"}
-                        </Text>
-                      </Pressable>
-                    ) : null}
-                  </>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <InputField
-                  label="First name"
-                  value={form.first_name}
-                  editable
-                  onChangeText={(value) => handleChange("first_name", value)}
-                />
-                <InputField
-                  label="Last name"
-                  value={form.last_name}
-                  editable
-                  onChangeText={(value) => handleChange("last_name", value)}
-                />
-                <InputField
-                  label="Email"
-                  value={form.email}
-                  editable
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  onChangeText={(value) => handleChange("email", value)}
-                />
-                <InputField
-                  label="Location"
-                  value={form.location}
-                  editable
-                  onChangeText={(value) => handleChange("location", value)}
-                />
-                <InputField
-                  label="Bio"
-                  value={form.bio}
-                  editable
-                  multiline
-                  onChangeText={(value) => handleChange("bio", value)}
-                />
-                <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={styles.secondarySmallButton}
-                    onPress={handleCancelEdit}
-                    disabled={isSaving}
-                  >
-                    <Text style={styles.secondarySmallButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.primaryGreenButton}
-                    onPress={() => void handleSave()}
-                    disabled={isSaving}
-                  >
-                    <Text style={styles.primaryGreenButtonText}>
-                      {isSaving ? "Saving..." : "Save changes"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        </View>
-
-        <ProfileListingStatsRow
-          offersCount={offersCount}
-          needsCount={needsCount}
-          exchangesCount={exchangesCount}
+        }
+      >
+        {/* New hero component */}
+        <ProfileHero
+          mode="own"
+          user={{
+            id: String(user.id ?? ""),
+            first_name: typedUser.first_name ?? form.first_name,
+            last_name: typedUser.last_name ?? form.last_name,
+            email: user.email ?? "",
+            bio: form.bio,
+            avatar_url: form.avatar_url || null,
+            banner_url: form.banner_url || typedUser.banner_url || null,
+            date_joined: typedUser.date_joined,
+            location: form.location || null,
+            karma_score: typedUser.karma_score,
+            followers_count: typedUser.followers_count,
+            following_count: typedUser.following_count,
+            featured_badges: typedUser.featured_badges ?? [],
+            featured_badges_detail: typedUser.featured_badges_detail ?? [],
+          }}
+          activeServicesCount={activeServices.length}
+          completedExchanges={exchangesCount}
+          onEditPress={() => navigation.navigate("ProfileEdit", { initialTab: "identity" })}
+          onAvatarPress={() => navigation.navigate("ProfileEdit", { initialTab: "photos" })}
+          onShowcaseBadgesPress={() =>
+            navigation.navigate("ProfileEdit", { initialTab: "showcase" })
+          }
+          onFollowersPress={() => {
+            if (!user?.id) return;
+            navigation.navigate("FollowList", {
+              userId: String(user.id),
+              kind: "followers",
+            });
+          }}
+          onFollowingPress={() => {
+            if (!user?.id) return;
+            navigation.navigate("FollowList", {
+              userId: String(user.id),
+              kind: "following",
+            });
+          }}
         />
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open time activity"
-          onPress={() => navigation.navigate("TimeActivity")}
-          style={({ pressed }) => [
-            styles.balanceCard,
-            pressed && styles.balanceCardPressed,
-          ]}
+        <TimeBalanceCard
+          balance={Number(timeSummary.current_balance) || 0}
+          earned={Number(timeSummary.total_earned) || 0}
+          spent={Math.abs(Number(timeSummary.total_spent) || 0)}
+          loading={timeSummaryLoading}
+          onViewActivity={() => navigation.navigate("TimeActivity")}
+        />
+
+        <ProfileAccordionSection
+          title="Schedule"
+          subtitle="Calendar and upcoming sessions"
+          icon="calendar-outline"
+          expanded={scheduleExpanded}
+          onToggle={() => setScheduleExpanded((v) => !v)}
         >
-          <View style={styles.balanceTopRow}>
-            <View style={styles.balanceHeadingWrap}>
-              <View style={styles.balanceIconWrap}>
-                <Ionicons name="time-outline" size={18} color={colors.WHITE} />
-              </View>
-              <View>
-                <Text style={styles.balanceEyebrow}>Your Time</Text>
-                <Text style={styles.balanceMainValue}>{balance}</Text>
-                <Text style={styles.balanceLabel}>hours available</Text>
-              </View>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={20}
-              color="rgba(255,255,255,0.82)"
-            />
-          </View>
+          <UpcomingScheduleCard embedded />
+        </ProfileAccordionSection>
 
-        </Pressable>
-
-        <View style={styles.miniStatsRow}>
-          <MiniStatCard
-            icon={<Ionicons name="heart-outline" size={18} color={colors.GREEN} />}
-            label="Karma"
-            value={typedUser.karma_score ?? 0}
-            accentColor={colors.GREEN}
-            accentBg={colors.GREEN_LT}
-          />
-          <MiniStatCard
-            icon={
-              <SimpleLineIcons name="badge" size={16} color={colors.PURPLE} />
-            }
-            label="Badges"
-            value={typedUser.badges?.length ?? 0}
-            accentColor={colors.PURPLE}
-            accentBg={colors.PURPLE_LT}
-            onPress={
-              user?.id
-                ? () =>
-                    navigation.navigate("AchievementsList", {
-                      userId: user.id,
-                    })
-                : undefined
-            }
-          />
-        </View>
-
-        <View style={styles.metricsRow}>
-          <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>
-              {typedUser.helpful_count ?? 0}
-            </Text>
-            <Text style={styles.metricPillLabel}>Helpful</Text>
-          </View>
-          <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>
-              {typedUser.kind_count ?? 0}
-            </Text>
-            <Text style={styles.metricPillLabel}>Kind</Text>
-          </View>
-          <View style={styles.metricPill}>
-            <Text style={styles.metricPillValue}>
-              {typedUser.punctual_count ?? 0}
-            </Text>
-            <Text style={styles.metricPillLabel}>Punctual</Text>
-          </View>
-        </View>
-
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>
-              Activity
-            </Text>
-            <View style={styles.activeServicesCountPill}>
-              <Text style={styles.activeServicesCountText}>
-                {tabItems.find((item) => item.key === activeTab)?.count ?? 0}
-              </Text>
-            </View>
-          </View>
+        <ProfileAccordionSection
+          title="Activity"
+          subtitle="Your listings, history & reviews"
+          icon="layers-outline"
+          badge={activityTotalBadge}
+          expanded={activityExpanded}
+          onToggle={() => setActivityExpanded((v) => !v)}
+        >
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -902,44 +732,93 @@ export default function ProfileScreen() {
               );
             })}
           </ScrollView>
-          <View style={styles.tabPanel}>{renderActiveTab()}</View>
-        </View>
-
-        {!!typedUser.skills?.length && (
-          <ProfileSkillsSection skills={typedUser.skills} />
-        )}
-
-        <AchievementsSection
-          completedIds={[
-            ...new Set([
-              ...(typedUser.achievements ?? []),
-              ...(typedUser.badges ?? []),
-            ]),
-          ]}
-          onViewAll={
-            user?.id
-              ? () =>
-                  navigation.navigate("AchievementsList", {
-                    userId: user.id,
-                  })
-              : undefined
-          }
-        />
-
-        {!!typedUser.portfolio_images?.length && (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Portfolio</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {typedUser.portfolio_images.map((imageUrl, index) => (
-                <Image
-                  key={`${imageUrl}-${index}`}
-                  source={{ uri: imageUrl }}
-                  style={styles.portfolioImage}
-                />
-              ))}
-            </ScrollView>
+          <View key={activeTab} style={styles.tabPanel}>
+            {renderActiveTab()}
           </View>
-        )}
+        </ProfileAccordionSection>
+
+        <ProfileAccordionSection
+          title="Saved"
+          subtitle="Services you bookmarked"
+          icon="bookmark-outline"
+          badge={savedServices.length}
+          expanded={savedExpanded}
+          onToggle={() => setSavedExpanded((v) => !v)}
+        >
+          <HorizontalCardCarousel
+            items={savedServices}
+            keyExtractor={(s) => s.id}
+            renderItem={(s) => (
+              <ActivityServiceCard
+                service={s}
+                onPress={() =>
+                  navigation.navigate("ServiceDetail", { id: s.id })
+                }
+              />
+            )}
+            emptyContent={renderEmpty(
+              "No saved services yet",
+              "Tap the bookmark on any service to keep it here for quick access.",
+            )}
+          />
+        </ProfileAccordionSection>
+
+        <ProfileAccordionSection
+          title="Showcase"
+          subtitle="Portfolio, skills, and achievements"
+          icon="sparkles-outline"
+          badge={showcaseTotalBadge}
+          expanded={showcaseExpanded}
+          onToggle={() => setShowcaseExpanded((v) => !v)}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.profileTabsRow}
+          >
+            {showcaseTabs.map((tab) => {
+              const isActive = showcaseTab === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  onPress={() => setShowcaseTab(tab.key)}
+                  style={({ pressed }) => [
+                    styles.profileTab,
+                    isActive && styles.profileTabActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.profileTabText,
+                      isActive && styles.profileTabTextActive,
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                  <View
+                    style={[
+                      styles.profileTabCount,
+                      isActive && styles.profileTabCountActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.profileTabCountText,
+                        isActive && styles.profileTabCountTextActive,
+                      ]}
+                    >
+                      {tab.count}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <View key={showcaseTab} style={styles.tabPanel}>
+            {renderShowcaseTab()}
+          </View>
+        </ProfileAccordionSection>
 
       </ScrollView>
       <Modal
@@ -995,298 +874,6 @@ export default function ProfileScreen() {
   );
 }
 
-function ProfileActivityServiceCard({ service }: { service: Service }) {
-  const accent = activityCardAccent(service.type);
-  const participantLabel =
-    service.type === "Event"
-      ? `${service.participant_count ?? 0}/${service.max_participants} joined`
-      : service.max_participants > 1
-        ? `${service.participant_count ?? 0}/${service.max_participants} spots`
-        : "1:1 exchange";
-
-  return (
-    <View style={profileActivityCardStyles.card}>
-      <View style={profileActivityCardStyles.topRow}>
-        <View
-          style={[
-            profileActivityCardStyles.typeBadge,
-            { backgroundColor: accent.bg },
-          ]}
-        >
-          <Ionicons name={accent.icon} size={12} color={accent.color} />
-          <Text
-            style={[
-              profileActivityCardStyles.typeBadgeText,
-              { color: accent.color },
-            ]}
-          >
-            {accent.label}
-          </Text>
-        </View>
-        <View style={profileActivityCardStyles.metaRow}>
-          <View style={profileActivityCardStyles.metaBadge}>
-            <Ionicons name="time-outline" size={12} color={colors.GRAY500} />
-            <Text style={profileActivityCardStyles.metaBadgeText}>
-              {formatHours(service.duration)}
-            </Text>
-          </View>
-          <View style={profileActivityCardStyles.metaBadge}>
-            <Ionicons name="people-outline" size={12} color={colors.GRAY500} />
-            <Text style={profileActivityCardStyles.metaBadgeText}>
-              {participantLabel}
-            </Text>
-          </View>
-        </View>
-      </View>
-      <Text style={profileActivityCardStyles.title} numberOfLines={2}>
-        {service.title}
-      </Text>
-      <Text style={profileActivityCardStyles.description} numberOfLines={2}>
-        {service.description || "No description yet."}
-      </Text>
-      <View style={profileActivityCardStyles.bottomRow}>
-        <View style={profileActivityCardStyles.metaBadge}>
-          <Ionicons name="location-outline" size={12} color={colors.GRAY500} />
-          <Text style={profileActivityCardStyles.metaBadgeText}>
-            {service.location_area || service.location_type || "Flexible"}
-          </Text>
-        </View>
-        {service.schedule_details ? (
-          <View style={profileActivityCardStyles.metaBadge}>
-            <Ionicons name="calendar-outline" size={12} color={colors.GRAY500} />
-            <Text
-              style={profileActivityCardStyles.metaBadgeText}
-              numberOfLines={1}
-            >
-              {service.schedule_details}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-function MiniStatCard({
-  icon,
-  label,
-  value,
-  accentColor,
-  accentBg,
-  onPress,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  accentColor: string;
-  accentBg: string;
-  onPress?: () => void;
-}) {
-  const content = (
-    <>
-      <View style={[miniCardStyles.accentBar, { backgroundColor: accentColor }]} />
-      <View style={miniCardStyles.inner}>
-        <View style={miniCardStyles.topRow}>
-          <View style={[miniCardStyles.iconWrap, { backgroundColor: accentBg }]}>
-            {icon}
-          </View>
-          <Text style={miniCardStyles.value}>{value}</Text>
-        </View>
-        <View style={miniCardStyles.bottomRow}>
-          <Text style={miniCardStyles.label}>{label}</Text>
-          {onPress ? (
-            <Ionicons name="chevron-forward" size={14} color={colors.GRAY400} />
-          ) : null}
-        </View>
-      </View>
-    </>
-  );
-
-  if (onPress) {
-    return (
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [miniCardStyles.card, pressed && { opacity: 0.9 }]}
-      >
-        {content}
-      </Pressable>
-    );
-  }
-
-  return (
-    <View style={miniCardStyles.card}>
-      {content}
-    </View>
-  );
-}
-
-type InputFieldProps = {
-  label: string;
-  value: string;
-  editable?: boolean;
-  multiline?: boolean;
-  keyboardType?: "default" | "email-address" | "numeric" | "phone-pad" | "url";
-  autoCapitalize?: "none" | "sentences" | "words" | "characters";
-  onChangeText: (value: string) => void;
-};
-
-function InputField({
-  label,
-  value,
-  editable = false,
-  multiline = false,
-  keyboardType = "default",
-  autoCapitalize = "sentences",
-  onChangeText,
-}: InputFieldProps) {
-  const insets = useSafeAreaInsets();
-  const styles = useMemo(
-    () => getStyles(insets.top, insets.bottom),
-    [insets.top, insets.bottom],
-  );
-
-  return (
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        editable={editable}
-        multiline={multiline}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize}
-        onChangeText={onChangeText}
-        placeholder={label}
-        placeholderTextColor={colors.GRAY400}
-        textAlignVertical={multiline ? "top" : "center"}
-        style={[
-          styles.input,
-          multiline && styles.multilineInput,
-          !editable && styles.readOnlyInput,
-        ]}
-      />
-    </View>
-  );
-}
-
-const miniCardStyles = StyleSheet.create({
-  card: {
-    flex: 1,
-    backgroundColor: colors.WHITE,
-    borderRadius: 12,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: colors.GRAY200,
-    shadowColor: colors.GRAY900,
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
-  },
-  accentBar: {
-    height: 3,
-    width: "100%",
-  },
-  inner: {
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-  },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 4,
-  },
-  iconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  value: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: colors.GRAY800,
-  },
-  bottomRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: "500",
-    color: colors.GRAY500,
-  },
-});
-
-const profileActivityCardStyles = StyleSheet.create({
-  card: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.GRAY200,
-    backgroundColor: colors.WHITE,
-    padding: 12,
-  },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 10,
-    marginBottom: 10,
-  },
-  typeBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  typeBadgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  metaRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    justifyContent: "flex-end",
-    flex: 1,
-  },
-  metaBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: colors.GRAY100,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  metaBadgeText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.GRAY600,
-    flexShrink: 1,
-  },
-  title: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: colors.GRAY800,
-    marginBottom: 6,
-  },
-  description: {
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.GRAY600,
-    marginBottom: 10,
-  },
-  bottomRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-  },
-});
 
 const getStyles = (top: number, bottom: number) =>
   StyleSheet.create({
@@ -1295,8 +882,28 @@ const getStyles = (top: number, bottom: number) =>
       backgroundColor: colors.GRAY50,
     },
     scrollContent: {
-      paddingTop: top + 16,
+      paddingTop: 4,
       paddingBottom: Math.max(32, bottom + 16),
+    },
+    topBarActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    topBarIconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.WHITE,
+      borderWidth: 1,
+      borderColor: colors.GRAY200,
+      alignItems: "center",
+      justifyContent: "center",
+      shadowColor: colors.GRAY900,
+      shadowOpacity: 0.06,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 2,
     },
     authContainer: {
       flex: 1,
@@ -1451,51 +1058,13 @@ const getStyles = (top: number, bottom: number) =>
       fontWeight: "600",
       color: colors.GREEN,
     },
-    notificationButton: {
-      position: "absolute",
-      top: top + 12,
-      right: 16,
-      zIndex: 10,
-      backgroundColor: "rgba(255,255,255,0.92)",
-      borderRadius: 20,
-      width: 40,
-      height: 40,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 1,
-      borderColor: colors.GRAY200,
-      shadowColor: colors.GRAY900,
-      shadowOpacity: 0.08,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 3,
-    },
-    overflowButton: {
-      position: "absolute",
-      top: top + 12,
-      right: 64,
-      zIndex: 10,
-      backgroundColor: "rgba(255,255,255,0.92)",
-      borderRadius: 20,
-      width: 40,
-      height: 40,
-      alignItems: "center",
-      justifyContent: "center",
-      borderWidth: 1,
-      borderColor: colors.GRAY200,
-      shadowColor: colors.GRAY900,
-      shadowOpacity: 0.08,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 3,
-    },
     menuBackdrop: {
       ...StyleSheet.absoluteFillObject,
       zIndex: 8,
     },
     overflowMenu: {
       position: "absolute",
-      top: top + 58,
+      top: top + 56,
       right: 16,
       zIndex: 12,
       backgroundColor: colors.WHITE,
@@ -2049,11 +1618,15 @@ const getStyles = (top: number, bottom: number) =>
       fontSize: 13,
       fontWeight: "600",
     },
+    portfolioRow: {
+      paddingVertical: 4,
+      paddingRight: 12,
+      gap: 10,
+    },
     portfolioImage: {
-      width: 170,
-      height: 100,
-      borderRadius: 12,
-      marginRight: 12,
+      width: 180,
+      height: 120,
+      borderRadius: 14,
       backgroundColor: colors.GRAY200,
     },
     primaryButton: {

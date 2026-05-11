@@ -4,9 +4,10 @@
  */
 
 import { apiRequest } from "./client";
+import { normalizeRuntimeUrl } from "../constants/env";
 import type { PaginatedResponse } from "./types";
 
-export type TransactionDirection = "all" | "credit" | "debit";
+export type TransactionDirection = "all" | "credit" | "debit" | "reservation";
 
 export interface TransactionCounterpart {
   id: string;
@@ -25,6 +26,8 @@ export interface Transaction {
   service_type?: "Offer" | "Need" | "Event" | null;
   schedule_type?: "One-Time" | "Recurrent" | string | null;
   max_participants?: number | null;
+  handshake_status?: string | null;
+  service_status?: string | null;
   is_current_user_provider?: boolean;
   counterpart: TransactionCounterpart | null;
   amount: number;
@@ -83,6 +86,10 @@ function normalizeTransaction(raw: Partial<Transaction>): Transaction {
         : (String(raw.schedule_type) as Transaction["schedule_type"]),
     max_participants:
       raw.max_participants == null ? null : toNumber(raw.max_participants),
+    handshake_status:
+      raw.handshake_status == null ? null : String(raw.handshake_status),
+    service_status:
+      raw.service_status == null ? null : String(raw.service_status),
     is_current_user_provider: raw.is_current_user_provider === true,
     counterpart: raw.counterpart
       ? {
@@ -95,7 +102,9 @@ function normalizeTransaction(raw: Partial<Transaction>): Transaction {
           ),
           email: String((raw.counterpart as TransactionCounterpart).email ?? ""),
           avatar_url:
-            (raw.counterpart as TransactionCounterpart).avatar_url ?? null,
+            normalizeRuntimeUrl(
+              (raw.counterpart as TransactionCounterpart).avatar_url,
+            ) ?? null,
         }
       : null,
     amount: toNumber(raw.amount),

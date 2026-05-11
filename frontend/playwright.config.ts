@@ -14,11 +14,11 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/e2e',
 
-  /* Three workers for CI — balances speed vs backend container load.
-     Each test authenticates via a fast API call (loginAs), so concurrent
-     sessions are lightweight.  Locally keep it at 1 for simplicity. */
-  fullyParallel: false,
-  workers: process.env.CI ? 3 : 1,
+  /* Per-file parallelism so independent tests inside the same spec can run
+     concurrently. Each test authenticates via a fast API call (loginAs), so
+     concurrent sessions are cheap on the backend. */
+  fullyParallel: true,
+  workers: process.env.CI ? 4 : 1,
 
   /* Fail CI fast if someone left `.only` in a test file */
   forbidOnly: !!process.env.CI,
@@ -28,6 +28,10 @@ export default defineConfig({
 
   /* CI Docker can be slow — give each test enough headroom */
   timeout: process.env.CI ? 60_000 : 30_000,
+
+  /* Default expect() timeout so locator assertions retry instead of needing
+     manual waitFor calls everywhere. */
+  expect: { timeout: 10_000 },
 
   /* Reporters */
   reporter: [
@@ -54,6 +58,18 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'chromium-mobile',
+      // Restrict to actual spec files. The directory globs without an
+      // extension constraint also pick up README.md / coverage notes,
+      // which Playwright then tries to parse as TypeScript and crashes.
+      testMatch: [
+        '**/responsive/**/*.@(spec|test).?(c|m)[jt]s?(x)',
+        '**/a11y/**/*.@(spec|test).?(c|m)[jt]s?(x)',
+        '**/feature-11/**/*.@(spec|test).?(c|m)[jt]s?(x)',
+      ],
+      use: { ...devices['Pixel 7'] },
     },
   ],
 })

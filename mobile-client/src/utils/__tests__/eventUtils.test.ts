@@ -5,6 +5,7 @@ import {
   spotsLeft,
   isEventFull,
   isEventBanned,
+  formatGroupOfferDateTime,
 } from "../eventUtils";
 
 describe("isWithinLockdownWindow", () => {
@@ -109,5 +110,14 @@ describe("isEventBanned", () => {
   it("returns false when ban has expired", () => {
     const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     expect(isEventBanned(lastWeek)).toBe(false);
+  });
+});
+
+describe("formatGroupOfferDateTime", () => {
+  it("formats fixed group offer dates compactly with time", () => {
+    const formatted = formatGroupOfferDateTime("2026-05-14T00:36:00Z");
+
+    expect(formatted).toMatch(/14 May, \d{2}:\d{2}/);
+    expect(formatted).not.toMatch(/Thu|Fri|2026/);
   });
 });

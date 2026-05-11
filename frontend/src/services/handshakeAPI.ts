@@ -8,8 +8,15 @@ export interface Handshake {
   service_type?: 'Offer' | 'Need' | 'Event'
   schedule_type?: 'One-Time' | 'Recurrent'
   max_participants?: number
-  requester: string
+  requester: string | { id?: string }
   requester_name: string
+  requester_detail?: {
+    id: string
+    first_name: string
+    last_name: string
+    avatar_url: string | null
+    member_since: string
+  } | null
   provider_name: string
   counterpart?: {
     id: string
@@ -175,9 +182,12 @@ export const handshakeAPI = {
 
   /**
    * Participant checks in during the 24-hour lockdown window.
+   * For QR events, pass the QR token or attendance code.
    */
-  checkin: async (id: string): Promise<Handshake> => {
-    const res = await apiClient.post<Handshake>(`/handshakes/${id}/checkin/`, {})
+  checkin: async (id: string, qrToken?: string): Promise<Handshake> => {
+    const body: Record<string, string> = {}
+    if (qrToken) body.qr_token = qrToken
+    const res = await apiClient.post<Handshake>(`/handshakes/${id}/checkin/`, body)
     return res.data
   },
 

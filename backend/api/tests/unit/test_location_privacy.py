@@ -10,12 +10,12 @@ FR-19h requires:
 
 Current codebase status:
   - _fuzzy_coords() in serializers.py applies a deterministic FNV-1a ~500m offset.
-  - The blur is applied to ALL non-owner users regardless of handshake status.
-  - Conditional reveal on handshake ACCEPTED is NOT yet implemented.
+  - Owners always see exact coordinates.
+  - Requesters with an ACCEPTED handshake see exact coordinates; others see fuzzed.
 
 Test classes:
-  TestLocationBlurDeterminism   — green (current behaviour, already works)
-  TestLocationBlurConditional   — xfail (FR-19h conditional reveal not implemented)
+  TestLocationBlurDeterminism   — green
+  TestLocationBlurConditional   — green
 """
 import math
 import pytest
@@ -69,9 +69,12 @@ class TestLocationBlurDeterminism:
 
         assert lat is not None
         assert lng is not None
-        assert float(lat) != pytest.approx(float(real_lat), abs=1e-4), (
-            "Non-owner received exact latitude — blur not applied."
-        )
+        # Check combined 2D offset — individual lat/lng components can be near zero
+        # when the blur angle is ~0 or ~π (all offset goes to lng or lat respectively).
+        # The blur guarantees total_offset == R == 0.0045°; 1e-3 is safely below that.
+        import math
+        total_offset = math.sqrt((float(lat) - float(real_lat)) ** 2 + (float(lng) - float(real_lng)) ** 2)
+        assert total_offset > 1e-3, "Non-owner received exact coordinates — blur not applied."
 
     def test_blur_is_consistent_across_requests(self):
         """Same non-owner querying the same service twice must get identical fuzzed coords."""
@@ -109,10 +112,6 @@ class TestLocationBlurDeterminism:
             "Two different services produced identical fuzz — hash is not service-specific."
         )
 
-    @pytest.mark.xfail(
-        reason="Owner bypass currently returns blurred coordinates; tracked in FR-19h implementation",
-        strict=False,
-    )
     def test_owner_sees_exact_coordinates(self):
         """Service owner must receive the real unblurred coordinates."""
         provider = UserFactory()
@@ -126,6 +125,9 @@ class TestLocationBlurDeterminism:
 
         assert float(lat) == pytest.approx(float(real_lat), abs=1e-4), (
             "Owner received fuzzed latitude — owner bypass is broken."
+        )
+        assert float(lng) == pytest.approx(float(real_lng), abs=1e-4), (
+            "Owner received fuzzed longitude — owner bypass is broken."
         )
 
     def test_online_service_coordinates_not_fuzzed(self):
@@ -146,22 +148,16 @@ class TestLocationBlurDeterminism:
 
 
 # ---------------------------------------------------------------------------
-# xfail tests — FR-19h conditional reveal on ACCEPTED handshake (not yet implemented)
+# FR-19h — conditional reveal on ACCEPTED handshake (green)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 @pytest.mark.unit
-@pytest.mark.xfail(
-    reason="FR-19h: blur is always-on; conditional reveal on ACCEPTED handshake not implemented",
-    strict=False,
-)
 class TestLocationBlurConditional:
     """
     Once a handshake between the requester and provider reaches status='accepted',
-    the requester should receive the exact (unblurred) service coordinates.
-
-    These tests are xfail because the serializer currently blurs for all non-owners
-    regardless of handshake status.
+    the requester receives the exact (unblurred) service coordinates. Non-owners
+    without an accepted handshake continue to see fuzzed coordinates.
     """
 
     def _fetch_coords(self, service, user):
@@ -202,7 +198,14 @@ class TestLocationBlurConditional:
 
         lat, lng = self._fetch_coords(service, requester)
 
-        assert float(lat) != pytest.approx(float(real_lat), abs=1e-4), (
+        # 2D offset — lat alone can be near-zero when the fuzz angle puts
+        # all the offset into longitude (or vice versa); compare combined
+        # distance so the assertion doesn't flake on hash angle.
+        total_offset = math.sqrt(
+            (float(lat) - float(real_lat)) ** 2
+            + (float(lng) - float(real_lng)) ** 2
+        )
+        assert total_offset > 1e-3, (
             "Requester with pending handshake received exact coordinates before acceptance."
         )
 
@@ -218,7 +221,11 @@ class TestLocationBlurConditional:
 
         lat, lng = self._fetch_coords(service, unrelated)
 
-        assert float(lat) != pytest.approx(float(real_lat), abs=1e-4)
+        total_offset = math.sqrt(
+            (float(lat) - float(real_lat)) ** 2
+            + (float(lng) - float(real_lng)) ** 2
+        )
+        assert total_offset > 1e-3
 
     def test_provider_always_sees_exact_coords_regardless_of_handshake(self):
         """Service owner should always see exact coordinates — handshake status is irrelevant."""
@@ -236,3 +243,4 @@ class TestLocationBlurConditional:
         lng = resp.data.get('location_lng')
 
         assert float(lat) == pytest.approx(float(real_lat), abs=1e-4)
+        assert float(lng) == pytest.approx(float(real_lng), abs=1e-4)

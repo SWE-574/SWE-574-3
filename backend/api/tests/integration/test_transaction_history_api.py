@@ -6,6 +6,7 @@ GET /api/transactions/{id}/   - retrieve single transaction
 """
 import pytest
 from decimal import Decimal
+from django.core.cache import cache
 from rest_framework import status
 
 from api.tests.helpers.factories import (
@@ -16,6 +17,7 @@ from api.tests.helpers.factories import (
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import TransactionHistory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 # ---------------------------------------------------------------------------
@@ -44,14 +46,14 @@ class TestTransactionHistoryAuth:
     def test_list_requires_auth(self):
         client = AuthenticatedAPIClient()
         response = client.get('/api/transactions/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_retrieve_requires_auth(self):
         user = UserFactory()
         tx = _make_tx(user, 'provision', Decimal('-2.00'))
         client = AuthenticatedAPIClient()
         response = client.get(f'/api/transactions/{tx.id}/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +75,7 @@ class TestTransactionHistoryList:
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get('/api/transactions/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = {r['id'] for r in response.data['results']}
         other_txs = TransactionHistory.objects.filter(user=other).values_list('id', flat=True)
         for oid in other_txs:
@@ -86,9 +88,7 @@ class TestTransactionHistoryList:
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get('/api/transactions/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert 'results' in response.data
-        assert 'summary' in response.data
+        assert_api_response(response, 200, contains={'results', 'summary'})
         result = response.data['results'][0]
         for field in ('id', 'transaction_type', 'transaction_type_display', 'amount',
                       'balance_after', 'description', 'created_at'):
@@ -126,8 +126,7 @@ class TestTransactionHistoryList:
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get('/api/transactions/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['results'] == []
+        assert_api_response(response, 200, schema={'results': []})
         assert response.data['summary']['total_earned'] == pytest.approx(0.0)
         assert response.data['summary']['total_spent'] == pytest.approx(0.0)
 
@@ -145,18 +144,20 @@ class TestTransactionHistoryDirectionFilter:
         self.user = UserFactory()
         self.credit_tx = _make_tx(self.user, 'transfer', Decimal('3.00'))
         self.debit_tx = _make_tx(self.user, 'provision', Decimal('-2.00'))
+        self.refund_tx = _make_tx(self.user, 'refund', Decimal('2.00'))
+        self.adjustment_tx = _make_tx(self.user, 'adjustment', Decimal('1.00'))
         self.client = AuthenticatedAPIClient().authenticate_user(self.user)
 
     def test_filter_credit(self):
         response = self.client.get('/api/transactions/?direction=credit')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = {r['id'] for r in response.data['results']}
         assert str(self.credit_tx.id) in ids
         assert str(self.debit_tx.id) not in ids
 
     def test_filter_debit(self):
         response = self.client.get('/api/transactions/?direction=debit')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = {r['id'] for r in response.data['results']}
         assert str(self.debit_tx.id) in ids
         assert str(self.credit_tx.id) not in ids
@@ -166,9 +167,18 @@ class TestTransactionHistoryDirectionFilter:
         response_default = self.client.get('/api/transactions/')
         assert len(response_all.data['results']) == len(response_default.data['results'])
 
+    def test_filter_reservation(self):
+        response = self.client.get('/api/transactions/?direction=reservation')
+        assert_api_response(response, 200)
+        ids = {r['id'] for r in response.data['results']}
+        assert str(self.debit_tx.id) in ids
+        assert str(self.refund_tx.id) in ids
+        assert str(self.credit_tx.id) not in ids
+        assert str(self.adjustment_tx.id) not in ids
+
     def test_invalid_direction_falls_back_to_all(self):
         response = self.client.get('/api/transactions/?direction=bogus')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         # Both transactions should be present
         ids = {r['id'] for r in response.data['results']}
         assert str(self.credit_tx.id) in ids
@@ -191,10 +201,7 @@ class TestTransactionHistoryPagination:
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get('/api/transactions/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert 'count' in response.data
-        assert 'results' in response.data
-        assert response.data['count'] == 5
+        assert_api_response(response, 200, contains={'count', 'results'}, schema={'count': 5})
 
     def test_second_page_accessible(self):
         """If page size is smaller than total records, page=2 returns different results."""
@@ -206,11 +213,31 @@ class TestTransactionHistoryPagination:
         response_p1 = client.get('/api/transactions/?page=1')
         response_p2 = client.get('/api/transactions/?page=2')
 
-        assert response_p1.status_code == status.HTTP_200_OK
-        assert response_p2.status_code == status.HTTP_200_OK
+        assert_api_response(response_p1, 200)
+        assert_api_response(response_p2, 200)
         ids_p1 = {r['id'] for r in response_p1.data['results']}
         ids_p2 = {r['id'] for r in response_p2.data['results']}
         assert ids_p1.isdisjoint(ids_p2), "Pages should not overlap"
+
+    def test_cache_keeps_different_page_sizes_separate(self):
+        """A cached default page must not truncate larger insight/page_size requests."""
+        cache.clear()
+        user = UserFactory()
+        TransactionHistoryFactory.create_batch(
+            30,
+            user=user,
+            amount=Decimal('1.00'),
+            balance_after=Decimal('5.00'),
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(user)
+        response_default = client.get('/api/transactions/?page=1&page_size=20&direction=all')
+        response_large = client.get('/api/transactions/?page=1&page_size=100&direction=all')
+
+        assert_api_response(response_default, 200)
+        assert_api_response(response_large, 200)
+        assert len(response_default.data['results']) == 20
+        assert len(response_large.data['results']) == 30
 
 
 # ---------------------------------------------------------------------------
@@ -229,9 +256,7 @@ class TestTransactionHistoryRetrieve:
         client = AuthenticatedAPIClient().authenticate_user(user)
         response = client.get(f'/api/transactions/{tx.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['id'] == str(tx.id)
-        assert response.data['transaction_type'] == 'transfer'
+        assert_api_response(response, 200, schema={'id': str(tx.id), 'transaction_type': 'transfer'})
 
     def test_cannot_retrieve_other_users_transaction(self):
         owner = UserFactory()
@@ -241,7 +266,7 @@ class TestTransactionHistoryRetrieve:
         client = AuthenticatedAPIClient().authenticate_user(other)
         response = client.get(f'/api/transactions/{tx.id}/')
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +301,7 @@ class TestTransactionHistorySideEffects:
 
         client = AuthenticatedAPIClient().authenticate_user(requester)
         tx_response = client.get('/api/transactions/?direction=debit')
-        assert tx_response.status_code == status.HTTP_200_OK
+        assert_api_response(tx_response, 200)
         types = [r['transaction_type'] for r in tx_response.data['results']]
         assert 'provision' in types
 

@@ -11,6 +11,8 @@ import {
   RefreshControl,
   Modal,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -23,7 +25,8 @@ import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import { listServices, type ServicesListParams } from "../../api/services";
 import { Service } from "../../api/types";
 import ServiceCard from "../components/ServiceCard";
-import FeaturedSection from "../components/FeaturedSection";
+import TagChipsRow from "../components/TagChipsRow";
+import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
@@ -31,32 +34,39 @@ import {
   isInPersonService,
   isNearlyFullService,
   isOnlineService,
-  isRecurringService,
   type Coordinates,
 } from "../../utils/discovery";
+import { useScreenCache } from "../../hooks/useScreenCache";
+import { ApiNetworkError } from "../../api/client";
 
 type ServiceTypeFilter = "all" | "Offer" | "Need" | "Event";
-type LocationFilter = "all" | "nearby" | "in_person" | "online";
-type SortFilter = "latest" | "hot";
 type LocationStatus = "idle" | "granted" | "denied";
-type ToggleFilterKey = "recurringOnly" | "nearlyFullOnly";
 
 interface DiscoveryFilters {
+  // Single-select for now; the backend honours `type=` for one value, the
+  // visible quick-chip row in the future can promote multi-select.
   serviceType: ServiceTypeFilter;
-  locationMode: LocationFilter;
-  sortBy: SortFilter;
+  // Secondary filters mirror the web More-filters popover. All four are
+  // independent toggles; only one of `online` / `inPerson` typically goes
+  // on at a time but both are allowed (the backend handles `location_types[]`).
+  online: boolean;
+  inPerson: boolean;
+  oneTime: boolean;
+  weekend: boolean;
+  // Distance is opt-in via the slider; without it, location stays a soft
+  // ranking signal courtesy of LocationStrategy's annotate-only path.
   distanceKm: number;
-  recurringOnly: boolean;
-  nearlyFullOnly: boolean;
+  radiusEnabled: boolean;
 }
 
 const DEFAULT_FILTERS: DiscoveryFilters = {
   serviceType: "all",
-  locationMode: "all",
-  sortBy: "latest",
-  distanceKm: 15,
-  recurringOnly: false,
-  nearlyFullOnly: false,
+  online: false,
+  inPerson: false,
+  oneTime: false,
+  weekend: false,
+  distanceKm: 20,
+  radiusEnabled: false,
 };
 
 interface ChipDef {
@@ -67,11 +77,29 @@ interface ChipDef {
   onPress: () => void;
 }
 
+function filtersAreDefault(
+  filters: DiscoveryFilters,
+  debouncedSearch: string,
+): boolean {
+  return (
+    debouncedSearch === "" &&
+    filters.serviceType === DEFAULT_FILTERS.serviceType &&
+    filters.online === DEFAULT_FILTERS.online &&
+    filters.inPerson === DEFAULT_FILTERS.inPerson &&
+    filters.oneTime === DEFAULT_FILTERS.oneTime &&
+    filters.weekend === DEFAULT_FILTERS.weekend &&
+    filters.distanceKm === DEFAULT_FILTERS.distanceKm &&
+    filters.radiusEnabled === DEFAULT_FILTERS.radiusEnabled
+  );
+}
+
 export default function HomeScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<HomeStackParamList, "HomeFeed">>();
   const tabNavigation =
     useNavigation<BottomTabNavigationProp<BottomTabParamList>>();
+  const { user, isAuthenticated } = useAuth();
+  const cache = useScreenCache<Service[]>(user?.id ?? null, "home-feed-default");
   const [services, setServices] = useState<Service[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
@@ -79,6 +107,7 @@ export default function HomeScreen() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [chipsVisible, setChipsVisible] = useState(false);
   const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_FILTERS);
+  const [activeTagQid, setActiveTagQid] = useState<string | null>(null);
   const [draftFilters, setDraftFilters] =
     useState<DiscoveryFilters>(DEFAULT_FILTERS);
   const [isLoading, setIsLoading] = useState(true);
@@ -166,7 +195,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (
-      filters.locationMode === "nearby" &&
+      filters.radiusEnabled &&
       !userLocation &&
       !resolvingLocation
     ) {
@@ -174,53 +203,116 @@ export default function HomeScreen() {
     }
   }, [
     ensureDeviceLocation,
-    filters.locationMode,
+    filters.radiusEnabled,
     resolvingLocation,
     userLocation,
   ]);
 
   const fetchServices = useCallback(async () => {
+    const isDefault = filtersAreDefault(filters, debouncedSearch);
     try {
       setLoadError(null);
       setIsLoading(true);
 
+      const locationTypes: ("Online" | "In-Person")[] = [];
+      if (filters.online) locationTypes.push("Online");
+      if (filters.inPerson) locationTypes.push("In-Person");
+
       const params: ServicesListParams = {
         page_size: 30,
+        exclude_own: true,
+        // Match the web client: always show every active service, the
+        // ranking engine reorders. Without skip_onboarding the implicit
+        // skill filter would hide unmatched-tag services (e.g. a fresh
+        // event by an account whose tags don't overlap the viewer's).
+        skip_onboarding: true,
+        // Match the web Browse grid: composite_score (hot * proximity +
+        // social) drives the order. Without this the backend defaulted
+        // to `latest`, so the freshest demo card (the April 23rd event,
+        // hot_score 0.26) sat at position 1 on mobile while the same
+        // viewer's web feed correctly led with the engagement-weighted
+        // top result (Manti Cooking Circle, hot_score 2.11).
+        sort: "hot",
         search: debouncedSearch || undefined,
-        sort: filters.sortBy,
         type:
           filters.serviceType !== "all" && filters.serviceType !== "Event"
             ? filters.serviceType
             : undefined,
+        // Web sends location_types only when ONE of the two is on; both on
+        // matches "either", which Django's `location_type__in=[...]` honours
+        // and effectively means "no in-person/online narrowing".
+        location_types: locationTypes.length > 0 ? locationTypes : undefined,
+        schedule_type: filters.oneTime ? "One-Time" : undefined,
+        weekend: filters.weekend ? true : undefined,
       };
 
-      if (filters.locationMode === "nearby" && userLocation) {
+      // Location is always-on as a ranking signal whenever permission is
+      // granted -- no hard radius cutoff. `radiusEnabled` from the modal is
+      // the opt-in for the hard radius (mirrors the web More-filters slider).
+      if (userLocation) {
         params.lat = userLocation.latitude;
         params.lng = userLocation.longitude;
-        params.distance = filters.distanceKm;
+        if (filters.radiusEnabled) {
+          params.distance = filters.distanceKm;
+        }
+      }
+
+      if (activeTagQid) {
+        params.tags = [activeTagQid];
       }
 
       const { results } = await listServices(params);
-      setServices(results ?? []);
+      const next = results ?? [];
+      setServices(next);
+      if (isDefault) cache.persist(next);
     } catch (error) {
-      setLoadError(
-        error instanceof Error ? error.message : "Unable to load services.",
-      );
+      const isNetwork = error instanceof ApiNetworkError;
+      // On a network failure with the default filter, fall back to whatever
+      // is on disk so the user sees their last-known feed instead of an
+      // empty state.
+      if (isNetwork && isDefault) {
+        const seed = await cache.hydrate();
+        if (seed) {
+          setServices(seed.data);
+          setLoadError(null);
+        } else {
+          setLoadError("You are offline.");
+        }
+      } else {
+        setLoadError("Couldn't load services. Pull down to retry.");
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch, filters, userLocation]);
+  }, [debouncedSearch, filters, userLocation, cache, activeTagQid]);
 
   useEffect(() => {
     if (
-      filters.locationMode === "nearby" &&
+      filters.radiusEnabled &&
       !userLocation &&
       locationStatus !== "denied"
     ) {
       return;
     }
     fetchServices();
-  }, [fetchServices, filters.locationMode, locationStatus, userLocation]);
+  }, [fetchServices, filters.radiusEnabled, locationStatus, userLocation]);
+
+  // Cold-start cache hydration: show the previously cached feed immediately
+  // so the user is not staring at a spinner while the first network round-
+  // trip resolves (or never resolves, if offline).
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (!cache.enabled) return;
+    if (!filtersAreDefault(filters, debouncedSearch)) return;
+    if (services.length > 0) return;
+    hydratedRef.current = true;
+    cache.hydrate().then((seed) => {
+      if (seed && seed.data.length > 0) {
+        setServices((prev) => (prev.length === 0 ? seed.data : prev));
+      }
+    });
+  }, [cache, filters, debouncedSearch, services.length]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -238,32 +330,23 @@ export default function HomeScreen() {
         break;
     }
 
-    switch (filters.locationMode) {
-      case "nearby":
-        list = userLocation
-          ? list
-              .map((s) => ({
-                s,
-                d: getServiceDistanceKm(s, userLocation),
-              }))
-              .filter(
-                (item): item is { s: Service; d: number } =>
-                  item.d !== null && item.d <= filters.distanceKm,
-              )
-              .sort((a, b) => a.d - b.d)
-              .map((item) => item.s)
-          : [];
-        break;
-      case "in_person":
-        list = list.filter(isInPersonService);
-        break;
-      case "online":
-        list = list.filter(isOnlineService);
-        break;
+    if (filters.radiusEnabled && userLocation) {
+      list = list
+        .map((s) => ({ s, d: getServiceDistanceKm(s, userLocation) }))
+        .filter(
+          (item): item is { s: Service; d: number } =>
+            item.d !== null && item.d <= filters.distanceKm,
+        )
+        .sort((a, b) => a.d - b.d)
+        .map((item) => item.s);
     }
-
-    if (filters.recurringOnly) list = list.filter(isRecurringService);
-    if (filters.nearlyFullOnly) list = list.filter(isNearlyFullService);
+    if (filters.online && filters.inPerson) {
+      // Both toggles on -> no narrowing (parity with web behaviour).
+    } else if (filters.online) {
+      list = list.filter(isOnlineService);
+    } else if (filters.inPerson) {
+      list = list.filter(isInPersonService);
+    }
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -281,83 +364,50 @@ export default function HomeScreen() {
   const activeFilterCount = useMemo(() => {
     let c = 0;
     if (filters.serviceType !== "all") c++;
-    if (filters.locationMode !== "all") c++;
-    if (filters.sortBy !== "latest") c++;
-    if (filters.recurringOnly) c++;
-    if (filters.nearlyFullOnly) c++;
+    if (filters.online) c++;
+    if (filters.inPerson) c++;
+    if (filters.oneTime) c++;
+    if (filters.weekend) c++;
+    if (filters.radiusEnabled) c++;
     return c;
   }, [filters]);
 
+  // Quick chips are visible shortcuts for the most-used secondary filters
+  // (mirrors the web Browse layout where the same toggles live in the
+  // More-filters popover). Service type stays in the modal so the visible
+  // row stays small.
   const quickChips: ChipDef[] = useMemo(
     () => [
-      {
-        id: "nearby",
-        label:
-          filters.locationMode === "nearby" && userLocation
-            ? `Nearby ${Math.round(filters.distanceKm)} km`
-            : "Nearby",
-        icon: "navigate-outline",
-        selected: filters.locationMode === "nearby",
-        onPress: async () => {
-          if (filters.locationMode === "nearby") {
-            setFilters((c) => ({ ...c, locationMode: "all" }));
-            return;
-          }
-          const coords = await ensureDeviceLocation();
-          if (coords) setFilters((c) => ({ ...c, locationMode: "nearby" }));
-        },
-      },
-      {
-        id: "hot",
-        label: "Hot",
-        icon: "flame-outline",
-        selected: filters.sortBy === "hot",
-        onPress: () =>
-          setFilters((c) => ({
-            ...c,
-            sortBy: c.sortBy === "hot" ? "latest" : "hot",
-          })),
-      },
-      {
-        id: "events",
-        label: "Events",
-        icon: "calendar-outline",
-        selected: filters.serviceType === "Event",
-        onPress: () =>
-          setFilters((c) => ({
-            ...c,
-            serviceType: c.serviceType === "Event" ? "all" : "Event",
-          })),
-      },
       {
         id: "online",
         label: "Online",
         icon: "wifi-outline",
-        selected: filters.locationMode === "online",
-        onPress: () =>
-          setFilters((c) => ({
-            ...c,
-            locationMode: c.locationMode === "online" ? "all" : "online",
-          })),
+        selected: filters.online,
+        onPress: () => setFilters((c) => ({ ...c, online: !c.online })),
       },
       {
-        id: "full",
-        label: "Nearly Full",
-        icon: "hourglass-outline",
-        selected: filters.nearlyFullOnly,
-        onPress: () =>
-          setFilters((c) => ({ ...c, nearlyFullOnly: !c.nearlyFullOnly })),
+        id: "in_person",
+        label: "In-person",
+        icon: "location-outline",
+        selected: filters.inPerson,
+        onPress: () => setFilters((c) => ({ ...c, inPerson: !c.inPerson })),
       },
       {
-        id: "recurring",
-        label: "Recurring",
-        icon: "repeat-outline",
-        selected: filters.recurringOnly,
-        onPress: () =>
-          setFilters((c) => ({ ...c, recurringOnly: !c.recurringOnly })),
+        id: "one_time",
+        label: "One-time",
+        icon: "calendar-outline",
+        selected: filters.oneTime,
+        onPress: () => setFilters((c) => ({ ...c, oneTime: !c.oneTime })),
+      },
+      {
+        id: "weekend",
+        label: "Weekend",
+        icon: "sunny-outline",
+        selected: filters.weekend,
+        onPress: () => setFilters((c) => ({ ...c, weekend: !c.weekend })),
       },
     ],
-    [ensureDeviceLocation, filters, userLocation],
+    [filters],
   );
 
   const handleServicePress = useCallback(
@@ -366,27 +416,35 @@ export default function HomeScreen() {
   );
 
   const listHeader = (
-    <FeaturedSection
-      services={filteredServices}
-      onServicePress={handleServicePress}
-      userLocation={userLocation}
-      locationStatus={locationStatus}
-      maxNearbyKm={filters.distanceKm}
-    />
+    <TagChipsRow activeQid={activeTagQid} onSelect={setActiveTagQid} />
   );
 
   const showNearbyStatus =
-    filters.locationMode === "nearby" &&
+    filters.radiusEnabled &&
     (resolvingLocation || locationMessage != null);
 
-  const showLocationBanner =
-    locationStatus === "idle" && !userLocation && !resolvingLocation;
+  // Banner shows whenever we don't have a location fix. After a denial the
+  // status flips to "denied"; we still want the prompt visible so the user
+  // can retry / open Settings, since location feeds the ranking signal.
+  const showLocationBanner = !userLocation && !resolvingLocation;
+  const locationBannerMessage =
+    locationStatus === "denied"
+      ? "Location off. Tap to grant for better recommendations."
+      : "Enable location for better recommendations.";
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <KeyboardAvoidingView
+        style={styles.keyboardFlex}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+      >
       {/* Top bar */}
       <View style={styles.topBar}>
         <TouchableOpacity
+          testID="home-post-button"
+          accessibilityRole="button"
+          accessibilityLabel="Post a new service"
           onPress={() =>
             tabNavigation.navigate("PostService", { screen: "PostServiceHome" })
           }
@@ -460,7 +518,9 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Location banner -- shown when permission not yet requested */}
+      {/* Location prompt -- sits directly above the Wikidata tag chips so
+          the viewer can opt in without digging into filters. Visible whenever
+          there is no fix (idle or denied); message changes accordingly. */}
       {showLocationBanner && (
         <Pressable
           style={styles.locationBanner}
@@ -468,7 +528,7 @@ export default function HomeScreen() {
         >
           <Ionicons name="location-outline" size={18} color={colors.GREEN} />
           <Text style={styles.locationBannerText}>
-            Enable location for nearby services
+            {locationBannerMessage}
           </Text>
           <Ionicons name="chevron-forward" size={16} color={colors.GRAY400} />
         </Pressable>
@@ -543,6 +603,7 @@ export default function HomeScreen() {
       )}
 
       <FlatList
+        testID="home-feed"
         data={filteredServices}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item, index }) => (
@@ -565,7 +626,7 @@ export default function HomeScreen() {
         }
         ListEmptyComponent={
           <Text style={styles.empty}>
-            {filters.locationMode === "nearby" && locationStatus === "denied"
+            {filters.radiusEnabled && locationStatus === "denied"
               ? "Enable location permission to see services nearby."
               : "No services match these filters right now."}
           </Text>
@@ -597,7 +658,7 @@ export default function HomeScreen() {
               {(["all", "Offer", "Need", "Event"] as const).map((type) => {
                 const selected = draftFilters.serviceType === type;
                 const label =
-                  type === "all" ? "All" : type === "Need" ? "Want" : type;
+                  type === "all" ? "All" : type === "Need" ? "Need" : type;
                 return (
                   <TouchableOpacity
                     key={type}
@@ -623,125 +684,15 @@ export default function HomeScreen() {
               })}
             </View>
 
-            <Text style={styles.sectionTitle}>Location</Text>
-            <View style={styles.optionGrid}>
-              {(
-                [
-                  { id: "all", label: "All" },
-                  { id: "nearby", label: "Nearby" },
-                  { id: "in_person", label: "In Person" },
-                  { id: "online", label: "Online" },
-                ] as const
-              ).map((option) => {
-                const selected = draftFilters.locationMode === option.id;
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    style={[
-                      styles.segmentButton,
-                      selected && styles.segmentButtonSelected,
-                    ]}
-                    onPress={() =>
-                      setDraftFilters((c) => ({
-                        ...c,
-                        locationMode: option.id as LocationFilter,
-                      }))
-                    }
-                    activeOpacity={0.75}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentButtonLabel,
-                        selected && styles.segmentButtonLabelSelected,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {draftFilters.locationMode === "nearby" && (
-              <>
-                <Text style={styles.sectionTitle}>
-                  Nearby Radius: {Math.round(draftFilters.distanceKm)} km
-                </Text>
-                <View style={styles.sliderContainer}>
-                  <Text style={styles.sliderBound}>1 km</Text>
-                  <Slider
-                    style={styles.slider}
-                    minimumValue={1}
-                    maximumValue={50}
-                    step={1}
-                    value={draftFilters.distanceKm}
-                    onValueChange={(val) =>
-                      setDraftFilters((c) => ({
-                        ...c,
-                        distanceKm: Math.round(val),
-                      }))
-                    }
-                    minimumTrackTintColor={colors.GREEN}
-                    maximumTrackTintColor={colors.GRAY300}
-                    thumbTintColor={colors.GREEN}
-                  />
-                  <Text style={styles.sliderBound}>50 km</Text>
-                </View>
-              </>
-            )}
-
-            <Text style={styles.sectionTitle}>Sort</Text>
-            <View style={styles.optionGrid}>
-              {(
-                [
-                  { id: "latest", label: "Latest" },
-                  { id: "hot", label: "Hot" },
-                ] as const
-              ).map((option) => {
-                const selected = draftFilters.sortBy === option.id;
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    style={[
-                      styles.segmentButton,
-                      selected && styles.segmentButtonSelected,
-                    ]}
-                    onPress={() =>
-                      setDraftFilters((c) => ({
-                        ...c,
-                        sortBy: option.id as SortFilter,
-                      }))
-                    }
-                    activeOpacity={0.75}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentButtonLabel,
-                        selected && styles.segmentButtonLabelSelected,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <Text style={styles.sectionTitle}>Extra</Text>
+            <Text style={styles.sectionTitle}>Refine</Text>
             {(
               [
-                {
-                  key: "recurringOnly",
-                  label: "Recurring only",
-                  icon: "repeat-outline",
-                },
-                {
-                  key: "nearlyFullOnly",
-                  label: "Nearly full only",
-                  icon: "hourglass-outline",
-                },
+                { key: "online",   label: "Online",     icon: "wifi-outline" },
+                { key: "inPerson", label: "In-person",  icon: "location-outline" },
+                { key: "oneTime",  label: "One-time",   icon: "calendar-outline" },
+                { key: "weekend",  label: "Weekend",    icon: "sunny-outline" },
               ] as const satisfies ReadonlyArray<{
-                key: ToggleFilterKey;
+                key: "online" | "inPerson" | "oneTime" | "weekend";
                 label: string;
                 icon: React.ComponentProps<typeof Ionicons>["name"];
               }>
@@ -787,6 +738,72 @@ export default function HomeScreen() {
               );
             })}
 
+            {/* Distance slider lives at the bottom of the modal so power
+                users can dial in a hard radius. Off by default; otherwise
+                location stays a soft ranking signal. */}
+            <TouchableOpacity
+              style={[
+                styles.modalOption,
+                draftFilters.radiusEnabled && styles.modalOptionActive,
+              ]}
+              onPress={() =>
+                setDraftFilters((c) => ({
+                  ...c,
+                  radiusEnabled: !c.radiusEnabled,
+                }))
+              }
+              activeOpacity={0.75}
+            >
+              <Ionicons
+                name="navigate-outline"
+                size={18}
+                color={draftFilters.radiusEnabled ? colors.GREEN : colors.GRAY500}
+              />
+              <Text
+                style={[
+                  styles.modalOptionText,
+                  draftFilters.radiusEnabled && styles.modalOptionTextActive,
+                ]}
+              >
+                Hard radius cutoff
+              </Text>
+              {draftFilters.radiusEnabled && (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={18}
+                  color={colors.GREEN}
+                  style={{ marginLeft: "auto" }}
+                />
+              )}
+            </TouchableOpacity>
+            {draftFilters.radiusEnabled && (
+              <>
+                <Text style={styles.sectionTitle}>
+                  Within {Math.round(draftFilters.distanceKm)} km
+                </Text>
+                <View style={styles.sliderContainer}>
+                  <Text style={styles.sliderBound}>1 km</Text>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={1}
+                    maximumValue={50}
+                    step={1}
+                    value={draftFilters.distanceKm}
+                    onValueChange={(val) =>
+                      setDraftFilters((c) => ({
+                        ...c,
+                        distanceKm: Math.round(val),
+                      }))
+                    }
+                    minimumTrackTintColor={colors.GREEN}
+                    maximumTrackTintColor={colors.GRAY300}
+                    thumbTintColor={colors.GREEN}
+                  />
+                  <Text style={styles.sliderBound}>50 km</Text>
+                </View>
+              </>
+            )}
+
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={styles.secondaryAction}
@@ -798,7 +815,7 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={styles.primaryAction}
                 onPress={async () => {
-                  if (draftFilters.locationMode === "nearby") {
+                  if (draftFilters.radiusEnabled) {
                     const coords = await ensureDeviceLocation();
                     if (!coords) return;
                   }
@@ -813,6 +830,7 @@ export default function HomeScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -821,6 +839,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.WHITE,
+  },
+  keyboardFlex: {
+    flex: 1,
   },
   topBar: {
     flexDirection: "row",

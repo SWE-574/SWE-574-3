@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { loginAsAdmin, goToAdminTab, ADMIN_USERS } from '../helpers'
+import { waitForApi } from '../helpers/wait'
 
 /**
  * FR-03e — Comment moderation: remove and restore comments.
@@ -7,10 +8,9 @@ import { loginAsAdmin, goToAdminTab, ADMIN_USERS } from '../helpers'
 
 test('FR-03e: Comment Moderation tab loads with the active comments view', async ({ page }) => {
   await loginAsAdmin(page, ADMIN_USERS.admin)
+  const commentsLoad = waitForApi(page, '/api/admin/comments')
   await goToAdminTab(page, 'comments')
-
-  // Wait for the loading spinner to disappear and data to settle.
-  await page.waitForTimeout(2_000)
+  await commentsLoad.catch(() => undefined)
 
   // The comment table uses <Flex> rows (no role="row"), so detect data presence
   // via the "Author" column header which only renders when rows exist.
@@ -31,13 +31,13 @@ test('FR-03e: Comment Moderation tab loads with the active comments view', async
 
 test('FR-03e: admin can open the remove-comment confirmation dialog', async ({ page }) => {
   await loginAsAdmin(page, ADMIN_USERS.admin)
+  const commentsLoad = waitForApi(page, '/api/admin/comments')
   await goToAdminTab(page, 'comments')
-
-  await page.waitForTimeout(2_000)
+  await commentsLoad.catch(() => undefined)
 
   const removeBtn = page.getByRole('button', { name: /remove comment/i }).first()
   if (!(await removeBtn.isVisible().catch(() => false))) {
-    test.skip()
+    test.skip(true, 'No reportable comments seeded in this environment')
     return
   }
 

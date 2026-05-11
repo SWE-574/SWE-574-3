@@ -96,9 +96,33 @@ export default defineConfig(({ mode }) => {
       exclude: ['tests/e2e/**', 'node_modules/**'],
       coverage: {
         provider: 'v8',
-        reporter: ['text', 'json', 'json-summary'],
+        reporter: ['text', 'json', 'json-summary', 'html', 'lcov'],
         include: ['src/**/*.{ts,tsx}'],
-        exclude: ['src/test/**', 'src/main.tsx'],
+        exclude: [
+          'src/test/**',
+          'src/main.tsx',
+          'src/**/*.d.ts',
+          'src/**/__mocks__/**',
+        ],
+        // Coverage gate. Set just below the current repo baseline so it
+        // catches regressions today; the targets in the testing roadmap
+        // (60/60/60/40) need a lot more component / hook / store specs.
+        // Ratchet these up as new test specs land — never down.
+        // Latest baseline (after the #461 service + store spec batch):
+        //   lines 16.79, functions 15.07, statements 15.91, branches 12.23.
+        thresholds: {
+          lines: 15,
+          functions: 14,
+          statements: 14,
+          branches: 11,
+        },
+      },
+      server: {
+        deps: {
+          // @exodus/bytes is ESM-only but html-encoding-sniffer (jsdom 28 dep) requires it via CJS.
+          // Inline it so Vite transforms it to CJS-compatible output before the test environment loads.
+          inline: ['@exodus/bytes'],
+        },
       },
       resolve: {
         alias: {

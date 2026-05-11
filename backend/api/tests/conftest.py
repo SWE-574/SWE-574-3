@@ -1,6 +1,46 @@
 import pytest
 
 
+def pytest_collection_modifyitems(config, items):
+    """Network isolation policy.
+
+    Both unit and integration tests are restricted to loopback so external
+    HTTP cannot leak into the suite. The in-process Redis cache, postgres
+    test DB, and MinIO setup all need 127.0.0.1; anything beyond that is a
+    test smell. Websocket-marked tests are exempt because Channels' in-memory
+    communicator opens an internal socket pair on some platforms.
+    """
+    try:
+        import pytest_socket  # noqa: F401
+    except ImportError:
+        return
+
+    LOOPBACK = ['127.0.0.1', '::1', 'localhost']
+    for item in items:
+        if 'websocket' in item.keywords:
+            continue
+        if 'unit' in item.keywords or 'integration' in item.keywords:
+            item.add_marker(pytest.mark.allow_hosts(LOOPBACK))
+
+
+@pytest.fixture(autouse=True)
+def _assert_in_memory_channels(request, settings):
+    """Unit and websocket-marked tests must use the in-memory channel layer.
+
+    Hitting Redis from tests is a leak — slow, flaky, and silently coupled
+    across xdist workers (each worker shares Redis but uses its own DB
+    transaction, so channel groups created by one worker can bleed into
+    another). Reset to in-memory at the start of every unit and
+    websocket-marked test so a misconfigured CI environment cannot sneak
+    by.
+    """
+    if 'unit' not in request.keywords and 'websocket' not in request.keywords:
+        return
+    settings.CHANNEL_LAYERS = {
+        'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'},
+    }
+
+
 @pytest.fixture(autouse=True)
 def seed_badges(db):
     """Pre-create all badge rows so that check_and_assign_badges() never hits
@@ -20,6 +60,22 @@ def seed_badges(db):
 def clear_django_cache():
     from django.core.cache import cache
     cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _propagate_api_security_logs():
+    """Production has propagate=False on the api / api.security loggers so
+    Docker log scraping does not see duplicates. pytest's caplog only attaches
+    a handler to root, so without propagation the security-signal tests cannot
+    observe the records they emit. Restore propagation for the test only."""
+    import logging
+    loggers = [logging.getLogger(name) for name in ('api', 'api.security')]
+    originals = [logger.propagate for logger in loggers]
+    for logger in loggers:
+        logger.propagate = True
+    yield
+    for logger, original in zip(loggers, originals):
+        logger.propagate = original
 
 
 @pytest.fixture(autouse=True)

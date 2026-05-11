@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -20,6 +20,10 @@ import { useAuth } from "../../context/AuthContext";
 import { colors } from "../../constants/colors";
 import type { BottomTabParamList } from "../../navigation/BottomTabNavigator";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import ScreenTopBar from "../components/ScreenTopBar";
+import { useScreenCache } from "../../hooks/useScreenCache";
+import { ApiNetworkError } from "../../api/client";
+import { shouldSuppressChatLoadError } from "../../utils/messagesOffline";
 
 type Nav = NativeStackNavigationProp<MessagesStackParamList, "MessagesList">;
 
@@ -143,20 +147,18 @@ function buildGroupChatEntries(chats: Chat[]): GroupChatListEntry[] {
   for (const [serviceId, convs] of byService) {
     if (!convs.some(isAcceptedHandshake)) continue;
 
-    let latest: Chat | null = null;
+    // Use the most-recently-updated handshake to pick the representative conv
+    // (for title / member count), but do NOT expose its last_message as the
+    // group preview — those are 1-to-1 handshake messages, not group messages.
+    let rep = convs[0];
     let latestTs = 0;
     for (const c of convs) {
-      const msgT = c.last_message?.created_at
-        ? new Date(c.last_message.created_at).getTime()
-        : 0;
       const upT = c.updated_at ? new Date(c.updated_at).getTime() : 0;
-      const t = Math.max(msgT, upT);
-      if (t >= latestTs) {
-        latestTs = t;
-        latest = c;
+      if (upT > latestTs) {
+        latestTs = upT;
+        rep = c;
       }
     }
-    const rep = latest ?? convs[0];
     const acceptedCount = convs.filter(isAcceptedHandshake).length;
     const memberCount =
       typeof rep.service_member_count === "number"
@@ -167,8 +169,8 @@ function buildGroupChatEntries(chats: Chat[]): GroupChatListEntry[] {
       serviceId,
       serviceTitle: rep.service_title ?? "Group chat",
       memberCount,
-      previewBody: rep.last_message?.body ?? null,
-      previewAt: rep.last_message?.created_at ?? null,
+      previewBody: null,
+      previewAt: null,
     });
   }
 
@@ -241,6 +243,8 @@ export default function MessagesScreen() {
   const [showClosedGroup, setShowClosedGroup] = useState(false);
   const [showClosedEvents, setShowClosedEvents] = useState(false);
   const { user } = useAuth();
+  const cache = useScreenCache<Chat[]>(user?.id ?? null, "messages-chats");
+  const hydratedRef = useRef(false);
 
   const fetchChats = useCallback(
     async (isRefresh = false) => {
@@ -259,6 +263,7 @@ export default function MessagesScreen() {
           listHandshakes({ page_size: 200 }),
         ]);
         setChats(data);
+        cache.persist(data);
 
         const relevantEventHandshakes = handshakePage.results.filter((handshake) =>
           EVENT_TAB_HANDSHAKE_STATUSES.has(handshake.status?.toLowerCase() ?? ""),
@@ -344,9 +349,25 @@ export default function MessagesScreen() {
           ),
         );
       } catch (err) {
-        console.error("Failed to load chats:", err);
-        setError("Failed to load messages.");
-        setChats([]);
+        if (!shouldSuppressChatLoadError(err)) {
+          console.error("Failed to load chats:", err);
+        }
+        // Network failure: fall back to cached chats so the conversation
+        // list survives going offline. Event/joined-event derivations stay
+        // empty — they require network round-trips we cannot replay here.
+        if (err instanceof ApiNetworkError) {
+          const seed = await cache.hydrate();
+          if (seed && seed.data.length > 0) {
+            setChats(seed.data);
+            setError(null);
+          } else {
+            setChats([]);
+            setError("You are offline.");
+          }
+        } else {
+          setError("Failed to load messages.");
+          setChats([]);
+        }
         setEventServices([]);
         setJoinedEventServices([]);
       } finally {
@@ -354,8 +375,21 @@ export default function MessagesScreen() {
         setRefreshing(false);
       }
     },
-    [user],
+    [user, cache],
   );
+
+  // Cold-start hydration so the conversation list renders immediately.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (!cache.enabled) return;
+    if (chats.length > 0) return;
+    hydratedRef.current = true;
+    cache.hydrate().then((seed) => {
+      if (seed && seed.data.length > 0) {
+        setChats((prev) => (prev.length === 0 ? seed.data : prev));
+      }
+    });
+  }, [cache, chats.length]);
 
   useEffect(() => {
     if (!user) {
@@ -882,6 +916,7 @@ export default function MessagesScreen() {
 
   return (
     <View style={styles.safeArea}>
+      <ScreenTopBar title="Messages" />
       <View style={styles.screen}>
         {!user ? (
           <View style={styles.centerState}>
@@ -984,6 +1019,7 @@ export default function MessagesScreen() {
             </View>
 
             <FlatList
+              testID="messages-list"
               data={listData}
               renderItem={renderItem}
               keyExtractor={keyExtractor}

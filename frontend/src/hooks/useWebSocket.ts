@@ -32,6 +32,7 @@ export function useWebSocket({
   const [reconnectAttempts, setReconnectAttempts] = useState(0)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const openedAtRef = useRef<number>(0)
   const connectedUrlRef = useRef<string | null>(null)
   const onMessageRef = useRef(onMessage)
@@ -69,7 +70,14 @@ export function useWebSocket({
       ws.onopen = () => {
         openedAtRef.current = Date.now()
         setIsConnected(true)
-        setReconnectAttempts(0)
+        // Reset the reconnect budget only after the connection has been stable
+        // for >2s, so flapping connections (open→close→open) don't keep
+        // refilling credits and masking a chronically broken socket.
+        if (stableTimerRef.current) clearTimeout(stableTimerRef.current)
+        stableTimerRef.current = setTimeout(() => {
+          setReconnectAttempts(0)
+          stableTimerRef.current = null
+        }, 2000)
         onOpenRef.current?.()
       }
 
@@ -93,6 +101,10 @@ export function useWebSocket({
       ws.onclose = (event) => {
         setIsConnected(false)
         connectedUrlRef.current = null
+        if (stableTimerRef.current) {
+          clearTimeout(stableTimerRef.current)
+          stableTimerRef.current = null
+        }
         onCloseRef.current?.()
 
         // 4xxx = application-level rejection — never retry.
@@ -122,6 +134,10 @@ export function useWebSocket({
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current)
       reconnectTimeoutRef.current = null
+    }
+    if (stableTimerRef.current) {
+      clearTimeout(stableTimerRef.current)
+      stableTimerRef.current = null
     }
     if (wsRef.current) {
       wsRef.current.close(1000)

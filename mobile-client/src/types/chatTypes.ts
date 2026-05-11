@@ -3,8 +3,9 @@ import type { ChatMessage } from "../api/chatMessages";
 
 export type ChatScreenParams = {
   handshakeId: string;
+  notificationId?: string;
   serviceId?: string;
-  otherUserName: string;
+  otherUserName?: string;
   serviceTitle?: string;
   otherUserId?: string;
   otherUserAvatarUrl?: string;

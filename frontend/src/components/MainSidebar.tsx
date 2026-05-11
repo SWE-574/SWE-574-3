@@ -13,7 +13,7 @@ import {
 import { useAuthStore } from '@/store/useAuthStore'
 import {
   GREEN, GREEN_LT, AMBER, AMBER_LT, BLUE, BLUE_LT,
-  GRAY50, GRAY100, GRAY200, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800, WHITE,
+  GRAY50, GRAY100, GRAY200, GRAY400, GRAY500, GRAY700, GRAY800, WHITE,
 } from '@/theme/tokens'
 
 function initials(u?: { first_name?: string; last_name?: string; email?: string } | null) {
@@ -74,8 +74,8 @@ interface MainSidebarProps {
 export function MainSidebar({
   pendingHs = 0, acceptedHs = 0, completedHs = 0,
   myServices = [], incomingMap = new Map(),
-  locationEnabled, locationLoading, locationError, userLocation, distanceKm, distanceLabel,
-  toggleLocation, setDistanceKm,
+  locationEnabled, locationLoading, locationError, userLocation,
+  toggleLocation,
   hideLocationFilters = false,
 }: MainSidebarProps) {
   const navigate = useNavigate()
@@ -94,7 +94,7 @@ export function MainSidebar({
       <Box px={4} pt={5} pb={4} borderBottom={`1px solid ${GRAY100}`}>
         {isAuthenticated && user ? (
           <>
-            <Flex align="center" gap={3} mb={4}>
+            <Flex data-tour="profile-card" align="center" gap={3} mb={4}>
               <Avatar u={user} size={44} />
               <Box flex={1} minW={0}>
                 <Text fontSize="14px" fontWeight={700} color={GRAY800}
@@ -124,6 +124,7 @@ export function MainSidebar({
             {/* Time bank widget */}
             <Box
               as="button"
+              data-tour="time-balance"
               w="full"
               display="block"
               borderRadius="14px" p="14px" mb={3} position="relative" overflow="hidden"
@@ -168,7 +169,7 @@ export function MainSidebar({
             </Box>
 
             {/* Stats row */}
-            <Grid templateColumns="repeat(2, minmax(0, 1fr))" gap="5px">
+            <Grid data-tour="activity-stats" templateColumns="repeat(2, minmax(0, 1fr))" gap="5px">
               <StatPill label="Pending"  value={pendingHs}   bg={AMBER_LT} color={AMBER} />
               <StatPill label="Active"   value={acceptedHs}  bg={GREEN_LT} color={GREEN} />
               <StatPill label="Done"     value={completedHs} bg={BLUE_LT}  color={BLUE}  />
@@ -204,7 +205,7 @@ export function MainSidebar({
 
       {/* ── Post a Service ── */}
       {isAuthenticated && (
-        <Box px={4} py={3} borderBottom={`1px solid ${GRAY100}`}>
+        <Box data-tour="post-buttons" px={4} py={3} borderBottom={`1px solid ${GRAY100}`}>
           <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
             style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             Post a Service
@@ -239,7 +240,7 @@ export function MainSidebar({
       <Box flex={1} overflowY="auto" px={4} py={4}>
 
         {!hideLocationFilters && toggleLocation && (
-          <Box mb={4}>
+          <Box data-tour="location" mb={4}>
             <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
               style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}>
               Location
@@ -252,36 +253,22 @@ export function MainSidebar({
               onClick={() => !locationLoading && toggleLocation()}
               style={{ cursor: locationLoading ? 'not-allowed' : 'pointer', opacity: locationLoading ? 0.65 : 1 }}>
               {locationLoading
-                ? <><FiLoader size={12} /> Getting location…</>
+                ? <><FiLoader size={12} /> Getting location</>
                 : locationEnabled
-                  ? <><FiMapPin size={12} /> By distance — ON</>
+                  ? <><FiMapPin size={12} /> Location on</>
                   : <><FiNavigation size={12} /> Enable location</>}
             </Box>
             {locationError && <Text fontSize="11px" color="red.500" mb={2}>{locationError}</Text>}
-            {userLocation && (
-              <Box>
-                <Flex justify="space-between" mb="6px">
-                  <Text fontSize="11px" color={GRAY600} fontWeight={500}>
-                    {locationEnabled ? `${distanceKm} km` : 'Disabled'}
-                  </Text>
-                  <Text fontSize="11px" color={GRAY400}>{locationEnabled ? distanceLabel : '—'}</Text>
-                </Flex>
-                <input
-                  type="range" min={1} max={50} step={1} value={distanceKm}
-                  onChange={(e) => { setDistanceKm?.(Number(e.target.value)); if (!locationEnabled) toggleLocation?.() }}
-                  style={{ width: '100%', accentColor: GREEN, height: '4px', cursor: 'pointer', opacity: locationEnabled ? 1 : 0.5 }}
-                />
-                <Flex justify="space-between" mt="4px">
-                  <Text fontSize="9px" color={GRAY400}>1 km</Text>
-                  <Text fontSize="9px" color={GRAY400}>50 km</Text>
-                </Flex>
-              </Box>
+            {userLocation && locationEnabled && (
+              <Text fontSize="10px" color={GRAY500} lineHeight="1.4">
+                Closer cards rank higher when this is on.
+              </Text>
             )}
           </Box>
         )}
 
         {isAuthenticated && myServices.length > 0 && !hideLocationFilters && (
-          <>
+          <Box data-tour="my-listings">
             <Text fontSize="10px" fontWeight={700} color={GRAY400} mb={3}
               style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}>
               My Listings ({myServices.length})
@@ -313,12 +300,25 @@ export function MainSidebar({
                 )
               })}
               {myServices.length > 4 && (
-                <Text fontSize="11px" color={GRAY400} textAlign="center">
-                  +{myServices.length - 4} more
-                </Text>
+                <Box
+                  as="button"
+                  w="full"
+                  py="6px"
+                  borderRadius="9px"
+                  bg="transparent"
+                  border={`1px dashed ${GRAY200}`}
+                  onClick={() => navigate('/profile?tab=offers')}
+                  aria-label="View all my listings"
+                  data-testid="my-listings-show-all"
+                  _hover={{ bg: GRAY50, borderColor: GRAY100 }}
+                >
+                  <Text fontSize="11px" fontWeight={600} color={GRAY500} textAlign="center">
+                    +{myServices.length - 4} more
+                  </Text>
+                </Box>
               )}
             </VStack>
-          </>
+          </Box>
         )}
       </Box>
     </Box>

@@ -15,6 +15,7 @@ export const NOTIFICATION_ICONS: Record<NotificationType, string> = {
   positive_rep: 'star-outline',
   admin_warning: 'warning-outline',
   dispute_resolved: 'shield-checkmark-outline',
+  user_followed: 'person-add-outline',
 };
 
 /**
@@ -25,16 +26,60 @@ export function navigateToNotificationTarget(
   notification: Notification,
   navigation: { navigate: (screen: string, params?: object) => void },
 ): void {
-  const { type, related_handshake, related_service } = notification;
+  const { type, related_handshake, related_service, related_service_type, related_user } = notification;
 
-  // Handshake-related and chat notifications → Chat screen
+  // New follower → follower's public profile (lives on Profile stack, not Home)
+  if (type === 'user_followed' && related_user) {
+    navigation.navigate('Profile', {
+      screen: 'PublicProfile',
+      params: { userId: related_user },
+    });
+    return;
+  }
+
+  // Event chat message → PublicChat screen (not ServiceDetail)
+  if (type === 'chat_message' && related_service_type === 'Event' && related_service) {
+    navigation.navigate('Messages', { screen: 'MessagesList' });
+    navigation.navigate('Messages', {
+      screen: 'PublicChat',
+      params: { roomId: related_service },
+    });
+    return;
+  }
+
+  // Group offer/need chat message (no handshake link = group-level chat) → GroupChat screen
+  if (type === 'chat_message' && related_service && !related_handshake) {
+    navigation.navigate('Messages', { screen: 'MessagesList' });
+    navigation.navigate('Messages', {
+      screen: 'GroupChat',
+      params: { groupId: related_service },
+    });
+    return;
+  }
+
+  // All other event notifications → ServiceDetail
+  if (related_service_type === 'Event' && related_service) {
+    navigation.navigate('Home', {
+      screen: 'ServiceDetail',
+      params: { id: related_service },
+    });
+    return;
+  }
+
+  // Handshake-related and chat notifications → Chat screen.
+  // service_confirmation also lands here when related_service is absent
+  // (i.e. only a handshake link is available) so the user can confirm
+  // completion directly from the conversation.
   if (
-    (type.startsWith('handshake_') || type === 'chat_message') &&
+    (type.startsWith('handshake_') || type === 'chat_message' || type === 'service_confirmation') &&
     related_handshake
   ) {
+    // Navigate to MessagesList first so it anchors the back-stack, then push Chat.
+    // This guarantees a back button even when the Messages tab was already showing Chat.
+    navigation.navigate('Messages', { screen: 'MessagesList' });
     navigation.navigate('Messages', {
       screen: 'Chat',
-      params: { handshakeId: related_handshake },
+      params: { handshakeId: related_handshake, notificationId: notification.id },
     });
     return;
   }

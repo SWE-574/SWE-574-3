@@ -184,6 +184,30 @@ Without a key, email features are silently disabled — the app still works.
 
 ---
 
+## API Documentation
+
+The Hive serves an OpenAPI 3.0 schema generated directly from the Django code via `drf-spectacular`. The Swagger UI at `/api/docs/` is what we hand in as API documentation.
+
+| URL | Description |
+|-----|-------------|
+| `/api/docs/` | Swagger UI (interactive — has an Authorize button for JWT testing) |
+| `/api/redoc/` | ReDoc (single-page reference view) |
+| `/api/schema/` | Raw OpenAPI 3.0 schema (YAML by default; `?format=json` for JSON) |
+
+WebSocket endpoints (`/ws/chat/…`, `/ws/public-chat/…`, `/ws/group-chat/…`) are documented in the same schema under the **WebSocket** tag.
+
+To regenerate a static schema file offline:
+
+```bash
+docker compose exec backend python manage.py spectacular --file openapi.yaml
+# or, against a local virtualenv:
+python manage.py spectacular --file openapi.yaml
+```
+
+Routes that exist for compatibility with earlier milestones (the direct handshake CRUD entrypoints, the duplicate `/handshakes/services/{id}/interest/`, the debug-ranking probes, the E2E balance helper, the public featured listing) are kept wired but marked **deprecated** in the schema. The Swagger UI renders them with a strikethrough banner and a note pointing to the replacement.
+
+---
+
 ## Audit Log Retention SLA
 
 `AdminAuditLog` records document every moderation and administrative action taken within The Hive. These records are **immutable** and must be retained for a minimum of **7 years (2,555 days)** from creation.

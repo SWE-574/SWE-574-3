@@ -208,7 +208,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 // ─── Conversation Row (inside a group) ───────────────────────────────────────
 
-/** True when the current user owns the service (regardless of Offer/Want). */
+/** True when the current user owns the service (regardless of Offer/Need). */
 function isServiceOwner(conv: ChatConversation): boolean {
   const isOffer = conv.service_type?.toLowerCase() !== 'need' && conv.service_type?.toLowerCase() !== 'want'
   return isOffer ? conv.is_provider : !conv.is_provider
@@ -798,7 +798,7 @@ function ActionCard({
       )
     : (conv.exact_location_maps_url || (previewLocation ? buildMapsUrl(previewLocation) : null))
 
-  // Service owner always initiates (Offer or Want) — requester approves
+  // Service owner always initiates (Offer or Need) — requester approves
 
   const myConfirmed    = is_provider ? provider_confirmed_complete : receiver_confirmed_complete
   const otherConfirmed = is_provider ? receiver_confirmed_complete : provider_confirmed_complete
@@ -1096,7 +1096,7 @@ function ActionCard({
       boxShadow="0 1px 3px rgba(0,0,0,0.04)"
     >
       {iAmServiceOwner ? (
-        // ── Service owner side (Offer owner OR Want/Need owner) ──────────────
+        // ── Service owner side (Offer owner OR Need owner) ──────────────
         provider_initiated ? (
           // Already sent details — waiting for requester to approve
           <Flex align="center" gap={3}>
@@ -1916,9 +1916,15 @@ export default function ChatPage() {
 
   const handleInitiate = useCallback(async (payload: InitiatePayload) => {
     if (!selectedId) return
-    await handshakeAPI.initiate(selectedId, payload)
-    toast.success('Session details sent!')
-    refreshConversations()
+    try {
+      await handshakeAPI.initiate(selectedId, payload)
+      toast.success('Session details sent!')
+      refreshConversations()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(err?.response?.data?.detail ?? err?.message ?? 'Failed to send session details.')
+      throw e
+    }
   }, [selectedId, refreshConversations])
 
   const handleApprove = useCallback(async () => {
@@ -2058,15 +2064,17 @@ export default function ChatPage() {
     }
   }, [isReportingNoShow, refreshConversations, selectedId])
 
-  const handleSubmitReportIssue = useCallback(async (issueType: string) => {
+  const handleSubmitReportIssue = useCallback(async (issueType: string, statement = '') => {
     if (!selectedId || isReportingIssue) return
     setIsReportingIssue(true)
     try {
       const selectedIssue = CHAT_REPORT_OPTIONS.find((option) => option.value === issueType)
       const selectedIssueType = (selectedIssue?.value ?? 'service_issue') as ChatReportIssueType
-      const autoDescription = selectedIssue
-        ? `${selectedIssue.label}. ${selectedIssue.desc}`
-        : 'Service issue reported by participant'
+      const autoDescription = statement.trim()
+        ? statement.trim()
+        : selectedIssue
+          ? `${selectedIssue.label}. ${selectedIssue.desc}`
+          : 'Service issue reported by participant'
       await handshakeAPI.report(selectedId, selectedIssueType, autoDescription)
       toast.success('Issue report submitted for admin review.')
       setShowReportIssueModal(false)
@@ -2194,7 +2202,7 @@ export default function ChatPage() {
                         bg={selectedConv.service_type?.toLowerCase() === 'offer' ? '#FEF3C7' : '#F3E8FF'}
                         color={selectedConv.service_type?.toLowerCase() === 'offer' ? '#92400E' : '#6B21A8'}
                       >
-                        {selectedConv.service_type?.toLowerCase() === 'offer' ? 'Offer' : 'Want'}
+                        {selectedConv.service_type?.toLowerCase() === 'offer' ? 'Offer' : 'Need'}
                       </Box>
                     </Flex>
                     {/* Clickable service title */}
@@ -2402,7 +2410,7 @@ export default function ChatPage() {
       {showReportIssueModal && selectedConv && (
         <ReportModal
           onClose={() => !isReportingIssue && setShowReportIssueModal(false)}
-          onSubmit={handleSubmitReportIssue}
+          onSubmit={(issueType, statement) => handleSubmitReportIssue(issueType, statement)}
           loading={isReportingIssue}
           options={CHAT_REPORT_OPTIONS}
           title={`Report ${selectedConv.other_user.name}`}

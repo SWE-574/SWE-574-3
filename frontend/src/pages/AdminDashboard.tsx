@@ -6,6 +6,7 @@ import {
   FiCheck, FiX, FiLink2, FiAlertCircle, FiSlash, FiMapPin, FiClock,
   FiCalendar, FiTrash2, FiPauseCircle, FiArrowUpRight, FiLock, FiUserX,
   FiUnlock, FiBookmark, FiRefreshCw, FiMessageCircle as FiCommentIcon, FiSettings,
+  FiCheckCircle, FiXCircle,
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { adminAPI, type AuditTargetFilter, type CommentStatusFilter, type ReportResolveAction, type ReportStatusFilter } from '@/services/adminAPI'
@@ -137,6 +138,7 @@ const AdminDashboard = () => {
   const [openReportService, setOpenReportService] = useState<Service | null>(null)
   const [openReportLoading, setOpenReportLoading] = useState(false)
   const [openReportActionLoading, setOpenReportActionLoading] = useState(false)
+  const [forumContentDeleted, setForumContentDeleted] = useState(false)
   const [isNotesExpanded, setIsNotesExpanded] = useState(false)
 
   const [commentsLoading, setCommentsLoading] = useState(false)
@@ -513,6 +515,7 @@ const AdminDashboard = () => {
     setOpenReport(null)
     setOpenReportService(null)
     setOpenReportLoading(false)
+    setForumContentDeleted(false)
   }, [])
 
   const closeOpenReportPanel = useCallback(() => {
@@ -525,6 +528,7 @@ const AdminDashboard = () => {
 
     setOpenReportId(reportId)
     setIsNotesExpanded(false)
+    setForumContentDeleted(false)
     setOpenReportLoading(true)
     setOpenReportService(null)
     try {
@@ -581,6 +585,8 @@ const AdminDashboard = () => {
       confirm_no_show: { title: 'Confirm No-Show', desc: 'Mark this as a no-show incident and resolve the report.', label: 'Confirm no-show', accent: GREEN, accentLt: GREEN_LT },
       dismiss:         { title: 'Dismiss Report',  desc: 'Dismiss this report. The reported content will remain visible.', label: 'Dismiss', accent: BLUE, accentLt: BLUE_LT },
       remove_from_event: { title: 'Remove From Event', desc: 'Remove the reported participant from this event and resolve the report.', label: 'Remove participant', accent: RED, accentLt: RED_LT },
+      mark_resolved:   { title: 'Mark as Resolved', desc: 'Close this report as resolved without affecting any TimeBank transfer.', label: 'Mark resolved', accent: GREEN, accentLt: GREEN_LT },
+      mark_dismissed:  { title: 'Mark as Dismissed', desc: 'Close this report as dismissed without affecting any TimeBank transfer.', label: 'Mark dismissed', accent: BLUE, accentLt: BLUE_LT },
     }
     const meta = labelMap[action] ?? { title: `Action: ${action}`, desc: 'Confirm this moderation action.', label: 'Confirm', accent: GREEN, accentLt: GREEN_LT }
     setConfirmModal({
@@ -711,18 +717,13 @@ const AdminDashboard = () => {
           if (hasReply) { await forumAPI.deletePost(targetId) }
           else { await forumAPI.deleteTopic(targetId) }
           toast.success(`Reported forum ${targetLabel} deleted`)
-          void loadReports()
-          void loadDashboard()
-          try {
-            const refreshed = await adminAPI.getReport(openReport.id)
-            setOpenReport(refreshed)
-          } catch { closeOpenReport() }
+          setForumContentDeleted(true)
         } catch (error) {
           toast.error(getErrorMessage(error, `Failed to delete reported forum ${targetLabel}`))
         } finally { setOpenReportActionLoading(false) }
       },
     })
-  }, [closeOpenReport, loadDashboard, loadReports, openReport])
+  }, [openReport])
 
   const closeOpenReportedService = useCallback(async () => {
     if (!openReport) return
@@ -1408,10 +1409,9 @@ const AdminDashboard = () => {
                         <Flex w="136px" flexShrink={0} justify="flex-end" gap="4px" pl={2}
                           onClick={(e) => e.stopPropagation()}>
                           {mkBtn('Detail', <FiArrowUpRight size={11} />, GRAY700, GRAY100, GRAY200, () => requestOpenReport(report.id))}
-                          {mkBtn('No-show', <FiCheck size={11} />, GREEN, GREEN_LT, GREEN + '40', () => handleResolveReport(report, 'confirm_no_show'), !report.related_handshake || hasPendingLinkedHandshake(report) || isEventNotStartedForNoShow(report))}
-                          {mkBtn('Dismiss', <FiX size={11} />, BLUE, BLUE_LT, BLUE + '40', () => handleResolveReport(report, 'dismiss'))}
-                          {mkBtn('Remove', <FiUserX size={11} />, RED, RED_LT, RED + '40', () => handleResolveReport(report, 'remove_from_event'), !canRemoveReportedUserFromEvent(report))}
-                          {mkBtn('Pause', <FiPauseCircle size={11} />, AMBER, AMBER_LT, AMBER + '40', () => handlePauseReport(report), !report.related_handshake || hasPendingLinkedHandshake(report))}
+                          {mkBtn('No-show', <FiCheck size={11} />, GREEN, GREEN_LT, GREEN + '40', () => handleResolveReport(report, 'confirm_no_show'), report.status !== 'pending' || !report.related_handshake || hasPendingLinkedHandshake(report) || isEventNotStartedForNoShow(report))}
+                          {!report.reported_forum_topic && !report.reported_forum_post && mkBtn('Remove', <FiUserX size={11} />, RED, RED_LT, RED + '40', () => handleResolveReport(report, 'remove_from_event'), report.status !== 'pending' || !canRemoveReportedUserFromEvent(report))}
+                          {mkBtn('Pause', <FiPauseCircle size={11} />, AMBER, AMBER_LT, AMBER + '40', () => handlePauseReport(report), report.status !== 'pending' || !report.related_handshake || hasPendingLinkedHandshake(report))}
                         </Flex>
                       </Flex>
                     )
@@ -1977,6 +1977,10 @@ const AdminDashboard = () => {
                   const isServiceReport = !!openReport.reported_service
                   const canCloseServiceFromReport = canCloseReportedService(openReport)
                   const isServiceAlreadyClosed = openReport.reported_service_status === 'Cancelled' || openReportService?.status === 'Cancelled'
+                  const reportedServiceStatus = openReport.reported_service_status || openReportService?.status
+                  const isReportedServiceTerminal = reportedServiceStatus === 'Cancelled' || reportedServiceStatus === 'Completed'
+                  const isPending = openReport.status === 'pending'
+                  const closeBlockedByHandshakes = !!openReport.reported_service_has_active_handshakes
                   const forumTopicPath = openReport.reported_forum_topic ? `/forum/topic/${openReport.reported_forum_topic}` : null
                   const hasHandshakeInfo = !!(openReport.related_handshake || openReport.handshake_status || openReport.handshake_scheduled_time || openReport.handshake_hours != null)
 
@@ -2231,35 +2235,45 @@ const AdminDashboard = () => {
                           <Box style={{ borderTop: `1px solid ${GRAY100}` }} pt={3}>
                             <Text fontSize="10px" fontWeight={600} color={GRAY400} textTransform="uppercase" letterSpacing="0.06em" mb={2}>Actions</Text>
                             <Flex gap={2} wrap="wrap">
+                              {openReport.status === 'pending' && (
+                                <PanelActionBtn label="Mark as resolved" icon={<FiCheckCircle size={11} />} accent={GREEN} accentLt={GREEN_LT}
+                                  onClick={() => resolveOpenReport('mark_resolved')}
+                                  disabled={openReportActionLoading} />
+                              )}
+                              {openReport.status === 'pending' && (
+                                <PanelActionBtn label="Mark as dismissed" icon={<FiXCircle size={11} />} accent={BLUE} accentLt={BLUE_LT}
+                                  onClick={() => resolveOpenReport('mark_dismissed')}
+                                  disabled={openReportActionLoading} />
+                              )}
                               {!isForumReport && (
                                 <PanelActionBtn label="Confirm no-show" icon={<FiCheck size={11} />} accent={GREEN} accentLt={GREEN_LT}
                                   onClick={() => resolveOpenReport('confirm_no_show')}
-                                  disabled={openReportActionLoading || !openReport.related_handshake || hasPendingLinkedHandshake(openReport) || isEventNotStartedForNoShow(openReport)} />
+                                  disabled={openReportActionLoading || !isPending || !openReport.related_handshake || hasPendingLinkedHandshake(openReport) || isEventNotStartedForNoShow(openReport) || isReportedServiceTerminal} />
                               )}
-                              <PanelActionBtn label="Dismiss" icon={<FiX size={11} />} accent={BLUE} accentLt={BLUE_LT}
-                                onClick={() => resolveOpenReport('dismiss')} disabled={openReportActionLoading} />
-                              <PanelActionBtn label="Remove from event" icon={<FiUserX size={11} />} accent={RED} accentLt={RED_LT}
-                                onClick={() => resolveOpenReport('remove_from_event')}
-                                disabled={openReportActionLoading || !canRemoveReportedUserFromEvent(openReport)} />
+                              {!isForumReport && (
+                                <PanelActionBtn label="Remove from event" icon={<FiUserX size={11} />} accent={RED} accentLt={RED_LT}
+                                  onClick={() => resolveOpenReport('remove_from_event')}
+                                  disabled={openReportActionLoading || !isPending || !canRemoveReportedUserFromEvent(openReport)} />
+                              )}
                               {isServiceReport && canCloseServiceFromReport && (
                                 <PanelActionBtn
                                   label={isServiceAlreadyClosed ? 'Already closed' : 'Close service'}
                                   icon={isServiceAlreadyClosed ? <FiSlash size={11} /> : <FiLock size={11} />}
                                   accent={RED} accentLt={RED_LT}
                                   onClick={closeOpenReportedService}
-                                  disabled={openReportActionLoading || isServiceAlreadyClosed} />
+                                  disabled={openReportActionLoading || isServiceAlreadyClosed || closeBlockedByHandshakes} />
                               )}
                               {isForumReport && (
                                 <PanelActionBtn
-                                  label={`Delete ${openReport.reported_forum_post ? 'reply' : 'topic'}`}
+                                  label={forumContentDeleted ? `${openReport.reported_forum_post ? 'Reply' : 'Topic'} Deleted` : `Delete ${openReport.reported_forum_post ? 'reply' : 'topic'}`}
                                   icon={<FiTrash2 size={11} />} accent={RED} accentLt={RED_LT}
                                   onClick={deleteOpenReportedForumContent}
-                                  disabled={openReportActionLoading || (!openReport.reported_forum_post && !openReport.reported_forum_topic)} />
+                                  disabled={openReportActionLoading || forumContentDeleted || !isPending || (!openReport.reported_forum_post && !openReport.reported_forum_topic)} />
                               )}
                               {!isForumReport && (
                                 <PanelActionBtn label="Pause handshake" icon={<FiPauseCircle size={11} />} accent={AMBER} accentLt={AMBER_LT}
                                   onClick={pauseOpenReport}
-                                  disabled={openReportActionLoading || !openReport.related_handshake || hasPendingLinkedHandshake(openReport)} />
+                                  disabled={openReportActionLoading || !isPending || !openReport.related_handshake || hasPendingLinkedHandshake(openReport)} />
                               )}
                             </Flex>
                             {!isForumReport && !openReport.related_handshake && (
@@ -2273,6 +2287,21 @@ const AdminDashboard = () => {
                             )}
                             {!isForumReport && isEventNotStartedForNoShow(openReport) && (
                               <Text fontSize="11px" color={GRAY400} mt={2}>Event not started — no-show confirm disabled.</Text>
+                            )}
+                            {!isForumReport && isReportedServiceTerminal && (
+                              <Text fontSize="11px" color={GRAY400} mt={2}>
+                                Linked service is {String(reportedServiceStatus).toLowerCase()} — TimeBank actions are unavailable. Use Mark as resolved/dismissed to close the case.
+                              </Text>
+                            )}
+                            {isServiceReport && canCloseServiceFromReport && !isServiceAlreadyClosed && closeBlockedByHandshakes && (
+                              <Text fontSize="11px" color={GRAY400} mt={2}>
+                                Service has active handshakes — closing is blocked. Use Mark as resolved/dismissed to close the case without affecting the in-flight transfers.
+                              </Text>
+                            )}
+                            {!isPending && (
+                              <Text fontSize="11px" color={GRAY400} mt={2}>
+                                Report is {openReport.status} — no further actions available.
+                              </Text>
                             )}
                           </Box>
                         </Box>

@@ -45,13 +45,26 @@ export function NotificationDropdown() {
     (notification: Notification) => {
       if (!notification.is_read) markAsRead(notification.id)
       setOpen(false)
-      // Feedback/reputation notifications with a related service → go to the service detail
-      // so users can leave their evaluation there. Other handshake notifications → messages.
-      const isFeedbackNotif = notification.type === 'positive_rep'
-      if (notification.related_service && isFeedbackNotif) {
+      if (notification.type === 'user_followed' && notification.related_user) {
+        navigate(`/public-profile/${notification.related_user}`)
+      } else if (notification.related_report && notification.type === 'new_report') {
+        navigate(`/admin?tab=reports&reportId=${notification.related_report}`)
+      } else if (
+        notification.type === 'report_received'
+        || notification.type === 'report_resolved'
+        || notification.type === 'report_dismissed'
+      ) {
+        navigate('/profile?tab=reports')
+      } else if (notification.type === 'chat_message' && notification.related_service_type === 'Event' && notification.related_service) {
+        navigate(`/service-detail/${notification.related_service}?tab=chat`)
+      } else if (notification.related_service_type === 'Event' && notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)
+      } else if (notification.related_service && notification.type === 'positive_rep') {
+        navigate(`/service-detail/${notification.related_service}`)
+      } else if (notification.type === 'chat_message' && !notification.related_handshake && notification.related_service) {
+        navigate(`/messages?group=${notification.related_service}`)
       } else if (notification.related_handshake) {
-        navigate(`/messages?handshake=${notification.related_handshake}`)
+        navigate(`/messages/${notification.related_handshake}`)
       } else if (notification.related_service) {
         navigate(`/service-detail/${notification.related_service}`)
       } else {

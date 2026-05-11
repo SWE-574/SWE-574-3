@@ -4,6 +4,7 @@
  */
 
 import { apiRequest } from './client';
+import { normalizeRuntimeUrl } from '../constants/env';
 import type { PaginatedResponse } from './types';
 
 export interface Handshake {
@@ -50,12 +51,30 @@ export interface HandshakesListParams {
   status?: string;
 }
 
-export function listHandshakes(params?: HandshakesListParams): Promise<PaginatedResponse<Handshake>> {
-  return apiRequest<PaginatedResponse<Handshake>>('/handshakes/', { params: params as Record<string, string | number | undefined> });
+/** Coerce relative `/media/...` avatar URLs into absolute, app-loadable ones. */
+function normalizeHandshake(h: Handshake): Handshake {
+  if (!h.counterpart) return h;
+  return {
+    ...h,
+    counterpart: {
+      ...h.counterpart,
+      avatar_url: normalizeRuntimeUrl(h.counterpart.avatar_url) ?? null,
+    },
+  };
 }
 
-export function getHandshake(id: string): Promise<Handshake> {
-  return apiRequest<Handshake>(`/handshakes/${id}/`);
+export async function listHandshakes(
+  params?: HandshakesListParams,
+): Promise<PaginatedResponse<Handshake>> {
+  const res = await apiRequest<PaginatedResponse<Handshake>>('/handshakes/', {
+    params: params as Record<string, string | number | undefined>,
+  });
+  return { ...res, results: (res.results ?? []).map(normalizeHandshake) };
+}
+
+export async function getHandshake(id: string): Promise<Handshake> {
+  const res = await apiRequest<Handshake>(`/handshakes/${id}/`);
+  return normalizeHandshake(res);
 }
 
 export function createHandshake(body: HandshakeRequest): Promise<Handshake> {
@@ -138,7 +157,6 @@ export function handshakeServiceInterest(serviceId: string, body?: object): Prom
   return apiRequest(`/handshakes/services/${serviceId}/interest/`, { method: 'POST', body: body ?? {} });
 }
 
-// ─── Event actions ────────────────────────────────────────────────────────
 
 export function joinEvent(serviceId: string): Promise<Handshake> {
   return apiRequest<Handshake>(`/handshakes/services/${serviceId}/join-event/`, { method: 'POST', body: {} });
@@ -148,8 +166,10 @@ export function leaveEvent(id: string): Promise<Handshake> {
   return apiRequest<Handshake>(`/handshakes/${id}/leave-event/`, { method: 'POST', body: {} });
 }
 
-export function checkinEvent(id: string): Promise<Handshake> {
-  return apiRequest<Handshake>(`/handshakes/${id}/checkin/`, { method: 'POST', body: {} });
+export function checkinEvent(id: string, qrToken?: string): Promise<Handshake> {
+  const body: Record<string, string> = {};
+  if (qrToken) body.qr_token = qrToken;
+  return apiRequest<Handshake>(`/handshakes/${id}/checkin/`, { method: 'POST', body });
 }
 
 export function markAttended(id: string): Promise<Handshake> {

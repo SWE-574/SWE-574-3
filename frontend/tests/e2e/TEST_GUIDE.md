@@ -382,6 +382,67 @@ If a scenario is flaky:
 2. stabilize setup first
 3. keep the final requirement proof in the UI
 
+### Wait helpers — never `page.waitForTimeout`
+
+Hardcoded wall-clock waits are the suite's number-one source of flake. Use,
+in order of preference:
+
+1. `expect(locator).toBeVisible()` / `toHaveText(...)` — Playwright's auto-
+   retrying assertions (default 10 s via `expect.timeout` in
+   `playwright.config.ts`).
+2. `await page.waitForResponse((r) => r.url().includes('/api/...'))` when
+   gating on a specific request — kick the promise off **before** the
+   action, then `await` it after.
+3. `waitForApi(page, '/api/...')` from `helpers/wait.ts` — thin wrapper that
+   rejects on 4xx/5xx and accepts a substring or regex.
+4. `waitForUI(page, () => predicate)` from `helpers/wait.ts` — when the
+   readiness signal is a JS expression evaluated in the page.
+5. `waitForIdle(page)` from `helpers/wait.ts` — last resort, capped at 1 s
+   so it cannot mask a real regression.
+
+`page.waitForTimeout(ms)` is forbidden. The only legitimate exception is a
+UI deliberately rate-limited by a debounce window where the wait duration
+matches that constant exactly, and even then write the constant in code —
+not a magic number in the spec.
+
+### Accessibility (a11y) coverage
+
+`helpers/axe.ts` exposes `expectNoBlockingA11y(page)` and
+`expectNoCriticalA11y(page)`, both built on `@axe-core/playwright`. Tag
+a11y-only specs with `@a11y` so they can be selected via
+`npm run test:e2e:a11y`. Start with `expectNoBlockingA11y` (critical impact
+only) on a new page, then tighten to `expectNoCriticalA11y` once the
+baseline is clean.
+
+The high-traffic baseline lives at `tests/e2e/a11y/baseline.spec.ts` —
+extend it when you add a new top-level page rather than scattering single
+`@a11y` assertions across feature suites.
+
+### Performance gates (k6)
+
+Performance assertions live alongside Playwright in `frontend/tests/perf/`
+as k6 scripts:
+
+- `feed-sla.js`         — FR-17a, services listing p95 < 1 s
+- `feed-sla-2s.js`      — NFR-19a, authenticated feed p95 < 2 s
+- `event-create.js`     — NFR-11a, event create p95 < 1.5 s
+
+Run all of them via `make test-perf`. They are advisory on PRs and gating on
+the nightly schedule (`.github/workflows/ci-e2e-nightly.yml`).
+
+### Requirement-mapped feature suites
+
+The current canonical example is `tests/e2e/feature-11/`. Helpers live
+alongside the specs in `helpers/feature11.ts`. When starting a new suite:
+
+1. Mirror the helper module pattern — small, focused functions
+   (`createX`, `expressInterestViaApi`, `asUser`).
+2. Name each spec `NN-<fr|nfr>-<feature>-<sub>.spec.ts` and add a row to
+   `frontend/tests/e2e/coverage-matrix.md` so the FR/NFR ↔ spec map stays
+   visible.
+3. Use `uniqueTitle()` for any user-visible string that needs to survive
+   `fullyParallel: true`.
+
 ## Performance and NFR Cases
 
 NFR tests should still follow the same structure.

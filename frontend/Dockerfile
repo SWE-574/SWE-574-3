@@ -4,7 +4,12 @@ FROM node:20-alpine AS dev
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+# Retry npm ci once on a 10s back-off — transient ECONNRESET / network
+# aborts from the registry are common enough on GitHub Actions runners
+# to take down a clean PR. --fetch-retries bumps npm's internal retry
+# count too, which catches most blips before the outer fallback fires.
+RUN npm ci --prefer-offline --no-audit --fetch-retries=5 --fetch-retry-maxtimeout=120000 \
+    || (sleep 10 && npm ci --prefer-offline --no-audit --fetch-retries=5 --fetch-retry-maxtimeout=120000)
 
 COPY . .
 
@@ -18,7 +23,12 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+# Retry npm ci once on a 10s back-off — transient ECONNRESET / network
+# aborts from the registry are common enough on GitHub Actions runners
+# to take down a clean PR. --fetch-retries bumps npm's internal retry
+# count too, which catches most blips before the outer fallback fires.
+RUN npm ci --prefer-offline --no-audit --fetch-retries=5 --fetch-retry-maxtimeout=120000 \
+    || (sleep 10 && npm ci --prefer-offline --no-audit --fetch-retries=5 --fetch-retry-maxtimeout=120000)
 
 COPY . .
 

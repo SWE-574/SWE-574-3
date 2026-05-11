@@ -2,28 +2,24 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Interactive .env generator for The Hive
 #
-# Usage:  ./scripts/setup-env.sh          (creates .env)
-#         Prompts before overwriting if .env already exists.
+# Generates a single `.env` file at the repo root that the Makefile, Vite,
+# Expo, and Docker compose files all read from. For production-shaped values,
+# see `.env.production.example` (committed reference).
+#
+# Usage:  ./scripts/setup-env.sh   or   make env
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-ROOT_ENV=".env"
-
-# ── Guard ────────────────────────────────────────────────────────────────────
-if [[ -f "$ROOT_ENV" ]]; then
-  printf '\033[1;33m⚠  %s already exists.\033[0m\n' "$ROOT_ENV"
-  printf 'Overwrite? [y/N] '
-  read -r ans
-  [[ "${ans:-N}" =~ ^[Yy]$ ]] || { echo "Keeping existing .env."; exit 0; }
-fi
+ENV_FILE=".env"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 blue()  { printf '\033[1;34m%s\033[0m' "$1"; }
 green() { printf '\033[1;32m%s\033[0m' "$1"; }
 gray()  { printf '\033[0;90m%s\033[0m' "$1"; }
+warn()  { printf '\033[1;33m%s\033[0m\n' "$1"; }
+ok()    { printf '\033[1;32m✓ %s\033[0m\n' "$1"; }
 
 prompt() {
-  # prompt VAR_NAME "description" "default"
   local var="$1" desc="$2" default="${3:-}"
   if [[ -n "$default" ]]; then
     printf "  %s (%s) [%s]: " "$(blue "$var")" "$desc" "$(gray "$default")"
@@ -35,60 +31,94 @@ prompt() {
   printf -v "$var" '%s' "$value"
 }
 
+prompt_yn() {
+  local desc="$1" default="${2:-N}"
+  printf "  %s [%s]: " "$desc" "$default"
+  read -r ans
+  ans="${ans:-$default}"
+  [[ "$ans" =~ ^[Yy] ]]
+}
+
+detect_lan_ip() {
+  local ip=""
+  if command -v ipconfig &>/dev/null && [[ "$(uname)" == "Darwin" ]]; then
+    ip=$(ipconfig getifaddr en0 2>/dev/null || true)
+  fi
+  if [[ -z "$ip" ]] && command -v hostname &>/dev/null; then
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  fi
+  if [[ -z "$ip" ]] && command -v ip &>/dev/null; then
+    ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' || true)
+  fi
+  echo "${ip:-192.168.1.100}"
+}
+
+# ── Guard ────────────────────────────────────────────────────────────────────
+# If .env exists (file or symlink), confirm before overwriting.
+if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
+  warn "⚠  Found existing $ENV_FILE"
+  if ! prompt_yn "Overwrite? (existing file will be backed up)" "N"; then
+    echo "Keeping existing $ENV_FILE."
+    exit 0
+  fi
+  if [[ -L "$ENV_FILE" ]]; then
+    if [[ -e "$ENV_FILE" ]]; then
+      # Live symlink: copy through to the real file.
+      cp -L "$ENV_FILE" "${ENV_FILE}.bak"
+      echo "  Backed up $ENV_FILE (-> $(readlink "$ENV_FILE")) → ${ENV_FILE}.bak"
+    else
+      # Broken symlink: nothing to copy; just remove and note the target.
+      warn "  (existing $ENV_FILE is a broken symlink → $(readlink "$ENV_FILE"); nothing to back up)"
+    fi
+    rm "$ENV_FILE"
+  else
+    cp "$ENV_FILE" "${ENV_FILE}.bak"
+    echo "  Backed up $ENV_FILE → ${ENV_FILE}.bak"
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 echo ""
 printf '\033[1;34m──── The Hive: Environment Setup ────\033[0m\n'
 echo ""
-echo "This will generate $(blue "$ROOT_ENV") (single file for backend + frontend)."
+echo "This will generate $(blue "$ENV_FILE")."
 echo "Press Enter to accept the [default] value."
 echo ""
 
-# ─── Database ────────────────────────────────────────────────────────────────
+# ── Prompts ──────────────────────────────────────────────────────────────────
 echo "$(green "▸ Database (PostGIS)")"
 prompt DB_NAME     "database name"     "the_hive_db"
 prompt DB_USER     "database user"     "postgres"
 prompt DB_PASSWORD "database password" "postgres123"
-prompt DB_HOST     "host"              "localhost"
 prompt DB_PORT     "port"              "5432"
 echo ""
 
-# ─── Redis ───────────────────────────────────────────────────────────────────
 echo "$(green "▸ Redis")"
-prompt REDIS_HOST "host" "localhost"
 prompt REDIS_PORT "port" "6379"
 echo ""
 
-# ─── MinIO ───────────────────────────────────────────────────────────────────
 echo "$(green "▸ MinIO (S3-compatible storage)")"
-prompt MINIO_ENDPOINT    "endpoint"        "localhost:9000"
-prompt MINIO_ACCESS_KEY  "access key"      "minioadmin"
-prompt MINIO_SECRET_KEY  "secret key"      "minioadmin123"
-prompt MINIO_BUCKET_NAME "bucket name"     "hive-media"
-prompt MINIO_API_PORT    "API port"        "9000"
-prompt MINIO_CONSOLE_PORT "console port"   "9001"
+prompt MINIO_ACCESS_KEY   "access key"    "minioadmin"
+prompt MINIO_SECRET_KEY   "secret key"    "minioadmin123"
+prompt MINIO_BUCKET_NAME  "bucket name"   "hive-media"
+prompt MINIO_API_PORT     "API port"      "9000"
+prompt MINIO_CONSOLE_PORT "console port"  "9001"
 echo ""
 
-# ─── Django ──────────────────────────────────────────────────────────────────
 echo "$(green "▸ Django")"
-# Auto-generate a secret key
 if command -v python3 &>/dev/null; then
   DEFAULT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(50))" 2>/dev/null || echo "change-me-to-a-long-random-string")
 else
   DEFAULT_SECRET="change-me-to-a-long-random-string"
 fi
-prompt SECRET_KEY          "secret key (auto-generated)"  "$DEFAULT_SECRET"
-prompt DEBUG               "debug mode"                   "True"
-prompt ALLOWED_HOSTS       "allowed hosts"                "localhost,127.0.0.1"
-prompt CORS_ALLOWED_ORIGINS "CORS origins"                "http://localhost,http://localhost:5173,http://localhost:3000"
-prompt FRONTEND_URL        "frontend URL"                 "http://localhost:5173"
+prompt SECRET_KEY "secret key (auto-generated)" "$DEFAULT_SECRET"
 echo ""
 
-# ─── Throttling ──────────────────────────────────────────────────────────────
 echo "$(green "▸ Throttling")"
-prompt THROTTLE_RELAXED    "relaxed throttle"  "True"
-prompt DISABLE_THROTTLING  "disable throttling" "False"
+prompt THROTTLE_RELAXED   "relaxed throttle (local)"   "True"
+prompt DISABLE_THROTTLING "disable throttling (local)"  "False"
 echo ""
 
-# ─── API Keys (optional) ────────────────────────────────────────────────────
 echo "$(green "▸ API Keys") $(gray "(leave blank to skip — features will be disabled)")"
 echo ""
 prompt RESEND_API_KEY       "Resend email API key — https://resend.com/api-keys"  ""
@@ -98,27 +128,31 @@ echo ""
 prompt VITE_MAPBOX_TOKEN    "Mapbox token — https://account.mapbox.com/access-tokens/" ""
 echo ""
 
-# ─── Production (optional) ──────────────────────────────────────────────────
-echo "$(green "▸ Production") $(gray "(optional — skip for local dev)")"
-prompt DOMAIN          "production domain"       ""
-prompt LETSENCRYPT_DIR "Let's Encrypt directory" ""
+echo "$(green "▸ Mobile (Expo physical device access)")"
+DETECTED_IP=$(detect_lan_ip)
+echo "  Detected LAN IP: $(blue "$DETECTED_IP")"
+prompt LAN_IP "LAN IP for mobile device access" "$DETECTED_IP"
 echo ""
 
-# ─── Write root .env ────────────────────────────────────────────────────────
-cat > "$ROOT_ENV" <<EOF
-# ─── Database (PostGIS) ───────────────────────────────────────────────────────
+# ── Write .env ───────────────────────────────────────────────────────────────
+cat > "$ENV_FILE" <<EOF
+# ─── The Hive: Local Development ─────────────────────────────────────────────
+# Generated by: make env  ($(date +%Y-%m-%d))
+# For prod-shaped values see .env.production.example.
+
+# ─── Database (PostGIS) ──────────────────────────────────────────────────────
 DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 DB_PASSWORD=$DB_PASSWORD
-DB_HOST=$DB_HOST
+DB_HOST=localhost
 DB_PORT=$DB_PORT
 
-# ─── Redis ────────────────────────────────────────────────────────────────────
-REDIS_HOST=$REDIS_HOST
+# ─── Redis ───────────────────────────────────────────────────────────────────
+REDIS_HOST=localhost
 REDIS_PORT=$REDIS_PORT
 
-# ─── MinIO (S3-compatible object storage) ─────────────────────────────────────
-MINIO_ENDPOINT=$MINIO_ENDPOINT
+# ─── MinIO (S3-compatible object storage) ────────────────────────────────────
+MINIO_ENDPOINT=localhost:$MINIO_API_PORT
 MINIO_ACCESS_KEY=$MINIO_ACCESS_KEY
 MINIO_SECRET_KEY=$MINIO_SECRET_KEY
 MINIO_BUCKET_NAME=$MINIO_BUCKET_NAME
@@ -126,46 +160,44 @@ MINIO_USE_SSL=false
 MINIO_API_PORT=$MINIO_API_PORT
 MINIO_CONSOLE_PORT=$MINIO_CONSOLE_PORT
 
-# ─── Django ───────────────────────────────────────────────────────────────────
+# ─── Django ──────────────────────────────────────────────────────────────────
 SECRET_KEY='$SECRET_KEY'
-DEBUG=$DEBUG
-ALLOWED_HOSTS=$ALLOWED_HOSTS
-CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1,10.0.2.2,$LAN_IP
+CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:5173,http://localhost:3000
 
-# ─── Throttling ───────────────────────────────────────────────────────────────
+# ─── Throttling ──────────────────────────────────────────────────────────────
 THROTTLE_RELAXED=$THROTTLE_RELAXED
 DISABLE_THROTTLING=$DISABLE_THROTTLING
 
-# ─── Frontend ─────────────────────────────────────────────────────────────────
+# ─── Frontend ────────────────────────────────────────────────────────────────
 VITE_API_URL=/api
 FRONTEND_PORT=5173
 BACKEND_PORT=8000
-FRONTEND_URL=$FRONTEND_URL
+FRONTEND_URL=http://localhost:5173
+VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN:-}
 
-# ─── Resend (email service) ───────────────────────────────────────────────────
+# ─── Mobile (Expo) ───────────────────────────────────────────────────────────
+EXPO_PUBLIC_API_URL=http://$LAN_IP:8000/api
+EXPO_PUBLIC_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN:-}
+
+# ─── Resend (email service) ──────────────────────────────────────────────────
 RESEND_API_KEY=${RESEND_API_KEY:-}
 RESEND_CUSTOM_DOMAIN=$RESEND_CUSTOM_DOMAIN
 RESEND_FROM_EMAIL=$RESEND_FROM_EMAIL
-
-# ─── Mapbox ───────────────────────────────────────────────────────────────────
-VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN:-}
 EOF
-
-# Add production section only if values were provided
-if [[ -n "$DOMAIN" || -n "$LETSENCRYPT_DIR" ]]; then
-  cat >> "$ROOT_ENV" <<EOF
-
-# ─── TLS / Domain (production) ───────────────────────────────────────────────
-EOF
-  [[ -n "$DOMAIN" ]]          && echo "DOMAIN=$DOMAIN" >> "$ROOT_ENV"
-  [[ -n "$LETSENCRYPT_DIR" ]] && echo "LETSENCRYPT_DIR=$LETSENCRYPT_DIR" >> "$ROOT_ENV"
-fi
 
 echo ""
-printf '\033[1;32m✓ Created %s\033[0m\n' "$ROOT_ENV"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+ok "Created $ENV_FILE"
 echo ""
 echo "  Next steps:"
-echo "    make setup       — first-time setup (no demo data)"
+echo "    make setup       — first-time setup (venv, deps, infra, migrate)"
 echo "    make setup-demo  — first-time setup + demo data"
 echo "    make dev         — start local development"
+echo "    make dev-all     — start backend + frontend + mobile"
+echo ""
+echo "  To test the prod compose stack locally, copy the prod template over:"
+echo "    cp .env.production.example .env   (edit values for your environment)"
+echo "    make prod-up"
 echo ""

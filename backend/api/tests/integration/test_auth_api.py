@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
 
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 from api.tests.helpers.factories import UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 
@@ -28,12 +29,15 @@ class TestUserRegistration:
             'first_name': 'New',
             'last_name': 'User'
         })
-        assert response.status_code == status.HTTP_201_CREATED
-        assert 'user_id' in response.data
-        assert 'user' in response.data
-        assert response.data['user']['email'] == 'newuser@test.com'
+        assert_api_response(
+            response, 201,
+            contains={'user_id', 'user'},
+            schema={
+                'user': lambda u: isinstance(u, dict) and u.get('email') == 'newuser@test.com',
+            },
+        )
         assert User.objects.filter(email='newuser@test.com').exists()
-    
+
     def test_registration_duplicate_email(self):
         """Test registration with duplicate email fails"""
         UserFactory(email='existing@test.com')
@@ -44,15 +48,15 @@ class TestUserRegistration:
             'first_name': 'Test',
             'last_name': 'User'
         })
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-    
+        assert_problem_detail(response, 400, contains_text='email')
+
     def test_registration_missing_fields(self):
         """Test registration with missing required fields"""
         client = APIClient()
         response = client.post('/api/auth/register/', {
             'email': 'incomplete@test.com'
         })
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
 
 @pytest.mark.django_db
@@ -65,40 +69,45 @@ class TestUserLogin:
         user = UserFactory(email='testuser@test.com')
         user.set_password('testpass123')
         user.save()
-        
+
         client = APIClient()
         response = client.post('/api/auth/login/', {
             'email': 'testuser@test.com',
             'password': 'testpass123'
         })
-        assert response.status_code == status.HTTP_200_OK
-        assert 'access' in response.data
-        assert 'refresh' in response.data
-    
+        assert_api_response(
+            response, 200,
+            contains={'access', 'refresh'},
+            schema={
+                'access': lambda v: isinstance(v, str) and v.count('.') == 2,
+                'refresh': lambda v: isinstance(v, str) and v.count('.') == 2,
+            },
+        )
+
     def test_login_invalid_credentials(self):
         """Test login with invalid credentials"""
         UserFactory(email='testuser@test.com', password='correctpass')
-        
+
         client = APIClient()
         response = client.post('/api/auth/login/', {
             'email': 'testuser@test.com',
             'password': 'wrongpass'
         })
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-    
+        assert_problem_detail(response, 401)
+
     def test_login_account_locked(self):
         """Test login with locked account"""
         user = UserFactory(email='locked@test.com')
         user.set_password('testpass123')
         user.locked_until = timezone.now() + timedelta(hours=1)
         user.save()
-        
+
         client = APIClient()
         response = client.post('/api/auth/login/', {
             'email': 'locked@test.com',
             'password': 'testpass123'
         })
-        assert response.status_code == status.HTTP_423_LOCKED
+        assert_problem_detail(response, 423, contains_text='lock')
     
     def test_login_account_lockout_after_failed_attempts(self):
         """Test account lockout after multiple failed attempts"""
@@ -133,8 +142,7 @@ class TestTokenRefresh:
         response = client.post('/api/auth/refresh/', {
             'refresh': str(refresh)
         })
-        assert response.status_code == status.HTTP_200_OK
-        assert 'access' in response.data
+        assert_api_response(response, 200, contains={'access'})
     
     def test_token_refresh_invalid_token(self):
         """Test token refresh with invalid token"""
@@ -142,7 +150,7 @@ class TestTokenRefresh:
         response = client.post('/api/auth/refresh/', {
             'refresh': 'invalid-token'
         })
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 @pytest.mark.django_db
@@ -157,14 +165,13 @@ class TestAuthenticatedEndpoints:
         client.authenticate_user(user)
         
         response = client.get('/api/users/me/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['email'] == user.email
+        assert_api_response(response, 200, schema={'email': user.email})
     
     def test_unauthenticated_access(self):
         """Test accessing protected endpoint without token"""
         client = APIClient()
         response = client.get('/api/users/me/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 @pytest.mark.django_db
@@ -178,7 +185,7 @@ class TestLogout:
         user.set_password(password)
         user.save()
         resp = client.post('/api/auth/login/', {'email': email, 'password': password})
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         return user, resp.data['refresh']
 
     def test_logout_returns_200(self):
@@ -186,8 +193,7 @@ class TestLogout:
         client = APIClient()
         self._login(client)
         response = client.post('/api/auth/logout/')
-        assert response.status_code == status.HTTP_200_OK
-        assert 'detail' in response.data
+        assert_api_response(response, 200, contains={'detail'})
 
     def test_logout_clears_auth_cookies(self):
         """Logout response includes cookie-deletion directives for both tokens."""
@@ -198,7 +204,7 @@ class TestLogout:
         client.cookies['refresh_token'] = refresh_token
 
         response = client.post('/api/auth/logout/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         # Django sets max-age=0 when deleting a cookie
         assert 'access_token' in response.cookies
@@ -214,16 +220,15 @@ class TestLogout:
         # Attach refresh cookie so logout can blacklist it
         client.cookies['refresh_token'] = refresh_token
         logout_resp = client.post('/api/auth/logout/')
-        assert logout_resp.status_code == status.HTTP_200_OK
+        assert_api_response(logout_resp, 200)
 
         # Attempt to use the blacklisted token on a fresh client (sent in body)
         fresh_client = APIClient()
         refresh_resp = fresh_client.post('/api/auth/refresh/', {'refresh': refresh_token})
-        assert refresh_resp.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(refresh_resp, 401)
 
     def test_logout_without_cookies_is_safe(self):
         """Logout is idempotent / safe when no refresh cookie is present."""
         client = APIClient()
         response = client.post('/api/auth/logout/')
-        assert response.status_code == status.HTTP_200_OK
-        assert 'detail' in response.data
+        assert_api_response(response, 200, contains={'detail'})

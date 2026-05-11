@@ -5,6 +5,7 @@
  */
 
 import { apiRequest } from "./client";
+import { normalizeRuntimeUrl } from "../constants/env";
 import type {
   PaginatedResponse,
   PublicUserProfile,
@@ -41,28 +42,97 @@ export interface UserProfileRequest {
   first_name?: string;
   last_name?: string;
   bio?: string;
+  location?: string;
   avatar_url?: string;
   banner_url?: string;
+  notification_preferences?: NotificationPreferences;
+  featured_badges?: string[];
+  /** Tag IDs (Wikidata QIDs or UUID tags) — same as web `skill_ids` */
+  skill_ids?: string[];
+}
+
+// Notification preference categories surfaced in the mobile settings screen
+// (#370). Missing keys default to ON; setting a key to false opts the user
+// out of that category.
+export interface NotificationPreferences {
+  push?: boolean;        // master switch — false silences every push channel
+  chat?: boolean;
+  handshakes?: boolean;
+  services?: boolean;
+  reputation?: boolean;
+  reports?: boolean;
+  system?: boolean;
+}
+
+export function getNotificationPreferences(): Promise<NotificationPreferences> {
+  return apiRequest<{ notification_preferences?: NotificationPreferences }>(
+    '/users/me/',
+  ).then((u) => u.notification_preferences ?? {});
+}
+
+export function patchNotificationPreferences(
+  prefs: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  return apiRequest<{ notification_preferences?: NotificationPreferences }>(
+    '/users/me/',
+    { method: 'PATCH', body: { notification_preferences: prefs } },
+  ).then((u) => u.notification_preferences ?? {});
+}
+
+function normalizeUserSummary(user: UserSummary): UserSummary {
+  return {
+    ...user,
+    avatar_url: normalizeRuntimeUrl(user.avatar_url),
+    banner_url: normalizeRuntimeUrl(user.banner_url),
+  };
+}
+
+function normalizePublicUserProfile(user: PublicUserProfile): PublicUserProfile {
+  return {
+    ...user,
+    avatar_url: normalizeRuntimeUrl(user.avatar_url),
+    banner_url: normalizeRuntimeUrl(user.banner_url),
+  };
+}
+
+function normalizeProfileReview(review: ProfileReview): ProfileReview {
+  return {
+    ...review,
+    user_avatar_url: normalizeRuntimeUrl(review.user_avatar_url) ?? undefined,
+  };
+}
+
+function normalizeUserHistoryItem(item: UserHistoryItem): UserHistoryItem {
+  return {
+    ...item,
+    partner_avatar_url: normalizeRuntimeUrl(item.partner_avatar_url),
+  };
 }
 
 export function getMe(): Promise<UserSummary> {
-  return apiRequest<UserSummary>("/users/me/");
+  return apiRequest<UserSummary>("/users/me/").then(normalizeUserSummary);
 }
 
 export function updateMe(
   body: Partial<UserProfileRequest>,
 ): Promise<UserSummary> {
-  return apiRequest<UserSummary>("/users/me/", { method: "PUT", body });
+  return apiRequest<UserSummary>("/users/me/", { method: "PUT", body }).then(
+    normalizeUserSummary,
+  );
 }
 
 export function patchMe(
-  body: Partial<UserProfileRequest>,
+  body: Partial<UserProfileRequest> | FormData,
 ): Promise<UserSummary> {
-  return apiRequest<UserSummary>("/users/me/", { method: "PATCH", body });
+  return apiRequest<UserSummary>("/users/me/", { method: "PATCH", body }).then(
+    normalizeUserSummary,
+  );
 }
 
 export function getUser(id: string): Promise<PublicUserProfile> {
-  return apiRequest<PublicUserProfile>(`/users/${id}/`);
+  return apiRequest<PublicUserProfile>(`/users/${id}/`).then(
+    normalizePublicUserProfile,
+  );
 }
 
 export function followUser(userId: string): Promise<void> {
@@ -79,8 +149,8 @@ export function unfollowUser(userId: string): Promise<void> {
 function normalizeUserSummaryList(
   data: UserSummary[] | PaginatedResponse<UserSummary>,
 ): UserSummary[] {
-  if (Array.isArray(data)) return data;
-  return data.results ?? [];
+  const rows = Array.isArray(data) ? data : data.results ?? [];
+  return rows.map(normalizeUserSummary);
 }
 
 export function getFollowers(userId: string): Promise<UserSummary[]> {
@@ -99,14 +169,18 @@ export function updateUser(
   id: string,
   body: Partial<UserProfileRequest>,
 ): Promise<UserSummary> {
-  return apiRequest<UserSummary>(`/users/${id}/`, { method: "PUT", body });
+  return apiRequest<UserSummary>(`/users/${id}/`, { method: "PUT", body }).then(
+    normalizeUserSummary,
+  );
 }
 
 export function patchUser(
   id: string,
   body: Partial<UserProfileRequest>,
 ): Promise<UserSummary> {
-  return apiRequest<UserSummary>(`/users/${id}/`, { method: "PATCH", body });
+  return apiRequest<UserSummary>(`/users/${id}/`, { method: "PATCH", body }).then(
+    normalizeUserSummary,
+  );
 }
 
 export function getBadgeProgress(userId: string): Promise<unknown> {
@@ -116,8 +190,8 @@ export function getBadgeProgress(userId: string): Promise<unknown> {
 function normalizeUserHistoryList(
   data: UserHistoryItem[] | { results?: UserHistoryItem[] },
 ): UserHistoryItem[] {
-  if (Array.isArray(data)) return data;
-  return data?.results ?? [];
+  const rows = Array.isArray(data) ? data : data?.results ?? [];
+  return rows.map(normalizeUserHistoryItem);
 }
 
 export function getUserHistory(
@@ -142,5 +216,8 @@ export function getVerifiedReviews(
 ): Promise<ProfileReviewsResponse> {
   return apiRequest<ProfileReviewsResponse>(`/users/${userId}/verified-reviews/`, {
     params: params as Record<string, string | number | undefined>,
-  });
+  }).then((response) => ({
+    ...response,
+    results: (response.results ?? []).map(normalizeProfileReview),
+  }));
 }

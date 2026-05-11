@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useForm, Controller, type Resolver } from 'react-hook-form'
+import { useForm, Controller, type Resolver, type SubmitErrorHandler } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
@@ -9,9 +9,19 @@ import {
 import { FiX, FiImage, FiClock, FiMapPin, FiCalendar, FiTag, FiSearch, FiCheckCircle, FiNavigation, FiStar } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { serviceAPI } from '@/services/serviceAPI'
+import { useAuthStore } from '@/store/useAuthStore'
 import WikidataTagAutocomplete from './WikidataTagAutocomplete'
 import { LocationPickerMap } from './LocationPickerMap'
 import type { Service, ServiceMedia, Tag } from '@/types'
+import {
+  maxParticipantsFloor,
+  validateMaxParticipantsValue,
+} from '@/utils/serviceFormCapacity'
+import {
+  effectiveScheduleType,
+  recurrenceIntervalForSubmission,
+} from '@/utils/eventRecurrence'
+import { extractFieldErrors, extractTopLevelDetail } from '@/utils/formErrors'
 
 import {
   GREEN, GREEN_LT,
@@ -39,6 +49,7 @@ function getSchema(type: 'Offer' | 'Need' | 'Event') {
     max_participants: z.coerce.number().int().positive('Must be at least 1').max(100),
     schedule_type:    z.enum(['One-Time', 'Recurrent']),
     schedule_details: z.string().max(500).optional(),
+    recurrence_interval_days: z.coerce.number().int().min(1).max(365).optional(),
   })
 }
 
@@ -433,6 +444,9 @@ export default function ServiceForm({
   initialService,
 }: ServiceFormProps) {
   const navigate = useNavigate()
+  const refreshUser = useAuthStore((state) => state.refreshUser)
+  const updateUserOptimistically = useAuthStore((state) => state.updateUserOptimistically)
+  const currentUser = useAuthStore((state) => state.user)
   const accent   = type === 'Event' ? AMBER : type === 'Offer' ? GREEN : BLUE
   const accentLt = type === 'Event' ? AMBER_LT : type === 'Offer' ? GREEN_LT : BLUE_LT
   const isEditMode = mode === 'edit' && !!serviceId
@@ -461,9 +475,10 @@ export default function ServiceForm({
   const [eventDate, setEventDate]           = useState('')
   const [eventTime, setEventTime]           = useState('')
   const [eventDateTimeError, setEventDateTimeError] = useState<string | undefined>()
+  const [requiresQrCheckin, setRequiresQrCheckin]   = useState(false)
 
   const schema = useMemo(() => getSchema(type), [type])
-  const { register, handleSubmit, control, watch, trigger, reset, formState } = useForm<FormValues>({
+  const { register, handleSubmit, control, watch, trigger, reset, setError, formState } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
     defaultValues: { location_type: 'In-Person', schedule_type: 'One-Time', max_participants: 1 },
   })
@@ -520,6 +535,7 @@ export default function ServiceForm({
       max_participants: initialService.max_participants,
       schedule_type: initialService.schedule_type,
       schedule_details: initialService.schedule_details ?? '',
+      recurrence_interval_days: initialService.recurrence_interval_days ?? undefined,
     })
 
     setSelectedTags(initialService.tags ?? [])
@@ -545,6 +561,10 @@ export default function ServiceForm({
       if (exactLat != null && exactLng != null && Number.isFinite(exactLat) && Number.isFinite(exactLng)) {
         setSessionExactLocationCoords({ lat: exactLat, lng: exactLng })
       }
+    }
+
+    if (initialService.type === 'Event') {
+      setRequiresQrCheckin(!!initialService.requires_qr_checkin)
     }
 
     if ((initialService.type === 'Event' || (
@@ -775,10 +795,19 @@ export default function ServiceForm({
           fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
         }
         if (scheduleTypeChanged || type === 'Event') {
-          fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
+          fd.append('schedule_type', effectiveScheduleType(type, values.schedule_type))
+        }
+        const recurrenceDays = recurrenceIntervalForSubmission(
+          type, values.schedule_type, values.recurrence_interval_days,
+        )
+        if (recurrenceDays !== null) {
+          fd.append('recurrence_interval_days', String(recurrenceDays))
         }
         if (dirtyFields.schedule_details || scheduleTypeChanged) {
           fd.append('schedule_details', values.schedule_details ?? '')
+        }
+        if (type === 'Event' && requiresQrCheckin !== !!initialService?.requires_qr_checkin) {
+          fd.append('requires_qr_checkin', requiresQrCheckin ? 'true' : 'false')
         }
 
         if (values.location_type === 'In-Person' && locationValue && (locationTypeChanged || publicLocationChanged)) {
@@ -844,7 +873,14 @@ export default function ServiceForm({
           })
           unmanagedMediaIds.forEach((mediaId) => fd.append('media_order', `existing:${mediaId}`))
         }
+        // NFR-05d: round-trip the optimistic-lock counter so the backend
+        // can reject a concurrent owner edit with 409 instead of silently
+        // overwriting the other writer.
+        if (typeof initialService?.version === 'number') {
+          fd.append('version', String(initialService.version))
+        }
         const updated = await serviceAPI.update(serviceId, fd)
+        if (type === 'Need') await refreshUser()
         toast.success(`${type} updated successfully!`)
         navigate(`/service-detail/${updated.id}`)
       } else {
@@ -884,7 +920,18 @@ export default function ServiceForm({
           fd.append('session_location_guide', '')
         }
         fd.append('max_participants', type === 'Need' ? '1' : String(values.max_participants))
-        fd.append('schedule_type', type === 'Event' ? 'One-Time' : values.schedule_type)
+        fd.append('schedule_type', effectiveScheduleType(type, values.schedule_type))
+        {
+          const recurrenceDays = recurrenceIntervalForSubmission(
+            type, values.schedule_type, values.recurrence_interval_days,
+          )
+          if (recurrenceDays !== null) {
+            fd.append('recurrence_interval_days', String(recurrenceDays))
+          }
+        }
+        if (type === 'Event') {
+          fd.append('requires_qr_checkin', requiresQrCheckin ? 'true' : 'false')
+        }
         if (values.schedule_details) fd.append('schedule_details', values.schedule_details)
         if ((type === 'Event' || isFixedGroupOffer) && eventDate && eventTime) {
           // Send as UTC ISO string so the backend stores the correct absolute time
@@ -905,31 +952,127 @@ export default function ServiceForm({
             ]
         orderedFiles.forEach((f) => fd.append('media', f))
         const created = await serviceAPI.create(fd)
+        if (type === 'Need') {
+          const currentBalance = Number(currentUser?.timebank_balance ?? 0)
+          updateUserOptimistically({
+            timebank_balance: currentBalance - Number(values.duration),
+          })
+          await refreshUser()
+        }
         toast.success(`${type} posted successfully!`)
         navigate(`/service-detail/${created.id}`)
       }
     } catch (err: unknown) {
-      const data = (err as { response?: { data?: unknown } })?.response?.data
-      let msg = 'Failed to post. Please try again.'
-      if (data && typeof data === 'object') {
-        if ('detail' in data && typeof (data as Record<string, unknown>).detail === 'string') {
-          msg = (data as Record<string, string>).detail
-        } else {
-          // DRF returns field-level errors as { field: [msg, ...], ... }
-          const firstError = Object.values(data as Record<string, unknown>)
-            .flatMap((v) => (Array.isArray(v) ? v : [v]))
-            .find((v) => typeof v === 'string')
-          if (firstError) msg = String(firstError)
+      const response = (err as { response?: { status?: number; data?: unknown } })?.response
+      const data = response?.data
+
+      // NFR-05d: a VERSION_CONFLICT means another owner session saved
+      // first. Keep the form open and surface a non-blocking toast that
+      // offers a reload — discarding the user's draft silently would
+      // be the worse failure mode.
+      if (
+        response?.status === 409
+        && data && typeof data === 'object'
+        && (data as Record<string, unknown>).code === 'VERSION_CONFLICT'
+      ) {
+        const conflictDetail = typeof (data as Record<string, unknown>).detail === 'string'
+          ? String((data as Record<string, string>).detail)
+          : 'This listing was updated elsewhere — reload to see the latest changes.'
+        toast.warning(conflictDetail, {
+          action: {
+            label: 'Reload',
+            onClick: () => { window.location.reload() },
+          },
+          duration: 10_000,
+        })
+        return
+      }
+
+      // Preserve everything the user typed. We only surface the API-side
+      // validation errors next to the offending input — the form values,
+      // tags, media, and location selections all stay intact.
+      const fieldErrors = extractFieldErrors(data)
+      const detail = extractTopLevelDetail(data)
+      let routedAny = false
+
+      // Inputs registered with react-hook-form: route directly via setError.
+      const rhfFields: (keyof FormValues)[] = [
+        'title',
+        'description',
+        'duration',
+        'max_participants',
+        'schedule_type',
+        'location_type',
+        'schedule_details',
+        'recurrence_interval_days',
+      ]
+      for (const name of rhfFields) {
+        const msg = fieldErrors[name]
+        if (msg) {
+          setError(name, { type: 'server', message: msg }, { shouldFocus: !routedAny })
+          routedAny = true
         }
       }
-      toast.error(msg)
+
+      // Inputs that live outside of react-hook-form. We reuse the existing
+      // inline error slots that the form already renders for client-side
+      // validation, so the user sees the message right under the input.
+      const locationFieldMsg =
+        fieldErrors.location_area
+        ?? fieldErrors.location_lat
+        ?? fieldErrors.location_lng
+      if (locationFieldMsg) {
+        setLocationError(locationFieldMsg)
+        routedAny = true
+      }
+
+      const sessionFieldMsg =
+        fieldErrors.session_exact_location
+        ?? fieldErrors.session_exact_location_lat
+        ?? fieldErrors.session_exact_location_lng
+        ?? fieldErrors.session_location_guide
+      if (sessionFieldMsg) {
+        setSessionExactLocationError(sessionFieldMsg)
+        routedAny = true
+      }
+
+      if (fieldErrors.scheduled_time) {
+        setEventDateTimeError(fieldErrors.scheduled_time)
+        routedAny = true
+      }
+
+      // Anything we couldn't pin to a specific input still needs a banner so
+      // the user knows the submit didn't go through.
+      if (!routedAny) {
+        toast.error(detail ?? 'Failed to post. Please try again.')
+      } else if (detail) {
+        toast.error(detail)
+      }
     } finally { setSubmitting(false) }
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
 
+  // When zod rejects a field, surface the failure and scroll the first
+  // offending input into view so the user (and the test harness) gets a
+  // visible signal instead of a silent stay-on-page.
+  const onInvalid: SubmitErrorHandler<FormValues> = (fieldErrors) => {
+    const firstField = Object.keys(fieldErrors)[0]
+    if (firstField) {
+      const el = document.querySelector<HTMLElement>(`[name="${firstField}"]`)
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+      const focusable = el as HTMLInputElement | null
+      if (focusable && typeof focusable.focus === 'function') {
+        focusable.focus({ preventScroll: true })
+      }
+    }
+    toast.error('Please check the highlighted fields and try again.')
+  }
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate>
+    <form onSubmit={handleSubmit(onSubmit, onInvalid)} noValidate>
       <Stack gap={7}>
 
         {/* ── Basic Info ─────────────────────────────────────────────────── */}
@@ -984,21 +1127,35 @@ export default function ServiceForm({
                 <ErrTxt msg={errors.duration?.message} />
               </Box>
               {type !== 'Need' && (
-              <Box>
-                <Label required>Max participants</Label>
-                <Input
-                  type="number" min={1} max={100} placeholder="1"
-                  {...register('max_participants')}
-                  style={inputStyle}
-                  _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
-                />
-                <ErrTxt msg={errors.max_participants?.message} />
-                {isGroupOffer && (
-                  <Text fontSize="11px" color={GRAY400} mt="5px">
-                    One-time group offers have a fixed date, location, and capacity. Recurring group offers allow participants to re-join after completion.
-                  </Text>
-                )}
-              </Box>
+                <Box>
+                  <Label required>Max participants</Label>
+                  <Input
+                    type="number"
+                    min={maxParticipantsFloor(isEditMode, initialService?.participant_count)}
+                    max={100}
+                    placeholder="1"
+                    {...register('max_participants', {
+                      validate: (value) => validateMaxParticipantsValue(
+                        value,
+                        isEditMode,
+                        maxParticipantsFloor(isEditMode, initialService?.participant_count),
+                      ),
+                    })}
+                    style={inputStyle}
+                    _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
+                  />
+                  <ErrTxt msg={errors.max_participants?.message} />
+                  {isGroupOffer && (
+                    <Text fontSize="11px" color={GRAY400} mt="5px">
+                      One-time group offers have a fixed date, location, and capacity. Recurring group offers allow participants to re-join after completion.
+                    </Text>
+                  )}
+                  {isEditMode && maxParticipantsFloor(isEditMode, initialService?.participant_count) > 1 && (
+                    <Text fontSize="11px" color={GRAY400} mt="5px">
+                      {initialService?.participant_count} already accepted. The cap can't go below that.
+                    </Text>
+                  )}
+                </Box>
               )}
             </Grid>
 
@@ -1016,115 +1173,124 @@ export default function ServiceForm({
                   />
                 )}
               />
+              <ErrTxt msg={errors.location_type?.message} />
             </Box>
 
-            {locType === 'In-Person' && (
-              <Stack gap={4}>
-                <Box>
-                  <Flex align="center" justify="space-between" mb="6px">
-                    <Label required>
-                      <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
-                      {isFixedGroupOffer ? 'Public district / area' : 'Address'}
-                    </Label>
-                    <UseMyLocationButton
-                      accent={accent}
-                      onLocated={(v) => {
-                        setLocationValue(v)
-                        setLocationError(undefined)
-                        if (isFixedGroupOffer) {
-                          syncExactFromLocation(v)
-                        }
-                      }}
-                    />
-                  </Flex>
-                  <LocationSearch
+            {locType === 'In-Person' && !isFixedGroupOffer && (
+              <Box>
+                <Flex align="center" justify="space-between" mb="6px">
+                  <Label required>
+                    <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
+                    Address
+                  </Label>
+                  <UseMyLocationButton
                     accent={accent}
-                    value={locationValue}
-                    onChange={(v) => {
+                    onLocated={(v) => {
                       setLocationValue(v)
-                      if (v) {
-                        setLocationError(undefined)
-                        if (isFixedGroupOffer) {
-                          syncExactFromLocation(v)
-                        }
-                      }
+                      setLocationError(undefined)
                     }}
-                    error={locationError}
                   />
-                  {isFixedGroupOffer && (
-                    <Text fontSize="11px" color={GRAY400} mt="5px">
-                      This public area is shown on the listing and service detail before approval.
-                    </Text>
-                  )}
-                </Box>
+                </Flex>
+                <LocationSearch
+                  accent={accent}
+                  value={locationValue}
+                  onChange={(v) => {
+                    setLocationValue(v)
+                    if (v) setLocationError(undefined)
+                  }}
+                  error={locationError}
+                />
+              </Box>
+            )}
 
-                {isFixedGroupOffer && (
-                  <Box>
-                    <Label required>
-                      <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
-                      Exact address for session details
-                    </Label>
-                    <LocationSearch
-                      accent={accent}
-                      value={sessionExactLocationCoords ? {
-                        label: sessionExactLocation,
-                        fullAddress: sessionExactLocation,
-                        district: locationValue?.label,
-                        lat: sessionExactLocationCoords.lat,
-                        lng: sessionExactLocationCoords.lng,
-                      } : null}
-                      onChange={(v) => {
-                        if (v) {
-                          setSessionExactLocation(v.fullAddress ?? v.label)
-                          setSessionExactLocationCoords({ lat: v.lat, lng: v.lng })
-                          setSessionExactLocationError(undefined)
-                          syncPublicFromExact({
-                            district: v.district,
-                            fullAddress: v.fullAddress ?? v.label,
-                            lat: v.lat,
-                            lng: v.lng,
-                          })
-                        } else {
-                          setSessionExactLocationCoords(null)
-                        }
-                      }}
-                      error={sessionExactLocationError}
-                      mode="full"
-                      placeholder="Search the exact meeting address — e.g. Moda Sahili No: 12, Kadıköy"
-                    />
-                    <Text fontSize="11px" color={GRAY400} mt="5px" mb="8px">
-                      You can also fine-tune it on the map below.
-                    </Text>
-                    <LocationPickerMap
-                      value={sessionExactLocation}
-                      coords={sessionExactLocationCoords}
-                      showSearchInput={false}
-                      onChange={(value, coords, meta) => {
-                        setSessionExactLocation(value)
-                        setSessionExactLocationCoords(coords ?? null)
-                        if (coords) {
-                          syncPublicFromExact({
-                            district: meta?.district ?? null,
-                            fullAddress: meta?.fullAddress ?? value,
-                            lat: coords.lat,
-                            lng: coords.lng,
-                          })
-                        }
-                        if (value.trim() && coords) setSessionExactLocationError(undefined)
-                      }}
-                      height="220px"
-                      auxiliaryLabel="Location guide (optional)"
-                      auxiliaryValue={sessionLocationGuide}
-                      auxiliaryPlaceholder="Near of the park"
-                      onAuxiliaryChange={setSessionLocationGuide}
-                    />
-                    <ErrTxt msg={sessionExactLocationError} />
-                    <Text fontSize="11px" color={AMBER} mt="5px">
-                      This exact address will be shared when you send the fixed session details to interested participants.
-                    </Text>
-                  </Box>
-                )}
-              </Stack>
+            {/*
+              Fixed group offer: collect the meeting address in a single
+              canonical control. Issue #506 — the form previously rendered a
+              separate "public district" input alongside the exact address,
+              which left users with two location inputs to fill in. We now
+              render only the exact address picker and derive the public
+              district from it via syncPublicFromExact.
+            */}
+            {locType === 'In-Person' && isFixedGroupOffer && (
+              <Box>
+                <Flex align="center" justify="space-between" mb="6px">
+                  <Label required>
+                    <FiMapPin size={12} style={{ display: 'inline', marginRight: 5 }} />
+                    Meeting address
+                  </Label>
+                  <UseMyLocationButton
+                    accent={accent}
+                    onLocated={(v) => {
+                      setLocationValue(v)
+                      setLocationError(undefined)
+                      syncExactFromLocation(v)
+                    }}
+                  />
+                </Flex>
+                <LocationSearch
+                  accent={accent}
+                  value={sessionExactLocationCoords ? {
+                    label: sessionExactLocation,
+                    fullAddress: sessionExactLocation,
+                    district: locationValue?.label,
+                    lat: sessionExactLocationCoords.lat,
+                    lng: sessionExactLocationCoords.lng,
+                  } : null}
+                  onChange={(v) => {
+                    if (v) {
+                      setSessionExactLocation(v.fullAddress ?? v.label)
+                      setSessionExactLocationCoords({ lat: v.lat, lng: v.lng })
+                      setSessionExactLocationError(undefined)
+                      setLocationError(undefined)
+                      syncPublicFromExact({
+                        district: v.district,
+                        fullAddress: v.fullAddress ?? v.label,
+                        lat: v.lat,
+                        lng: v.lng,
+                      })
+                    } else {
+                      setSessionExactLocationCoords(null)
+                    }
+                  }}
+                  error={sessionExactLocationError ?? locationError}
+                  mode="full"
+                  placeholder="Search the exact meeting address — e.g. Moda Sahili No: 12, Kadıköy"
+                />
+                <Text fontSize="11px" color={GRAY400} mt="5px" mb="8px">
+                  You can also fine-tune it on the map below.
+                </Text>
+                <LocationPickerMap
+                  value={sessionExactLocation}
+                  coords={sessionExactLocationCoords}
+                  showSearchInput={false}
+                  onChange={(value, coords, meta) => {
+                    setSessionExactLocation(value)
+                    setSessionExactLocationCoords(coords ?? null)
+                    if (coords) {
+                      syncPublicFromExact({
+                        district: meta?.district ?? null,
+                        fullAddress: meta?.fullAddress ?? value,
+                        lat: coords.lat,
+                        lng: coords.lng,
+                      })
+                    }
+                    if (value.trim() && coords) {
+                      setSessionExactLocationError(undefined)
+                      setLocationError(undefined)
+                    }
+                  }}
+                  height="220px"
+                  auxiliaryLabel="Location guide (optional)"
+                  auxiliaryValue={sessionLocationGuide}
+                  auxiliaryPlaceholder="Near of the park"
+                  onAuxiliaryChange={setSessionLocationGuide}
+                />
+                <ErrTxt msg={sessionExactLocationError} />
+                <Text fontSize="11px" color={AMBER} mt="5px">
+                  This exact address is shared with approved participants. The
+                  surrounding district appears on the public listing.
+                </Text>
+              </Box>
             )}
 
             {locType === 'Online' && isFixedGroupOffer && (
@@ -1145,6 +1311,7 @@ export default function ServiceForm({
             )}
 
             {(type === 'Event' || isFixedGroupOffer) ? (
+              <>
               <Box>
                 <Label required>
                   <FiCalendar size={12} style={{ display: 'inline', marginRight: 5 }} />
@@ -1176,52 +1343,91 @@ export default function ServiceForm({
                     : 'This exact date/time will be reused for every approved participant. It cannot be customized per handshake.'}
                 </Text>
               </Box>
-            ) : (
-              <>
-                <Box>
-                  <Label required>
-                    <FiCalendar size={12} style={{ display: 'inline', marginRight: 5 }} />
-                    Schedule
-                  </Label>
-                  <Controller
-                    name="schedule_type"
-                    control={control}
-                    render={({ field }) => (
-                      <SegmentedControl
-                        value={field.value}
-                        onChange={field.onChange}
-                        options={[{ value: 'One-Time', label: 'One-Time' }, { value: 'Recurrent', label: 'Recurring' }]}
-                        accent={accent}
+
+              {type === 'Event' && (
+                <>
+                  <Box>
+                    <Label>Repeats</Label>
+                    <Controller
+                      name="schedule_type"
+                      control={control}
+                      render={({ field }) => (
+                        <SegmentedControl
+                          value={field.value}
+                          onChange={field.onChange}
+                          options={[{ value: 'One-Time', label: 'One-time' }, { value: 'Recurrent', label: 'Recurring' }]}
+                          accent={accent}
+                        />
+                      )}
+                    />
+                    <ErrTxt msg={errors.schedule_type?.message} />
+                  </Box>
+
+                  {schedType === 'Recurrent' && (
+                    <Box>
+                      <Label>Repeat every (days)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={365}
+                        placeholder="7"
+                        {...register('recurrence_interval_days')}
+                        style={inputStyle}
+                        _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
                       />
-                    )}
-                  />
-                </Box>
+                      <ErrTxt msg={errors.recurrence_interval_days?.message} />
+                      <Text fontSize="11px" color={GRAY400} mt="5px">
+                        When this event is completed, a fresh copy is reposted with the date shifted forward by this many days.
+                      </Text>
+                    </Box>
+                  )}
 
-                {schedType === 'Recurrent' && (
-                  <Box>
-                    <Label>Schedule details</Label>
-                    <Input
-                      placeholder="e.g. Every Saturday 10–11 AM"
-                      {...register('schedule_details')}
-                      style={inputStyle}
-                      _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
-                    />
-                    <ErrTxt msg={errors.schedule_details?.message} />
+                  <Box
+                    p="14px 16px" borderRadius="12px"
+                    border={`1px solid ${requiresQrCheckin ? GREEN : GRAY200}`}
+                    bg={requiresQrCheckin ? GREEN_LT : WHITE}
+                    cursor="pointer"
+                    onClick={() => setRequiresQrCheckin(!requiresQrCheckin)}
+                    transition="border-color 0.15s, background 0.15s"
+                  >
+                    <Flex align="center" justify="space-between">
+                      <Box>
+                        <Text fontSize="sm" fontWeight="600" color={GRAY800}>
+                          Require QR attendance
+                        </Text>
+                        <Text fontSize="11px" color={GRAY500} mt="2px">
+                          Participants must scan a QR code or enter an attendance code at the event
+                        </Text>
+                      </Box>
+                      <Box
+                        w="40px" h="22px" borderRadius="full" flexShrink={0} ml={3}
+                        bg={requiresQrCheckin ? GREEN : GRAY300}
+                        position="relative" transition="background 0.2s"
+                      >
+                        <Box
+                          position="absolute" top="2px"
+                          left={requiresQrCheckin ? '20px' : '2px'}
+                          w="18px" h="18px" borderRadius="full" bg={WHITE}
+                          boxShadow="0 1px 3px rgba(0,0,0,0.15)"
+                          transition="left 0.2s"
+                        />
+                      </Box>
+                    </Flex>
                   </Box>
-                )}
-
-                {schedType === 'One-Time' && (
-                  <Box>
-                    <Label>Schedule details <Text as="span" fontSize="11px" color={GRAY400} fontWeight={400}>(optional)</Text></Label>
-                    <Input
-                      placeholder="e.g. This weekend, flexible timing"
-                      {...register('schedule_details')}
-                      style={inputStyle}
-                      _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
-                    />
-                  </Box>
-                )}
+                </>
+              )}
               </>
+            ) : (
+              <Box>
+                <Label>Schedule details <Text as="span" fontSize="11px" color={GRAY400} fontWeight={400}>(optional)</Text></Label>
+                <Input
+                  placeholder="e.g. This weekend, flexible timing"
+                  {...register('schedule_details')}
+                  style={inputStyle}
+                  _focus={{ borderColor: accent, boxShadow: `0 0 0 2px ${accent}18` }}
+                />
+                <ErrTxt msg={errors.schedule_details?.message} />
+              </Box>
             )}
           </Stack>
         </Section>

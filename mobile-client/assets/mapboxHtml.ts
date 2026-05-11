@@ -1,0 +1,220 @@
+// Inlined as a TS string instead of a separate `.html` asset so Metro hot
+// reloads pick up edits immediately and there is no Asset.downloadAsync
+// cache to invalidate between dev rebuilds. The previous `.html` asset
+// would survive a code change in mapbox.html if the simulator app was
+// not deleted between runs, which made every fix to the WebView bridge
+// look like a no-op until the user wiped the app.
+//
+// Sister file `mapbox.html` is kept around for editor syntax highlighting
+// during local prototyping. Whenever you edit it, paste the body back
+// into the template literal below — the `.html` is no longer loaded at
+// runtime.
+export const MAPBOX_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #fff; }
+    #map { position: absolute; inset: 0; }
+    .mapboxgl-ctrl-attrib { display: none; }
+    .mapboxgl-ctrl-bottom-right,
+    .mapboxgl-ctrl-bottom-left { display: none; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    (function () {
+      var map = null;
+      var loaded = false;
+      var pendingServices = null;
+      var userMarker = null;
+
+      function send(payload) {
+        try {
+          if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+          }
+        } catch (e) { /* swallow */ }
+      }
+
+      function colorFor(type) {
+        // Mirror the web tokens (frontend/src/theme/tokens.ts):
+        //   GREEN  = #2D5C4E (Offer)
+        //   BLUE   = #1D4ED8 (Need)
+        //   AMBER  = #D97706 (Event)
+        // The previous lighter hex values disagreed with the type pill
+        // colours used on the rest of the app, so an Offer marker on the
+        // map didn't match the green Offer pill on a service card.
+        switch (type) {
+          case "Offer": return "#2D5C4E";
+          case "Need":  return "#1D4ED8";
+          case "Event": return "#D97706";
+          default:      return "#6B7280";
+        }
+      }
+
+      function applyServices(services) {
+        if (!map || !loaded) {
+          pendingServices = services;
+          return;
+        }
+        var fc = {
+          type: "FeatureCollection",
+          features: (services || [])
+            .filter(function (s) {
+              var lat = Number(s.lat);
+              var lng = Number(s.lng);
+              return !Number.isNaN(lat) && !Number.isNaN(lng);
+            })
+            .map(function (s) {
+              return {
+                type: "Feature",
+                properties: {
+                  id: s.id,
+                  type: s.type,
+                  color: colorFor(s.type),
+                },
+                geometry: {
+                  type: "Point",
+                  coordinates: [Number(s.lng), Number(s.lat)],
+                },
+              };
+            }),
+        };
+
+        var src = map.getSource("services");
+        if (src) {
+          src.setData(fc);
+          return;
+        }
+
+        map.addSource("services", { type: "geojson", data: fc });
+        map.addLayer({
+          id: "services-area",
+          type: "circle",
+          source: "services",
+          paint: {
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              8, 8,
+              11, 18,
+              14, 32,
+              17, 60
+            ],
+            "circle-color": ["get", "color"],
+            "circle-opacity": 0.35,
+            "circle-stroke-color": ["get", "color"],
+            "circle-stroke-opacity": 0.7,
+            "circle-stroke-width": 1.5,
+          },
+        });
+
+        map.on("click", "services-area", function (e) {
+          if (!e.features || !e.features[0]) return;
+          send({ type: "markerPress", id: e.features[0].properties.id });
+        });
+        map.on("mouseenter", "services-area", function () {
+          map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", "services-area", function () {
+          map.getCanvas().style.cursor = "";
+        });
+      }
+
+      function setUserMarker(lat, lng) {
+        if (lat == null || lng == null) return;
+        if (!map) return;
+        if (userMarker) {
+          userMarker.setLngLat([lng, lat]);
+          return;
+        }
+        var el = document.createElement("div");
+        el.style.cssText =
+          "width:14px;height:14px;border-radius:50%;background:#1F8F66;border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.18);";
+        userMarker = new mapboxgl.Marker({ element: el })
+          .setLngLat([lng, lat])
+          .addTo(map);
+      }
+
+      function flyTo(lat, lng, zoom) {
+        if (!map) return;
+        map.flyTo({
+          center: [lng, lat],
+          zoom: zoom != null ? zoom : Math.max(map.getZoom(), 13),
+          essential: true,
+        });
+      }
+
+      function init(cfg) {
+        if (!cfg || !cfg.token) {
+          send({ type: "error", message: "missing token" });
+          return;
+        }
+        mapboxgl.accessToken = cfg.token;
+
+        var center = cfg.center ? [cfg.center.lng, cfg.center.lat] : [28.9784, 41.0082];
+        map = new mapboxgl.Map({
+          container: "map",
+          style: cfg.style || "mapbox://styles/mapbox/streets-v12",
+          center: center,
+          zoom: cfg.zoom != null ? cfg.zoom : 11,
+          attributionControl: false,
+          logoPosition: "bottom-left",
+        });
+        // No NavigationControl on mobile: the +/- buttons collide with
+        // the find-me FAB (also bottom-right) and duplicate gestures
+        // Mapbox GL already binds — pinch-to-zoom and double-tap-to-zoom
+        // are enabled by default on touch, so the buttons are redundant.
+        // Apple Maps and Google Maps both omit them on mobile for the
+        // same reason.
+        map.on("load", function () {
+          loaded = true;
+          send({ type: "ready" });
+          if (cfg.user) setUserMarker(cfg.user.lat, cfg.user.lng);
+          // RN posts \`init\` once mapReady flips, but at that moment the
+          // services state on the RN side is usually still the empty
+          // initial array because fetchServices is async. The populated
+          // list arrives via a later \`updateServices\` message. If that
+          // message lands before \`map.on("load")\` fires, applyServices
+          // sees \`loaded=false\` and stashes the payload in
+          // pendingServices. Previously this branch picked cfg.services
+          // unconditionally because \`[]\` is truthy, dropping the real
+          // data on the floor and rendering an empty map. Prefer
+          // pendingServices when present so the freshest payload wins.
+          var initialServices = pendingServices != null
+            ? pendingServices
+            : (cfg.services || []);
+          pendingServices = null;
+          applyServices(initialServices);
+        });
+        map.on("error", function (e) {
+          send({ type: "error", message: (e && e.error && e.error.message) || "map error" });
+        });
+      }
+
+      function handle(raw) {
+        if (typeof raw !== "string") return;
+        try {
+          var msg = JSON.parse(raw);
+          switch (msg.type) {
+            case "init": init(msg); break;
+            case "updateServices": applyServices(msg.services || []); break;
+            case "setUser": setUserMarker(msg.lat, msg.lng); break;
+            case "flyTo": flyTo(msg.lat, msg.lng, msg.zoom); break;
+          }
+        } catch (e) {
+          send({ type: "error", message: String(e) });
+        }
+      }
+
+      document.addEventListener("message", function (ev) { handle(ev.data); });
+      window.addEventListener("message", function (ev) { handle(ev.data); });
+      send({ type: "loaded" });
+    })();
+  </script>
+</body>
+</html>`

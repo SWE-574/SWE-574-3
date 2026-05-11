@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { loginAsAdmin, goToAdminTab, ADMIN_USERS } from '../helpers'
+import { waitForApi } from '../helpers/wait'
 
 /**
  * The audit log uses Flex-based rows (no <table>/<tr>), so we read the
@@ -26,10 +27,9 @@ async function getAuditCount(page: Page): Promise<number> {
 
 test('NFR-03b: performing an admin action appends a new entry to the audit log', async ({ page }) => {
   await loginAsAdmin(page, ADMIN_USERS.admin)
+  const initialAudit = waitForApi(page, '/api/admin/audit')
   await goToAdminTab(page, 'audit')
-
-  // Wait for the initial log to render and capture the backend entry count.
-  await page.waitForTimeout(2_000)
+  await initialAudit
 
   const rowsBefore = await getAuditCount(page)
 
@@ -52,27 +52,27 @@ test('NFR-03b: performing an admin action appends a new entry to the audit log',
   await expect(toast.first()).toBeVisible({ timeout: 10_000 })
 
   // Return to the audit log tab.
+  const reloadAudit = waitForApi(page, '/api/admin/audit')
   await goToAdminTab(page, 'audit')
-  await page.waitForTimeout(2_000)
+  await reloadAudit
 
-  // The log must have grown — the warning action was appended.
-  const rowsAfter = await getAuditCount(page)
-
-  expect(rowsAfter).toBeGreaterThan(rowsBefore)
+  // The log must have grown — the warning action was appended. Audit
+  // writes commit on a follower replica that lags the response by ~1s,
+  // so poll the count instead of reading it once.
+  await expect.poll(() => getAuditCount(page), { timeout: 10_000 }).toBeGreaterThan(rowsBefore)
 })
 
 test('NFR-03b: existing audit log entries are retained after a new action is appended', async ({ page }) => {
   await loginAsAdmin(page, ADMIN_USERS.admin)
+  const initialAudit = waitForApi(page, '/api/admin/audit')
   await goToAdminTab(page, 'audit')
-
-  await page.waitForTimeout(2_000)
+  await initialAudit
 
   // Capture the current total so we can verify nothing is removed after adding one.
   const countBefore = await getAuditCount(page)
 
   if (countBefore === 0) {
-    // No prior entries to retain — skip retention check.
-    test.skip()
+    test.skip(true, 'No prior audit entries to retain — retention check requires preexisting log rows')
     return
   }
 
@@ -94,8 +94,9 @@ test('NFR-03b: existing audit log entries are retained after a new action is app
   await expect(toast.first()).toBeVisible({ timeout: 10_000 })
 
   // Return to the audit log.
+  const reloadAudit = waitForApi(page, '/api/admin/audit')
   await goToAdminTab(page, 'audit')
-  await page.waitForTimeout(2_000)
+  await reloadAudit
 
   // Count must have grown (append) and not dropped below what we had (retention).
   const countAfter = await getAuditCount(page)
@@ -109,9 +110,9 @@ test('NFR-03b: existing audit log entries are retained after a new action is app
 
 test('NFR-03b: audit log has no delete or edit controls on any entry', async ({ page }) => {
   await loginAsAdmin(page, ADMIN_USERS.admin)
+  const initialAudit = waitForApi(page, '/api/admin/audit')
   await goToAdminTab(page, 'audit')
-
-  await page.waitForTimeout(2_000)
+  await initialAudit
 
   // No edit or delete buttons anywhere in the audit log view.
   await expect(page.getByRole('button', { name: /^edit$/i })).toHaveCount(0)

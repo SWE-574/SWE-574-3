@@ -12,6 +12,7 @@ from api.tests.helpers.factories import (
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import ForumCategory, ForumTopic, ForumPost, Report
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 @pytest.mark.django_db
@@ -26,7 +27,7 @@ class TestForumCategoryViewSet:
         
         client = APIClient()
         response = client.get('/api/forum/categories/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data) == 3
     
     def test_retrieve_category_by_slug(self):
@@ -35,8 +36,7 @@ class TestForumCategoryViewSet:
         
         client = APIClient()
         response = client.get(f'/api/forum/categories/{category.slug}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['slug'] == 'general'
+        assert_api_response(response, 200, schema={'slug': 'general'})
     
     def test_create_category_admin_only(self):
         """Test only admins can create categories"""
@@ -53,7 +53,7 @@ class TestForumCategoryViewSet:
             'icon': 'message-square',
             'color': 'blue'
         })
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         
         client.authenticate_user(admin)
         response = client.post('/api/forum/categories/', {
@@ -63,7 +63,7 @@ class TestForumCategoryViewSet:
             'icon': 'message-square',
             'color': 'blue'
         })
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
 
 @pytest.mark.django_db
@@ -78,8 +78,7 @@ class TestForumTopicViewSet:
         
         client = APIClient()
         response = client.get('/api/forum/topics/')
-        assert response.status_code == status.HTTP_200_OK
-        assert 'results' in response.data
+        assert_api_response(response, 200, contains={'results'})
     
     def test_list_topics_by_category(self):
         """Test filtering topics by category"""
@@ -90,7 +89,7 @@ class TestForumTopicViewSet:
         
         client = APIClient()
         response = client.get('/api/forum/topics/?category=cat1')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data['results']) == 3
     
     def test_create_topic(self):
@@ -106,8 +105,7 @@ class TestForumTopicViewSet:
             'title': 'New Topic',
             'body': 'This is a new topic discussion'
         })
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data['title'] == 'New Topic'
+        assert_api_response(response, 201, schema={'title': 'New Topic'})
         assert ForumTopic.objects.filter(title='New Topic').exists()
     
     def test_update_topic_author(self):
@@ -122,8 +120,7 @@ class TestForumTopicViewSet:
         response = client.patch(f'/api/forum/topics/{topic.id}/', {
             'title': 'Updated Title'
         })
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['title'] == 'Updated Title'
+        assert_api_response(response, 200, schema={'title': 'Updated Title'})
     
     def test_update_topic_unauthorized(self):
         """Test non-author cannot update topic"""
@@ -138,7 +135,7 @@ class TestForumTopicViewSet:
         response = client.patch(f'/api/forum/topics/{topic.id}/', {
             'title': 'Hacked Title'
         })
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
 @pytest.mark.django_db
 @pytest.mark.integration
@@ -164,17 +161,14 @@ class TestForumActivityView:
 
         response = client.get('/api/forum/my-activity/')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['my_topics'] == 2
-        assert response.data['my_replies'] == 3
-        assert response.data['open_topics'] == 1
+        assert_api_response(response, 200, schema={'my_topics': 2, 'my_replies': 3, 'open_topics': 1})
         assert len(response.data['open_topic_items']) == 1
         assert response.data['open_topic_items'][0]['id'] == str(open_topic.id)
         assert response.data['open_topic_items'][0]['is_locked'] is False
 
     def test_forum_activity_requires_authentication(self):
         response = APIClient().get('/api/forum/my-activity/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 @pytest.mark.django_db
@@ -189,8 +183,7 @@ class TestForumPostViewSet:
         
         client = APIClient()
         response = client.get(f'/api/forum/topics/{topic.id}/posts/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['count'] == 5
+        assert_api_response(response, 200, schema={'count': 5})
         assert len(response.data['results']) == 5
     
     def test_create_post(self):
@@ -204,8 +197,7 @@ class TestForumPostViewSet:
         response = client.post(f'/api/forum/topics/{topic.id}/posts/', {
             'body': 'This is a reply to the topic'
         })
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data['body'] == 'This is a reply to the topic'
+        assert_api_response(response, 201, schema={'body': 'This is a reply to the topic'})
         assert ForumPost.objects.filter(body='This is a reply to the topic').exists()
     
     def test_update_post_author(self):
@@ -220,8 +212,7 @@ class TestForumPostViewSet:
         response = client.patch(f'/api/forum/posts/{post.id}/', {
             'body': 'Updated post content'
         })
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['body'] == 'Updated post content'
+        assert_api_response(response, 200, schema={'body': 'Updated post content'})
     
     def test_delete_post_soft_delete(self):
         """Test post deletion is soft delete"""
@@ -233,7 +224,7 @@ class TestForumPostViewSet:
         client.authenticate_user(author)
 
         response = client.delete(f'/api/forum/posts/{post.id}/')
-        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert_api_response(response, 204)
 
         post.refresh_from_db()
         assert post.is_deleted is True
@@ -254,9 +245,7 @@ class TestForumTopicEdit:
 
         response = client.patch(f'/api/forum/topics/{topic.id}/', {'title': 'Updated Title'})
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['title'] == 'Updated Title'
-        assert response.data['body'] == 'Original body text here.'
+        assert_api_response(response, 200, schema={'title': 'Updated Title', 'body': 'Original body text here.'})
         topic.refresh_from_db()
         assert topic.title == 'Updated Title'
 
@@ -270,9 +259,7 @@ class TestForumTopicEdit:
 
         response = client.patch(f'/api/forum/topics/{topic.id}/', {'body': 'Brand new body content here.'})
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['title'] == 'Original Title'
-        assert response.data['body'] == 'Brand new body content here.'
+        assert_api_response(response, 200, schema={'title': 'Original Title', 'body': 'Brand new body content here.'})
         topic.refresh_from_db()
         assert topic.body == 'Brand new body content here.'
 
@@ -289,9 +276,7 @@ class TestForumTopicEdit:
             'body': 'New body content.',
         })
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['title'] == 'New Title'
-        assert response.data['body'] == 'New body content.'
+        assert_api_response(response, 200, schema={'title': 'New Title', 'body': 'New body content.'})
 
     def test_other_user_cannot_edit_topic(self):
         """A user who did not create the topic receives 403"""
@@ -304,7 +289,7 @@ class TestForumTopicEdit:
 
         response = client.patch(f'/api/forum/topics/{topic.id}/', {'title': 'Stolen Title'})
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         topic.refresh_from_db()
         assert topic.title == 'Original Title'
 
@@ -314,7 +299,7 @@ class TestForumTopicEdit:
 
         response = APIClient().patch(f'/api/forum/topics/{topic.id}/', {'title': 'No Auth Title'})
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
         topic.refresh_from_db()
         assert topic.title == 'Original Title'
 
@@ -332,8 +317,7 @@ class TestForumTopicEdit:
             'body': 'Admin edited body.',
         })
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['title'] == 'Admin Edited Title'
+        assert_api_response(response, 200, schema={'title': 'Admin Edited Title'})
 
     def test_edit_ignores_non_editable_fields(self):
         """Patching category or is_pinned has no effect — only title/body are allowed"""
@@ -351,7 +335,7 @@ class TestForumTopicEdit:
             'is_pinned': True,
         })
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         topic.refresh_from_db()
         assert topic.category_id == category.id  # unchanged
         assert topic.is_pinned is False           # unchanged
@@ -366,7 +350,7 @@ class TestForumTopicEdit:
 
         response = client.patch(f'/api/forum/topics/{topic.id}/', {'title': 'Hi'})
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_title_preserves_special_characters(self):
         """Special characters like & are stored and returned as-is (not HTML-encoded)"""
@@ -378,8 +362,7 @@ class TestForumTopicEdit:
 
         response = client.patch(f'/api/forum/topics/{topic.id}/', {'title': 'Cats & Dogs'})
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['title'] == 'Cats & Dogs'
+        assert_api_response(response, 200, schema={'title': 'Cats & Dogs'})
         topic.refresh_from_db()
         assert topic.title == 'Cats & Dogs'
 
@@ -391,7 +374,7 @@ class TestForumTopicEdit:
 
         response = client.patch('/api/forum/topics/00000000-0000-0000-0000-000000000000/', {'title': 'Ghost'})
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
 
 @pytest.mark.django_db
@@ -430,7 +413,7 @@ class TestForumTopicSorting:
         topic_old, topic_mid, topic_new = self._make_topics_with_ages(category)
 
         response = APIClient().get('/api/forum/topics/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = [t['id'] for t in response.data['results']]
         assert ids.index(str(topic_new.pk)) < ids.index(str(topic_mid.pk))
         assert ids.index(str(topic_mid.pk)) < ids.index(str(topic_old.pk))
@@ -441,7 +424,7 @@ class TestForumTopicSorting:
         topic_old, _mid, topic_new = self._make_topics_with_ages(category)
 
         response = APIClient().get('/api/forum/topics/?sort=newest')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = [t['id'] for t in response.data['results']]
         assert ids.index(str(topic_new.pk)) < ids.index(str(topic_old.pk))
 
@@ -451,7 +434,7 @@ class TestForumTopicSorting:
         topic_old, _mid, _new = self._make_topics_with_ages(category)
 
         response = APIClient().get('/api/forum/topics/?sort=most_active')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = [t['id'] for t in response.data['results']]
         assert ids[0] == str(topic_old.pk)
 
@@ -471,7 +454,7 @@ class TestForumTopicSorting:
         ForumPost.objects.filter(pk=deleted_post.pk).update(created_at=now - timedelta(minutes=5))
 
         response = APIClient().get('/api/forum/topics/?sort=most_active')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = [t['id'] for t in response.data['results']]
         # topic_b was created more recently; topic_a's only post is deleted
         assert ids[0] == str(topic_b.pk)
@@ -492,7 +475,7 @@ class TestForumTopicSorting:
         ForumPost.objects.filter(pk=post.pk).update(created_at=now - timedelta(hours=1))
 
         response = APIClient().get('/api/forum/topics/?category=sort-cat-a&sort=most_active')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         result_ids = {t['id'] for t in response.data['results']}
         assert str(topic_a.pk) in result_ids
         assert str(topic_b.pk) not in result_ids
@@ -513,7 +496,7 @@ class TestForumTopicSorting:
         ForumPost.objects.filter(pk=post.pk).update(created_at=now - timedelta(minutes=1))
 
         response = APIClient().get('/api/forum/topics/?sort=most_active')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         ids = [t['id'] for t in response.data['results']]
         assert ids[0] == str(pinned.pk)
 
@@ -523,7 +506,7 @@ class TestForumTopicSorting:
         ForumTopicFactory.create_batch(3, category=category)
 
         response = APIClient().get('/api/forum/topics/?sort=garbage')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
 
 @pytest.mark.django_db
@@ -545,7 +528,7 @@ class TestForumTopicReport:
         client.authenticate_user(reporter)
         response = client.post(self._url(topic.id), {'type': 'spam'})
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert Report.objects.filter(
             reporter=reporter,
             reported_forum_topic=topic,
@@ -566,7 +549,7 @@ class TestForumTopicReport:
             'description': 'This topic contains offensive language.',
         })
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         report = Report.objects.get(reporter=reporter, reported_forum_topic=topic)
         assert report.description == 'This topic contains offensive language.'
 
@@ -595,7 +578,7 @@ class TestForumTopicReport:
         client.authenticate_user(reporter)
         response = client.post(self._url(topic.id), {'type': 'harassment'})
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         data = response.data
         assert 'id' in data
         assert data['type'] == 'harassment'
@@ -613,7 +596,7 @@ class TestForumTopicReport:
         client.authenticate_user(reporter)
         response = client.post(self._url(topic.id), {'type': 'not_a_valid_type'})
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_self_report_on_own_topic_is_rejected(self):
         """A user cannot report a topic they authored."""
@@ -625,7 +608,7 @@ class TestForumTopicReport:
         client.authenticate_user(author)
         response = client.post(self._url(topic.id), {'type': 'spam'})
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert not Report.objects.filter(reported_forum_topic=topic).exists()
 
     def test_unauthenticated_report_is_blocked(self):
@@ -648,7 +631,7 @@ class TestForumTopicReport:
         client.authenticate_user(reporter)
         response = client.post(self._url(uuid.uuid4()), {'type': 'spam'})
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
 
 @pytest.mark.django_db
@@ -671,7 +654,7 @@ class TestForumPostReport:
         client.authenticate_user(reporter)
         response = client.post(self._url(post.id), {'type': 'harassment'})
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert Report.objects.filter(
             reporter=reporter,
             reported_forum_post=post,
@@ -693,7 +676,7 @@ class TestForumPostReport:
             'description': 'This reply is promotional content.',
         })
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         report = Report.objects.get(reporter=reporter, reported_forum_post=post)
         assert report.description == 'This reply is promotional content.'
 
@@ -740,7 +723,7 @@ class TestForumPostReport:
         client.authenticate_user(reporter)
         response = client.post(self._url(post.id), {'type': 'scam'})
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         data = response.data
         assert 'id' in data
         assert data['type'] == 'scam'
@@ -760,7 +743,7 @@ class TestForumPostReport:
         client.authenticate_user(reporter)
         response = client.post(self._url(post.id), {'type': 'gibberish'})
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_self_report_on_own_post_is_rejected(self):
         """A user cannot report a post they authored."""
@@ -773,7 +756,7 @@ class TestForumPostReport:
         client.authenticate_user(author)
         response = client.post(self._url(post.id), {'type': 'spam'})
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert not Report.objects.filter(reported_forum_post=post).exists()
 
     def test_unauthenticated_post_report_is_blocked(self):
@@ -797,7 +780,7 @@ class TestForumPostReport:
         client.authenticate_user(reporter)
         response = client.post(self._url(uuid.uuid4()), {'type': 'spam'})
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
 
 @pytest.mark.django_db
@@ -818,7 +801,7 @@ class TestForumTopicLockUnlock:
         client.authenticate_user(admin)
         response = client.post(self._url(topic.id))
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['is_locked'] is True
         topic.refresh_from_db()
         assert topic.is_locked is True
@@ -833,7 +816,7 @@ class TestForumTopicLockUnlock:
         client.authenticate_user(admin)
         response = client.post(self._url(topic.id))
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert response.data['is_locked'] is False
         topic.refresh_from_db()
         assert topic.is_locked is False
@@ -882,7 +865,7 @@ class TestForumTopicLockUnlock:
         client.authenticate_user(user)
         response = client.post(self._url(topic.id))
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         topic.refresh_from_db()
         assert topic.is_locked is False
 
@@ -906,7 +889,7 @@ class TestForumTopicLockUnlock:
         client.authenticate_user(admin)
         response = client.post(f'/api/forum/topics/{uuid.uuid4()}/lock/')
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
 
 @pytest.mark.django_db
@@ -927,7 +910,7 @@ class TestPostingToLockedThread:
             {'body': 'This should not be allowed.'},
         )
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         assert not ForumPost.objects.filter(topic=topic).exists()
 
     def test_posting_to_unlocked_topic_succeeds(self):
@@ -943,7 +926,7 @@ class TestPostingToLockedThread:
             {'body': 'A valid reply.'},
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert ForumPost.objects.filter(topic=topic).exists()
 
     def test_lock_then_post_is_rejected(self):
@@ -964,7 +947,7 @@ class TestPostingToLockedThread:
             {'body': 'Trying to post after lock.'},
         )
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
 
     def test_unlock_then_post_succeeds(self):
         """Admin unlocks a previously locked topic; reply is then accepted."""
@@ -984,7 +967,7 @@ class TestPostingToLockedThread:
             {'body': 'Now this should work.'},
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
 
 @pytest.mark.django_db
@@ -1010,7 +993,7 @@ class TestForumPostRestore:
         client.authenticate_user(admin)
         response = client.post(self._url(post.id))
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         post.refresh_from_db()
         assert post.is_deleted is False
 
@@ -1025,7 +1008,7 @@ class TestForumPostRestore:
         client.authenticate_user(admin)
         response = client.post(self._url(post.id))
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         data = response.data
         assert str(post.id) == str(data['id'])
         assert data['is_deleted'] is False
@@ -1045,7 +1028,7 @@ class TestForumPostRestore:
         assert post.is_deleted is True
 
         response = admin_client.post(self._url(post.id))
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         post.refresh_from_db()
         assert post.is_deleted is False
 
@@ -1060,7 +1043,7 @@ class TestForumPostRestore:
         client.authenticate_user(user)
         response = client.post(self._url(post.id))
 
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(response, 403)
         post.refresh_from_db()
         assert post.is_deleted is True
 
@@ -1087,7 +1070,7 @@ class TestForumPostRestore:
         client.authenticate_user(admin)
         response = client.post(self._url(post.id))
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
     def test_restore_nonexistent_post_returns_404(self):
         """Restoring a UUID that does not exist returns 404."""
@@ -1098,7 +1081,7 @@ class TestForumPostRestore:
         client.authenticate_user(admin)
         response = client.post(self._url(uuid.uuid4()))
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
 
 # ---------------------------------------------------------------------------
@@ -1189,7 +1172,7 @@ class TestDeletedAuthorTraceability:
         author.delete()
 
         response = APIClient().get('/api/forum/topics/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         result = next(t for t in response.data['results'] if t['id'] == topic_id)
         assert result['author_name'] == '[Deleted User]'
@@ -1205,8 +1188,7 @@ class TestDeletedAuthorTraceability:
         author.delete()
 
         response = APIClient().get(f'/api/forum/topics/{topic.id}/')
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['author_name'] == '[Deleted User]'
+        assert_api_response(response, 200, schema={'author_name': '[Deleted User]'})
         assert response.data['author_id'] is None
         assert response.data['author_avatar_url'] is None
 
@@ -1220,7 +1202,7 @@ class TestDeletedAuthorTraceability:
         author.delete()
 
         response = APIClient().get(f'/api/forum/topics/{topic.id}/posts/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         result = next(p for p in response.data['results'] if str(p['id']) == str(post.id))
         assert result['author_name'] == '[Deleted User]'
@@ -1237,7 +1219,7 @@ class TestDeletedAuthorTraceability:
         post_author.delete()
 
         response = APIClient().get(f'/api/forum/topics/{topic.id}/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         inline_post = next(p for p in response.data['posts'] if str(p['id']) == str(post.id))
         assert inline_post['author_name'] == '[Deleted User]'
@@ -1252,7 +1234,7 @@ class TestDeletedAuthorTraceability:
         ForumTopicFactory(category=category, author=author)
 
         response = APIClient().get('/api/forum/topics/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         result = next(t for t in response.data['results'] if t['author_id'] == str(author.id))
         assert result['author_name'] == 'Alice Smith'
@@ -1266,7 +1248,7 @@ class TestDeletedAuthorTraceability:
         post = ForumPostFactory(topic=topic, author=author)
 
         response = APIClient().get(f'/api/forum/topics/{topic.id}/posts/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         result = next(p for p in response.data['results'] if str(p['id']) == str(post.id))
         assert result['author_name'] == 'Bob Jones'
@@ -1285,7 +1267,7 @@ class TestDeletedAuthorTraceability:
         deleted_author.delete()
 
         response = APIClient().get('/api/forum/topics/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         results = {t['id']: t for t in response.data['results']}
 
@@ -1294,3 +1276,201 @@ class TestDeletedAuthorTraceability:
 
         assert results[deleted_topic_id]['author_name'] == '[Deleted User]'
         assert results[deleted_topic_id]['author_id'] is None
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestForumTopicSoftDelete:
+    """DELETE /api/forum/topics/<pk>/ soft-deletes the topic.
+
+    Reports filed against the topic (and its posts) must survive so the
+    moderation trail is not lost. Public list/detail/post views must hide
+    the topic.
+    """
+
+    def _delete_url(self, topic_id):
+        return f'/api/forum/topics/{topic_id}/'
+
+    def test_delete_topic_is_soft_delete(self):
+        """DELETE marks is_deleted=True instead of removing the row."""
+        author = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.delete(self._delete_url(topic.id))
+        assert_api_response(response, 204)
+
+        topic.refresh_from_db()
+        assert topic.is_deleted is True
+        assert topic.deleted_at is not None
+        # Row still exists
+        assert ForumTopic.objects.filter(pk=topic.pk).exists()
+
+    def test_report_against_topic_survives_topic_deletion(self):
+        """Regression for #542: deleting a topic must NOT cascade-delete reports.
+
+        Before the fix, ForumTopicViewSet.destroy hard-deleted the row and
+        Report.reported_forum_topic (on_delete=CASCADE) wiped the report.
+        """
+        author = UserFactory()
+        reporter = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category, title='Bad Topic')
+
+        # File a report against the topic and a report against a post in it.
+        post = ForumPostFactory(topic=topic, author=author)
+        topic_report = Report.objects.create(
+            reporter=reporter,
+            reported_user=author,
+            reported_forum_topic=topic,
+            type='spam',
+            description='Spammy topic',
+        )
+        post_report = Report.objects.create(
+            reporter=reporter,
+            reported_user=author,
+            reported_forum_topic=topic,
+            reported_forum_post=post,
+            type='harassment',
+            description='Abusive reply',
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+        response = client.delete(self._delete_url(topic.id))
+        assert_api_response(response, 204)
+
+        # Both reports remain queryable and still reference the topic row.
+        topic_report.refresh_from_db()
+        post_report.refresh_from_db()
+        assert Report.objects.filter(pk=topic_report.pk).exists()
+        assert Report.objects.filter(pk=post_report.pk).exists()
+        assert topic_report.reported_forum_topic_id == topic.id
+        assert post_report.reported_forum_topic_id == topic.id
+
+    def test_soft_deleted_topic_hidden_from_list(self):
+        """Public list must not return soft-deleted topics."""
+        category = ForumCategoryFactory(is_active=True)
+        live = ForumTopicFactory(category=category, title='Live topic')
+        ForumTopicFactory(category=category, title='Removed topic', is_deleted=True)
+
+        response = APIClient().get('/api/forum/topics/')
+        assert_api_response(response, 200)
+
+        ids = [t['id'] for t in response.data['results']]
+        assert str(live.id) in ids
+        # Removed topic is hidden
+        for entry in response.data['results']:
+            assert entry['title'] != 'Removed topic'
+
+    def test_soft_deleted_topic_returns_404_on_detail(self):
+        """GET /api/forum/topics/<pk>/ on a soft-deleted topic returns 404."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_deleted=True)
+
+        response = APIClient().get(f'/api/forum/topics/{topic.id}/')
+        assert_problem_detail(response, 404)
+
+    def test_soft_deleted_topic_blocks_post_creation(self):
+        """POST /api/forum/topics/<pk>/posts/ on a soft-deleted topic returns 404."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_deleted=True)
+        user = UserFactory()
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(user)
+        response = client.post(f'/api/forum/topics/{topic.id}/posts/', {'body': 'Hi'})
+
+        assert_problem_detail(response, 404)
+
+    def test_soft_deleted_topic_hides_posts_from_listing(self):
+        """GET posts on a soft-deleted topic returns 404 (topic not visible)."""
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, is_deleted=True)
+        ForumPostFactory(topic=topic)
+
+        response = APIClient().get(f'/api/forum/topics/{topic.id}/posts/')
+        assert_problem_detail(response, 404)
+
+    def test_unauthorized_delete_does_not_soft_delete(self):
+        """A non-author/non-admin DELETE returns 403 and the topic stays live."""
+        author = UserFactory()
+        other = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(other)
+
+        response = client.delete(self._delete_url(topic.id))
+        assert_problem_detail(response, 403)
+
+        topic.refresh_from_db()
+        assert topic.is_deleted is False
+
+    def test_admin_can_soft_delete_any_topic(self):
+        """Admins can soft-delete topics they did not author."""
+        author = UserFactory()
+        admin = AdminUserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+
+        response = client.delete(self._delete_url(topic.id))
+        assert_api_response(response, 204)
+
+        topic.refresh_from_db()
+        assert topic.is_deleted is True
+
+    def test_double_delete_returns_404(self):
+        """Re-deleting an already soft-deleted topic returns 404 (not visible)."""
+        author = UserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(author=author, category=category, is_deleted=True)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(author)
+
+        response = client.delete(self._delete_url(topic.id))
+        assert_problem_detail(response, 404)
+
+    def test_staff_can_retrieve_soft_deleted_topic(self):
+        """Staff can GET /api/forum/topics/<pk>/ on a soft-deleted topic.
+
+        Soft-deleted topics are hidden from the public surface, but moderators
+        need a way to inspect the original content of a deleted topic when
+        triaging the surviving Report.reported_forum_topic rows. Staff bypass
+        the is_deleted filter on list/retrieve.
+        """
+        admin = AdminUserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        topic = ForumTopicFactory(category=category, title='Removed', is_deleted=True)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+
+        response = client.get(f'/api/forum/topics/{topic.id}/')
+        assert_api_response(response, 200)
+        assert response.data['id'] == str(topic.id)
+        assert response.data['is_deleted'] is True
+
+    def test_staff_list_includes_soft_deleted_topics(self):
+        """Staff list response surfaces soft-deleted topics for moderation review."""
+        admin = AdminUserFactory()
+        category = ForumCategoryFactory(is_active=True)
+        live = ForumTopicFactory(category=category, title='Live')
+        removed = ForumTopicFactory(category=category, title='Removed', is_deleted=True)
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(admin)
+        response = client.get('/api/forum/topics/')
+        assert_api_response(response, 200)
+
+        ids = {t['id'] for t in response.data['results']}
+        assert str(live.id) in ids
+        assert str(removed.id) in ids

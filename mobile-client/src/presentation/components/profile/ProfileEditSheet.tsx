@@ -1,0 +1,1571 @@
+/**
+ * ProfileEditSheet – bottom-sheet style profile editor.
+ *
+ * Uses React Native Modal with animationType="slide" (native slide-up on both platforms).
+ * On iOS, presentationStyle="pageSheet" gives the native sheet appearance.
+ * On Android it falls back to a full slide-up overlay.
+ *
+ * Sections (in order):
+ *   1. Identity         – first name, last name, username (read-only), city
+ *   2. About you        – bio (280 char limit + counter), profession
+ *   3. Avatar           – "Change avatar" button (delegates to existing image picker)
+ *   4. Skills & interests – text list editor (TODO: WikidataTagAutocomplete)
+ *   5. Showcase badges  – BadgeShowcase picker variant
+ *   6. Account & privacy – email link, password link, public visibility toggle (UI only)
+ *
+ * Footer: sticky [Cancel] + [Save changes] (disabled until dirty).
+ * PATCH sends only changed fields (diff).
+ * Discard confirm via Alert.alert on close-with-unsaved.
+ */
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Alert,
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { colors } from "../../../constants/colors";
+import { patchMe } from "../../../api/users";
+import type { UserProfileRequest } from "../../../api/users";
+import type { UserSummary } from "../../../api/types";
+import BadgeShowcase from "./BadgeShowcase";
+import type { BadgeProgress } from "./BadgeShowcase";
+import SkillTagAutocomplete from "./SkillTagAutocomplete";
+import type { BadgeDetail } from "../../../api/calendar";
+import { ensureTagInDb } from "../../../api/tags";
+import type { Tag as SkillTag } from "../../../api/types";
+import {
+  getMapboxToken,
+  searchMapboxLocations,
+  type LocationValue,
+} from "../../../utils/mapboxLocation";
+
+
+export interface ProfileEditSheetProps {
+  visible: boolean;
+  onClose: () => void;
+  /** Called with the updated user object after a successful save */
+  onSaveSuccess: (updated: UserSummary) => void;
+  user: UserSummary & {
+    location?: string | null;
+    avatar_url?: string | null;
+    banner_url?: string | null;
+    /** Profession / headline */
+    profession?: string | null;
+    featured_badges?: string[];
+    featured_badges_detail?: BadgeDetail[];
+    /** User's skill tags from the API (read-only list). */
+    skills?: Array<{ id: string; name: string }>;
+  };
+  /** Full badge progress list – from GET /users/{id}/badge-progress/ (web parity) */
+  badgeProgress?: BadgeProgress[];
+  /** When true, Showcase tab shows a loading state instead of the empty grid */
+  badgeProgressLoading?: boolean;
+  /** Set when badge progress failed to load (Showcase tab shows retry) */
+  badgeProgressError?: string | null;
+  onBadgeProgressRetry?: () => void;
+  /**
+   * Called when the user taps "Change avatar". The handler should pick an
+   * image and return its local asset (URI + filename + mime) so the sheet
+   * can preview it and queue the upload alongside the rest of the form.
+   * Return `null` (or resolve with no value) when the user cancels.
+   */
+  onPickAvatar?: () => Promise<PickedImageAsset | null | void>;
+  /** Called when the user taps "Change cover photo". Same contract as `onPickAvatar`. */
+  onPickCoverPhoto?: () => Promise<PickedImageAsset | null | void>;
+  /** Called when the user taps "Change email" */
+  onChangeEmailPress?: () => void;
+  /** Called when the user taps "Change password" */
+  onChangePasswordPress?: () => void;
+  initialTab?: EditTabKey;
+  presentation?: "modal" | "screen";
+}
+
+type EditableFields = {
+  first_name: string;
+  last_name: string;
+  bio: string;
+  location: string;
+  profession: string;
+  featured_badges: string[];
+  banner_url: string;
+  /** Profile skills — persisted via PATCH `skill_ids` (web parity) */
+  skills: SkillTag[];
+};
+
+export type PickedImageAsset = {
+  uri: string;
+  name?: string | null;
+  mimeType?: string | null;
+};
+
+type EditTabKey = "identity" | "photos" | "skills" | "showcase" | "privacy";
+
+const EDIT_TABS: Array<{ key: EditTabKey; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
+  { key: "identity", label: "Identity", icon: "person-outline" },
+  { key: "photos", label: "Photos", icon: "images-outline" },
+  { key: "skills", label: "Skills", icon: "sparkles-outline" },
+  { key: "showcase", label: "Showcase", icon: "ribbon-outline" },
+  { key: "privacy", label: "Privacy", icon: "shield-checkmark-outline" },
+];
+
+
+function diffFields(
+  original: EditableFields,
+  current: EditableFields,
+): Partial<Record<keyof EditableFields, string | string[]>> {
+  const diff: Partial<Record<keyof EditableFields, string | string[]>> = {};
+
+  if (current.first_name !== original.first_name) {
+    diff.first_name = current.first_name;
+  }
+  if (current.last_name !== original.last_name) {
+    diff.last_name = current.last_name;
+  }
+  if (current.bio !== original.bio) {
+    diff.bio = current.bio;
+  }
+  if (current.location !== original.location) {
+    diff.location = current.location;
+  }
+  if (current.profession !== original.profession) {
+    diff.profession = current.profession;
+  }
+  if (
+    JSON.stringify(current.featured_badges) !==
+    JSON.stringify(original.featured_badges)
+  ) {
+    diff.featured_badges = current.featured_badges;
+  }
+  if (current.banner_url !== original.banner_url) {
+    diff.banner_url = current.banner_url;
+  }
+
+  return diff;
+}
+
+function skillIdsSignature(skills: SkillTag[]): string {
+  return [...skills]
+    .map((s) => s.id)
+    .sort()
+    .join("|");
+}
+
+function isDirty(original: EditableFields, current: EditableFields): boolean {
+  if (Object.keys(diffFields(original, current)).length > 0) return true;
+  return skillIdsSignature(original.skills) !== skillIdsSignature(current.skills);
+}
+
+
+function SectionHeader({ title }: { title: string }) {
+  return (
+    <View style={sectionStyles.header}>
+      <Text style={sectionStyles.title}>{title}</Text>
+    </View>
+  );
+}
+
+
+function FormField({
+  label,
+  value,
+  onChangeText,
+  multiline = false,
+  maxLength,
+  readOnly = false,
+  placeholder,
+  keyboardType,
+  autoCapitalize,
+  helperText,
+}: {
+  label: string;
+  value: string;
+  onChangeText?: (text: string) => void;
+  multiline?: boolean;
+  maxLength?: number;
+  readOnly?: boolean;
+  placeholder?: string;
+  keyboardType?: TextInput["props"]["keyboardType"];
+  autoCapitalize?: TextInput["props"]["autoCapitalize"];
+  helperText?: string;
+}) {
+  return (
+    <View style={fieldStyles.group}>
+      <View style={fieldStyles.labelRow}>
+        <Text style={fieldStyles.label}>{label}</Text>
+        {readOnly && (
+          <Text style={fieldStyles.readOnlyTag}>read-only</Text>
+        )}
+        {maxLength !== undefined && (
+          <Text
+            style={[
+              fieldStyles.counter,
+              value.length > maxLength * 0.9 && fieldStyles.counterWarn,
+            ]}
+          >
+            {value.length}/{maxLength}
+          </Text>
+        )}
+      </View>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        editable={!readOnly}
+        multiline={multiline}
+        maxLength={maxLength}
+        placeholder={placeholder ?? label}
+        placeholderTextColor={colors.GRAY400}
+        keyboardType={keyboardType ?? "default"}
+        autoCapitalize={autoCapitalize ?? "sentences"}
+        textAlignVertical={multiline ? "top" : "center"}
+        style={[
+          fieldStyles.input,
+          multiline && fieldStyles.multilineInput,
+          readOnly && fieldStyles.readOnlyInput,
+        ]}
+      />
+      {helperText ? (
+        <Text style={fieldStyles.helperText}>{helperText}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+
+export default function ProfileEditSheet({
+  visible,
+  onClose,
+  onSaveSuccess,
+  user,
+  badgeProgress = [],
+  badgeProgressLoading = false,
+  badgeProgressError = null,
+  onBadgeProgressRetry,
+  onPickAvatar,
+  onPickCoverPhoto,
+  onChangeEmailPress,
+  onChangePasswordPress,
+  initialTab = "identity",
+  presentation = "modal",
+}: ProfileEditSheetProps) {
+  const insets = useSafeAreaInsets();
+
+  const buildInitial = (): EditableFields => ({
+    first_name: user.first_name ?? "",
+    last_name: user.last_name ?? "",
+    bio: user.bio ?? "",
+    location: user.location ?? "",
+    profession: user.profession ?? "",
+    featured_badges: user.featured_badges ?? [],
+    banner_url: user.banner_url ?? "",
+    skills: (user.skills ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+    })),
+  });
+
+  const [form, setForm] = useState<EditableFields>(buildInitial);
+  const [pendingAvatar, setPendingAvatar] = useState<PickedImageAsset | null>(
+    null,
+  );
+  const [pendingBanner, setPendingBanner] = useState<PickedImageAsset | null>(
+    null,
+  );
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<EditTabKey>(initialTab);
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationValue[]>([]);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationFocused, setLocationFocused] = useState(false);
+  /** When the user picks a suggestion we suppress autocomplete for the
+   * resulting value so the dropdown does not re-open with the same text. */
+  const suppressLocationSuggestionsRef = useRef(false);
+  // UI-only public visibility toggle (no backend support yet)
+  const [isPublic, setIsPublic] = useState(true);
+
+  const originalRef = useRef<EditableFields>(buildInitial());
+
+  // Reset form when sheet opens
+  useEffect(() => {
+    if (visible) {
+      const initial = buildInitial();
+      setForm(initial);
+      originalRef.current = initial;
+      setPendingAvatar(null);
+      setPendingBanner(null);
+      setSaveError(null);
+      setActiveTab(initialTab);
+      setLocationSuggestions([]);
+      setLocationFocused(false);
+      suppressLocationSuggestionsRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab, visible]);
+
+  useEffect(() => {
+    let active = true;
+    const query = form.location.trim();
+
+    if (
+      !visible ||
+      activeTab !== "identity" ||
+      !getMapboxToken() ||
+      !locationFocused ||
+      suppressLocationSuggestionsRef.current ||
+      query.length < 2
+    ) {
+      setLocationSuggestions([]);
+      setLocationLoading(false);
+      return;
+    }
+
+    setLocationLoading(true);
+    const timer = setTimeout(() => {
+      searchMapboxLocations(query, "full")
+        .then((results) => {
+          if (active) setLocationSuggestions(results.slice(0, 5));
+        })
+        .catch(() => {
+          if (active) setLocationSuggestions([]);
+        })
+        .finally(() => {
+          if (active) setLocationLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [activeTab, form.location, locationFocused, visible]);
+
+  const dirty = useMemo(
+    () =>
+      isDirty(originalRef.current, form) ||
+      pendingAvatar !== null ||
+      pendingBanner !== null,
+    [form, pendingAvatar, pendingBanner],
+  );
+
+  const handleClose = () => {
+    if (dirty) {
+      Alert.alert(
+        "Discard changes?",
+        "You have unsaved changes. Discard them and close?",
+        [
+          { text: "Keep editing", style: "cancel" },
+          {
+            text: "Discard",
+            style: "destructive",
+            onPress: onClose,
+          },
+        ],
+      );
+      return;
+    }
+    onClose();
+  };
+
+  const handleSave = async () => {
+    if (!dirty) return;
+
+    const diff = diffFields(originalRef.current, form);
+    const skillsChanged =
+      skillIdsSignature(originalRef.current.skills) !==
+      skillIdsSignature(form.skills);
+
+    setSaving(true);
+    setSaveError(null);
+
+    try {
+      const isUuid = (id: string) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          id,
+        );
+
+      let skill_ids: string[] | undefined;
+      if (skillsChanged) {
+        const resolved = await Promise.all(
+          form.skills.map((tag) =>
+            isUuid(tag.id) ? tag : ensureTagInDb(tag),
+          ),
+        );
+        skill_ids = resolved.map((t) => t.id);
+      }
+
+      let updated;
+      if (pendingAvatar || pendingBanner) {
+        // Multipart PATCH so the new image(s) ride along with the other diff.
+        // DRF `ListField` expects array values to appear as REPEATED keys
+        // (skill_ids=a&skill_ids=b). A JSON-stringified blob would land in
+        // the backend as a single literal string and fail validation
+        // (#627 review: "badge has not been earned" / "tag not found").
+        const fd = new FormData();
+        for (const [key, value] of Object.entries(diff)) {
+          // banner_url only has meaning when it's a saved CDN URL — the
+          // multipart upload below handles the new image case.
+          if (key === "banner_url" && pendingBanner) continue;
+          if (Array.isArray(value)) {
+            for (const item of value) {
+              fd.append(key, String(item));
+            }
+          } else if (value != null) {
+            fd.append(key, String(value));
+          }
+        }
+        if (skillsChanged) {
+          for (const id of skill_ids ?? []) {
+            fd.append("skill_ids", id);
+          }
+        }
+        if (pendingAvatar) {
+          fd.append("avatar", {
+            uri: pendingAvatar.uri,
+            name: pendingAvatar.name ?? `avatar-${Date.now()}.jpg`,
+            type: pendingAvatar.mimeType ?? "image/jpeg",
+          } as unknown as Blob);
+        }
+        if (pendingBanner) {
+          fd.append("banner", {
+            uri: pendingBanner.uri,
+            name: pendingBanner.name ?? `banner-${Date.now()}.jpg`,
+            type: pendingBanner.mimeType ?? "image/jpeg",
+          } as unknown as Blob);
+        }
+        updated = await patchMe(fd);
+      } else {
+        const body: Partial<UserProfileRequest> = {
+          ...(diff as Partial<UserProfileRequest>),
+        };
+        if (skillsChanged) {
+          body.skill_ids = skill_ids ?? [];
+        }
+        updated = await patchMe(body);
+      }
+
+      setPendingAvatar(null);
+      setPendingBanner(null);
+      onSaveSuccess(updated);
+      // Parent dismisses the editor (e.g. navigation.goBack once). Do not call
+      // onClose() here — that would double-pop and leave the previous screen
+      // (e.g. a visited PublicProfile) instead of own ProfileHome.
+    } catch (err) {
+      setSaveError(
+        err instanceof Error ? err.message : "Could not save your profile.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setField = (key: keyof EditableFields) => (value: string) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+
+  const content = (
+      <KeyboardAvoidingView
+        style={[
+          styles.keyboardLayer,
+          presentation === "screen" && styles.screenKeyboardLayer,
+        ]}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+      >
+      <View
+        style={[
+          styles.sheetContainer,
+          presentation === "screen" && styles.sheetContainerScreen,
+          { paddingBottom: insets.bottom + 8 },
+        ]}
+      >
+        {/* Sheet header — only render the title row in modal mode. When
+            presented as a stack screen the native nav header already shows
+            "Edit profile" and a back button, so a duplicate title row is
+            redundant. */}
+        <View style={styles.sheetHeader}>
+          {presentation === "modal" ? (
+            <View style={styles.headerRow}>
+              <View>
+                <Text style={styles.sheetEyebrow}>Profile settings</Text>
+                <Text style={styles.sheetTitle}>Edit profile</Text>
+              </View>
+              <Pressable
+                onPress={handleClose}
+                style={styles.closeButton}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={22} color={colors.GRAY700} />
+              </Pressable>
+            </View>
+          ) : null}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabRow}
+          >
+            {EDIT_TABS.map((tab) => {
+              const selected = activeTab === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  onPress={() => setActiveTab(tab.key)}
+                  style={({ pressed }) => [
+                    styles.tabButton,
+                    selected && styles.tabButtonActive,
+                    pressed && { opacity: 0.82 },
+                  ]}
+                >
+                  <Ionicons
+                    name={tab.icon}
+                    size={14}
+                    color={selected ? colors.GREEN : colors.GRAY500}
+                  />
+                  <Text
+                    style={[
+                      styles.tabButtonText,
+                      selected && styles.tabButtonTextActive,
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Scrollable content */}
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {activeTab === "identity" ? (
+            <>
+              <SectionHeader title="Identity" />
+              <FormField
+                label="First name"
+                value={form.first_name}
+                onChangeText={setField("first_name")}
+              />
+              <FormField
+                label="Last name"
+                value={form.last_name}
+                onChangeText={setField("last_name")}
+              />
+              <View style={fieldStyles.group}>
+                <Text style={fieldStyles.label}>City / Location</Text>
+                <View style={styles.locationInputWrap}>
+                  <Ionicons name="location-outline" size={17} color={colors.GRAY500} />
+                  <TextInput
+                    value={form.location}
+                    onChangeText={(text) => {
+                      suppressLocationSuggestionsRef.current = false;
+                      setField("location")(text);
+                    }}
+                    onFocus={() => {
+                      setLocationFocused(true);
+                    }}
+                    onBlur={() => {
+                      setLocationFocused(false);
+                      setLocationSuggestions([]);
+                    }}
+                    placeholder="Tap to search a city, district, or address"
+                    placeholderTextColor={colors.GRAY400}
+                    style={styles.locationInput}
+                    autoCapitalize="words"
+                  />
+                  {locationLoading ? (
+                    <ActivityIndicator size="small" color={colors.GREEN} />
+                  ) : form.location ? (
+                    <Pressable
+                      onPress={() => {
+                        suppressLocationSuggestionsRef.current = false;
+                        setForm((prev) => ({ ...prev, location: "" }));
+                        setLocationSuggestions([]);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear location"
+                      hitSlop={8}
+                    >
+                      <Ionicons
+                        name="close-circle"
+                        size={18}
+                        color={colors.GRAY400}
+                      />
+                    </Pressable>
+                  ) : null}
+                </View>
+                {locationFocused && locationSuggestions.length > 0 ? (
+                  <View style={styles.locationSuggestions}>
+                    {locationSuggestions.map((item) => (
+                      <Pressable
+                        key={`${item.lat}-${item.lng}-${item.fullAddress ?? item.label}`}
+                        onPress={() => {
+                          const chosen = item.fullAddress ?? item.label;
+                          suppressLocationSuggestionsRef.current = true;
+                          setForm((prev) => ({
+                            ...prev,
+                            location: chosen,
+                          }));
+                          setLocationSuggestions([]);
+                          setLocationFocused(false);
+                        }}
+                        style={({ pressed }) => [
+                          styles.locationSuggestionRow,
+                          pressed && { backgroundColor: colors.GREEN_LT },
+                        ]}
+                      >
+                        <Ionicons name="pin-outline" size={15} color={colors.GREEN} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.locationSuggestionTitle} numberOfLines={1}>
+                            {item.district ?? item.label}
+                          </Text>
+                          <Text style={styles.locationSuggestionText} numberOfLines={1}>
+                            {item.fullAddress ?? item.label}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+
+              <SectionHeader title="About you" />
+              <FormField
+                label="Bio"
+                value={form.bio}
+                onChangeText={setField("bio")}
+                multiline
+                maxLength={280}
+                placeholder="Tell the community a bit about yourself..."
+              />
+              <FormField
+                label="Profession"
+                value={form.profession}
+                onChangeText={setField("profession")}
+                placeholder="e.g. Graphic designer"
+              />
+            </>
+          ) : null}
+
+          {activeTab === "photos" ? (
+            <>
+              <SectionHeader title="Avatar & cover photo" />
+
+              <View style={styles.photoPreviewRow}>
+                <View style={styles.avatarPreviewWrap}>
+                  {pendingAvatar?.uri || user.avatar_url ? (
+                    <Image
+                      source={{
+                        uri: pendingAvatar?.uri ?? user.avatar_url ?? undefined,
+                      }}
+                      style={styles.avatarPreview}
+                      accessibilityLabel="Profile photo preview"
+                      accessibilityIgnoresInvertColors
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.avatarPreview,
+                        styles.avatarPreviewFallback,
+                      ]}
+                    >
+                      <Ionicons
+                        name="person-outline"
+                        size={28}
+                        color={colors.GRAY400}
+                      />
+                    </View>
+                  )}
+                  {pendingAvatar ? (
+                    <View style={styles.photoPendingBadge}>
+                      <Ionicons name="ellipse" size={8} color={colors.WHITE} />
+                      <Text style={styles.photoPendingBadgeText}>New</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <View style={{ flex: 1, gap: 8 }}>
+                  <Text style={styles.photoActionTitle}>Profile photo</Text>
+                  <Text style={styles.photoActionText}>
+                    Pick a new avatar. It uploads when you tap{" "}
+                    <Text style={{ fontWeight: "700" }}>Save changes</Text>.
+                  </Text>
+                  <View style={styles.photoButtonRow}>
+                    <TouchableOpacity
+                      onPress={async () => {
+                        if (!onPickAvatar) return;
+                        const asset = await onPickAvatar();
+                        if (asset) setPendingAvatar(asset);
+                      }}
+                      style={styles.photoPrimaryButton}
+                      accessibilityRole="button"
+                      accessibilityLabel="Change avatar"
+                    >
+                      <Ionicons
+                        name="camera-outline"
+                        size={14}
+                        color={colors.WHITE}
+                      />
+                      <Text style={styles.photoPrimaryButtonText}>
+                        {pendingAvatar ? "Replace" : "Choose photo"}
+                      </Text>
+                    </TouchableOpacity>
+                    {pendingAvatar ? (
+                      <TouchableOpacity
+                        onPress={() => setPendingAvatar(null)}
+                        style={styles.photoSecondaryButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Discard new avatar"
+                      >
+                        <Text style={styles.photoSecondaryButtonText}>
+                          Discard
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.coverPreviewWrapper}>
+                {pendingBanner?.uri || user.banner_url ? (
+                  <Image
+                    source={{
+                      uri: pendingBanner?.uri ?? user.banner_url ?? undefined,
+                    }}
+                    style={styles.coverPreview}
+                    accessibilityLabel="Cover photo preview"
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : (
+                  <View style={[styles.coverPreview, styles.coverPreviewEmpty]}>
+                    <Ionicons
+                      name="image-outline"
+                      size={28}
+                      color={colors.GRAY400}
+                    />
+                    <Text style={styles.coverPreviewEmptyText}>
+                      No cover photo yet
+                    </Text>
+                  </View>
+                )}
+                {pendingBanner ? (
+                  <View style={styles.coverPendingBadge}>
+                    <Ionicons name="ellipse" size={8} color={colors.WHITE} />
+                    <Text style={styles.photoPendingBadgeText}>New</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.photoActionTitle}>Cover photo</Text>
+              <Text style={styles.photoActionText}>
+                Wide hero banner shown at the top of your profile. Uploads when
+                you tap <Text style={{ fontWeight: "700" }}>Save changes</Text>.
+              </Text>
+              <View style={[styles.photoButtonRow, { marginTop: 10 }]}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (!onPickCoverPhoto) return;
+                    const asset = await onPickCoverPhoto();
+                    if (asset) setPendingBanner(asset);
+                  }}
+                  style={styles.photoPrimaryButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Change cover photo"
+                >
+                  <Ionicons name="image-outline" size={14} color={colors.WHITE} />
+                  <Text style={styles.photoPrimaryButtonText}>
+                    {pendingBanner ? "Replace" : "Choose photo"}
+                  </Text>
+                </TouchableOpacity>
+                {pendingBanner ? (
+                  <TouchableOpacity
+                    onPress={() => setPendingBanner(null)}
+                    style={styles.photoSecondaryButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Discard new cover photo"
+                  >
+                    <Text style={styles.photoSecondaryButtonText}>Discard</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </>
+          ) : null}
+
+          {activeTab === "skills" ? (
+            <>
+              <SectionHeader title="Skills & interests" />
+              {form.skills.length > 0 ? (
+                <View style={styles.skillsWrap}>
+                  {form.skills.map((skill) => (
+                    <Pressable
+                      key={skill.id}
+                      onPress={() =>
+                        setForm((prev) => ({
+                          ...prev,
+                          skills: prev.skills.filter((t) => t.id !== skill.id),
+                        }))
+                      }
+                      style={({ pressed }) => [
+                        styles.skillChip,
+                        pressed && { opacity: 0.85 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${skill.name}`}
+                    >
+                      <Text style={styles.skillChipText}>{skill.name}</Text>
+                      <Ionicons name="close-circle" size={16} color={colors.GREEN} />
+                    </Pressable>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.todoSection}>
+                  <Ionicons name="sparkles-outline" size={16} color={colors.GRAY500} />
+                  <Text style={styles.todoText}>No skills yet. Search below to add.</Text>
+                </View>
+              )}
+              <SkillTagAutocomplete
+                selected={form.skills}
+                disabled={form.skills.length >= 15}
+                onSelect={(tag) => {
+                  setForm((prev) => ({
+                    ...prev,
+                    skills: prev.skills.some((t) => t.id === tag.id)
+                      ? prev.skills
+                      : [...prev.skills, tag],
+                  }));
+                }}
+              />
+              <Text style={styles.skillsCounter}>{form.skills.length}/15 tags</Text>
+            </>
+          ) : null}
+
+          {activeTab === "showcase" ? (
+            <>
+              <SectionHeader title="Showcase badges" />
+              {badgeProgressLoading ? (
+                <View style={styles.showcaseLoading}>
+                  <ActivityIndicator color={colors.GREEN} />
+                  <Text style={styles.showcaseLoadingText}>Loading badges…</Text>
+                </View>
+              ) : badgeProgressError ? (
+                <View style={styles.showcaseError}>
+                  <Ionicons name="alert-circle-outline" size={18} color={colors.RED} />
+                  <Text style={styles.showcaseErrorText}>{badgeProgressError}</Text>
+                  {onBadgeProgressRetry ? (
+                    <Pressable
+                      onPress={onBadgeProgressRetry}
+                      style={({ pressed }) => [
+                        styles.showcaseRetryBtn,
+                        pressed && { opacity: 0.85 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Retry loading badges"
+                    >
+                      <Text style={styles.showcaseRetryBtnText}>Try again</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : (
+                <BadgeShowcase
+                  variant="picker"
+                  badgeProgress={badgeProgress}
+                  selectedIds={form.featured_badges}
+                  onSelectionChange={(ids) =>
+                    setForm((prev) => ({ ...prev, featured_badges: ids }))
+                  }
+                />
+              )}
+            </>
+          ) : null}
+
+          {activeTab === "privacy" ? (
+            <>
+              <SectionHeader title="Account & privacy" />
+              <Pressable
+                onPress={onChangeEmailPress}
+                style={({ pressed }) => [
+                  styles.linkRow,
+                  pressed && { opacity: 0.75 },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Change email"
+              >
+                <Ionicons name="mail-outline" size={18} color={colors.GRAY600} />
+                <Text style={styles.linkRowText}>Change email</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.GRAY400} />
+              </Pressable>
+              <Pressable
+                onPress={onChangePasswordPress}
+                style={({ pressed }) => [
+                  styles.linkRow,
+                  pressed && { opacity: 0.75 },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Change password"
+              >
+                <Ionicons name="lock-closed-outline" size={18} color={colors.GRAY600} />
+                <Text style={styles.linkRowText}>Change password</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.GRAY400} />
+              </Pressable>
+              <View style={styles.toggleRow}>
+                <Ionicons name="eye-outline" size={18} color={colors.GRAY600} />
+                <Text style={styles.toggleRowText}>Public profile</Text>
+                <Switch
+                  value={isPublic}
+                  onValueChange={setIsPublic}
+                  trackColor={{ false: colors.GRAY200, true: colors.GREEN_MD }}
+                  thumbColor={isPublic ? colors.GREEN : colors.GRAY400}
+                  accessibilityLabel="Toggle public profile visibility"
+                />
+              </View>
+              <Text style={styles.disabledHelp}>
+                Public visibility is shown here for parity with web settings and will be saved when the backend setting is exposed to mobile.
+              </Text>
+            </>
+          ) : null}
+
+          {/* Error display */}
+          {saveError ? (
+            <View style={styles.errorBanner}>
+              <Ionicons name="alert-circle-outline" size={16} color={colors.RED} />
+              <Text style={styles.errorText}>{saveError}</Text>
+            </View>
+          ) : null}
+
+          <View style={{ height: 24 }} />
+        </ScrollView>
+
+        {/* Sticky footer */}
+        <View style={styles.footer}>
+          <TouchableOpacity
+            onPress={handleClose}
+            style={styles.cancelButton}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+          >
+            <Text style={styles.cancelButtonText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => void handleSave()}
+            style={[
+              styles.saveButton,
+              (!dirty || saving) && styles.saveButtonDisabled,
+            ]}
+            disabled={!dirty || saving}
+            accessibilityRole="button"
+            accessibilityLabel={saving ? "Saving…" : "Save changes"}
+          >
+            <Text style={styles.saveButtonText}>
+              {saving ? "Saving…" : "Save changes"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      </KeyboardAvoidingView>
+  );
+
+  if (presentation === "screen") {
+    return <View style={styles.screenRoot}>{content}</View>;
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent
+      presentationStyle="overFullScreen"
+      onRequestClose={handleClose}
+    >
+      <View style={styles.modalBackdrop}>
+        {content}
+      </View>
+    </Modal>
+  );
+}
+
+
+const sectionStyles = StyleSheet.create({
+  header: {
+    paddingVertical: 10,
+    marginTop: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.GRAY100,
+    marginBottom: 12,
+  },
+  title: {
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    color: colors.GREEN,
+    textTransform: "uppercase",
+  },
+});
+
+const fieldStyles = StyleSheet.create({
+  group: {
+    marginBottom: 14,
+  },
+  labelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 5,
+    gap: 6,
+  },
+  label: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.GRAY700,
+  },
+  readOnlyTag: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: colors.GRAY400,
+    backgroundColor: colors.GRAY100,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  counter: {
+    fontSize: 11,
+    color: colors.GRAY400,
+    fontWeight: "600",
+  },
+  counterWarn: {
+    color: colors.AMBER,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.GRAY800,
+    backgroundColor: colors.WHITE,
+  },
+  multilineInput: {
+    minHeight: 80,
+    paddingTop: 10,
+  },
+  readOnlyInput: {
+    backgroundColor: colors.GRAY50,
+    color: colors.GRAY500,
+  },
+  helperText: {
+    fontSize: 11,
+    color: colors.GRAY400,
+    marginTop: 4,
+    fontStyle: "italic",
+  },
+});
+
+const styles = StyleSheet.create({
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(17, 24, 39, 0.42)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  keyboardLayer: {
+    width: "100%",
+    maxWidth: 540,
+  },
+  screenRoot: {
+    flex: 1,
+    backgroundColor: colors.GRAY50,
+  },
+  screenKeyboardLayer: {
+    flex: 1,
+    maxWidth: undefined,
+  },
+  sheetContainer: {
+    backgroundColor: colors.WHITE,
+    borderRadius: 24,
+    overflow: "hidden",
+    maxHeight: "90%",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.68)",
+    shadowColor: colors.GRAY900,
+    shadowOpacity: 0.26,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 18,
+  },
+  sheetContainerScreen: {
+    flex: 1,
+    maxHeight: undefined,
+    borderRadius: 0,
+    borderWidth: 0,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  sheetHeader: {
+    paddingTop: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.GRAY100,
+    backgroundColor: colors.WHITE,
+  },
+  sheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.GRAY300,
+    marginBottom: 10,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    justifyContent: "space-between",
+  },
+  sheetEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: colors.GREEN,
+    marginBottom: 2,
+  },
+  sheetTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: colors.GRAY800,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  tabRow: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  tabButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    backgroundColor: colors.GRAY50,
+  },
+  tabButtonActive: {
+    backgroundColor: colors.GREEN_LT,
+    borderColor: "rgba(45, 92, 78, 0.28)",
+  },
+  tabButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.GRAY500,
+  },
+  tabButtonTextActive: {
+    color: colors.GREEN,
+  },
+  locationInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: colors.WHITE,
+  },
+  locationInput: {
+    flex: 1,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: colors.GRAY800,
+  },
+  locationSuggestions: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: colors.WHITE,
+  },
+  locationSuggestionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.GRAY100,
+  },
+  locationSuggestionTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.GRAY800,
+  },
+  locationSuggestionText: {
+    fontSize: 12,
+    color: colors.GRAY500,
+    marginTop: 1,
+  },
+  photoGrid: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 12,
+  },
+  photoActionCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    borderRadius: 16,
+    backgroundColor: colors.GRAY50,
+    padding: 12,
+    minHeight: 104,
+    justifyContent: "space-between",
+  },
+  photoActionTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.GRAY800,
+    marginTop: 10,
+  },
+  photoActionText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.GRAY500,
+    marginTop: 2,
+  },
+  avatarButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.GREEN,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignSelf: "flex-start",
+    marginBottom: 16,
+  },
+  avatarButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.GREEN,
+  },
+  coverPreviewWrapper: {
+    marginBottom: 10,
+    borderRadius: 10,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+  },
+  coverPreview: {
+    width: "100%",
+    height: 120,
+    resizeMode: "cover",
+  },
+  coverPreviewEmpty: {
+    backgroundColor: colors.GRAY50,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  coverPreviewEmptyText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.GRAY500,
+  },
+  photoPreviewRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 14,
+    marginBottom: 16,
+  },
+  avatarPreviewWrap: {
+    position: "relative",
+  },
+  avatarPreview: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: colors.GRAY200,
+    borderWidth: 2,
+    borderColor: colors.WHITE,
+  },
+  avatarPreviewFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.GRAY100,
+  },
+  photoPendingBadge: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: colors.GREEN,
+    borderWidth: 1.5,
+    borderColor: colors.WHITE,
+  },
+  coverPendingBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: colors.GREEN,
+  },
+  photoPendingBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: colors.WHITE,
+    letterSpacing: 0.4,
+  },
+  photoButtonRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  photoPrimaryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: colors.GREEN,
+  },
+  photoPrimaryButtonText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.WHITE,
+  },
+  photoSecondaryButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.GRAY300,
+  },
+  photoSecondaryButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.GRAY600,
+  },
+  coverButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.GREEN,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignSelf: "flex-start",
+    marginBottom: 16,
+  },
+  coverButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.GREEN,
+  },
+  todoSection: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: colors.GRAY100,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  todoText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.GRAY600,
+    lineHeight: 18,
+  },
+  disabledHelp: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.GRAY500,
+    marginTop: 8,
+  },
+  skillsWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 10,
+  },
+  skillChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: colors.GREEN_LT,
+    borderWidth: 1,
+    borderColor: "rgba(45, 92, 78, 0.2)",
+  },
+  skillChipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.GREEN,
+    flexShrink: 1,
+  },
+  skillsCounter: {
+    fontSize: 11,
+    color: colors.GRAY400,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.GRAY100,
+  },
+  linkRowText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.GRAY700,
+    fontWeight: "500",
+  },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    marginBottom: 4,
+  },
+  toggleRowText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.GRAY700,
+    fontWeight: "500",
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.RED_LT,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 12,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.RED,
+    fontWeight: "600",
+  },
+  // Footer
+  footer: {
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.GRAY100,
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.GRAY200,
+    alignItems: "center",
+  },
+  cancelButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.GRAY600,
+  },
+  saveButton: {
+    flex: 2,
+    paddingVertical: 13,
+    borderRadius: 10,
+    backgroundColor: colors.GREEN,
+    alignItems: "center",
+  },
+  saveButtonDisabled: {
+    backgroundColor: colors.GRAY200,
+  },
+  saveButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.WHITE,
+  },
+  showcaseLoading: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 36,
+    gap: 10,
+  },
+  showcaseLoadingText: {
+    fontSize: 13,
+    color: colors.GRAY500,
+    fontWeight: "600",
+  },
+  showcaseError: {
+    alignItems: "center",
+    paddingVertical: 24,
+    paddingHorizontal: 12,
+    gap: 10,
+    backgroundColor: colors.RED_LT,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  showcaseErrorText: {
+    fontSize: 13,
+    color: colors.RED,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  showcaseRetryBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.GREEN,
+    backgroundColor: colors.WHITE,
+  },
+  showcaseRetryBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.GREEN,
+  },
+});

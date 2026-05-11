@@ -13,7 +13,9 @@ Covers:
 - Pending handshake does not count
 """
 from decimal import Decimal
-from django.test import TestCase
+from types import SimpleNamespace
+
+import pytest
 from django.contrib.auth import get_user_model
 
 from api.models import Service, Handshake, UserFollow
@@ -44,88 +46,109 @@ def _make_completed_handshake(provider, requester):
     )
 
 
-class SocialProximityBoostTests(TestCase):
+def _boost(result, user):
+    """Look up boost by UUID key."""
+    return result.get(user.id)
 
-    def setUp(self):
-        self.viewer = _make_user('viewer@test.com')
-        self.u1 = _make_user('u1@test.com')
-        self.u2 = _make_user('u2@test.com')
-        self.u3 = _make_user('u3@test.com')
-        self.stranger = _make_user('stranger@test.com')
 
-    def _boost(self, result, user):
-        """Look up boost by UUID key."""
-        return result.get(user.id)
+@pytest.fixture
+def env(db):
+    return SimpleNamespace(
+        viewer=_make_user('viewer@test.com'),
+        u1=_make_user('u1@test.com'),
+        u2=_make_user('u2@test.com'),
+        u3=_make_user('u3@test.com'),
+        stranger=_make_user('stranger@test.com'),
+    )
 
-    def test_no_viewer_returns_empty(self):
-        result = get_social_proximity_boosts(None)
-        self.assertEqual(result, {})
 
-    def test_no_connections_returns_empty(self):
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertEqual(result, {})
+@pytest.mark.django_db
+def test_no_viewer_returns_empty():
+    result = get_social_proximity_boosts(None)
+    assert result == {}
 
-    def test_first_degree_via_follow(self):
-        UserFollow.objects.create(follower=self.viewer, following=self.u1)
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertAlmostEqual(self._boost(result, self.u1), 1.0)
 
-    def test_first_degree_via_completed_handshake_as_requester(self):
-        _make_completed_handshake(provider=self.u1, requester=self.viewer)
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertAlmostEqual(self._boost(result, self.u1), 1.0)
+@pytest.mark.django_db
+def test_no_connections_returns_empty(env):
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert result == {}
 
-    def test_first_degree_via_completed_handshake_as_provider(self):
-        _make_completed_handshake(provider=self.viewer, requester=self.u1)
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertAlmostEqual(self._boost(result, self.u1), 1.0)
 
-    def test_second_degree_via_follow_chain(self):
-        # viewer -> u1 -> u2
-        UserFollow.objects.create(follower=self.viewer, following=self.u1)
-        UserFollow.objects.create(follower=self.u1, following=self.u2)
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertAlmostEqual(self._boost(result, self.u2), 0.5)
+@pytest.mark.django_db
+def test_first_degree_via_follow(env):
+    UserFollow.objects.create(follower=env.viewer, following=env.u1)
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.u1) == pytest.approx(1.0)
 
-    def test_second_degree_via_transaction_chain(self):
-        # viewer -[completed]- u1 -[completed]- u2
-        _make_completed_handshake(provider=self.u1, requester=self.viewer)
-        _make_completed_handshake(provider=self.u1, requester=self.u2)
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertAlmostEqual(self._boost(result, self.u2), 0.5)
 
-    def test_first_degree_takes_precedence_over_second(self):
-        # u1 is directly followed AND reachable via u2 (2nd-degree path)
-        UserFollow.objects.create(follower=self.viewer, following=self.u1)
-        UserFollow.objects.create(follower=self.viewer, following=self.u2)
-        UserFollow.objects.create(follower=self.u2, following=self.u1)
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertAlmostEqual(self._boost(result, self.u1), 1.0)
+@pytest.mark.django_db
+def test_first_degree_via_completed_handshake_as_requester(env):
+    _make_completed_handshake(provider=env.u1, requester=env.viewer)
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.u1) == pytest.approx(1.0)
 
-    def test_stranger_has_no_entry(self):
-        UserFollow.objects.create(follower=self.viewer, following=self.u1)
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertIsNone(self._boost(result, self.stranger))
 
-    def test_viewer_excluded_from_own_results(self):
-        UserFollow.objects.create(follower=self.viewer, following=self.u1)
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertIsNone(self._boost(result, self.viewer))
+@pytest.mark.django_db
+def test_first_degree_via_completed_handshake_as_provider(env):
+    _make_completed_handshake(provider=env.viewer, requester=env.u1)
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.u1) == pytest.approx(1.0)
 
-    def test_pending_handshake_does_not_count(self):
-        svc = _make_service(self.u1)
-        Handshake.objects.create(
-            service=svc, requester=self.viewer,
-            status='pending', provisioned_hours=Decimal('1.00'),
-        )
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertIsNone(self._boost(result, self.u1))
 
-    def test_multiple_paths_do_not_duplicate_entries(self):
-        # u1 is reachable via two 1st-degree paths (follow + handshake)
-        UserFollow.objects.create(follower=self.viewer, following=self.u1)
-        _make_completed_handshake(provider=self.u1, requester=self.viewer)
-        result = get_social_proximity_boosts(self.viewer.id)
-        self.assertAlmostEqual(self._boost(result, self.u1), 1.0)
-        # Only one entry, not two
-        self.assertEqual(list(result.values()).count(1.0), 1)
+@pytest.mark.django_db
+def test_second_degree_via_follow_chain(env):
+    UserFollow.objects.create(follower=env.viewer, following=env.u1)
+    UserFollow.objects.create(follower=env.u1, following=env.u2)
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.u2) == pytest.approx(0.5)
+
+
+@pytest.mark.django_db
+def test_second_degree_via_transaction_chain(env):
+    _make_completed_handshake(provider=env.u1, requester=env.viewer)
+    _make_completed_handshake(provider=env.u1, requester=env.u2)
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.u2) == pytest.approx(0.5)
+
+
+@pytest.mark.django_db
+def test_first_degree_takes_precedence_over_second(env):
+    UserFollow.objects.create(follower=env.viewer, following=env.u1)
+    UserFollow.objects.create(follower=env.viewer, following=env.u2)
+    UserFollow.objects.create(follower=env.u2, following=env.u1)
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.u1) == pytest.approx(1.0)
+
+
+@pytest.mark.django_db
+def test_stranger_has_no_entry(env):
+    UserFollow.objects.create(follower=env.viewer, following=env.u1)
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.stranger) is None
+
+
+@pytest.mark.django_db
+def test_viewer_excluded_from_own_results(env):
+    UserFollow.objects.create(follower=env.viewer, following=env.u1)
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.viewer) is None
+
+
+@pytest.mark.django_db
+def test_pending_handshake_does_not_count(env):
+    svc = _make_service(env.u1)
+    Handshake.objects.create(
+        service=svc, requester=env.viewer,
+        status='pending', provisioned_hours=Decimal('1.00'),
+    )
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.u1) is None
+
+
+@pytest.mark.django_db
+def test_multiple_paths_do_not_duplicate_entries(env):
+    UserFollow.objects.create(follower=env.viewer, following=env.u1)
+    _make_completed_handshake(provider=env.u1, requester=env.viewer)
+    result = get_social_proximity_boosts(env.viewer.id)
+    assert _boost(result, env.u1) == pytest.approx(1.0)
+    assert list(result.values()).count(1.0) == 1

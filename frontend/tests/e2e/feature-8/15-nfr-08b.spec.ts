@@ -6,11 +6,11 @@ import {
   initiateOnlineHandshakeViaApi,
   pickUsersWithBalanceAtLeast,
   postHandshakeAction,
-  switchUser,
+  switchUserApi,
   USERS,
 } from '../helpers'
 
-test('NFR-08b: only handshake parties can execute state-changing exchange actions', async ({ page }) => {
+test('NFR-08b: only the requester can approve and only the owner can initiate or cancel a pending offer exchange', async ({ page }) => {
   const owner = USERS.elif
   const picked = await pickUsersWithBalanceAtLeast(page, 2, 2, [owner.email])
   const requester = picked[0].user
@@ -31,7 +31,7 @@ test('NFR-08b: only handshake parties can execute state-changing exchange action
   })
 
   // A third party must not be able to initiate or cancel someone else's pending exchange.
-  await switchUser(page, stranger)
+  await switchUserApi(page, stranger)
   const strangerInitiate = await postHandshakeAction(page, handshakeId, 'initiate', {
     exact_location: 'https://meet.example.com/nfr-08b',
     exact_duration: 1,
@@ -43,7 +43,7 @@ test('NFR-08b: only handshake parties can execute state-changing exchange action
   expect([403, 404]).toContain(strangerCancel.status)
 
   // After the owner initiates, only the requester should be allowed to approve.
-  await switchUser(page, owner)
+  await switchUserApi(page, owner)
   await initiateOnlineHandshakeViaApi(page, {
     serviceTitle: title,
     requesterName: requester.name,
@@ -51,16 +51,16 @@ test('NFR-08b: only handshake parties can execute state-changing exchange action
     meetingLink: 'https://meet.example.com/nfr-08b',
   })
 
-  await switchUser(page, stranger)
+  await switchUserApi(page, stranger)
   const strangerApprove = await postHandshakeAction(page, handshakeId, 'approve')
   expect([403, 404]).toContain(strangerApprove.status)
 
-  await switchUser(page, requester)
+  await switchUserApi(page, requester)
   const requesterApprove = await postHandshakeAction(page, handshakeId, 'approve')
   expect(requesterApprove.ok).toBeTruthy()
 
   // Even after acceptance, a third party must still be blocked from confirming completion.
-  await switchUser(page, stranger)
+  await switchUserApi(page, stranger)
   const strangerConfirm = await postHandshakeAction(page, handshakeId, 'confirm')
   expect([403, 404]).toContain(strangerConfirm.status)
 })

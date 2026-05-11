@@ -357,6 +357,7 @@ REST_FRAMEWORK = {
         'anon': '20/hour',        # Reduced from 100/hour (REQ-NF-SEC-002)
         'user': '200/hour',       # Reduced from 1000/hour (REQ-NF-SEC-002)
         'registration': '20/hour',  # Separate rate for registration
+        'login': '30/hour',       # Per-IP login throttle (#244)
         'handshake': '20/hour',   # Limit handshake creation
         'chat': '100/hour',       # Limit chat messages
         'confirm': '10/hour',     # Limit confirmations
@@ -376,6 +377,7 @@ if THROTTLE_RELAXED:
         'anon': '500/hour',
         'user': '10000/hour',
         'registration': '200/hour',
+        'login': '500/hour',
         'handshake': '500/hour',
         'chat': '5000/hour',
         'confirm': '200/hour',
@@ -393,6 +395,7 @@ if DJANGO_E2E:
         'anon': '100000/hour',
         'user': '100000/hour',
         'registration': '100000/hour',
+        'login': '100000/hour',
         'handshake': '100000/hour',
         'chat': '100000/hour',
         'confirm': '100000/hour',
@@ -409,6 +412,7 @@ if DISABLE_THROTTLING:
         'anon': '1000000/hour',
         'user': '1000000/hour',
         'registration': '1000000/hour',
+        'login': '1000000/hour',
         'handshake': '1000000/hour',
         'chat': '1000000/hour',
         'confirm': '1000000/hour',
@@ -433,7 +437,31 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
+# Cookie security defaults — pinned for both dev and prod so a future
+# Django version change cannot silently downgrade them. ``Secure`` is only
+# enabled in production because the dev server runs over plain HTTP and
+# browsers would otherwise drop the cookie. SameSite is ``Lax`` here so
+# top-level navigations the SPA relies on still attach the session and
+# CSRF cookies; note that the JWT auth cookies written by
+# ``get_cookie_settings`` in ``api/views.py`` deliberately diverge to
+# ``Strict`` under ``IS_PRODUCTION=True`` (``Lax`` in dev) — those cookies
+# are only ever needed on first-party XHR/fetch, so the stricter posture
+# costs nothing while shrinking the CSRF surface.
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+
 # Security settings for production
+#
+# Geolocation encryption posture (NFR-19c, #326): user coordinates rely on
+# transport-layer TLS (HSTS below) for confidentiality plus a deterministic
+# ~1 km fuzz applied at serializer-output time as the access-control layer.
+# Field-level encryption at rest is intentionally NOT in scope at MVP — see
+# docs/security/geolocation-encryption-posture.md for the full reasoning and
+# the conditions under which this decision should be revisited.
 if not DEBUG:
     # SSL redirect is handled by nginx — backend runs plain HTTP internally
     SECURE_SSL_REDIRECT = False
@@ -776,8 +804,32 @@ SPECTACULAR_SETTINGS = {
             },
         },
     },
-    # Tag descriptions for the WebSocket section
+    # Preserve the order in which operations are declared rather than sorting alphabetically;
+    # we tag operations by domain so the natural file order is also the natural docs order.
+    'SORT_OPERATIONS': False,
+    # Tag descriptions. Every operation should carry exactly one of these tags.
     'TAGS': [
+        {'name': 'Auth', 'description': 'Registration, login, refresh, logout, password and email verification flows.'},
+        {'name': 'Users', 'description': 'User profile read / update, calendar, history, badges, verified reviews.'},
+        {'name': 'Social', 'description': 'Follow / unfollow and follower / following listings.'},
+        {'name': 'Services', 'description': 'Offer and Need listings: CRUD, visibility, media, event lifecycle actions.'},
+        {'name': 'Comments', 'description': 'Service-listing comments (read path; writes happen via reputation).'},
+        {'name': 'Handshakes', 'description': 'Exchange lifecycle between provider and requester.'},
+        {'name': 'Events', 'description': 'Event-specific actions: join, leave, check-in, mark-attended, appeal-no-show.'},
+        {'name': 'Chats', 'description': 'Private 1-to-1, public, and group chats over HTTP. Live transport is documented under WebSocket.'},
+        {'name': 'Forum', 'description': 'Discussion forum categories, topics, posts, and activity summaries.'},
+        {'name': 'Notifications', 'description': 'In-app and push notifications.'},
+        {'name': 'Reputation', 'description': 'Positive and negative reputation entries.'},
+        {'name': 'Reviews', 'description': 'Verified post-transaction reviews.'},
+        {'name': 'Transactions', 'description': 'TimeBank transaction history for the current user.'},
+        {'name': 'Tags', 'description': 'Listing tags (Wikidata-style identifiers).'},
+        {'name': 'Wikidata', 'description': 'Wikidata search proxy used by the tag picker.'},
+        {'name': 'Activity', 'description': 'Cross-user activity feed.'},
+        {'name': 'Pulse', 'description': 'Personal stats and visit tracking.'},
+        {'name': 'Featured', 'description': 'Featured / discovery surfaces.'},
+        {'name': 'Admin', 'description': 'Moderation, reports, user management, audit log, platform settings.'},
+        {'name': 'System', 'description': 'Health check and metrics.'},
+        {'name': 'E2E', 'description': 'Testing helpers gated by DJANGO_E2E. Not part of the production surface.'},
         {'name': 'WebSocket', 'description': 'Real-time WebSocket endpoints (use ws:// or wss://, not HTTP).'},
     ],
 }
@@ -834,6 +886,13 @@ LOGGING = {
             'level': 'DEBUG',
             'propagate': False,
         },
+        # Security events: successful + failed logins, IP, etc. (#244).
+        # Goes to console + file so Docker log scraping picks it up.
+        'api.security': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
         'django.request': {
             'handlers': ['console', 'file'],
             'level': 'WARNING',
@@ -851,3 +910,77 @@ EVENT_FEEDBACK_WINDOW_HOURS = int(os.environ.get('EVENT_FEEDBACK_WINDOW_HOURS', 
 # Audit log retention (FR-AUDIT): admin audit records must be retained for
 # at least 7 years (2555 days) before archival is permitted.
 AUDIT_RETENTION_DAYS = int(os.environ.get('AUDIT_RETENTION_DAYS', '2555'))
+
+# ── Ranking pipeline (Phase 3 + SLA) ────────────────────────────────────────
+RANKING_EXPLORATION_RATE = float(os.environ.get('RANKING_EXPLORATION_RATE', '0.20'))
+RANKING_COLDSTART_THRESHOLD = int(os.environ.get('RANKING_COLDSTART_THRESHOLD', '5'))
+RANKING_EXPLORATION_SLOT_INDEX = int(os.environ.get('RANKING_EXPLORATION_SLOT_INDEX', '5'))
+RANKING_UNDERSHOWN_QUALITY_THRESHOLD = float(os.environ.get('RANKING_UNDERSHOWN_QUALITY_THRESHOLD', '0.4'))
+RANKING_UNDERSHOWN_STALE_DAYS = int(os.environ.get('RANKING_UNDERSHOWN_STALE_DAYS', '14'))
+RANKING_FEED_SLA_SECONDS = float(os.environ.get('RANKING_FEED_SLA_SECONDS', '1.0'))
+RANKING_FEED_E2E_SLA_SECONDS = float(os.environ.get('RANKING_FEED_E2E_SLA_SECONDS', '2.0'))
+# Newcomer boost: services owned by users registered < 30 days ago receive a
+# multiplicative bump in Phase 2 score so brand-new members surface before
+# their reputation accumulates. Customer request, May 2026.
+RANKING_NEWCOMER_BOOST = float(os.environ.get('RANKING_NEWCOMER_BOOST', '1.2'))
+
+# For You feed (#481). Additive blend on top of hot_score:
+#   for_you_score = hot_score
+#                 + TAG * tag_overlap (Jaccard with viewer.skills)
+#                 + FOLLOW * follow_affinity (1.0 1st-degree, 0.5 2nd-degree)
+#                 + COOCCUR * cooccurrence_signal (k-anon item-item)
+#                 - RECENCY * recency_penalty (decay over hours since last seen)
+# TAG outweighs FOLLOW: a freshly onboarded user has declared skills but
+# few follows, so tag relevance is the strongest available signal.
+RANKING_FOR_YOU_TAG_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_TAG_WEIGHT', '0.5'))
+RANKING_FOR_YOU_FOLLOW_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_FOLLOW_WEIGHT', '0.3'))
+RANKING_FOR_YOU_COOCCUR_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_COOCCUR_WEIGHT', '0.2'))
+RANKING_FOR_YOU_RECENCY_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_RECENCY_WEIGHT', '0.1'))
+RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS = float(os.environ.get('RANKING_FOR_YOU_RECENCY_HALF_LIFE_HOURS', '24'))
+# Engagement signal: tag-overlap with services the viewer has saved (bookmarks).
+# Endorsements deliberately excluded — they're a public quality signal, not
+# a private preference. Net effect of adding ENGAGEMENT(+0.25) and
+# DISMISSED(-0.20) on top of the base weights is a slight +0.05 nudge toward
+# engaged-with content; intentional, not a wholesale rebalance.
+RANKING_FOR_YOU_ENGAGEMENT_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_ENGAGEMENT_WEIGHT', '0.25'))
+# Soft penalty: tag-similarity to services the viewer has dismissed.
+# Layered on top of the existing hard exclusion of the dismissed services
+# themselves (see ServiceViewSet._list_for_you).
+RANKING_FOR_YOU_DISMISSED_SIMILARITY_WEIGHT = float(os.environ.get('RANKING_FOR_YOU_DISMISSED_SIMILARITY_WEIGHT', '0.20'))
+# MMR diversification at re-rank time: penalise candidates whose tag set
+# overlaps with already-selected results so the visible feed isn't five
+# near-duplicates in a row. Lambda=0 makes MMR a no-op.
+RANKING_FOR_YOU_MMR_LAMBDA = float(os.environ.get('RANKING_FOR_YOU_MMR_LAMBDA', '0.3'))
+RANKING_FOR_YOU_MMR_TOP_K = int(os.environ.get('RANKING_FOR_YOU_MMR_TOP_K', '20'))
+RANKING_COOCCUR_MIN_USERS = int(os.environ.get('RANKING_COOCCUR_MIN_USERS', '3'))
+RANKING_FOR_YOU_LIMIT = int(os.environ.get('RANKING_FOR_YOU_LIMIT', '10'))
+# Click-to-handshake attribution window for the For You CTR proxy. A handshake
+# created within this many minutes of a `?from=for_you` click is attributed to
+# the For You feed in ForYouEvent.
+RANKING_FOR_YOU_ATTRIBUTION_MINUTES = int(os.environ.get('RANKING_FOR_YOU_ATTRIBUTION_MINUTES', '60'))
+# Cap on how many recent impressions to remember per viewer for the recency
+# penalty. Older entries are dropped.
+RANKING_FOR_YOU_IMPRESSION_HISTORY = int(os.environ.get('RANKING_FOR_YOU_IMPRESSION_HISTORY', '100'))
+
+# Stochastic boost probabilities (#477). Each ranges 0..1. Default 1.0 means
+# the boost behaves exactly like the deterministic baseline. Lowering a
+# probability rotates which boosted items surface across impressions while
+# preserving the expected multiplier (sample_boost in api/ranking.py amplifies
+# the effective multiplier when applied so the average across calls equals
+# the configured target).
+RANKING_NEWCOMER_BOOST_PROBABILITY = float(os.environ.get('RANKING_NEWCOMER_BOOST_PROBABILITY', '1.0'))
+RANKING_CAPACITY_BOOST_PROBABILITY = float(os.environ.get('RANKING_CAPACITY_BOOST_PROBABILITY', '1.0'))
+RANKING_SOCIAL_PROXIMITY_PROBABILITY = float(os.environ.get('RANKING_SOCIAL_PROXIMITY_PROBABILITY', '1.0'))
+
+# Proximity ranking factor (#479). Distance decay applied to the hot score on
+# the recommendation feed when the viewer has a known location. The
+# multiplier is 1 / (1 + distance_km / half_life_km); a service at the half
+# life distance keeps half its score. Skipped when the viewer has no
+# location (multiplier = 1.0).
+RANKING_PROXIMITY_HALF_LIFE_KM = float(os.environ.get('RANKING_PROXIMITY_HALF_LIFE_KM', '10.0'))
+
+# Onboarding tag fallback (#478). When an onboarded viewer with declared
+# skills hits the hot feed and fewer than this many services match those
+# skills, the tail is filled from the Phase 3 explore pool (cold start,
+# undershown quality, stale recurring) so the feed never feels empty.
+RANKING_ONBOARDING_MIN_RESULTS = int(os.environ.get('RANKING_ONBOARDING_MIN_RESULTS', '10'))

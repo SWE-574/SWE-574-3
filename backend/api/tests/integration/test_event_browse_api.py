@@ -8,8 +8,10 @@ Covers the public event browsing and discovery requirements:
   FR-12f  Unauthenticated join attempt returns 401
   FR-12g  Cancelled events excluded from browse; detail page exposes cancellation state
 
-Tests for date-range filtering (FR-12c) will fail red until DateRangeStrategy is
-implemented in search_filters.py and wired into ServiceViewSet.
+FR-12c is wired up — `date_from` / `date_to` filtering on the event feed
+is handled in `DateRangeStrategy` (search_filters.py) and surfaces through
+`ServiceViewSet`. The tests in `TestEventDateRangeFilter` exercise that
+end-to-end and run green.
 """
 import pytest
 from datetime import timedelta
@@ -21,6 +23,7 @@ from rest_framework.test import APIClient
 from api.tests.helpers.factories import UserFactory, ServiceFactory, HandshakeFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
 from api.models import Service
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +62,7 @@ class TestEventFeedAnonymousAccess:
 
         response = client.get('/api/services/?type=Event')
 
-        assert response.status_code == status.HTTP_200_OK
-        assert 'results' in response.data
+        assert_api_response(response, 200, contains={'results'})
 
     def test_anonymous_user_sees_active_events(self):
         """FR-12a: anonymous feed includes Active events."""
@@ -81,19 +83,17 @@ class TestEventFeedAnonymousAccess:
 
         response = client.get('/api/services/?type=Event')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         titles = [s['title'] for s in response.data['results']]
         assert 'Auth User Event' in titles
 
 
 # ---------------------------------------------------------------------------
-# FR-12c — Date range filtering
-# (These tests will FAIL until DateRangeStrategy is implemented)
+# FR-12c — Date range filtering (green at the event-browse API surface)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 @pytest.mark.integration
-@pytest.mark.xfail(reason="FR-12c: date_from/date_to filter not yet implemented", strict=False)
 class TestEventDateRangeFilter:
     """FR-12c: users can filter events by date_from and date_to."""
 
@@ -107,7 +107,7 @@ class TestEventDateRangeFilter:
 
         response = client.get(f'/api/services/?type=Event&date_from={date_from}')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         titles = [s['title'] for s in response.data['results']]
         assert 'Future Event' in titles
         assert 'Past Event' not in titles
@@ -122,7 +122,7 @@ class TestEventDateRangeFilter:
 
         response = client.get(f'/api/services/?type=Event&date_to={date_to}')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         titles = [s['title'] for s in response.data['results']]
         assert 'Near Event' in titles
         assert 'Far Event' not in titles
@@ -141,7 +141,7 @@ class TestEventDateRangeFilter:
             f'/api/services/?type=Event&date_from={date_from}&date_to={date_to}'
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         titles = [s['title'] for s in response.data['results']]
         assert 'In Window' in titles
         assert 'Before Window' not in titles
@@ -153,7 +153,7 @@ class TestEventDateRangeFilter:
 
         response = client.get('/api/services/?type=Event&date_from=not-a-date')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_invalid_date_to_returns_400(self):
         """FR-12c: invalid date_to value should return 400, not silently ignored."""
@@ -161,7 +161,7 @@ class TestEventDateRangeFilter:
 
         response = client.get('/api/services/?type=Event&date_to=not-a-date')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_date_filter_does_not_affect_non_event_services(self):
         """FR-12c: date_from/date_to only applies when type=Event; other services unaffected."""
@@ -172,7 +172,7 @@ class TestEventDateRangeFilter:
         # Query without type=Event — the date filter should not silently drop regular services
         response = client.get(f'/api/services/?type=Offer&date_from={date_from}')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         titles = [s['title'] for s in response.data['results']]
         assert 'Regular Offer' in titles
 
@@ -193,7 +193,7 @@ class TestEventQuotaDisplay:
 
         response = client.get('/api/services/?type=Event')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         event_data = next(
             (s for s in response.data['results'] if s['title'] == 'Quota Event'), None
         )
@@ -247,7 +247,7 @@ class TestEventJoinAuthGuard:
 
         response = client.post(f'/api/handshakes/services/{event.id}/join-event/')
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
     def test_unauthenticated_user_can_still_view_event_detail(self):
         """FR-12f: read-only access to event detail is allowed anonymously."""
@@ -256,7 +256,7 @@ class TestEventJoinAuthGuard:
 
         response = client.get(f'/api/services/{event.id}/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +276,7 @@ class TestCancelledEventVisibility:
 
         response = client.get('/api/services/?type=Event')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         titles = [s['title'] for s in response.data['results']]
         assert 'Active Event' in titles
         assert 'Cancelled Event' not in titles
@@ -293,8 +293,7 @@ class TestCancelledEventVisibility:
         response = client.get(f'/api/services/{cancelled.id}/')
 
         # Object should be retrievable so the frontend can show cancellation state
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data['status'] == 'Cancelled'
+        assert_api_response(response, 200, schema={'status': 'Cancelled'})
 
     def test_cancelled_event_detail_exposes_cancelled_status_field(self):
         """
@@ -308,3 +307,51 @@ class TestCancelledEventVisibility:
 
         assert 'status' in response.data
         assert response.data['status'] == 'Cancelled'
+
+
+# ---------------------------------------------------------------------------
+# FR-11: Cancel event — server-side reason validation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+class TestCancelEventReasonValidation:
+    """
+    The frontend modal gates Confirm on a non-empty reason, but the endpoint
+    must also reject blank reasons so curl/mobile clients cannot write empty
+    strings into participants' cancellation_reason fields.
+    """
+
+    def test_cancel_event_without_reason_returns_400(self):
+        organizer = UserFactory()
+        event = make_event(user=organizer, days_from_now=3)
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+
+        response = client.post(f'/api/services/{event.id}/cancel-event/', data={})
+
+        assert_problem_detail(response, 400)
+
+    def test_cancel_event_with_blank_reason_returns_400(self):
+        organizer = UserFactory()
+        event = make_event(user=organizer, days_from_now=3)
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+
+        response = client.post(
+            f'/api/services/{event.id}/cancel-event/',
+            data={'reason': '   '},
+        )
+
+        assert_problem_detail(response, 400)
+
+    def test_cancel_event_with_reason_succeeds(self):
+        organizer = UserFactory()
+        event = make_event(user=organizer, days_from_now=3)
+        client = AuthenticatedAPIClient().authenticate_user(organizer)
+
+        response = client.post(
+            f'/api/services/{event.id}/cancel-event/',
+            data={'reason': 'Venue unavailable'},
+        )
+
+        assert_api_response(response, 200)
+        event.refresh_from_db()
+        assert event.status == 'Cancelled'

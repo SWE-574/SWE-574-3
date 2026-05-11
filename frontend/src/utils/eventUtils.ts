@@ -1,11 +1,11 @@
 // ─── Event Utilities ──────────────────────────────────────────────────────────
 
-/** Returns true if now is within 24 hours of the event start (lockdown window) */
+/** Returns true if now is within 24 hours of the event start, or the event has already started */
 export function isWithinLockdownWindow(scheduledTime: string | null | undefined): boolean {
   if (!scheduledTime) return false
   const eventMs = new Date(scheduledTime).getTime()
   const nowMs = Date.now()
-  return nowMs >= eventMs - 24 * 60 * 60 * 1000 && nowMs < eventMs
+  return nowMs >= eventMs - 24 * 60 * 60 * 1000
 }
 
 /** Returns true if the event is in the future (not yet started) */
@@ -27,6 +27,7 @@ export function spotsLeft(maxParticipants: number, participantCount: number): nu
 
 /** Returns true when 75-99% capacity (nearly full) */
 export function isNearlyFull(maxParticipants: number, participantCount: number): boolean {
+  // Stryker disable next-line ConditionalExpression,EqualityOperator: when max <= 0 the fallthrough produces NaN/Infinity which fail `pct < 1.0`, so dropping or weakening this guard yields the same observable answer.
   if (maxParticipants <= 0) return false
   const pct = participantCount / maxParticipants
   return pct >= 0.75 && pct < 1.0
@@ -49,6 +50,18 @@ export function formatEventDateTime(scheduledTime: string | null | undefined): s
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
+  })
+}
+
+/** Format fixed group-offer dates compactly for service cards/details. */
+export function formatGroupOfferDateTime(scheduledTime: string | null | undefined): string {
+  if (!scheduledTime) return 'TBD'
+  return new Date(scheduledTime).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
   })
 }
 

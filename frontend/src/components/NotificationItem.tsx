@@ -8,6 +8,9 @@ import {
   FiClock,
   FiBell,
   FiCheckCircle,
+  FiUserPlus,
+  FiFlag,
+  FiXCircle,
 } from 'react-icons/fi'
 import type { Notification, NotificationType } from '@/types'
 import { GRAY100, GRAY500, GRAY700, GRAY800, GREEN_LT, GREEN } from '@/theme/tokens'
@@ -26,6 +29,11 @@ const ICON_MAP: Record<NotificationType, React.ElementType> = {
   service_reminder: FiClock,
   service_confirmation: FiCheckCircle,
   dispute_resolved: FiCheckCircle,
+  user_followed: FiUserPlus,
+  new_report: FiFlag,
+  report_received: FiFlag,
+  report_resolved: FiCheckCircle,
+  report_dismissed: FiXCircle,
 }
 
 function timeAgo(dateStr: string): string {
@@ -92,8 +100,8 @@ export const NotificationItem = memo(function NotificationItem({
         >
           {notification.title}
         </Text>
-        {!compact && notification.message && (
-          <Text fontSize="12px" color={GRAY700} mt="2px" lineClamp={2}>
+        {notification.message && (
+          <Text fontSize="12px" color={GRAY700} mt="2px" lineClamp={compact ? 1 : 2}>
             {notification.message}
           </Text>
         )}

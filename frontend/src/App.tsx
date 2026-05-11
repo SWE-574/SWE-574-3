@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
-import { Box } from '@chakra-ui/react'
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Box, Spinner } from '@chakra-ui/react'
 import { useAuthStore } from '@/store/useAuthStore'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import AdminProtectedRoute from '@/components/AdminProtectedRoute'
+import RequireVerifiedEmail from '@/components/RequireVerifiedEmail'
 import Navbar from '@/components/Navbar'
 import { authAPI } from '@/services/authAPI'
 import { toast } from 'sonner'
@@ -29,6 +30,8 @@ const UserProfile            = lazy(() => import('@/pages/UserProfile'))
 const PublicProfile          = lazy(() => import('@/pages/PublicProfile'))
 const TransactionHistoryPage = lazy(() => import('@/pages/TransactionHistoryPage'))
 const NotificationsPage      = lazy(() => import('@/pages/NotificationsPage'))
+const SavedServicesPage      = lazy(() => import('@/pages/SavedServicesPage'))
+const SuggestedUsersPage     = lazy(() => import('@/pages/SuggestedUsersPage'))
 const AdminDashboard         = lazy(() => import('@/pages/AdminDashboard'))
 const AdminUserDetailPage    = lazy(() => import('@/pages/AdminUserDetailPage'))
 const ReportDetail           = lazy(() => import('@/pages/ReportDetail'))
@@ -37,11 +40,11 @@ const ForumCreateTopic       = lazy(() => import('@/pages/ForumCreateTopic'))
 const AchievementView        = lazy(() => import('@/pages/AchievementView'))
 const NotFoundPage           = lazy(() => import('@/pages/NotFoundPage'))
 
-// ─── Page-level Loading Fallback ──────────────────────────────────────────────
+// ─── Page-level Loading Fallback (lazy route chunks) ─────────────────────────
 const PageFallback = () => (
-  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-    <div>Loading…</div>
-  </div>
+  <Box display="flex" justifyContent="center" alignItems="center" minH="60vh" bg="gray.50">
+    <Spinner color="green.600" size="lg" />
+  </Box>
 )
 
 // ─── Email Verification Banner ────────────────────────────────────────────────
@@ -166,22 +169,36 @@ const FULL_SCREEN_PREFIXES = [
 // ─── Public pages where we skip the full-page spinner ─────────────────────────
 const PUBLIC_AUTH_PATHS = ['/login', '/register', '/', '/forgot-password', '/reset-password', '/verify-email', '/verify-email-sent']
 
-function App() {
-  const { checkAuth, isLoading, user } = useAuthStore()
-  const location = useLocation()
+/** Shell may render before session restore finishes — avoids a blank white flash on browsable routes (especially /public-profile/). */
+function pathAllowsShellWhileAuthPending(pathname: string): boolean {
+  if (PUBLIC_AUTH_PATHS.includes(pathname)) return true
+  if (pathname.startsWith('/public-profile/')) return true
+  if (pathname.startsWith('/service-detail/')) return true
+  if (pathname === '/forum' || pathname.startsWith('/forum/')) return true
+  if (pathname === '/dashboard' || pathname.startsWith('/dashboard/')) return true
+  return false
+}
 
-  const isPublicAuthPage = PUBLIC_AUTH_PATHS.includes(location.pathname)
+function App() {
+  const { checkAuth, refreshUser, isLoading, user } = useAuthStore()
+  const location = useLocation()
   const showNavbar = !PAGES_WITHOUT_NAVBAR.some((p) =>
     p === location.pathname || location.pathname.startsWith(p + '/')
   )
 
   // Allow the long create-topic form to use normal document scrolling.
   const isForumCreateTopicPage = location.pathname === '/forum/new'
+  // Service detail pages use document scroll — inner Box scroll feels slow
+  // on macOS wheel/touch because it bypasses the platform's fast-scroll path.
+  const isServiceDetailPage = location.pathname.startsWith('/service-detail/')
 
   // Lock/unlock body + html scroll for full-screen pages
-  const isFullScreenPage = !isForumCreateTopicPage && FULL_SCREEN_PREFIXES.some((p) =>
-    location.pathname === p || location.pathname.startsWith(p + '/')
-  )
+  const isFullScreenPage =
+    !isForumCreateTopicPage &&
+    !isServiceDetailPage &&
+    FULL_SCREEN_PREFIXES.some((p) =>
+      location.pathname === p || location.pathname.startsWith(p + '/')
+    )
   useEffect(() => {
     const el = document.documentElement
     const body = document.body
@@ -209,19 +226,24 @@ function App() {
     // triggering the /users/me/ → 401 → refresh-fail cycle on every keystroke.
     if (PUBLIC_AUTH_PATHS.includes(location.pathname)) return
 
-    // On protected route changes, verify session once.
-    checkAuth()
+    // Route changes are a soft auth/profile refresh so navigation does not
+    // flood /users/me/. Mutations that change balance call refreshUser() explicitly.
+    if (user) {
+      refreshUser({ force: false })
+    } else {
+      checkAuth()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
 
   // ── Notification WebSocket (fires only when authenticated) ──────────────
   useNotificationSocket()
 
-  if (isLoading && !user && !isPublicAuthPage) {
+  if (isLoading && !user && !pathAllowsShellWhileAuthPending(location.pathname)) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <div>Loading…</div>
-      </div>
+      <Box display="flex" justifyContent="center" alignItems="center" minH="100vh" bg="gray.50">
+        <Spinner color="green.600" size="lg" />
+      </Box>
     )
   }
 
@@ -246,6 +268,27 @@ function App() {
           <Route path="/verify-email"    element={<VerifyEmailPage />} />
           <Route path="/verify-email-sent" element={<VerifyEmailSentPage />} />
           <Route path="/dashboard"      element={<DashboardPage />} />
+          <Route
+            path="/saved"
+            element={
+              <ProtectedRoute>
+                <SavedServicesPage />
+              </ProtectedRoute>
+            }
+          />
+          {/* Pulse and the old /activity URL now redirect to Browse —
+              ranking lanes (For you, Discovery, Trending, Newest, Nearby)
+              live there as buttons. */}
+          <Route path="/pulse" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/activity" element={<Navigate to="/dashboard" replace />} />
+          <Route
+            path="/users/suggested"
+            element={
+              <ProtectedRoute>
+                <SuggestedUsersPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/service-detail/:id" element={<ServiceDetailPage />} />
           <Route path="/public-profile/:userId" element={<PublicProfile />} />
 
@@ -267,15 +310,33 @@ function App() {
           {/* ── Authenticated ────────────────────────────────────────── */}
           <Route
             path="/post-offer"
-            element={<ProtectedRoute><PostOfferForm /></ProtectedRoute>}
+            element={
+              <ProtectedRoute>
+                <RequireVerifiedEmail actionLabel="post an Offer">
+                  <PostOfferForm />
+                </RequireVerifiedEmail>
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/post-need"
-            element={<ProtectedRoute><PostNeedForm /></ProtectedRoute>}
+            element={
+              <ProtectedRoute>
+                <RequireVerifiedEmail actionLabel="post a Need">
+                  <PostNeedForm />
+                </RequireVerifiedEmail>
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/post-event"
-            element={<ProtectedRoute><PostEventForm /></ProtectedRoute>}
+            element={
+              <ProtectedRoute>
+                <RequireVerifiedEmail actionLabel="post an Event">
+                  <PostEventForm />
+                </RequireVerifiedEmail>
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/edit-service/:id"
@@ -296,6 +357,10 @@ function App() {
           <Route
             path="/transaction-history"
             element={<ProtectedRoute><TransactionHistoryPage /></ProtectedRoute>}
+          />
+          <Route
+            path="/profile/reports"
+            element={<ProtectedRoute><UserProfile /></ProtectedRoute>}
           />
           <Route
             path="/notifications"

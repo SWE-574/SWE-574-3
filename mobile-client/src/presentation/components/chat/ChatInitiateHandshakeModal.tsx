@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   View,
   Text,
   Pressable,
@@ -368,6 +370,11 @@ export function ChatInitiateHandshakeModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={styles.keyboardRoot}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+      >
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <Text style={styles.title}>{headerTitle}</Text>
@@ -586,11 +593,15 @@ export function ChatInitiateHandshakeModal({
           />
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardRoot: {
+    flex: 1,
+  },
   backdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
@@ -602,8 +613,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingTop: 24,
+    paddingBottom: 24,
   },
   title: {
     fontSize: 18,
@@ -621,7 +632,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     gap: 12,
-    paddingBottom: 8,
+    paddingBottom: 14,
   },
   field: {
     gap: 6,
@@ -636,7 +647,7 @@ const styles = StyleSheet.create({
     borderColor: colors.GRAY200,
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 14,
     fontSize: 15,
     color: colors.GRAY900,
     backgroundColor: colors.WHITE,
@@ -667,7 +678,7 @@ const styles = StyleSheet.create({
     borderColor: colors.GRAY200,
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 14,
     backgroundColor: colors.GRAY50,
   },
   readonlyText: {
@@ -692,7 +703,7 @@ const styles = StyleSheet.create({
   },
   dropdownItem: {
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 13,
     borderTopWidth: 1,
     borderTopColor: colors.GRAY100,
   },
@@ -717,7 +728,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 11,
     borderRadius: 10,
     backgroundColor: colors.BLUE_LT,
   },
@@ -757,7 +768,7 @@ const styles = StyleSheet.create({
     borderColor: colors.GRAY200,
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 14,
     backgroundColor: colors.WHITE,
   },
   pickerButtonText: {
@@ -772,11 +783,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "flex-end",
     gap: 10,
-    marginTop: 12,
+    marginTop: 18,
   },
   cancelButton: {
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 13,
     borderRadius: 10,
     backgroundColor: colors.GRAY100,
   },
@@ -787,7 +798,7 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 13,
     borderRadius: 10,
     backgroundColor: colors.GREEN,
   },

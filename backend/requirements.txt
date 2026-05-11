@@ -1,4 +1,4 @@
-django>=4.2,<6.0
+django>=4.2,<7.0
 python-dotenv
 resend>=2.0.0
 djangorestframework
@@ -21,6 +21,11 @@ pytest-django>=4.7.0
 pytest-cov>=4.1.0
 pytest-html>=3.2.0
 pytest-xdist>=3.3.0
+pytest-timeout>=2.2.0
+pytest-socket>=0.7.0
+pytest-asyncio>=0.23.0
+freezegun>=1.4.0
+mutmut>=2.4.0
 factory-boy>=3.3.0
 faker>=19.0.0
 exponent-server-sdk>=2.1.0

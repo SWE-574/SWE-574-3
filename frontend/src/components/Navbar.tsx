@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { Box, Flex, Text } from '@chakra-ui/react'
+import { Box, Flex, Text, useBreakpointValue } from '@chakra-ui/react'
 import {
+  FiBookmark,
   FiMessageSquare,
   FiUser,
   FiBell,
@@ -13,8 +14,10 @@ import {
   FiMenu,
   FiX,
   FiLayers,
+  FiHelpCircle,
 } from 'react-icons/fi'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useTourStore } from '@/store/useTourStore'
 
 import {
   YELLOW, GREEN, GREEN_LT, RED, RED_LT,
@@ -135,10 +138,15 @@ function MobileNavLink({ to, icon, children, active, onClick }: {
 
 const Navbar = () => {
   const { user, isAuthenticated, logout } = useAuthStore()
+  const startTour = useTourStore((s) => s.startTour)
   const navigate  = useNavigate()
   const location  = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const mobileRef = useRef<HTMLDivElement>(null)
+  // Match Chakra's `md` breakpoint (768px). `false` on first SSR/hydration
+  // pass so the desktop trigger keeps its testid in tests that boot before
+  // the breakpoint resolves.
+  const isMobile = useBreakpointValue({ base: true, md: false }) ?? false
 
   const handleLogout = () => { logout(); navigate('/') }
 
@@ -191,6 +199,7 @@ const Navbar = () => {
         {/* Desktop nav links — absolutely centered, always in middle of navbar */}
         {isAuthenticated && (
           <Flex
+            data-tour="top-nav"
             align="center" gap={1} display={{ base: 'none', md: 'flex' }}
             position="absolute" left="50%" style={{ transform: 'translateX(-50%)' }}
           >
@@ -257,12 +266,38 @@ const Navbar = () => {
                 <NotificationDropdown />
               </Box>
 
+              {/* Help / guided tour — visible on dashboard only */}
+              {isDashboard && (
+                <Box
+                  as="button"
+                  onClick={() => startTour()}
+                  title="Take a tour"
+                  aria-label="Take a tour"
+                  data-tour-trigger="dashboard"
+                  display={{ base: 'none', sm: 'flex' }}
+                  alignItems="center" justifyContent="center"
+                  w="36px" h="36px" borderRadius="10px"
+                  bg="transparent" color={GRAY600}
+                  style={{ border: 'none', cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s, color 0.15s' }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.background = GREEN_LT
+                    ;(e.currentTarget as HTMLDivElement).style.color = GREEN
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.background = 'transparent'
+                    ;(e.currentTarget as HTMLDivElement).style.color = GRAY600
+                  }}
+                >
+                  <FiHelpCircle size={20} />
+                </Box>
+              )}
+
               {/* User dropdown — desktop */}
               <Box display={{ base: 'none', md: 'block' }}>
                 <Dropdown
                   trigger={
                     <Flex
-                      data-testid="user-menu-trigger"
+                      data-testid={isMobile ? undefined : 'user-menu-trigger'}
                       align="center" gap="6px" p="5px" borderRadius="10px"
                       style={{ cursor: 'pointer', transition: 'background 0.15s' }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = GRAY100 }}
@@ -289,6 +324,7 @@ const Navbar = () => {
                   </Box>
                   <Box py="4px">
                     <DropdownItem onClick={() => navigate('/profile')} icon={<FiUser size={14} />}>My Profile</DropdownItem>
+                    <DropdownItem onClick={() => navigate('/saved')} icon={<FiBookmark size={14} />}>Saved</DropdownItem>
                     {isAdmin && (
                       <DropdownItem onClick={() => navigate('/admin')} icon={<FiGrid size={14} />}>Admin Panel</DropdownItem>
                     )}
@@ -299,9 +335,12 @@ const Navbar = () => {
                 </Dropdown>
               </Box>
 
-              {/* Mobile hamburger */}
+              {/* Mobile hamburger — also serves as the user menu trigger
+                  on small viewports (the desktop avatar dropdown is hidden). */}
               <Box
                 as="button" display={{ base: 'flex', md: 'none' }}
+                data-testid={isMobile ? 'user-menu-trigger' : undefined}
+                aria-label="Open menu"
                 alignItems="center" justifyContent="center"
                 w="36px" h="36px" borderRadius="10px"
                 bg={mobileOpen ? GRAY100 : 'transparent'}

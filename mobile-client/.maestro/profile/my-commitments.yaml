@@ -1,0 +1,19 @@
+appId: com.apiary.thehive
+tags:
+  - profile
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §4.8: My commitments.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Profile(, tab,.*)?"
+- tapOn:
+    id: "profile-overflow"
+    optional: true
+- tapOn:
+    text: "My commitments"
+- extendedWaitUntil:
+    visible: "My commitments"
+    timeout: 8000

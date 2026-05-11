@@ -1,5 +1,22 @@
 import apiClient from './api'
-import type { User, UserSummary, BadgeProgress, AchievementProgressItem, ProfileReviewsResponse } from '@/types'
+import type { User, UserSummary, BadgeProgress, AchievementProgressItem, ProfileReviewsResponse, PaginatedResponse } from '@/types'
+
+export type MyReportStatus = 'pending' | 'resolved' | 'dismissed'
+export type MyReportTargetKind = 'forum_post' | 'forum_topic' | 'service' | 'user' | 'other'
+
+export interface MyReport {
+  id: string
+  type: string
+  type_display: string
+  status: MyReportStatus
+  status_display: string
+  description: string
+  target_kind: MyReportTargetKind
+  target_id: string | null
+  target_summary: string | null
+  created_at: string
+  resolved_at: string | null
+}
 
 export interface UserHistoryItem {
   service_id: string
@@ -30,6 +47,8 @@ export interface UserUpdateData {
   banner_url?: string
   /** List of tag IDs (UUID strings or "custom:<name>") to set as user skills */
   skill_ids?: string[]
+  /** Showcase badge IDs (max 2); send `[]` to clear in JSON, or append `featured_badges` as '' in FormData (clears). */
+  featured_badges?: string[]
 }
 
 /** Convert a base64 data URL → Blob so it can be sent as a file */
@@ -123,6 +142,12 @@ export const userAPI = {
     return res.data
   },
 
+  getMyReports: async (signal?: AbortSignal): Promise<MyReport[]> => {
+    const res = await apiClient.get<PaginatedResponse<MyReport> | MyReport[]>('/users/me/reports/', { signal })
+    if (Array.isArray(res.data)) return res.data
+    return res.data.results
+  },
+
   /**
    * Update profile.
    * Pass a FormData when avatar/banner files are included (multipart);
@@ -159,6 +184,21 @@ export const userAPI = {
   getFollowing: async (userId: string, signal?: AbortSignal): Promise<UserSummary[]> => {
     const res = await apiClient.get<{ results: UserSummary[] }>(`/users/${userId}/following/`, { signal })
     return res.data.results
+  },
+
+  getSuggested: async (
+    options?: { page?: number; signal?: AbortSignal },
+  ): Promise<{ results: UserSummary[]; next: string | null; count: number }> => {
+    const params = options?.page ? { page: options.page } : undefined
+    const res = await apiClient.get<{ results: UserSummary[]; next: string | null; count: number }>(
+      '/users/suggested/',
+      { params, signal: options?.signal },
+    )
+    return {
+      results: res.data.results ?? [],
+      next: res.data.next ?? null,
+      count: res.data.count ?? 0,
+    }
   },
 
   getHistory: async (userId: string, signal?: AbortSignal): Promise<UserHistoryItem[]> => {

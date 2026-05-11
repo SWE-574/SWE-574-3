@@ -1,6 +1,7 @@
 """
 Unit tests for ranking utilities
 """
+import math
 import pytest
 from decimal import Decimal
 from unittest.mock import patch
@@ -8,7 +9,12 @@ from django.utils import timezone
 from datetime import timedelta
 
 from api.models import Service, Comment, ReputationRep
-from api.ranking import calculate_hot_score, calculate_hot_scores_batch
+from api.ranking import (
+    RankingPipeline,
+    calculate_hot_score,
+    calculate_hot_scores_batch,
+    wilson_score_lower_bound,
+)
 from api.tests.helpers.factories import (
     ServiceFactory, UserFactory, CommentFactory, ReputationRepFactory,
     NegativeRepFactory, HandshakeFactory,
@@ -24,14 +30,30 @@ except ImportError:
     _calculate_event_hot_score = None
 
 try:
-    from api.ranking import wilson_score_lower_bound as _wilson_score_lower_bound
-except ImportError:
-    _wilson_score_lower_bound = None
-
-try:
     from api.ranking import apply_recurring_decay as _apply_recurring_decay
 except ImportError:
     _apply_recurring_decay = None
+
+
+def _seed_positive_signal(service):
+    """Give the service a non-zero ``quality`` factor so the capacity
+    multiplier is observable in score deltas. The hot score is
+    ``quality * activity * capacity_multiplier * newcomer_boost`` — without
+    a positive rep, quality is 0 and any multiplier vanishes.
+
+    Note: ``_compute_service_factors`` only counts positive reps from
+    handshakes on Offer/Need services. For Event tests, seed quality through
+    a sibling Offer owned by the same user.
+    """
+    owner = service.user
+    rep_target = service
+    if service.type == 'Event':
+        rep_target = ServiceFactory(user=owner, type='Offer', status='Active')
+    giver = UserFactory()
+    handshake = HandshakeFactory(service=rep_target, requester=giver, status='completed')
+    ReputationRepFactory(handshake=handshake, giver=giver, receiver=owner)
+    CommentFactory(service=service)
+    service.refresh_from_db()
 
 
 @pytest.mark.django_db
@@ -47,16 +69,30 @@ class TestCalculateHotScore:
         assert isinstance(score, (int, float))
     
     def test_hot_score_with_comments(self):
-        """Test hot score increases with comments"""
-        service = ServiceFactory(status='Active')
+        """Each new comment must strictly raise the hot score.
+
+        The score is ``quality * activity * ...`` so quality must be non-zero
+        for activity changes to be observable. Seed one positive rep first.
+        """
+        owner = UserFactory()
+        service = ServiceFactory(user=owner, status='Active')
+        giver = UserFactory()
+        handshake = HandshakeFactory(service=service, requester=giver, status='completed')
+        ReputationRepFactory(handshake=handshake, giver=giver, receiver=owner)
+        service.refresh_from_db()
         base_score = calculate_hot_score(service)
-        
-        CommentFactory(service=service)
+        assert base_score > 0
+
         CommentFactory(service=service)
         service.refresh_from_db()
-        
-        new_score = calculate_hot_score(service)
-        assert new_score >= base_score
+        score_after_one = calculate_hot_score(service)
+
+        CommentFactory(service=service)
+        service.refresh_from_db()
+        score_after_two = calculate_hot_score(service)
+
+        assert score_after_one > base_score
+        assert score_after_two > score_after_one
     
     def test_hot_score_with_reputation(self):
         """Test hot score increases with reputation"""
@@ -71,22 +107,6 @@ class TestCalculateHotScore:
         service.refresh_from_db()
         new_score = calculate_hot_score(service)
         assert new_score >= base_score
-    
-    def test_hot_score_time_decay(self):
-        """Test hot score decreases over time"""
-        old_service = ServiceFactory(
-            status='Active',
-            created_at=timezone.now() - timedelta(days=30)
-        )
-        new_service = ServiceFactory(
-            status='Active',
-            created_at=timezone.now() - timedelta(days=1)
-        )
-        
-        old_score = calculate_hot_score(old_service)
-        new_score = calculate_hot_score(new_service)
-        
-        assert new_score >= old_score
     
     def test_hot_score_inactive_service(self):
         """Test inactive service has lower hot score"""
@@ -105,15 +125,15 @@ class TestCalculateHotScore:
             type='Event', status='Active', max_participants=4,
             scheduled_time=timezone.now() + timedelta(days=3),
         )
+        _seed_positive_signal(service)
         base_score = calculate_hot_score(service)
+        assert base_score > 0
 
-        # Fill to 75% (3 of 4)
         for _ in range(3):
             HandshakeFactory(service=service, status='accepted')
 
         boosted_score = calculate_hot_score(service)
-        if base_score != 0:
-            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+        assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
 
     def test_event_below_75_pct_no_boost(self):
         """Event below 75% capacity should NOT receive the multiplier."""
@@ -145,8 +165,12 @@ class TestCalculateHotScore:
         # At 100% capacity_ratio == 1.0  →  condition 0.75 <= ratio < 1.0 is False
         assert score == pytest.approx(base_score, rel=1e-5)
 
-    def test_non_event_service_no_boost(self):
-        """Single-participant Offer (Need-like) should never receive the multiplier."""
+    def test_solo_offer_does_not_get_capacity_boost(self):
+        """FR-17e / #304 — single-participant Offer (max_participants=1) is not
+        capacitated; the 1.5x boost is reserved for Events and group Offers
+        (max_participants > 1). The positive case (group Offer DOES get the
+        boost) is covered by TestPhase2ServiceFormula.test_capacity_multiplier_applies_to_group_offers.
+        """
         service = ServiceFactory(
             type='Offer', status='Active', max_participants=1,
         )
@@ -179,14 +203,15 @@ class TestCalculateHotScore:
             type='Event', status='Active', max_participants=100,
             scheduled_time=timezone.now() + timedelta(days=3),
         )
+        _seed_positive_signal(service)
         base_score = calculate_hot_score(service)
+        assert base_score > 0
 
         for _ in range(75):
             HandshakeFactory(service=service, status='accepted')
 
         boosted_score = calculate_hot_score(service)
-        if base_score != 0:
-            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+        assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
 
     def test_event_at_99pct_gets_boost(self):
         """99% capacity (last slot open) should still trigger the 1.5× boost."""
@@ -194,14 +219,15 @@ class TestCalculateHotScore:
             type='Event', status='Active', max_participants=100,
             scheduled_time=timezone.now() + timedelta(days=3),
         )
+        _seed_positive_signal(service)
         base_score = calculate_hot_score(service)
+        assert base_score > 0
 
         for _ in range(99):
             HandshakeFactory(service=service, status='accepted')
 
         boosted_score = calculate_hot_score(service)
-        if base_score != 0:
-            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+        assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
 
     def test_event_at_100pct_no_boost(self):
         """Exactly 100% capacity (full) should NOT trigger the boost."""
@@ -222,14 +248,15 @@ class TestCalculateHotScore:
         service = ServiceFactory(
             type='Offer', status='Active', max_participants=4,
         )
+        _seed_positive_signal(service)
         base_score = calculate_hot_score(service)
+        assert base_score > 0
 
         for _ in range(3):
             HandshakeFactory(service=service, status='accepted')
 
         boosted_score = calculate_hot_score(service)
-        if base_score != 0:
-            assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
+        assert boosted_score == pytest.approx(base_score * 1.5, rel=1e-5)
 
     def test_single_participant_offer_no_boost(self):
         """Offer with max_participants=1 should never receive the group multiplier."""
@@ -290,7 +317,8 @@ class TestCalculateHotScoresBatch:
             assert service.hot_score >= 0
 
     def test_batch_event_multiplier_matches_single(self):
-        """Batch scoring must match single-service scoring for Events."""
+        """Batch scoring of Events must match the dedicated event formula."""
+        from api.ranking import calculate_event_hot_score
         service = ServiceFactory(
             type='Event', status='Active', max_participants=4,
             scheduled_time=timezone.now() + timedelta(days=3),
@@ -298,10 +326,61 @@ class TestCalculateHotScoresBatch:
         for _ in range(3):
             HandshakeFactory(service=service, status='accepted')
 
-        single_score = calculate_hot_score(service)
+        single_score = calculate_event_hot_score(service)
         batch_scores = calculate_hot_scores_batch([service])
 
         assert batch_scores[service.id] == pytest.approx(single_score, rel=1e-5)
+
+    def test_batch_events_match_per_service_for_mixed_organisers(self):
+        """Batched event scoring must agree with calculate_event_hot_score
+        across a mixed list — different organisers, mixed feedback histories,
+        mixed RSVP volumes. Guards against regression of the batched event
+        path that replaced the per-event N+1 loop on /featured/public/.
+        """
+        from api.ranking import calculate_event_hot_score
+
+        organiser_a = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+        organiser_b = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+
+        # Seed real event-scoped feedback for organiser_a only.
+        seed_event = ServiceFactory(
+            user=organiser_a, type='Event', max_participants=10,
+            scheduled_time=timezone.now() + timedelta(days=10),
+        )
+        for _ in range(3):
+            requester = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+            hs = HandshakeFactory(service=seed_event, requester=requester, status='attended')
+            ReputationRepFactory(
+                handshake=hs, giver=requester, receiver=organiser_a,
+                is_punctual=True, is_helpful=True, is_kind=True,
+            )
+
+        a_busy = ServiceFactory(
+            user=organiser_a, type='Event', status='Active', max_participants=20,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        a_quiet = ServiceFactory(
+            user=organiser_a, type='Event', status='Active', max_participants=20,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        b_quiet = ServiceFactory(
+            user=organiser_b, type='Event', status='Active', max_participants=20,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        # Different recent-RSVP volumes per event.
+        for _ in range(8):
+            HandshakeFactory(service=a_busy, status='accepted')
+        HandshakeFactory(service=a_quiet, status='accepted')
+        for _ in range(4):
+            HandshakeFactory(service=b_quiet, status='accepted')
+
+        events = [a_busy, a_quiet, b_quiet]
+        batch = calculate_hot_scores_batch(events)
+        for ev in events:
+            ev.refresh_from_db()
+            assert batch[ev.id] == pytest.approx(
+                calculate_event_hot_score(ev), rel=1e-5,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -474,9 +553,6 @@ class TestEventHotScoreTimeIndependence:
 
 @pytest.mark.django_db
 @pytest.mark.unit
-@pytest.mark.xfail(
-    reason="FR-17b: Service Hot Score uses time-since-creation; should use HoursExchanged", strict=False
-)
 class TestServiceHotScoreUsesHoursExchanged:
     """
     FR-17b: the denominator/multiplier variable is HoursExchanged (sum of
@@ -508,23 +584,9 @@ class TestServiceHotScoreUsesHoursExchanged:
         # same denominator → same score (given no other engagement differences).
         assert score_old == pytest.approx(score_new, rel=1e-3)
 
-    def test_more_hours_exchanged_increases_denominator(self):
-        """Service with more completed hours has a different score than one with fewer hours."""
-        user = UserFactory()
-        low_hours_svc = ServiceFactory(user=user, type='Offer', status='Active')
-        high_hours_svc = ServiceFactory(user=user, type='Offer', status='Active')
-
-        HandshakeFactory(service=low_hours_svc, status='completed', provisioned_hours=Decimal('1.0'))
-        for _ in range(5):
-            HandshakeFactory(service=high_hours_svc, status='completed', provisioned_hours=Decimal('2.0'))
-
-        score_low = calculate_hot_score(low_hours_svc)
-        score_high = calculate_hot_score(high_hours_svc)
-
-        # With multiplication formula: high hours → higher score
-        # With division formula: high hours → lower score
-        # Either way they must differ — this test just asserts they are not equal.
-        assert score_low != pytest.approx(score_high, rel=1e-3)
+    # test_more_hours_exchanged_increases_score moved to TestPhase2ServiceFormula
+    # as test_score_grows_with_hours_exchanged (single source of truth for the
+    # ordering invariant under the new Quality * Activity formula).
 
 
 # ---------------------------------------------------------------------------
@@ -606,42 +668,37 @@ class TestHotScoreDeterminism:
     """NFR-17b: formula execution shall be deterministic for identical inputs."""
 
     def test_same_service_same_score_on_repeated_calls(self):
-        """NFR-17b: calling calculate_hot_score twice on the same service gives the same result."""
+        """NFR-17b: calling calculate_hot_score twice on the same service gives the same result.
+
+        The Phase 2 formula has no time inputs, so determinism is structural. The
+        old version of this test patched api.ranking.timezone to defend against
+        time-decay drift between calls; that defence is no longer needed.
+        """
         service = ServiceFactory(status='Active')
         CommentFactory(service=service)
         user = UserFactory()
         hs = HandshakeFactory(service=service, requester=user, status='completed')
         ReputationRepFactory(handshake=hs, giver=user, receiver=service.user)
 
-        fixed_time = timezone.now()
-        with patch('api.ranking.timezone') as mock_tz:
-            mock_tz.now.return_value = fixed_time
-            score_a = calculate_hot_score(service)
-            score_b = calculate_hot_score(service)
-
+        score_a = calculate_hot_score(service)
+        score_b = calculate_hot_score(service)
         assert score_a == score_b
 
     def test_identical_services_produce_identical_scores(self):
-        """NFR-17b: two services with the same engagement and creation time score the same."""
-        fixed_time = timezone.now() - timedelta(hours=5)
+        """NFR-17b: two services with the same engagement score the same regardless of age."""
         user_a = UserFactory()
         user_b = UserFactory()
 
         service_a = ServiceFactory(user=user_a, type='Offer', status='Active')
         service_b = ServiceFactory(user=user_b, type='Offer', status='Active')
-        for svc in (service_a, service_b):
-            Service.objects.filter(pk=svc.pk).update(created_at=fixed_time)
-            svc.refresh_from_db()
 
-        with patch('api.ranking.timezone') as mock_tz:
-            mock_tz.now.return_value = fixed_time + timedelta(hours=6)
-            score_a = calculate_hot_score(service_a)
-            score_b = calculate_hot_score(service_b)
-
+        score_a = calculate_hot_score(service_a)
+        score_b = calculate_hot_score(service_b)
         assert score_a == pytest.approx(score_b, rel=1e-9)
 
     def test_batch_score_matches_individual_for_all_service_types(self):
-        """NFR-17b: batch and single-service scoring produce the same result for every type."""
+        """NFR-17b: batch scoring matches the per-type single-service formula."""
+        from api.ranking import calculate_event_hot_score
         offer = ServiceFactory(type='Offer', status='Active')
         need = ServiceFactory(type='Need', status='Active')
         event = ServiceFactory(
@@ -652,57 +709,24 @@ class TestHotScoreDeterminism:
 
         batch = calculate_hot_scores_batch(services)
 
-        for svc in services:
-            assert batch[svc.id] == pytest.approx(calculate_hot_score(svc), rel=1e-5)
+        # Offer/Need use calculate_hot_score; Event uses the dedicated event
+        # formula since Task 3 (#303) -- batch routes accordingly.
+        assert batch[offer.id] == pytest.approx(calculate_hot_score(offer), rel=1e-5)
+        assert batch[need.id] == pytest.approx(calculate_hot_score(need), rel=1e-5)
+        assert batch[event.id] == pytest.approx(calculate_event_hot_score(event), rel=1e-5)
 
 
 # ---------------------------------------------------------------------------
-# NEW — Wilson Score confidence interval (TDD — xfail until implemented)
+# Phase 2 batch consistency — group offers
 # ---------------------------------------------------------------------------
 
+@pytest.mark.django_db
 @pytest.mark.unit
-@pytest.mark.xfail(reason="NEW: wilson_score_lower_bound not yet implemented", strict=False)
-class TestWilsonScoreConfidenceInterval:
-    """
-    New requirement from HiveMind scratch: use Wilson Score lower-bound
-    confidence interval for the reputation component to prevent a new user
-    with few reviews from outranking a power user with many reviews.
-    """
+class TestPhase2BatchConsistency:
+    """Batch scoring must match single-service scoring for Group Offers (was an
+    orphan test inside the old xfail Wilson class; lifted out so it actually runs)."""
 
-    def setup_method(self):
-        if _wilson_score_lower_bound is None:
-            pytest.xfail("wilson_score_lower_bound not yet implemented")
-
-    def test_zero_interactions_returns_zero(self):
-        """With no interactions, lower bound is 0 — no reputation established."""
-        assert _wilson_score_lower_bound(positives=0, total=0) == 0.0
-
-    def test_perfect_score_with_few_reviews_is_low(self):
-        """3 positives out of 3 total should give a low confidence lower bound (~0.29)."""
-        lb = _wilson_score_lower_bound(positives=3, total=3)
-        assert lb < 0.70  # High uncertainty due to small sample
-
-    def test_high_volume_high_rate_gives_high_lower_bound(self):
-        """90% positive rate with 300 reviews should give a high lower bound (>0.85)."""
-        lb = _wilson_score_lower_bound(positives=270, total=300)
-        assert lb > 0.85
-
-    def test_few_reviews_lower_bound_is_less_than_high_volume(self):
-        """A new user with 3/3 positives must score BELOW a veteran with 270/300."""
-        lb_new = _wilson_score_lower_bound(positives=3, total=3)
-        lb_veteran = _wilson_score_lower_bound(positives=270, total=300)
-        assert lb_new < lb_veteran
-
-    def test_lower_bound_never_exceeds_1(self):
-        """Confidence lower bound is always in [0, 1]."""
-        lb = _wilson_score_lower_bound(positives=100, total=100)
-        assert 0.0 <= lb <= 1.0
-
-    def test_deterministic_for_same_inputs(self):
-        """Same inputs always produce the same result (NFR-17b applies here too)."""
-        assert _wilson_score_lower_bound(50, 100) == _wilson_score_lower_bound(50, 100)
     def test_batch_group_offer_multiplier_matches_single(self):
-        """Batch scoring must match single-service scoring for Group Offers."""
         service = ServiceFactory(
             type='Offer', status='Active', max_participants=4,
         )
@@ -713,3 +737,530 @@ class TestWilsonScoreConfidenceInterval:
         batch_scores = calculate_hot_scores_batch([service])
 
         assert batch_scores[service.id] == pytest.approx(single_score, rel=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# FR-17j — Wilson Score lower bound
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+class TestWilsonScoreConfidenceInterval:
+    """FR-17j: provider with 3/3 positives must score below provider with 95/100."""
+
+    def test_zero_total_returns_zero(self):
+        assert wilson_score_lower_bound(0, 0) == 0.0
+
+    def test_zero_positives_returns_zero(self):
+        assert wilson_score_lower_bound(0, 50) == 0.0
+
+    def test_perfect_score_below_one(self):
+        # 3/3 should be well below 1.0 due to small-sample penalty
+        assert wilson_score_lower_bound(3, 3) < 0.5
+
+    def test_large_sample_perfect_score_close_to_one(self):
+        assert wilson_score_lower_bound(1000, 1000) > 0.99
+
+    def test_large_high_ratio_beats_small_perfect(self):
+        small_perfect = wilson_score_lower_bound(3, 3)
+        large_high = wilson_score_lower_bound(95, 100)
+        assert large_high > small_perfect, (
+            f"Wilson should rank 95/100 ({large_high}) above 3/3 ({small_perfect})"
+        )
+
+    def test_known_value_within_tolerance(self):
+        """20/25 with z=1.96 ≈ 0.6087 (Evan Miller / Reddit Wilson formula)."""
+        result = wilson_score_lower_bound(20, 25)
+        assert math.isclose(result, 0.6087, abs_tol=0.001), result
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestLaplacePriorOnHotScore:
+    """The +1/+2 Laplace prior at the call sites stops Wilson(0,0)=0 from
+    multiplicatively zeroing the entire Phase 2 score for unrated providers.
+    """
+
+    def test_brand_new_offer_with_activity_scores_above_zero(self):
+        owner = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', status='Active')
+        HandshakeFactory(service=service, status='completed', provisioned_hours=Decimal('5'))
+        CommentFactory(service=service)
+        score = calculate_hot_score(service)
+        assert score > 0, "Laplace prior should keep an active but unrated offer above zero"
+
+    def test_brand_new_event_with_recent_rsvps_scores_above_zero(self):
+        organiser = UserFactory()
+        event = ServiceFactory(
+            user=organiser, type='Event', status='Active', max_participants=20,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        for _ in range(8):
+            HandshakeFactory(service=event, status='accepted')
+        score = calculate_event_hot_score(event)
+        assert score > 0, "High-RSVP event with no organiser feedback should not score 0"
+
+    def test_unrated_provider_quality_matches_laplace_value(self):
+        from api.models import User as UserModel
+        owner = UserFactory()
+        # Age the owner past the newcomer cutoff so the multiplier is 1.0 and
+        # the assertion isolates the Laplace prior's effect on quality.
+        UserModel.objects.filter(pk=owner.pk).update(
+            date_joined=timezone.now() - timedelta(days=60),
+        )
+        owner.refresh_from_db()
+        service = ServiceFactory(user=owner, type='Offer', status='Active')
+        HandshakeFactory(service=service, status='completed', provisioned_hours=Decimal('1'))
+        CommentFactory(service=service)
+        # Quality from the +1/+2 prior on Wilson(1, 2).
+        expected_quality = wilson_score_lower_bound(1, 2)
+        expected_activity = math.log2(2 + 1.0) + 0.5 * math.log2(2 + 1)
+        expected = round(expected_quality * expected_activity, 6)
+        assert calculate_hot_score(service) == pytest.approx(expected, rel=1e-4)
+
+    def test_prior_preserves_ordering_for_rated_providers(self):
+        """A provider with strong real feedback still outranks a brand-new one."""
+        new_owner = UserFactory()
+        seasoned_owner = UserFactory()
+        for _ in range(20):
+            requester = UserFactory()
+            hs = HandshakeFactory(
+                service=ServiceFactory(user=seasoned_owner, type='Offer'),
+                requester=requester, status='completed',
+            )
+            ReputationRepFactory(handshake=hs, giver=requester, receiver=seasoned_owner, is_helpful=True)
+        new_service = ServiceFactory(user=new_owner, type='Offer', status='Active')
+        seasoned_service = ServiceFactory(user=seasoned_owner, type='Offer', status='Active')
+        for svc in (new_service, seasoned_service):
+            HandshakeFactory(service=svc, status='completed', provisioned_hours=Decimal('2'))
+            CommentFactory(service=svc)
+        assert calculate_hot_score(seasoned_service) > calculate_hot_score(new_service)
+
+    def test_batch_path_applies_same_prior(self):
+        """The batch helper must agree with the per-service helper on unrated providers."""
+        owner = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', status='Active')
+        HandshakeFactory(service=service, status='completed', provisioned_hours=Decimal('3'))
+        CommentFactory(service=service)
+        single = calculate_hot_score(service)
+        batch = calculate_hot_scores_batch([service])
+        assert batch[service.id] == pytest.approx(single, rel=1e-6)
+
+    def test_event_save_stores_event_formula_not_offer_formula(self):
+        """Service.save() must dispatch by type. Without this, an event whose
+        organiser already has Offer/Need rep history stored an inflated score
+        derived from the wrong formula -- the demo data showed events ranking
+        on stale stored values until a rep change forced a recompute.
+        """
+        from api.ranking import calculate_event_hot_score
+        organiser = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+        # Seed Offer/Need rep so the offer formula and event formula diverge.
+        for _ in range(6):
+            requester = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+            hs = HandshakeFactory(
+                service=ServiceFactory(user=organiser, type='Offer'),
+                requester=requester, status='completed',
+            )
+            ReputationRepFactory(
+                handshake=hs, giver=requester, receiver=organiser,
+                is_punctual=True, is_helpful=True, is_kind=True,
+            )
+        event = ServiceFactory(
+            user=organiser, type='Event', status='Active', max_participants=20,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        event.refresh_from_db()
+        expected = calculate_event_hot_score(event)
+        assert event.hot_score == pytest.approx(expected, rel=1e-4), (
+            f'event saved with offer-formula score {event.hot_score} '
+            f'instead of event-formula score {expected}'
+        )
+
+    def test_handshake_status_change_refreshes_event_hot_score(self):
+        """RSVPs to an event must update the parent event's stored hot_score
+        so velocity (rsvps_last_7d) feeds the persisted score in real time.
+        """
+        organiser = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+        event = ServiceFactory(
+            user=organiser, type='Event', status='Active', max_participants=20,
+            scheduled_time=timezone.now() + timedelta(days=3),
+        )
+        event.refresh_from_db()
+        score_before = float(event.hot_score)
+        for _ in range(5):
+            HandshakeFactory(service=event, status='accepted')
+        event.refresh_from_db()
+        score_after = float(event.hot_score)
+        assert score_after > score_before, (
+            f'event hot_score did not refresh on RSVP: {score_before} -> {score_after}'
+        )
+
+
+@pytest.mark.unit
+class TestRankingPipelineSkeleton:
+    """The pipeline skeleton must orchestrate three phases without raising on empty input.
+
+    Wired phases land in Tasks 2, 3, 8, 12 — this just locks the contract that
+    .run() is callable with a request and a candidate iterable from day one.
+    """
+
+    def test_run_with_no_candidates_returns_empty(self):
+        result = RankingPipeline(request=None).run([])
+        assert result == []
+
+    def test_phase_methods_are_callable_and_idempotent(self):
+        pipeline = RankingPipeline(request=None)
+        assert pipeline.filter_candidates([]) == []
+        assert pipeline.score_candidates([]) == []
+        assert pipeline.rerank([]) == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 service formula (Quality x Activity x CapacityMultiplier) — closes #302
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestPhase2ServiceFormula:
+    def test_score_grows_with_hours_exchanged(self):
+        user = UserFactory()
+        # Establish non-zero Quality so Activity differences are observable
+        # under the Quality * Activity formula.
+        for _ in range(5):
+            requester = UserFactory()
+            hs = HandshakeFactory(
+                service=ServiceFactory(user=user, type='Offer'),
+                requester=requester, status='completed',
+            )
+            ReputationRepFactory(handshake=hs, giver=requester, receiver=user, is_helpful=True)
+
+        low = ServiceFactory(user=user, type='Offer', status='Active')
+        high = ServiceFactory(user=user, type='Offer', status='Active')
+        # Same comments so Activity differs only via HoursExchanged
+        CommentFactory(service=low)
+        CommentFactory(service=high)
+        HandshakeFactory(service=low, status='completed', provisioned_hours=Decimal('1.0'))
+        for _ in range(5):
+            HandshakeFactory(service=high, status='completed', provisioned_hours=Decimal('2.0'))
+        assert calculate_hot_score(high) > calculate_hot_score(low)
+
+    def test_creation_time_does_not_affect_score(self):
+        """Two services with identical engagement score the same regardless of age."""
+        user_a = UserFactory()
+        user_b = UserFactory()
+        old = ServiceFactory(user=user_a, type='Offer', status='Active')
+        Service.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=180))
+        old.refresh_from_db()
+        new = ServiceFactory(user=user_b, type='Offer', status='Active')
+        for svc in (old, new):
+            HandshakeFactory(service=svc, status='completed', provisioned_hours=Decimal('2.0'))
+        assert calculate_hot_score(old) == pytest.approx(calculate_hot_score(new), rel=1e-3)
+
+    def test_hours_exchanged_only_counts_completed_handshakes_for_this_service(self):
+        owner = UserFactory()
+        target = ServiceFactory(user=owner, type='Offer', status='Active')
+        other = ServiceFactory(user=owner, type='Offer', status='Active')
+        # Non-completed handshake on target — must NOT contribute
+        HandshakeFactory(service=target, status='accepted', provisioned_hours=Decimal('99'))
+        # Completed handshake on a DIFFERENT service — must NOT contribute
+        HandshakeFactory(service=other, status='completed', provisioned_hours=Decimal('99'))
+        # The only contribution: 1 completed hour on target
+        HandshakeFactory(service=target, status='completed', provisioned_hours=Decimal('1'))
+        CommentFactory(service=target)
+        scores = calculate_hot_scores_batch([target])
+        # Reference service with the SAME true inputs target should report:
+        # one completed handshake at 1.0h and one comment. If the 99h from the
+        # accepted-but-not-completed handshake or the 99h from the sibling
+        # service leaked in, target's score would diverge from this reference.
+        reference = ServiceFactory(user=owner, type='Offer', status='Active')
+        HandshakeFactory(service=reference, status='completed', provisioned_hours=Decimal('1'))
+        CommentFactory(service=reference)
+        reference_scores = calculate_hot_scores_batch([reference])
+        assert scores[target.id] == pytest.approx(reference_scores[reference.id], rel=1e-6)
+
+    def test_capacity_multiplier_applies_to_group_offers(self):
+        """FR-RANK-03 / #304 — group Offers at 75-99% fill get the 1.5x boost."""
+        owner = UserFactory()
+        # Build up some real Quality so the multiplier matters
+        for _ in range(10):
+            requester = UserFactory()
+            hs = HandshakeFactory(service=ServiceFactory(user=owner, type='Offer'), requester=requester, status='completed')
+            ReputationRepFactory(handshake=hs, giver=requester, receiver=owner, is_helpful=True)
+        svc = ServiceFactory(user=owner, type='Offer', status='Active', max_participants=4)
+        for _ in range(3):  # 3/4 = 75% — boost applies
+            HandshakeFactory(service=svc, status='accepted')
+        CommentFactory(service=svc)
+        boosted = calculate_hot_score(svc)
+
+        svc2 = ServiceFactory(user=owner, type='Offer', status='Active', max_participants=4)
+        HandshakeFactory(service=svc2, status='accepted')  # 1/4 = 25% — no boost
+        CommentFactory(service=svc2)
+        unboosted = calculate_hot_score(svc2)
+        # Quality and Activity are identical between svc and svc2 (status='accepted'
+        # contributes neither completed-hours nor reps), so the only difference is
+        # the 1.5x multiplier itself.
+        assert boosted == pytest.approx(unboosted * 1.5, rel=1e-3)
+
+    def test_batch_matches_single(self):
+        user = UserFactory()
+        services = [ServiceFactory(user=user, type='Offer', status='Active') for _ in range(3)]
+        for svc in services:
+            CommentFactory(service=svc)
+            HandshakeFactory(service=svc, status='completed', provisioned_hours=Decimal('1'))
+        batch = calculate_hot_scores_batch(services)
+        for svc in services:
+            single = calculate_hot_score(svc)
+            assert batch[svc.id] == pytest.approx(single, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 event formula (RSVP velocity x OrganiserQuality x Capacity) - closes #303
+# ---------------------------------------------------------------------------
+
+from api.models import Handshake
+from api.ranking import calculate_event_hot_score
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestPhase2EventFormula:
+    def test_event_with_recent_rsvps_outranks_event_with_old_rsvps(self):
+        organiser = UserFactory()
+        # Seed event-scoped organiser quality so RSVP-velocity differences are
+        # observable (under pure Wilson, an organiser with 0 event reps has
+        # quality=0 -> all events score 0). Mirrors the service-formula tests.
+        for _ in range(5):
+            requester = UserFactory()
+            seed_event = ServiceFactory(user=organiser, type='Event', max_participants=10)
+            seed_hs = HandshakeFactory(service=seed_event, requester=requester, status='attended')
+            ReputationRepFactory(handshake=seed_hs, giver=requester, receiver=organiser, is_helpful=True)
+
+        hot = ServiceFactory(user=organiser, type='Event', status='Active', max_participants=10,
+                             scheduled_time=timezone.now() + timedelta(days=3))
+        cold = ServiceFactory(user=organiser, type='Event', status='Active', max_participants=10,
+                              scheduled_time=timezone.now() + timedelta(days=3))
+        # Hot event: 5 RSVPs in the last 7 days
+        for _ in range(5):
+            HandshakeFactory(service=hot, status='accepted')
+        # Cold event: 5 RSVPs but they're all 30 days old
+        for _ in range(5):
+            hs = HandshakeFactory(service=cold, status='accepted')
+            Handshake.objects.filter(pk=hs.pk).update(created_at=timezone.now() - timedelta(days=30))
+        assert calculate_event_hot_score(hot) > calculate_event_hot_score(cold)
+
+    def test_event_organiser_quality_uses_event_rep_only(self):
+        """An organiser's Offer/Need rep must NOT bleed into their event score."""
+        organiser = UserFactory()
+        event = ServiceFactory(user=organiser, type='Event', status='Active', max_participants=10,
+                               scheduled_time=timezone.now() + timedelta(days=3))
+        # Give organiser strong Offer rep -- should NOT boost event quality
+        for _ in range(20):
+            requester = UserFactory()
+            offer = ServiceFactory(user=organiser, type='Offer')
+            hs = HandshakeFactory(service=offer, requester=requester, status='completed')
+            ReputationRepFactory(handshake=hs, giver=requester, receiver=organiser, is_helpful=True)
+        # Give the event some RSVPs so velocity is non-zero
+        for _ in range(3):
+            HandshakeFactory(service=event, status='accepted')
+        baseline = calculate_event_hot_score(event)
+        # Now give one event-scoped positive -- quality should jump
+        requester = UserFactory()
+        event_hs = HandshakeFactory(service=event, requester=requester, status='attended')
+        ReputationRepFactory(handshake=event_hs, giver=requester, receiver=organiser, is_helpful=True)
+        boosted = calculate_event_hot_score(event)
+        assert boosted > baseline
+
+    def test_event_capacity_boost_at_75_percent(self):
+        organiser = UserFactory()
+        # Seed event-scoped quality so multiplier matters
+        for _ in range(5):
+            requester = UserFactory()
+            seed_event = ServiceFactory(user=organiser, type='Event', max_participants=10)
+            seed_hs = HandshakeFactory(service=seed_event, requester=requester, status='attended')
+            ReputationRepFactory(handshake=seed_hs, giver=requester, receiver=organiser, is_helpful=True)
+
+        event = ServiceFactory(user=organiser, type='Event', status='Active', max_participants=4,
+                               scheduled_time=timezone.now() + timedelta(days=3))
+        for _ in range(3):  # 3/4 = 75% -- boost applies
+            HandshakeFactory(service=event, status='accepted')
+        boosted = calculate_event_hot_score(event)
+
+        event2 = ServiceFactory(user=organiser, type='Event', status='Active', max_participants=4,
+                                scheduled_time=timezone.now() + timedelta(days=3))
+        HandshakeFactory(service=event2, status='accepted')  # 1/4 = 25% -- no boost
+        unboosted = calculate_event_hot_score(event2)
+        assert boosted > unboosted
+
+
+# ---------------------------------------------------------------------------
+# FR-17f reframe -- recurring decay is now a Phase 3 boost trigger (#305)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestCheckRecurringGrowth:
+    def _run(self):
+        from django.core.management import call_command
+        call_command('check_recurring_growth')
+
+    def test_stale_recurring_service_gets_flagged(self):
+        owner = UserFactory()
+        svc = ServiceFactory(user=owner, type='Event', status='Active', schedule_type='Recurrent')
+        # No completed handshakes -> stale
+        self._run()
+        svc.refresh_from_db()
+        assert svc.is_stale_recurring is True
+        assert svc.last_growth_check_at is not None
+
+    def test_growing_recurring_service_is_unflagged(self):
+        from datetime import timedelta as td
+        from api.models import Handshake
+        owner = UserFactory()
+        svc = ServiceFactory(user=owner, type='Event', status='Active', schedule_type='Recurrent')
+        # 2 completed handshakes in the last 7 days, 1 in the prior 7 days -> growth
+        for _ in range(2):
+            HandshakeFactory(service=svc, status='completed', provisioned_hours=Decimal('1'))
+        old_hs = HandshakeFactory(service=svc, status='completed', provisioned_hours=Decimal('1'))
+        Handshake.objects.filter(pk=old_hs.pk).update(updated_at=timezone.now() - td(days=10))
+        self._run()
+        svc.refresh_from_db()
+        assert svc.is_stale_recurring is False
+
+    def test_one_time_services_are_never_flagged(self):
+        owner = UserFactory()
+        one_time = ServiceFactory(user=owner, type='Offer', status='Active', schedule_type='One-Time')
+        self._run()
+        one_time.refresh_from_db()
+        assert one_time.is_stale_recurring is False
+        assert one_time.last_growth_check_at is None  # not even checked
+
+    def test_throttle_re_check_within_7_days(self):
+        owner = UserFactory()
+        svc = ServiceFactory(user=owner, type='Event', status='Active', schedule_type='Recurrent')
+        self._run()  # first run -- sets last_growth_check_at
+        svc.refresh_from_db()
+        first_check = svc.last_growth_check_at
+        # Second run immediately -- should not re-check
+        self._run()
+        svc.refresh_from_db()
+        assert svc.last_growth_check_at == first_check
+
+
+@pytest.mark.django_db
+@pytest.mark.unit
+class TestNewcomerBoost:
+    """Customer-requested 1.2x boost for services owned by newcomer accounts
+    (date_joined < 30 days). Multiplicative; stacks with capacity multiplier."""
+
+    BOOST = 1.2
+
+    def _seed_quality(self, owner):
+        """Give `owner` one positive rep on an Offer so Wilson > 0."""
+        from api.models import ReputationRep
+        svc = ServiceFactory(user=owner, type='Offer', status='Active')
+        giver = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+        hs = HandshakeFactory(service=svc, requester=giver, status='completed')
+        ReputationRepFactory(
+            handshake=hs, giver=giver, receiver=owner, is_punctual=True,
+        )
+        return svc
+
+    def test_newcomer_owner_gets_boost_on_service(self):
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+        newcomer = UserFactory(date_joined=timezone.now() - timedelta(days=10))
+        veteran_svc = self._seed_quality(veteran)
+        newcomer_svc = self._seed_quality(newcomer)
+
+        veteran_score = calculate_hot_score(veteran_svc)
+        newcomer_score = calculate_hot_score(newcomer_svc)
+
+        assert veteran_score > 0
+        assert newcomer_score == pytest.approx(veteran_score * self.BOOST, rel=1e-5)
+
+    def test_non_newcomer_no_boost(self):
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=31))
+        svc = self._seed_quality(veteran)
+        # 31 days old: just past the cutoff, so no boost.
+        assert calculate_hot_score(svc) > 0  # has reputation
+        # Compare against the explicit factor breakdown
+        from api.ranking import _compute_service_factors
+        factors = _compute_service_factors(svc)
+        assert factors['newcomer_boost'] == 1.0
+
+    def test_newcomer_event_organiser_gets_boost(self):
+        from api.ranking import calculate_event_hot_score
+        from api.models import ReputationRep
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+        newcomer = UserFactory(date_joined=timezone.now() - timedelta(days=5))
+
+        def _seed_event(organiser):
+            ev = ServiceFactory(
+                user=organiser, type='Event', status='Active',
+                scheduled_time=timezone.now() + timedelta(days=3),
+            )
+            # Velocity: at least one RSVP in the last 7 days so velocity > log2(2).
+            HandshakeFactory(service=ev, status='accepted')
+            # Quality on Events requires an Event-typed completed handshake + rep.
+            qual_event = ServiceFactory(
+                user=organiser, type='Event', status='Active',
+                scheduled_time=timezone.now() - timedelta(days=10),
+            )
+            giver = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+            hs = HandshakeFactory(service=qual_event, requester=giver, status='completed')
+            ReputationRepFactory(
+                handshake=hs, giver=giver, receiver=organiser, is_punctual=True,
+            )
+            return ev
+
+        veteran_event = _seed_event(veteran)
+        newcomer_event = _seed_event(newcomer)
+        veteran_score = calculate_event_hot_score(veteran_event)
+        newcomer_score = calculate_event_hot_score(newcomer_event)
+
+        assert veteran_score > 0
+        assert newcomer_score == pytest.approx(veteran_score * self.BOOST, rel=1e-5)
+
+    def test_batch_matches_single_for_mixed_owners(self):
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+        newcomer = UserFactory(date_joined=timezone.now() - timedelta(days=3))
+        veteran_svc = self._seed_quality(veteran)
+        newcomer_svc = self._seed_quality(newcomer)
+
+        single = {
+            veteran_svc.id: calculate_hot_score(veteran_svc),
+            newcomer_svc.id: calculate_hot_score(newcomer_svc),
+        }
+        batch = calculate_hot_scores_batch([veteran_svc, newcomer_svc])
+
+        assert batch[veteran_svc.id] == pytest.approx(single[veteran_svc.id], rel=1e-5)
+        assert batch[newcomer_svc.id] == pytest.approx(single[newcomer_svc.id], rel=1e-5)
+
+    def test_newcomer_boost_stacks_with_capacity(self):
+        """Newcomer owner of a 75%-full group offer should get 1.5 x 1.2 = 1.8x."""
+        from api.models import ReputationRep
+        veteran = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+        newcomer = UserFactory(date_joined=timezone.now() - timedelta(days=7))
+
+        def _seed_group_offer(owner):
+            svc = ServiceFactory(
+                user=owner, type='Offer', status='Active', max_participants=4,
+            )
+            # Quality
+            giver = UserFactory(date_joined=timezone.now() - timedelta(days=365))
+            hs = HandshakeFactory(service=svc, requester=giver, status='completed')
+            ReputationRepFactory(
+                handshake=hs, giver=giver, receiver=owner, is_punctual=True,
+            )
+            # Capacity fill: 3 of 4 = 75%
+            for _ in range(3):
+                HandshakeFactory(service=svc, status='accepted')
+            return svc
+
+        veteran_svc = _seed_group_offer(veteran)
+        newcomer_svc = _seed_group_offer(newcomer)
+
+        veteran_score = calculate_hot_score(veteran_svc)
+        newcomer_score = calculate_hot_score(newcomer_svc)
+
+        # Veteran gets capacity 1.5x only; newcomer gets 1.5 * 1.2 = 1.8x
+        # Ratio newcomer/veteran should be exactly the boost.
+        assert newcomer_score == pytest.approx(veteran_score * self.BOOST, rel=1e-5)

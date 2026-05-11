@@ -13,7 +13,24 @@ from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
 )
 from api.tests.helpers.test_client import AuthenticatedAPIClient
-from api.models import Handshake, ChatMessage
+from api.models import Handshake, ChatMessage, TransactionHistory
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
+
+
+def _accept_offer_via_approve_flow(handshake):
+    """Drive an Offer/Need handshake to 'accepted' via the canonical
+    propose→approve flow. Direct accept on Offer/Need is rejected (#521)."""
+    from api.services import HandshakeService
+    handshake.refresh_from_db()
+    handshake.exact_duration = handshake.service.duration
+    handshake.scheduled_time = timezone.now() + timedelta(days=1)
+    if handshake.service.location_type == 'In-Person':
+        handshake.exact_location = '123 Test Address'
+    handshake.provider_initiated = True
+    handshake.save()
+    HandshakeService.approve(handshake, handshake.requester)
+    handshake.refresh_from_db()
+    return handshake
 
 
 @pytest.mark.django_db
@@ -31,24 +48,83 @@ class TestExpressInterestView:
         client.authenticate_user(requester)
         
         response = client.post(f'/api/services/{service.id}/interest/')
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert Handshake.objects.filter(
             service=service,
             requester=requester,
             status='pending'
         ).exists()
+
+    # ── Email verification gate for express-interest ────────────────────
+    # Applicants must be verified to request an Offer or offer help on a Need.
+    # The same gate is enforced on /api/handshakes/services/<id>/interest/.
+
+    def test_express_interest_blocked_for_unverified_user(self):
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(
+            timebank_balance=Decimal('3.00'), is_verified=False
+        )
+        service = ServiceFactory(
+            user=provider, type='Offer', duration=Decimal('2.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+
+        response = client.post(f'/api/services/{service.id}/interest/')
+
+        assert_problem_detail(response, 403)
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Handshake.objects.filter(
+            service=service, requester=requester
+        ).exists()
+
+    def test_express_interest_blocked_for_unverified_user_on_need(self):
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(
+            timebank_balance=Decimal('3.00'), is_verified=False
+        )
+        need = ServiceFactory(
+            user=provider, type='Need', duration=Decimal('1.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+
+        response = client.post(f'/api/services/{need.id}/interest/')
+
+        assert_problem_detail(response, 403)
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Handshake.objects.filter(
+            service=need, requester=requester
+        ).exists()
+
+    def test_express_interest_router_action_blocked_for_unverified_user(self):
+        """The /handshakes/services/<id>/interest/ alias must apply the same gate."""
+        provider = UserFactory(timebank_balance=Decimal('5.00'))
+        requester = UserFactory(
+            timebank_balance=Decimal('3.00'), is_verified=False
+        )
+        service = ServiceFactory(
+            user=provider, type='Offer', duration=Decimal('2.00')
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+
+        response = client.post(f'/api/handshakes/services/{service.id}/interest/')
+
+        assert_problem_detail(response, 403)
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
     
     def test_express_interest_insufficient_balance(self):
-        """Test expressing interest with insufficient balance"""
+        """Test expressing interest is blocked only past the -10h debt floor."""
         provider = UserFactory()
-        requester = UserFactory(timebank_balance=Decimal('1.00'))
+        requester = UserFactory(timebank_balance=Decimal('-9.00'))
         service = ServiceFactory(user=provider, type='Offer', duration=Decimal('2.00'))
         
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         
         response = client.post(f'/api/services/{service.id}/interest/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
     
     def test_express_interest_own_service(self):
         """Test cannot express interest in own service"""
@@ -59,7 +135,7 @@ class TestExpressInterestView:
         client.authenticate_user(user)
         
         response = client.post(f'/api/services/{service.id}/interest/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
     
     def test_express_interest_max_participants(self):
         """Test cannot express interest when max participants reached"""
@@ -74,7 +150,7 @@ class TestExpressInterestView:
         client.authenticate_user(requester2)
         
         response = client.post(f'/api/services/{service.id}/interest/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_express_interest_creates_chat_thread_with_opening_message(self):
         """FR-10a/10b: expressing interest creates private thread and opening message."""
@@ -86,20 +162,20 @@ class TestExpressInterestView:
         client.authenticate_user(requester)
 
         interest_response = client.post(f'/api/services/{service.id}/interest/')
-        assert interest_response.status_code == status.HTTP_201_CREATED
+        assert_api_response(interest_response, 201)
 
         handshake_id = interest_response.data['id']
         assert str(interest_response.data['status']).lower() == 'pending'
 
         # Requester can see the conversation in chat list.
         requester_list = client.get('/api/chats/')
-        assert requester_list.status_code == status.HTTP_200_OK
+        assert_api_response(requester_list, 200)
         requester_rows = requester_list.data.get('results', requester_list.data)
         assert any(row['handshake_id'] == str(handshake_id) for row in requester_rows)
 
         # Requester can fetch messages and sees the auto opening text.
         requester_thread = client.get(f'/api/chats/{handshake_id}/')
-        assert requester_thread.status_code == status.HTTP_200_OK
+        assert_api_response(requester_thread, 200)
         requester_messages = requester_thread.data.get('results', [])
         assert len(requester_messages) >= 1
         assert any(
@@ -110,7 +186,7 @@ class TestExpressInterestView:
         # Provider can also fetch the same thread.
         client.authenticate_user(provider)
         provider_thread = client.get(f'/api/chats/{handshake_id}/')
-        assert provider_thread.status_code == status.HTTP_200_OK
+        assert_api_response(provider_thread, 200)
         provider_messages = provider_thread.data.get('results', [])
         assert any(
             'interested in your service' in message['body']
@@ -135,7 +211,7 @@ class TestExpressInterestView:
         ):
             response = client.post(f'/api/services/{service.id}/interest/')
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
         assert fake_channel_layer.group_send.await_count >= 1
         chat_group_name = f"chat_{response.data['id']}"
         chat_events = [
@@ -164,7 +240,7 @@ class TestHandshakeViewSet:
         client.authenticate_user(user)
         
         response = client.get('/api/handshakes/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert isinstance(response.data, list)
         assert len(response.data) == 3
 
@@ -186,7 +262,7 @@ class TestHandshakeViewSet:
         client.authenticate_user(requester)
 
         response = client.get('/api/handshakes/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         assert len(response.data) >= 1
         h = next((x for x in response.data if str(x['id']) == str(handshake.id)), None)
         assert h is not None
@@ -200,7 +276,7 @@ class TestHandshakeViewSet:
             'kindness': True,
         })
         response2 = client.get('/api/handshakes/')
-        assert response2.status_code == status.HTTP_200_OK
+        assert_api_response(response2, 200)
         h2 = next((x for x in response2.data if str(x['id']) == str(handshake.id)), None)
         assert h2 is not None
         assert h2['user_has_reviewed'] is True
@@ -220,7 +296,7 @@ class TestHandshakeViewSet:
             'exact_duration': 2.0,
             'scheduled_time': '2027-12-20T10:00:00Z'
         })
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
@@ -265,7 +341,7 @@ class TestHandshakeViewSet:
             'exact_duration': 9,
             'scheduled_time': '2099-01-01T10:00:00Z',
         })
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
@@ -300,7 +376,7 @@ class TestHandshakeViewSet:
             'exact_duration': 2,
             'scheduled_time': '2027-12-20T10:00:00Z',
         })
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
@@ -333,7 +409,7 @@ class TestHandshakeViewSet:
         client.authenticate_user(requester)
         
         response = client.post(f'/api/handshakes/{handshake.id}/approve/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
@@ -360,26 +436,109 @@ class TestHandshakeViewSet:
             provider_initiated=True,
             requester_initiated=True
         )
-        
+
         client = AuthenticatedAPIClient()
         client.authenticate_user(provider)
-        
+
         response = client.post(f'/api/handshakes/{handshake.id}/confirm/')
-        assert response.status_code == status.HTTP_200_OK
-        
+        assert_api_response(response, 200)
+
         handshake.refresh_from_db()
         assert handshake.provider_confirmed_complete is True
-        
+
         client.authenticate_user(requester)
         response = client.post(f'/api/handshakes/{handshake.id}/confirm/')
-        assert response.status_code == status.HTTP_200_OK
-        
+        assert_api_response(response, 200)
+
         handshake.refresh_from_db()
         assert handshake.status == 'completed'
         assert handshake.receiver_confirmed_complete is True
-        
+
         provider.refresh_from_db()
         assert provider.timebank_balance > Decimal('5.00')
+
+    def test_group_offer_settles_provider_on_first_completion(self):
+        """End-to-end coverage for the asymmetric group-offer settlement.
+
+        Pays the provider on the FIRST completion, not the last (sgunes
+        review). Settlement is idempotent: completing handshake2 must not
+        produce a second transfer. Each receiver pays per seat (escrowed at
+        acceptance) and is not refunded when their own handshake completes —
+        the surplus is the documented system sink.
+        """
+        provider = UserFactory(timebank_balance=Decimal('0.00'))
+        receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('3.00'),
+            schedule_type='One-Time',
+            max_participants=2,
+        )
+        handshake1 = HandshakeFactory(
+            service=service, requester=receiver1, status='accepted',
+            provisioned_hours=Decimal('3.00'),
+            provider_initiated=True, requester_initiated=True,
+        )
+        handshake2 = HandshakeFactory(
+            service=service, requester=receiver2, status='accepted',
+            provisioned_hours=Decimal('3.00'),
+            provider_initiated=True, requester_initiated=True,
+        )
+
+        # Receivers pay upfront — emulate the provisioning that happens at
+        # approval time for accepted handshakes.
+        from api.utils import provision_timebank
+        provision_timebank(handshake1)
+        provision_timebank(handshake2)
+        receiver1.refresh_from_db()
+        receiver2.refresh_from_db()
+        assert receiver1.timebank_balance == Decimal('2.00')
+        assert receiver2.timebank_balance == Decimal('2.00')
+
+        client = AuthenticatedAPIClient()
+
+        # Both sides confirm handshake1 — provider settles on this completion.
+        client.authenticate_user(provider)
+        assert_api_response(client.post(f'/api/handshakes/{handshake1.id}/confirm/'), 200)
+        client.authenticate_user(receiver1)
+        assert_api_response(client.post(f'/api/handshakes/{handshake1.id}/confirm/'), 200)
+
+        handshake1.refresh_from_db()
+        provider.refresh_from_db()
+        assert handshake1.status == 'completed'
+        assert provider.timebank_balance == Decimal('3.00'), (
+            'Group offer must pay the provider on the first completion, not the last'
+        )
+        # The single transfer row already exists by this point.
+        assert TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).count() == 1
+
+        # Both sides confirm handshake2 — settlement must be idempotent.
+        client.authenticate_user(provider)
+        assert_api_response(client.post(f'/api/handshakes/{handshake2.id}/confirm/'), 200)
+        client.authenticate_user(receiver2)
+        assert_api_response(client.post(f'/api/handshakes/{handshake2.id}/confirm/'), 200)
+
+        handshake2.refresh_from_db()
+        provider.refresh_from_db()
+        receiver1.refresh_from_db()
+        receiver2.refresh_from_db()
+
+        assert handshake2.status == 'completed'
+        # Provider earns once; receivers are not refunded (system sink).
+        assert provider.timebank_balance == Decimal('3.00')
+        assert receiver1.timebank_balance == Decimal('2.00')
+        assert receiver2.timebank_balance == Decimal('2.00')
+        assert TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).count() == 1
     
     def test_request_and_approve_cancellation(self):
         """Accepted Offer/Need handshakes require a mutual cancellation approval."""
@@ -399,7 +558,7 @@ class TestHandshakeViewSet:
         request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
             'reason': 'Unexpected conflict',
         })
-        assert request_response.status_code == status.HTTP_200_OK
+        assert_api_response(request_response, 200)
 
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
@@ -408,13 +567,56 @@ class TestHandshakeViewSet:
 
         client.authenticate_user(requester)
         response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         
         handshake.refresh_from_db()
         assert handshake.status == 'cancelled'
         
         requester.refresh_from_db()
         assert requester.timebank_balance == Decimal('3.00')
+
+    def test_need_approved_cancellation_keeps_service_reservation(self):
+        """Cancelling a Need agreement must not return hours unless the Need is cancelled."""
+        owner = UserFactory(timebank_balance=Decimal('1.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('2.00'),
+            reserved_timebank_hours=Decimal('2.00'),
+            status='Agreed',
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='accepted',
+            provisioned_hours=Decimal('2.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
+            'reason': 'Cannot help anymore',
+        })
+        assert_api_response(request_response, 200)
+
+        client.authenticate_user(owner)
+        response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
+        assert_api_response(response, 200)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+        handshake.refresh_from_db()
+        assert handshake.status == 'cancelled'
+        assert service.status == 'Active'
+        assert owner.timebank_balance == Decimal('1.00')
+        assert service.reserved_timebank_hours == Decimal('2.00')
+        assert not TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=handshake,
+            transaction_type='refund',
+        ).exists()
 
     def test_reject_cancellation_request_keeps_handshake_active(self):
         provider = UserFactory()
@@ -432,11 +634,11 @@ class TestHandshakeViewSet:
         request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/', {
             'reason': 'Need to reschedule instead',
         })
-        assert request_response.status_code == status.HTTP_200_OK
+        assert_api_response(request_response, 200)
 
         client.authenticate_user(requester)
         reject_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/reject/')
-        assert reject_response.status_code == status.HTTP_200_OK
+        assert_api_response(reject_response, 200)
 
         handshake.refresh_from_db()
         requester.refresh_from_db()
@@ -460,10 +662,10 @@ class TestHandshakeViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         request_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/')
-        assert request_response.status_code == status.HTTP_200_OK
+        assert_api_response(request_response, 200)
 
         approve_response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/approve/')
-        assert approve_response.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(approve_response, 403)
 
     def test_event_handshake_cannot_use_cancellation_request(self):
         organizer = UserFactory()
@@ -479,7 +681,7 @@ class TestHandshakeViewSet:
         client = AuthenticatedAPIClient()
         client.authenticate_user(organizer)
         response = client.post(f'/api/handshakes/{handshake.id}/cancel-request/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
 
 # ── Tests: initiate/approve permission changes (service-owner-first model) ────
@@ -513,7 +715,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(service_owner)
         resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
 
@@ -532,7 +734,7 @@ class TestInitiateApproveServiceOwnerModel:
             'scheduled_time': (timezone.now() + timedelta(days=5)).isoformat(),
         })
 
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(resp, 400)
         assert resp.data['detail'] == 'Duration must be a whole number of hours'
 
     def test_offer_requester_cannot_initiate(self):
@@ -545,7 +747,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
-        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(resp, 403)
 
     def test_offer_requester_can_approve(self):
         """Requester (interest expresser) can approve an Offer handshake."""
@@ -563,7 +765,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
 
@@ -595,7 +797,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
 
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
@@ -626,7 +828,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(resp, 400)
         assert resp.data['detail'] == 'Provider must provide exact location, duration, and scheduled time before approval'
         assert resp.data['requires_details'] is True
 
@@ -646,7 +848,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(service_owner)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(resp, 403)
 
     # ── Need/Want service ─────────────────────────────────────────────────────
 
@@ -663,7 +865,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(service_owner)
         resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         handshake.refresh_from_db()
         assert handshake.provider_initiated is True
         assert handshake.exact_location == 'Test Cafe, Beşiktaş'
@@ -681,7 +883,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(helper)
         resp = client.post(f'/api/handshakes/{handshake.id}/initiate/', self.INITIATE_PAYLOAD)
-        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(resp, 403)
 
     def test_need_helper_can_approve(self):
         """
@@ -702,9 +904,42 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(helper)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
+
+    def test_need_approve_reuses_existing_request_reservation(self):
+        """Approving a Need must not deduct again when creation already reserved hours."""
+        service_owner = UserFactory(timebank_balance=Decimal('2.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=service_owner,
+            type='Need',
+            duration=Decimal('1.00'),
+            reserved_timebank_hours=Decimal('1.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='pending',
+            provider_initiated=True,
+            exact_location='Need Location',
+            exact_duration=Decimal('1.00'),
+            scheduled_time=timezone.now() + timedelta(days=3),
+            provisioned_hours=Decimal('1.00'),
+        )
+
+        client = AuthenticatedAPIClient()
+        client.authenticate_user(helper)
+        resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
+        assert_api_response(resp, 200)
+
+        service_owner.refresh_from_db()
+        service.refresh_from_db()
+        handshake.refresh_from_db()
+        assert handshake.status == 'accepted'
+        assert service_owner.timebank_balance == Decimal('2.00')
+        assert service.reserved_timebank_hours == Decimal('1.00')
 
     def test_confirm_rejects_fractional_hours_adjustment(self):
         """Completion confirmation must reject fractional hour adjustments."""
@@ -724,7 +959,7 @@ class TestInitiateApproveServiceOwnerModel:
         client.authenticate_user(provider)
         resp = client.post(f'/api/handshakes/{handshake.id}/confirm/', {'hours': 1.5})
 
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(resp, 400)
         assert resp.data['detail'] == 'Hours must be a whole number'
 
     def test_need_service_owner_cannot_approve_own_handshake(self):
@@ -743,7 +978,7 @@ class TestInitiateApproveServiceOwnerModel:
         client = AuthenticatedAPIClient()
         client.authenticate_user(service_owner)
         resp = client.post(f'/api/handshakes/{handshake.id}/approve/', {})
-        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert_problem_detail(resp, 403)
 
     def test_third_party_cannot_initiate_or_approve(self):
         """
@@ -784,8 +1019,6 @@ class TestPendingCapacityIntegration:
     def test_multiple_users_can_express_interest_simultaneously(self):
         """Three users can all express interest in a max_participants=1 One-Time service
         because pending doesn't consume a slot."""
-        from api.utils import provision_timebank
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u1 = UserFactory(timebank_balance=Decimal('5'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
@@ -799,17 +1032,13 @@ class TestPendingCapacityIntegration:
         for user in (u1, u2, u3):
             client.authenticate_user(user)
             resp = client.post(f'/api/services/{svc.id}/interest/')
-            assert resp.status_code == status.HTTP_201_CREATED, (
-                f"User {user.email} should be able to express interest: {resp.data}"
-            )
+            assert_api_response(resp, 201)
 
         assert Handshake.objects.filter(service=svc, status='pending').count() == 3
 
     def test_accepted_slot_blocks_new_interest(self):
         """After one handshake is accepted, the slot is consumed and no further
         interest can be expressed on a max_participants=1 One-Time service."""
-        from api.utils import provision_timebank
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u1 = UserFactory(timebank_balance=Decimal('5'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
@@ -819,15 +1048,13 @@ class TestPendingCapacityIntegration:
         )
         h1 = HandshakeFactory(service=svc, requester=u1,
                                status='pending', provisioned_hours=Decimal('1'))
-        provision_timebank(h1)
 
-        # accept h1
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        client.post(f'/api/handshakes/{h1.id}/accept/')
+        # accept h1 via canonical propose→approve flow
+        _accept_offer_via_approve_flow(h1)
 
         # u2 tries to express interest — service is now Agreed (hidden) or full
         # Backend returns 404 (service not in Active queryset) or 400 (capacity)
+        client = AuthenticatedAPIClient()
         client.authenticate_user(u2)
         resp = client.post(f'/api/services/{svc.id}/interest/')
         assert resp.status_code in (
@@ -842,8 +1069,6 @@ class TestAcceptAutoDenyIntegration:
     """Accepting a One-Time handshake auto-denies all other pending ones."""
 
     def _setup_one_time(self, max_p=1):
-        from api.utils import provision_timebank
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         svc = ServiceFactory(
             user=provider, type='Offer', schedule_type='One-Time',
@@ -854,19 +1079,13 @@ class TestAcceptAutoDenyIntegration:
         for r in requesters:
             h = HandshakeFactory(service=svc, requester=r,
                                  status='pending', provisioned_hours=Decimal('1'))
-            provision_timebank(h)
             handshakes.append(h)
         return provider, svc, requesters, handshakes
 
     def test_accept_last_slot_denies_remaining_pending(self):
         """For max_p=1: accepting fills the only slot → other pending get denied."""
         provider, svc, _, handshakes = self._setup_one_time(max_p=1)
-        h_accept = handshakes[0]
-
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        resp = client.post(f'/api/handshakes/{h_accept.id}/accept/')
-        assert resp.status_code == status.HTTP_200_OK
+        _accept_offer_via_approve_flow(handshakes[0])
 
         for h in handshakes[1:]:
             h.refresh_from_db()
@@ -875,9 +1094,7 @@ class TestAcceptAutoDenyIntegration:
     def test_denied_count_correct_when_capacity_full(self):
         """max_p=1: accept 1 → remaining 2 denied."""
         provider, svc, _, handshakes = self._setup_one_time(max_p=1)
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        client.post(f'/api/handshakes/{handshakes[0].id}/accept/')
+        _accept_offer_via_approve_flow(handshakes[0])
 
         denied = Handshake.objects.filter(service=svc, status='denied').count()
         assert denied == 2
@@ -886,9 +1103,7 @@ class TestAcceptAutoDenyIntegration:
         """Group offer with max_p=2: accepting the first should NOT deny the
         second pending — one slot remains open for it."""
         provider, svc, _, handshakes = self._setup_one_time(max_p=2)
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        client.post(f'/api/handshakes/{handshakes[0].id}/accept/')
+        _accept_offer_via_approve_flow(handshakes[0])
 
         # handshakes[1] must remain pending (1 slot still open)
         handshakes[1].refresh_from_db()
@@ -908,12 +1123,7 @@ class TestAgreedStatusIntegration:
     """Service status lifecycle: Active → Agreed → Active."""
 
     def _accept(self, provider, handshake):
-        from api.utils import provision_timebank
-        provision_timebank(handshake)
-        client = AuthenticatedAPIClient()
-        client.authenticate_user(provider)
-        resp = client.post(f'/api/handshakes/{handshake.id}/accept/')
-        assert resp.status_code == status.HTTP_200_OK, resp.data
+        _accept_offer_via_approve_flow(handshake)
 
     def test_one_time_service_becomes_agreed_on_full_accept(self):
         provider = UserFactory(timebank_balance=Decimal('20'))
@@ -944,7 +1154,7 @@ class TestAgreedStatusIntegration:
         client = AuthenticatedAPIClient()
         client.authenticate_user(viewer)
         resp = client.get('/api/services/')
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
         data = resp.data
         results = data['results'] if isinstance(data, dict) and 'results' in data else data
         ids = [str(s['id']) for s in results]
@@ -966,10 +1176,10 @@ class TestAgreedStatusIntegration:
         client = AuthenticatedAPIClient()
         client.authenticate_user(provider)
         request_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/')
-        assert request_resp.status_code == status.HTTP_200_OK
+        assert_api_response(request_resp, 200)
         client.authenticate_user(requester)
         resp = client.post(f'/api/handshakes/{h.id}/cancel-request/approve/')
-        assert resp.status_code == status.HTTP_200_OK
+        assert_api_response(resp, 200)
 
         svc.refresh_from_db()
         assert svc.status == 'Active'
@@ -988,10 +1198,10 @@ class TestAgreedStatusIntegration:
         client = AuthenticatedAPIClient()
         client.authenticate_user(provider)
         request_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/')
-        assert request_resp.status_code == status.HTTP_200_OK
+        assert_api_response(request_resp, 200)
         client.authenticate_user(requester)
         approve_resp = client.post(f'/api/handshakes/{h.id}/cancel-request/approve/')
-        assert approve_resp.status_code == status.HTTP_200_OK
+        assert_api_response(approve_resp, 200)
 
         viewer = UserFactory()
         client.authenticate_user(viewer)
@@ -1055,11 +1265,33 @@ class TestEventHandshakeEndpoints:
         client = AuthenticatedAPIClient()
         client.authenticate_user(participant)
         response = client.post(f'/api/handshakes/services/{service.id}/join-event/')
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
         handshake = Handshake.objects.get(id=response.data['id'])
         assert handshake.status == 'accepted'
         assert handshake.provisioned_hours == Decimal('0.00')
+
+    def test_join_event_blocked_for_unverified_user(self):
+        """Unverified users may not RSVP to an Event."""
+        organizer = UserFactory()
+        participant = UserFactory(is_verified=False)
+        service = ServiceFactory(
+            user=organizer,
+            type='Event',
+            status='Active',
+            schedule_type='One-Time',
+            scheduled_time=timezone.now() + timedelta(days=2),
+            max_participants=3,
+        )
+
+        client = AuthenticatedAPIClient().authenticate_user(participant)
+        response = client.post(f'/api/handshakes/services/{service.id}/join-event/')
+
+        assert_problem_detail(response, 403)
+        assert response.data.get('code') == 'EMAIL_NOT_VERIFIED'
+        assert not Handshake.objects.filter(
+            service=service, requester=participant
+        ).exists()
 
     def test_checkin_after_start_returns_invalid_state(self):
         organizer = UserFactory()
@@ -1081,7 +1313,7 @@ class TestEventHandshakeEndpoints:
         client = AuthenticatedAPIClient()
         client.authenticate_user(participant)
         response = client.post(f'/api/handshakes/{handshake.id}/checkin/')
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         assert 'no longer available' in str(response.data).lower()
 
     def test_mark_attended_requires_authentication(self):
@@ -1146,7 +1378,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         handshake.refresh_from_db()
         assert handshake.status == 'attended'
 
@@ -1230,7 +1462,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         handshake.refresh_from_db()
         assert handshake.status == 'accepted'
 
@@ -1256,7 +1488,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/handshakes/{handshake.id}/mark-attended/')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
         handshake.refresh_from_db()
         assert handshake.status == 'attended'
 
@@ -1264,7 +1496,7 @@ class TestMarkAttendedAndCompleteEvent:
     # complete-event
     # ------------------------------------------------------------------ #
 
-    def test_complete_event_moves_accepted_and_checked_in_to_no_show(self):
+    def test_complete_event_no_show_only_for_checked_in(self):
         organizer = UserFactory()
         p_accepted = UserFactory()
         p_checked_in = UserFactory()
@@ -1299,14 +1531,14 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/services/{event.id}/complete-event/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
         h_accepted.refresh_from_db()
         h_checked_in.refresh_from_db()
         h_attended.refresh_from_db()
 
-        assert h_accepted.status == 'no_show'
-        assert h_checked_in.status == 'no_show'
+        assert h_accepted.status == 'accepted', 'accepted (never checked in) participants stay accepted — no penalty'
+        assert h_checked_in.status == 'no_show', 'checked_in participants who were not marked attended become no_show'
         assert h_attended.status == 'attended', 'attended participants must not be downgraded'
 
     def test_attended_participants_not_downgraded_during_completion(self):
@@ -1331,7 +1563,7 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
         response = client.post(f'/api/services/{event.id}/complete-event/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
         handshake.refresh_from_db()
         assert handshake.status == 'attended'
 
@@ -1378,11 +1610,101 @@ class TestMarkAttendedAndCompleteEvent:
         client.authenticate_user(organizer)
 
         first = client.post(f'/api/services/{event.id}/complete-event/')
-        assert first.status_code == status.HTTP_200_OK
+        assert_api_response(first, 200)
 
         second = client.post(f'/api/services/{event.id}/complete-event/')
         assert second.status_code in (
             status.HTTP_400_BAD_REQUEST,
             status.HTTP_409_CONFLICT,
             status.HTTP_404_NOT_FOUND,  # completed events may be filtered from active queryset
+        )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestHandshakeInterestsPanelRequesterDetail:
+    """
+    Tests for the requester_detail field in HandshakeSerializer.
+    This field powers the owner-side Interests panel (#298).
+    """
+
+    def test_owner_sees_requester_detail_with_id(self):
+        """Service owner's handshake list must include requester_detail.id."""
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', duration=Decimal('2.00'))
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+        resp = client.get('/api/handshakes/')
+        assert_api_response(resp, 200)
+        results = resp.json()
+        # Find our handshake in the list
+        hs_data = next(
+            (h for h in results if str(h.get('service_id')) == str(service.id)),
+            None
+        )
+        assert hs_data is not None, "Handshake not found in owner's list"
+        assert 'requester_detail' in hs_data
+        detail = hs_data['requester_detail']
+        assert detail is not None
+        assert 'id' in detail
+        assert str(detail['id']) == str(requester.id)
+        assert 'first_name' in detail
+        assert 'last_name' in detail
+        assert 'avatar_url' in detail
+        assert 'member_since' in detail
+        # member_since must be an ISO string (not an int year) so the frontend
+        # can call new Date(detail.member_since).getFullYear() correctly.
+        if detail['member_since'] is not None:
+            assert isinstance(detail['member_since'], str), (
+                "member_since must be an ISO datetime string, not an int"
+            )
+
+    def test_non_owner_gets_null_requester_detail(self):
+        """Non-owner (requester) must NOT see requester_detail — it should be null."""
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', duration=Decimal('2.00'))
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient().authenticate_user(requester)
+        resp = client.get('/api/handshakes/')
+        assert_api_response(resp, 200)
+        results = resp.json()
+        hs_data = next(
+            (h for h in results if str(h.get('service_id')) == str(service.id)),
+            None
+        )
+        assert hs_data is not None, "Handshake not found in requester's list"
+        # requester_detail must be null for the non-owner
+        assert hs_data.get('requester_detail') is None
+
+    def test_requester_detail_does_not_include_username(self):
+        """
+        requester_detail must NOT include a 'username' key.
+
+        This project's custom User model sets username=None (AbstractUser field
+        removed) and the team direction is to not use username anywhere —
+        the frontend now shows first/last name + member-since year only.
+        """
+        owner = UserFactory()
+        requester = UserFactory()
+        service = ServiceFactory(user=owner, type='Offer', duration=Decimal('2.00'))
+        HandshakeFactory(service=service, requester=requester, status='pending')
+
+        client = AuthenticatedAPIClient().authenticate_user(owner)
+        resp = client.get('/api/handshakes/')
+        assert_api_response(resp, 200)
+        results = resp.json()
+        hs_data = next(
+            (h for h in results if str(h.get('service_id')) == str(service.id)),
+            None
+        )
+        assert hs_data is not None, "Handshake not found in owner's list"
+        detail = hs_data.get('requester_detail')
+        assert detail is not None, "requester_detail should not be null for the owner"
+        assert 'username' not in detail, (
+            "requester_detail must NOT include 'username' — the User model has no "
+            "username field and the frontend no longer uses it."
         )

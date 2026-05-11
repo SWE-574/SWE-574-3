@@ -1,0 +1,292 @@
+name: CI — Mutation testing
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - "backend/api/ranking.py"
+      - "backend/api/achievement_utils.py"
+      - "backend/api/badge_utils.py"
+      - "backend/api/event_permissions.py"
+      - "backend/api/services.py"
+      - "backend/api/search_filters.py"
+      - "frontend/src/services/api.ts"
+      - "frontend/src/services/conversationAPI.ts"
+      - "frontend/src/utils/dateTime.ts"
+      - "frontend/src/utils/eventUtils.ts"
+      - "frontend/src/utils/cookies.ts"
+      - "backend/pyproject.toml"
+      - "frontend/stryker.conf.json"
+      - ".github/workflows/ci-mutation.yml"
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Backend mutmut runs on a nightly schedule + manual dispatch only — NOT
+  # on every PR. The CI scope (currently just badge_utils.py to fit the
+  # 45-min job timeout) doesn't earn its ~10 min of runner time per PR
+  # when the rest of the hot-module list isn't actually being gated. Keep
+  # the wiring so the bootstrap stays exercised by the nightly run, and
+  # so anyone debugging mutation testing can trigger it on demand from
+  # the Actions tab. To temporarily run it on a PR, dispatch this
+  # workflow against the PR's branch from the GitHub UI.
+  backend-mutmut:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      db:
+        image: postgis/postgis:15-3.4
+        env:
+          POSTGRES_DB: the_hive_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+
+    env:
+      DB_NAME: the_hive_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres_ci
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: 127.0.0.1:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_BUCKET_NAME: hive-media
+      MINIO_USE_SSL: "false"
+      SECRET_KEY: ci-secret-key-not-used-in-production
+      DEBUG: "True"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DJANGO_SETTINGS_MODULE: hive_project.settings
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install GDAL / GEOS
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gdal-bin libgdal-dev libgeos-dev
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name ci_minio \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin123 \
+            --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1" \
+            --health-interval 5s \
+            --health-timeout 3s \
+            --health-retries 20 \
+            minio/minio:latest server /data --console-address ":9001"
+
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' ci_minio)
+            if [ "$STATUS" = "healthy" ]; then
+              echo "MinIO is healthy."
+              break
+            fi
+            if [ "$STATUS" = "unhealthy" ]; then
+              echo "::error::MinIO became unhealthy"
+              docker logs ci_minio
+              exit 1
+            fi
+            echo "Waiting for MinIO... status=$STATUS ($i/30)"
+            sleep 2
+          done
+
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('backend/requirements.txt') }}
+
+      - name: Install backend deps
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Migrate
+        working-directory: backend
+        run: .venv/bin/python manage.py migrate --no-input
+
+      - name: Run mutmut
+        working-directory: backend
+        run: |
+          .venv/bin/mutmut run || true
+          .venv/bin/mutmut results > mutmut-results.txt
+          # `mutmut results` only prints SURVIVED/timeout/suspicious mutants,
+          # not the killed ones — counting it would always read killed=0.
+          # `export-cicd-stats` writes a JSON tally with the actual totals,
+          # which is what the PR comment script reads.
+          .venv/bin/mutmut export-cicd-stats || true
+
+      - name: Upload mutmut report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-mutation
+          path: |
+            backend/mutmut-results.txt
+            backend/mutants/mutmut-cicd-stats.json
+
+      # Read the cicd-stats JSON so killed/survived/total are accurate.
+      # Only post when mutmut actually scored a mutant — when the bootstrap
+      # is broken everything ends up in `segfault` / `not_checked` and the
+      # comment would just be noise.
+      - name: Comment mutation summary on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'backend/mutants/mutmut-cicd-stats.json';
+            if (!fs.existsSync(path)) {
+              core.info('No mutmut cicd-stats file produced; skipping PR comment.');
+              return;
+            }
+            const stats = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const killed = stats.killed ?? 0;
+            const survived = stats.survived ?? 0;
+            const timeout = stats.timeout ?? 0;
+            const suspicious = stats.suspicious ?? 0;
+            const skipped = stats.skipped ?? 0;
+            const segfault = stats.segfault ?? 0;
+            const noTests = stats.no_tests ?? 0;
+            const total = stats.total ?? (killed + survived + timeout + suspicious + skipped + segfault + noTests);
+            const scored = killed + survived;
+            if (scored === 0) {
+              core.info('mutmut produced no scored mutants this run; skipping PR comment.');
+              return;
+            }
+            const pct = ((killed / scored) * 100).toFixed(1);
+            const body = [
+              '### Backend mutation testing (mutmut)',
+              '',
+              '```',
+              'mutation score : ' + pct + '%',
+              'killed         : ' + killed,
+              'survived       : ' + survived,
+              'timeout        : ' + timeout,
+              'suspicious     : ' + suspicious,
+              'skipped        : ' + skipped,
+              'segfault       : ' + segfault,
+              'no_tests       : ' + noTests,
+              'total          : ' + total,
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+  frontend-stryker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: node-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Run Stryker
+        working-directory: frontend
+        run: npx stryker run --reporters json,clear-text || true
+
+      - name: Upload Stryker report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-mutation
+          path: frontend/tests/reports/mutation/
+
+      # Stryker's JSON schema (1.0) does not carry an aggregate score field,
+      # so compute it from the per-file mutant tallies. The clear-text
+      # reporter logs "Final mutation score of X" but parsing log lines is
+      # fragile across Stryker versions.
+      - name: Comment Stryker score on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'frontend/tests/reports/mutation/mutation.json';
+            if (!fs.existsSync(path)) {
+              core.warning('No Stryker report produced.');
+              return;
+            }
+            const report = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const tally = { Killed: 0, Survived: 0, Timeout: 0, NoCoverage: 0, RuntimeError: 0, CompileError: 0, Ignored: 0 };
+            for (const file of Object.values(report.files || {})) {
+              for (const mutant of file.mutants || []) {
+                if (tally[mutant.status] !== undefined) tally[mutant.status] += 1;
+              }
+            }
+            const denom = tally.Killed + tally.Survived + tally.Timeout + tally.NoCoverage;
+            const score = denom > 0 ? (tally.Killed + tally.Timeout) / denom : 0;
+            const pct = denom > 0 ? (score * 100).toFixed(2) : 'n/a';
+            const perFile = Object.entries(report.files || {})
+              .map(([fname, f]) => {
+                const fc = { Killed: 0, Survived: 0, Timeout: 0, NoCoverage: 0 };
+                for (const m of f.mutants || []) {
+                  if (fc[m.status] !== undefined) fc[m.status] += 1;
+                }
+                const fdenom = fc.Killed + fc.Survived + fc.Timeout + fc.NoCoverage;
+                const fpct = fdenom > 0 ? (((fc.Killed + fc.Timeout) / fdenom) * 100).toFixed(1) : 'n/a';
+                return '  ' + fname.padEnd(40) + fpct + '%';
+              })
+              .join('\n');
+            const body = [
+              '### Frontend mutation testing (Stryker)',
+              '',
+              'Mutation score: **' + pct + '%** ' +
+                '(killed ' + tally.Killed +
+                ' / survived ' + tally.Survived +
+                ' / timeout ' + tally.Timeout +
+                ' / no-coverage ' + tally.NoCoverage + ')',
+              '',
+              '```',
+              perFile,
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });

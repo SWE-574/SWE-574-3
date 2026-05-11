@@ -1,0 +1,80 @@
+[tool.coverage.run]
+branch = true
+source = ["api"]
+omit = [
+    "api/migrations/*",
+    "api/tests/*",
+    "*/management/commands/*",
+    "manage.py",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.mutmut]
+# Hot-module mutation scope. The CI gate (.github/workflows/ci-mutation.yml)
+# only mutates `badge_utils.py` so the run finishes inside the 45-min job
+# timeout — the full hot-module list (~4290 LOC, ~2700 mutants, ~7+ hrs at
+# CI pytest-cold-start speed) is impossible to gate per-PR. badge_utils
+# was picked because it is small (~300 LOC, ~200 mutants) AND covered by
+# the unit suite — event_permissions / ranking / search_filters / services
+# are either too large or not exercised under api/tests/unit/, which makes
+# mutmut bail with "could not find any test case for any mutant".
+#
+# To exercise the broader scope locally, append any of the following back
+# to `paths_to_mutate` before running `make test-mutation`:
+#   "api/ranking.py",            # 609 LOC — scoring weights
+#   "api/achievement_utils.py",  # 421 LOC — badge progress / stats
+#   "api/event_permissions.py",  #  54 LOC — needs an integration tests_dir
+#   "api/services.py",           # 2509 LOC — handshake/transaction domain
+#   "api/search_filters.py",     # 393 LOC — search strategies
+paths_to_mutate = [
+    "api/badge_utils.py",
+]
+# mutmut 3.x drives pytest internally — `runner` is no longer supported.
+# `tests_dir` is a list of paths fed as positional pytest args, and
+# `pytest_add_cli_args` carries the extras that used to live in the v2
+# `runner` string. We blank out the project's pytest addopts via
+# `-o addopts=` because the inherited --cov=api / --cov-fail-under=70 /
+# --html=... options break inside the mutants/ working tree.
+tests_dir = ["api/tests/unit"]
+pytest_add_cli_args = [
+    "-o", "addopts=",
+    "-x", "-q", "--no-header",
+    "-p", "no:cacheprovider",
+]
+# also_copy ships the supporting files pytest-django needs to bootstrap
+# inside the mutants/ working tree. Two pieces of the AUTH_USER_MODEL fix:
+#
+#   - `api` mirrors the entire package (models.py, __init__.py, migrations/,
+#     management/, etc.) into mutants/api/, so Django's app loading at
+#     django.setup() can actually find the User model. Without this, mutmut
+#     only copies the 6 paths_to_mutate files and Django bails with
+#     `AUTH_USER_MODEL refers to model 'api.User' that has not been installed`.
+#   - `conftest.py` ships the top-level backend/conftest.py into the mutants
+#     tree so it can load .env and apply local-dev fallbacks for DB / Redis
+#     env vars (settings.py's BASE_DIR-relative .env resolution otherwise
+#     points at the wrong directory inside mutants/).
+#
+# Bootstrap status (2026-05-08):
+#   FIXED: AUTH_USER_MODEL refers to model 'api.User' that has not been
+#          installed — root cause was incomplete `mutants/api/` tree.
+#   FIXED: DB_NAME=None TypeError on test_db_signature — root cause was
+#          relative .env resolution; backend/conftest.py loads the .env
+#          explicitly and applies hardcoded local-dev fallbacks.
+#   TODO:  RuntimeError "context has already been set" during
+#          ServiceFactory creation in pytest-django session setup. The
+#          single test that triggers this is fine outside mutmut. This
+#          appears to be subprocess/async-context pollution specific to
+#          mutmut's test runner; the next investigation should look at
+#          --forked / --no-database-creation or scoping pytest-django
+#          fixtures to function level.
+also_copy = ["api", "hive_project", "manage.py", "conftest.py", "logs", "pytest.ini"]

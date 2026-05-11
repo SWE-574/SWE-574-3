@@ -39,12 +39,26 @@ export interface ServicesListParams {
   search?: string;
   tags?: string | string[];
   location_type?: string;
+  /** Multi-select location type. Web Browse sends this with one of
+   *  `["Online"]` / `["In-Person"]`; backend honours `location_type__in`. */
+  location_types?: ("Online" | "In-Person")[];
+  /** Schedule slice. "One-Time" or "Recurrent" -- matches web Browse. */
+  schedule_type?: "One-Time" | "Recurrent";
+  /** Weekend-friendly slice. */
+  weekend?: boolean;
   /** Owner filter; matches web `serviceAPI.list` (`?user=`). */
   user?: string;
-  sort?: "latest" | "hot";
+  sort?: "latest" | "hot" | "for_you";
   lat?: number;
   lng?: number;
   distance?: number;
+  /** Restrict to Phase 3 explore-eligible services for the "Try something new" carousel. */
+  explore_only?: boolean;
+  /** Exclude services owned by the requester. Mirrors the web Browse contract. */
+  exclude_own?: boolean;
+  /** Bypass the implicit skill-based slice so the full active catalog
+   *  surfaces; the engine just reorders. Matches web Browse policy. */
+  skip_onboarding?: boolean;
 }
 
 function normalizeService(service: Service): Service {
@@ -118,6 +132,19 @@ export function reportService(
   return apiRequest(`/services/${id}/report/`, { method: 'POST', body: body ?? {} });
 }
 
+export function setServiceSaved(
+  serviceId: string,
+  saved: boolean,
+): Promise<{ is_saved: boolean }> {
+  return apiRequest<{ is_saved: boolean }>(`/services/${serviceId}/save/`, {
+    method: saved ? 'POST' : 'DELETE',
+  });
+}
+
+export function listSavedServices(): Promise<PaginatedResponse<Service>> {
+  return apiRequest<PaginatedResponse<Service>>('/services/saved/');
+}
+
 export function toggleServiceVisibility(id: string): Promise<Service> {
   return apiRequest<Service>(`/services/${id}/toggle-visibility/`, { method: 'POST' });
 }
@@ -138,6 +165,24 @@ export function completeEvent(serviceId: string): Promise<void> {
 
 export function cancelEvent(serviceId: string): Promise<void> {
   return apiRequest<void>(`/services/${serviceId}/cancel-event/`, { method: 'POST' });
+}
+
+
+export interface QRTokenResponse {
+  id: string;
+  token: string;
+  attendance_code: string;
+  created_at: string;
+  expires_at: string;
+  qr_payload: string;
+}
+
+export function generateQRToken(serviceId: string): Promise<QRTokenResponse> {
+  return apiRequest<QRTokenResponse>(`/services/${serviceId}/generate-qr-token/`, { method: 'POST' });
+}
+
+export function getQRToken(serviceId: string): Promise<QRTokenResponse> {
+  return apiRequest<QRTokenResponse>(`/services/${serviceId}/qr-token/`);
 }
 
 export function pinEvent(serviceId: string): Promise<Service> {

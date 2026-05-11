@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import InterestRequesterRow from '@/components/service-detail/InterestRequesterRow'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, Flex, Grid, Stack, Text } from '@chakra-ui/react'
 import {
   FiArrowLeft, FiClock, FiCalendar, FiMapPin, FiMonitor,
@@ -9,18 +10,25 @@ import {
 } from 'react-icons/fi'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/store/useAuthStore'
+import { useNotificationStore } from '@/store/useNotificationStore'
 import { serviceAPI } from '@/services/serviceAPI'
 import { commentAPI } from '@/services/commentAPI'
 import { handshakeAPI } from '@/services/handshakeAPI'
+import { canDirectlyAcceptHandshake } from '@/utils/handshakeActions'
+import { isEventRecurrent } from '@/utils/eventRecurrence'
 import { MapView } from '@/components/MapView'
+import SaveEndorseControls from '@/components/SaveEndorseControls'
 import EventDetailModal, { type EventDetailModalTab } from '@/components/EventDetailModal'
 import ServiceEvaluationModal from '@/components/ServiceEvaluationModal'
 import ReportModal, { type ReportOption } from '@/components/ReportModal'
+import { AdminConfirmModal, ModalBackdrop, ModalCard, ModalHeader, ModalFooter, ModalFieldLabel } from '@/components/AdminModals'
+import VerificationRequiredModal from '@/components/VerificationRequiredModal'
 import {
   isWithinLockdownWindow, isFutureEvent, isEventFull, isNearlyFull,
-  spotsLeft, formatEventDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
+  spotsLeft, formatEventDateTime, formatGroupOfferDateTime, timeUntilEvent, isEventBanned, formatBanExpiry,
 } from '@/utils/eventUtils'
 import type { Service, EventEvaluationSummary } from '@/types'
+import { isServiceDetailRefreshType } from '@/utils/serviceDetailRefreshTypes'
 import type { Comment } from '@/services/commentAPI'
 import type { Handshake } from '@/services/handshakeAPI'
 
@@ -32,21 +40,7 @@ import {
   GRAY50, GRAY100, GRAY200, GRAY300, GRAY400, GRAY500, GRAY600, GRAY700, GRAY800,
   WHITE,
 } from '@/theme/tokens'
-
-// ─── Handshake badge config ───────────────────────────────────────────────────
-
-const HS_BADGE: Record<Handshake['status'], { label: string; bg: string; color: string }> = {
-  pending:    { label: 'Pending',    bg: '#fef9c3', color: '#854d0e' },
-  accepted:   { label: 'Accepted',   bg: '#dcfce7', color: '#166534' },
-  completed:  { label: 'Completed',  bg: '#d1fae5', color: '#065f46' },
-  denied:     { label: 'Declined',   bg: '#fee2e2', color: '#991b1b' },
-  cancelled:  { label: 'Cancelled',  bg: '#f3f4f6', color: '#6b7280' },
-  reported:   { label: 'Reported',   bg: '#fee2e2', color: '#991b1b' },
-  paused:     { label: 'Paused',     bg: '#e0f2fe', color: '#0369a1' },
-  checked_in: { label: 'Checked In', bg: '#d1fae5', color: '#065f46' },
-  attended:   { label: 'Attended',   bg: '#d1fae5', color: '#065f46' },
-  no_show:    { label: 'No-Show',    bg: '#fee2e2', color: '#991b1b' },
-}
+import { HS_BADGE } from '@/constants/handshakeBadges'
 
 // ─── Report options ───────────────────────────────────────────────────────────
 
@@ -216,6 +210,9 @@ function InfoTile({ icon, label, value, accentBg, accentColor }: {
     </Flex>
   )
 }
+
+const NEUTRAL_TILE_BG = GRAY100
+const NEUTRAL_TILE_COLOR = GRAY500
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
@@ -482,12 +479,15 @@ function CommentSection({ serviceId, refreshKey }: { serviceId: string; refreshK
   )
 }
 
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ServiceDetailPage() {
   const { id }     = useParams<{ id: string }>()
   const navigate   = useNavigate()
-  const { isAuthenticated, user } = useAuthStore()
+  const [searchParams] = useSearchParams()
+  const { isAuthenticated, user, refreshUser, updateUserOptimistically } = useAuthStore()
+  const lastNotification = useNotificationStore((s) => s.notifications[0])
 
   const [service, setService]           = useState<Service | null>(null)
   const [loading, setLoading]           = useState(true)
@@ -510,13 +510,23 @@ export default function ServiceDetailPage() {
   const [joinLoading, setJoinLoading]       = useState(false)
   const [leaveLoading, setLeaveLoading]     = useState(false)
   const [checkinLoading, setCheckinLoading] = useState(false)
+  const [qrCodeModalOpen, setQrCodeModalOpen] = useState(false)
+  const [attendanceCode, setAttendanceCode]   = useState('')
   const [cancelLoading, setCancelLoading]   = useState(false)
   const [removeLoading, setRemoveLoading]   = useState(false)
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [showRemoveModal, setShowRemoveModal] = useState(false)
+  const [cancelReason, setCancelReason]     = useState('')
   const [commentRefreshKey, setCommentRefreshKey] = useState(0)
   const [isEventDetailModalOpen, setIsEventDetailModalOpen] = useState(false)
   const [eventDetailModalTab, setEventDetailModalTab] = useState<EventDetailModalTab>('details')
   const [completing, setCompleting]         = useState(false)
   const [markingAttendedId, setMarkingAttendedId] = useState<string | null>(null)
+  // #300 / FR-13m — owner-side manual Mark-as-Complete fallback. The
+  // pending-id pins which interest row's modal is open so we can
+  // confirm + dispatch + clear in one place.
+  const [markCompleteHandshakeId, setMarkCompleteHandshakeId] = useState<string | null>(null)
+  const [markingCompleteLoading, setMarkingCompleteLoading] = useState(false)
   const [reportingEventIssue, setReportingEventIssue] = useState(false)
   const [showEvaluationModal, setShowEvaluationModal] = useState(false)
 
@@ -535,6 +545,16 @@ export default function ServiceDetailPage() {
     if (!isAuthenticated) return
     handshakeAPI.list().then(setHandshakes).catch(() => {})
   }, [isAuthenticated])
+
+  // Re-fetch when a relevant notification arrives (e.g. check-in, handshake status change).
+  useEffect(() => {
+    if (!lastNotification || !service?.id) return
+    if (String(lastNotification.related_service) !== String(service.id)) return
+    if (!isServiceDetailRefreshType(lastNotification.type)) return
+    // Refresh both the service (participant_count etc.) and the handshake list.
+    serviceAPI.get(service.id).then(setService).catch(() => {})
+    if (isAuthenticated) handshakeAPI.list().then(setHandshakes).catch(() => {})
+  }, [lastNotification, service?.id, isAuthenticated])
 
   useEffect(() => {
     if (!user?.id || !service?.id) return
@@ -576,16 +596,23 @@ export default function ServiceDetailPage() {
     : 'Unknown'
 
   const isOwn      = !!user?.id && provId === user.id
-  const isRecurr   = service?.schedule_type === 'Recurrent'
+  const isRecurr   = isEventRecurrent(service)
   const isFull     = service != null && service.max_participants > 0
     && (service.participant_count ?? 0) >= service.max_participants
   const isOffer    = service?.type === 'Offer'
   const isEvent    = service?.type === 'Event'
+  const isFixedGroupOffer = !!service && isOffer && service.schedule_type === 'One-Time' && service.max_participants > 1
 
   const openEventDetailModal = (tab: EventDetailModalTab = 'details') => {
     setEventDetailModalTab(tab)
     setIsEventDetailModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'chat') {
+      openEventDetailModal('chat')
+    }
+  }, [searchParams])
 
   const closeEventDetailModal = () => {
     setIsEventDetailModalOpen(false)
@@ -609,33 +636,42 @@ export default function ServiceDetailPage() {
   })()
   const hasInterest = !!myHandshake && ['pending', 'accepted'].includes(myHandshake.status)
   const incoming    = handshakes.filter((h) => exId(h.service) === service?.id && exId(h.requester) !== user?.id)
-  const eventEditLocked = isEvent && isWithinLockdownWindow(service?.scheduled_time)
+  // FR-11f / FR-11n: prefer the backend-canonical edit_locked flag when the
+  // server provided it (#267). Fall back to client-side math only for the
+  // brief window where an older API hasn't shipped the new field yet.
+  const eventEditLocked = isEvent && (
+    service?.edit_locked ?? isWithinLockdownWindow(service?.scheduled_time)
+  )
   const hasActiveApprovedSession = incoming.some((h) => ['accepted', 'reported', 'paused'].includes(h.status))
   const activeApprovedSessionEditLocked = !isEvent && !isRecurr && hasActiveApprovedSession
   const ownerEditLocked = isOwn && ((isEvent && eventEditLocked) || activeApprovedSessionEditLocked)
   const ownerEditLockReason = isEvent
-    ? 'Editing is locked during the final 24 hours before event start.'
+    ? (service?.edit_lock_reason || 'Editing is locked during the final 24 hours before event start.')
     : 'Editing is locked while an approved session is still active.'
   const reportedParticipantIds = new Set(
     incoming
       .filter((h) => h.status === 'reported')
-      .map((h) => h.requester),
+      .map((h) => exId(h.requester))
+      .filter((id): id is string => Boolean(id)),
   )
   const eventIncomingParticipants = isEvent
     ? Array.from(
       incoming
         .filter((h) => ['accepted', 'checked_in', 'attended', 'no_show', 'reported'].includes(h.status))
         .reduce((acc, h) => {
-          const existing = acc.get(h.requester)
+          const requesterId = exId(h.requester)
+          if (!requesterId) return acc
+
+          const existing = acc.get(requesterId)
           if (!existing) {
-            acc.set(h.requester, h)
+            acc.set(requesterId, h)
             return acc
           }
 
           const existingPriority = EVENT_PARTICIPANT_STATUS_PRIORITY[existing.status] ?? -1
           const candidatePriority = EVENT_PARTICIPANT_STATUS_PRIORITY[h.status] ?? -1
           if (candidatePriority > existingPriority) {
-            acc.set(h.requester, h)
+            acc.set(requesterId, h)
             return acc
           }
 
@@ -643,7 +679,7 @@ export default function ServiceDetailPage() {
             const existingTs = new Date(existing.updated_at ?? existing.created_at).getTime()
             const candidateTs = new Date(h.updated_at ?? h.created_at).getTime()
             if (candidateTs > existingTs) {
-              acc.set(h.requester, h)
+              acc.set(requesterId, h)
             }
           }
 
@@ -671,6 +707,19 @@ export default function ServiceDetailPage() {
     ? (isOwn ? evaluationHandshake.requester_name : evaluationHandshake.provider_name)
     : 'counterpart'
   const evaluationWindow = getEvaluationWindowInfo(evaluationHandshake)
+  // For one-time group offers, "You already reviewed this exchange." is
+  // premature while other slots are still in flight — the owner/requester
+  // will have more participants to review when those slots settle. Hold the
+  // message back until every slot reaches `completed`.
+  const isOneTimeGroupOffer =
+    !isEvent &&
+    service?.schedule_type === 'One-Time' &&
+    Number(service?.max_participants ?? 1) > 1
+  const allGroupSlotsCompleted =
+    isOneTimeGroupOffer &&
+    incoming.length > 0 &&
+    incoming.every((h) => h.status === 'completed')
+  const hideAlreadyReviewedNotice = isOneTimeGroupOffer && !allGroupSlotsCompleted
 
   // Event-specific derived value — must come after exId / isEvent
   const myEventHandshake = isEvent
@@ -681,9 +730,35 @@ export default function ServiceDetailPage() {
       )
     : undefined
 
+  // ── Email-verification gate for join/request actions ───────────────
+  // Backend already rejects unverified users (HTTP 403, EMAIL_NOT_VERIFIED)
+  // on /services/<id>/interest/ and /handshakes/services/<id>/join-event/.
+  // We block in the UI too so the user understands *why* and can resend the
+  // verification email without leaving the page.
+  const [verificationGate, setVerificationGate] = useState<{
+    open: boolean
+    actionLabel: string
+  }>({ open: false, actionLabel: 'continue' })
+
+  const isUnverified = user?.is_verified === false
+
+  const promptVerification = (actionLabel: string) => {
+    setVerificationGate({ open: true, actionLabel })
+  }
+
+  const closeVerificationGate = () => {
+    setVerificationGate((prev) => ({ ...prev, open: false }))
+  }
+
   const handleExpressInterest = async () => {
     if (!service) return
     if (!isAuthenticated) { navigate('/login'); return }
+    if (isUnverified) {
+      promptVerification(
+        service.type === 'Need' ? 'offer help on a Need' : 'request this service',
+      )
+      return
+    }
     setInterestLoading(true)
     try {
       await serviceAPI.expressInterest(service.id)
@@ -695,15 +770,20 @@ export default function ServiceDetailPage() {
       const detail = err.response?.data?.detail
       if (code === 'ALREADY_EXISTS') { toast.info('You already have an active request.'); handshakeAPI.list().then(setHandshakes).catch(() => {}) }
       else if (code === 'INSUFFICIENT_BALANCE') toast.error(detail ?? 'Insufficient TimeBank balance.')
+      else if (code === 'EMAIL_NOT_VERIFIED') {
+        promptVerification(
+          service.type === 'Need' ? 'offer help on a Need' : 'request this service',
+        )
+      }
       else toast.error(detail ?? 'Could not express interest. Please try again.')
     } finally { setInterestLoading(false) }
   }
 
-  const handleReport = async (type: ReportType) => {
+  const handleReport = async (type: ReportType, statement = '') => {
     if (!service) return
     setReportLoading(true)
     try {
-      await serviceAPI.report(service.id, type, '')
+      await serviceAPI.report(service.id, type, statement)
       toast.success('Report submitted. Thank you for keeping the community safe.')
       if (user?.id) localStorage.setItem(`reported:${user.id}:${service.id}`, '1')
       setAlreadyReported(true); setShowReport(false)
@@ -735,6 +815,10 @@ export default function ServiceDetailPage() {
 
   const handleJoinEvent = async () => {
     if (!service || !isAuthenticated) { navigate('/login'); return }
+    if (isUnverified) {
+      promptVerification('join this event')
+      return
+    }
     if (service.status !== 'Active') {
       toast.error('This event is no longer open for joining.')
       return
@@ -745,8 +829,12 @@ export default function ServiceDetailPage() {
       toast.success('You\'ve joined the event!')
       setHandshakes(await handshakeAPI.list())
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail ?? 'Could not join event.')
+      const err = e as { response?: { data?: { detail?: string; code?: string } } }
+      if (err.response?.data?.code === 'EMAIL_NOT_VERIFIED') {
+        promptVerification('join this event')
+      } else {
+        toast.error(err.response?.data?.detail ?? 'Could not join event.')
+      }
     } finally { setJoinLoading(false) }
   }
 
@@ -763,12 +851,18 @@ export default function ServiceDetailPage() {
     } finally { setLeaveLoading(false) }
   }
 
-  const handleCheckin = async () => {
+  const handleCheckin = async (qrToken?: string) => {
     if (!myEventHandshake) return
     setCheckinLoading(true)
     try {
-      await handshakeAPI.checkin(myEventHandshake.id)
-      toast.success('Checked in! See you there.')
+      await handshakeAPI.checkin(myEventHandshake.id, qrToken)
+      if (qrToken) {
+        toast.success('Attendance confirmed!')
+        setQrCodeModalOpen(false)
+        setAttendanceCode('')
+      } else {
+        toast.success('Checked in! See you there.')
+      }
       setHandshakes(await handshakeAPI.list())
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
@@ -794,13 +888,14 @@ export default function ServiceDetailPage() {
 
   const handleReportParticipantBehavior = (participantHandshake: Handshake) => {
     if (reportingEventIssue) return
-    if (reportedParticipantIds.has(participantHandshake.requester)) {
+    const participantRequesterId = exId(participantHandshake.requester)
+    if (participantRequesterId && reportedParticipantIds.has(participantRequesterId)) {
       toast.info('You already reported this participant for this event.')
       return
     }
     openEventReportModal({
       handshakeId: participantHandshake.id,
-      reportedUserId: participantHandshake.requester,
+      reportedUserId: participantRequesterId,
       targetLabel: participantHandshake.requester_name,
     })
   }
@@ -820,7 +915,7 @@ export default function ServiceDetailPage() {
         toast.info('You already reported this participant for this event.')
         return
       }
-      const targetHandshake = eventIncomingParticipants.find((h) => h.requester === targetUserId)
+      const targetHandshake = eventIncomingParticipants.find((h) => exId(h.requester) === targetUserId)
       if (!targetHandshake) {
         toast.error('Could not find an active event participant to report.')
         return
@@ -850,14 +945,16 @@ export default function ServiceDetailPage() {
     })
   }
 
-  const handleSubmitEventBehaviorReport = async (issueType: EventBehaviorIssueType) => {
+  const handleSubmitEventBehaviorReport = async (issueType: EventBehaviorIssueType, statement = '') => {
     if (!eventReportTarget) return
     setReportingEventIssue(true)
     try {
       const selectedIssue = EVENT_BEHAVIOR_REPORT_OPTIONS.find((option) => option.value === issueType)
-      const autoDescription = selectedIssue
-        ? `${selectedIssue.label}. ${selectedIssue.desc}`
-        : `${issueType}`
+      const autoDescription = statement.trim()
+        ? statement.trim()
+        : selectedIssue
+          ? `${selectedIssue.label}. ${selectedIssue.desc}`
+          : `${issueType}`
 
       await handshakeAPI.report(
         eventReportTarget.handshakeId,
@@ -906,16 +1003,15 @@ export default function ServiceDetailPage() {
   }
 
   const handleCancelEvent = async () => {
-    if (!service) return
-    const inLockdown = isWithinLockdownWindow(service.scheduled_time)
-    const hasParticipants = (service.participant_count ?? 0) > 0
-    const confirmMsg = inLockdown && hasParticipants
-      ? 'You are in the 24h lockdown window. Cancelling now will apply a 30-day event creation ban. Continue?'
-      : 'Are you sure you want to cancel this event? All participants will be notified.'
-    if (!window.confirm(confirmMsg)) return
+    if (!service || !cancelReason.trim()) return
+    // The cancel modal already collects an explicit reason and renders the
+    // 30-day-ban warning inline when in lockdown; a second native window.confirm
+    // here was redundant, raced Playwright, and broke parity with the rest of
+    // the app's AdminConfirmModal-driven destructive flows.
     setCancelLoading(true)
+    setShowCancelModal(false)
     try {
-      await serviceAPI.cancelEvent(service.id)
+      await serviceAPI.cancelEvent(service.id, cancelReason.trim())
       toast.success('Event cancelled.')
       navigate('/dashboard')
     } catch (e: unknown) {
@@ -924,12 +1020,44 @@ export default function ServiceDetailPage() {
     } finally { setCancelLoading(false) }
   }
 
+  // #300 / FR-13m — owner-side fallback that records the owner's half of
+  // the dual-confirmation flow without forcing the owner to navigate to
+  // chat. Reuses the existing `handshakeAPI.confirm` endpoint, so no
+  // backend change is needed; the requester still has to confirm on their
+  // side before the time-credit transfer fires.
+  const handleMarkCompleteHandshake = async () => {
+    if (!markCompleteHandshakeId) return
+    setMarkingCompleteLoading(true)
+    try {
+      const updated = await handshakeAPI.confirm(markCompleteHandshakeId)
+      setHandshakes((prev) => prev.map((h) => (h.id === updated.id ? updated : h)))
+      if (updated.status === 'completed') {
+        toast.success('Exchange marked as complete.')
+      } else {
+        toast.info("Marked complete on your side. Awaiting the requester's confirmation.")
+      }
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail ?? 'Could not mark as complete. Please try again.')
+    } finally {
+      setMarkingCompleteLoading(false)
+      setMarkCompleteHandshakeId(null)
+    }
+  }
+
   const handleRemoveListing = async () => {
     if (!service || !isOwn) return
-    if (!window.confirm('Are you sure you want to remove this listing? This cannot be undone.')) return
     setRemoveLoading(true)
+    setShowRemoveModal(false)
     try {
       await serviceAPI.delete(service.id)
+      if (service.type === 'Need') {
+        const currentBalance = Number(user?.timebank_balance ?? 0)
+        updateUserOptimistically({
+          timebank_balance: currentBalance + Number(service.duration),
+        })
+        await refreshUser()
+      }
       toast.success('Listing removed.')
       navigate('/dashboard')
     } catch (e: unknown) {
@@ -969,7 +1097,8 @@ export default function ServiceDetailPage() {
     ? Math.min(100, ((service.participant_count ?? 0) / service.max_participants) * 100) : 0
 
   return (
-    <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto"
+    <>
+    <Box bg={GRAY50} minH="calc(100vh - 64px)"
       py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
       <Box maxW="1440px" mx="auto" py={{ base: 4, md: 5 }} px={{ base: 4, md: 5 }}>
 
@@ -985,6 +1114,27 @@ export default function ServiceDetailPage() {
         >
           <FiArrowLeft size={15} /> Back to Browse
         </Box>
+
+        {/* FR-12g — cancellation banner above the fold for any cancelled service.
+            Detail-area inline messages still appear below as fallback context. */}
+        {service.status === 'Cancelled' && (
+          <Box
+            mb={4} p={4} borderRadius="12px"
+            bg={RED_LT}
+            border={`1px solid ${RED}40`}
+            display="flex" alignItems="center" gap={3}
+          >
+            <FiAlertTriangle size={18} color={RED} />
+            <Box>
+              <Text fontSize="14px" fontWeight={700} color={RED}>
+                {service.type === 'Event' ? 'This event was cancelled' : 'This listing was cancelled'}
+              </Text>
+              <Text fontSize="12px" color="#991B1B" mt="2px">
+                Joining, checking in, and evaluation are no longer available.
+              </Text>
+            </Box>
+          </Box>
+        )}
 
         <Grid templateColumns={{ base: '1fr', lg: '1fr 360px' }} gap={5} alignItems="start">
 
@@ -1037,9 +1187,9 @@ export default function ServiceDetailPage() {
                       bg="rgba(255,255,255,0.2)" color={WHITE}
                       style={{ backdropFilter: 'blur(8px)' }}
                     >
-                      {isOffer ? 'Offer' : isEvent ? 'Event' : 'Want'}
+                      {isOffer ? 'Offer' : isEvent ? 'Event' : 'Need'}
                     </Box>
-                    {isRecurr && !isEvent && (
+                    {isRecurr && (
                       <Box px="8px" py="3px" borderRadius="full" fontSize="11px" fontWeight={700}
                         bg="rgba(255,255,255,0.15)" color={WHITE}
                         display="flex" alignItems="center" gap="4px"
@@ -1096,6 +1246,12 @@ export default function ServiceDetailPage() {
                   )}
                 </Flex>
 
+                <SaveEndorseControls
+                  service={service}
+                  isOwn={isOwn}
+                  onChange={(patch) => setService((prev) => (prev ? { ...prev, ...patch } : prev))}
+                />
+
                 {/* Info tiles */}
                 <Grid templateColumns={{ base: '1fr 1fr', md: 'repeat(4, 1fr)' }} gap={3} mb={6}>
                   {isEvent ? (
@@ -1113,11 +1269,20 @@ export default function ServiceDetailPage() {
                     </>
                   ) : (
                     <>
-                      <InfoTile icon={<FiClock size={15} />} label="Duration" value={fmtDuration(service.duration)} />
+                      <InfoTile
+                        icon={<FiClock size={15} />} label="Duration"
+                        value={fmtDuration(service.duration)}
+                        accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : undefined}
+                        accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : undefined}
+                      />
                       <InfoTile
                         icon={<FiCalendar size={15} />} label="Schedule"
-                        value={`${service.schedule_type}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`}
-                        accentBg={AMBER_LT} accentColor={AMBER}
+                        value={isFixedGroupOffer && service.scheduled_time
+                          ? `${formatGroupOfferDateTime(service.scheduled_time)}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`
+                          : `${service.schedule_type}${service.schedule_details ? ` · ${service.schedule_details}` : ''}`
+                        }
+                        accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : AMBER_LT}
+                        accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : AMBER}
                       />
                     </>
                   )}
@@ -1125,7 +1290,8 @@ export default function ServiceDetailPage() {
                     icon={service.location_type === 'Online' ? <FiMonitor size={15} /> : <FiMapPin size={15} />}
                     label="Location"
                     value={service.location_type === 'Online' ? 'Online' : service.location_area ?? 'In-Person'}
-                    accentBg={BLUE_LT} accentColor={BLUE}
+                    accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : BLUE_LT}
+                    accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : BLUE}
                   />
                   <InfoTile
                     icon={<FiUsers size={15} />}
@@ -1136,7 +1302,8 @@ export default function ServiceDetailPage() {
                         : `${service.participant_count ?? 0}/${service.max_participants} filled`
                       : String(service.max_participants)
                     }
-                    accentBg="#F3E8FF" accentColor="#7C3AED"
+                    accentBg={isFixedGroupOffer ? NEUTRAL_TILE_BG : '#F3E8FF'}
+                    accentColor={isFixedGroupOffer ? NEUTRAL_TILE_COLOR : '#7C3AED'}
                   />
                 </Grid>
 
@@ -1442,9 +1609,12 @@ export default function ServiceDetailPage() {
                       <Stack gap={2} maxH="200px" overflowY="auto">
                         {eventIncomingParticipants.map((h) => {
                           // Event reports should not alter owner-facing attendance/status display.
-                          const alreadyReportedParticipant = reportedParticipantIds.has(h.requester)
+                          const alreadyReportedParticipant = reportedParticipantIds.has(exId(h.requester) ?? '')
                           const displayStatus = h.status === 'reported' ? 'accepted' : h.status
-                          const cfg = HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 }
+                          const isSkipped = displayStatus === 'accepted' && service?.status === 'Completed'
+                          const cfg = isSkipped
+                            ? { label: 'Skipped', bg: '#f3f4f6', color: '#6b7280' }
+                            : (HS_BADGE[displayStatus] ?? { label: displayStatus, bg: GRAY100, color: GRAY500 })
                           return (
                             <Flex key={h.id} align="center" justify="space-between"
                               p="10px" bg={GRAY50} borderRadius="9px" gap={2}
@@ -1514,6 +1684,18 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
+                    ) : service.status === 'Cancelled' ? (
+                      <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiAlertTriangle size={20} color={RED} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={RED}>Event cancelled</Text>
+                          <Text fontSize="12px" color="#991B1B" mt="2px">
+                            Completing or cancelling this event is no longer available.
+                          </Text>
+                        </Box>
+                      </Box>
                     ) : (
                       <>
                         <Box as="button" w="full" py="11px" borderRadius="10px"
@@ -1537,7 +1719,7 @@ export default function ServiceDetailPage() {
                         <Box as="button" w="full" py="10px" borderRadius="10px"
                           bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
                           display="flex" alignItems="center" justifyContent="center" gap="6px"
-                          onClick={handleCancelEvent}
+                          onClick={() => { setCancelReason(''); setShowCancelModal(true) }}
                           style={{ border: `1px solid ${RED}30`, cursor: cancelLoading ? 'not-allowed' : 'pointer', opacity: cancelLoading ? 0.65 : 1 }}
                         >
                           {cancelLoading ? 'Cancelling…' : 'Cancel Event'}
@@ -1581,13 +1763,24 @@ export default function ServiceDetailPage() {
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'cancelled' ? (
-                    /* Participant was removed from event */
+                    /* Participant left voluntarily or was removed by moderation */
                     <Stack gap={2}>
                       <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}>
-                        <Text fontSize="13px" fontWeight={700} color={RED}>Removed From Event</Text>
-                        <Text fontSize="12px" color="#991B1B" mt="3px">
-                          You have been removed from this event after a moderation review.
-                        </Text>
+                        {myEventHandshake.cancellation_reason === 'user_left' ? (
+                          <>
+                            <Text fontSize="13px" fontWeight={700} color={RED}>You Left This Event</Text>
+                            <Text fontSize="12px" color="#991B1B" mt="3px">
+                              You cancelled your registration for this event.
+                            </Text>
+                          </>
+                        ) : (
+                          <>
+                            <Text fontSize="13px" fontWeight={700} color={RED}>Removed From Event</Text>
+                            <Text fontSize="12px" color="#991B1B" mt="3px">
+                              You have been removed from this event after a moderation review.
+                            </Text>
+                          </>
+                        )}
                       </Box>
                     </Stack>
                   ) : myEventHandshake?.status === 'checked_in' ? (
@@ -1626,7 +1819,7 @@ export default function ServiceDetailPage() {
                           </Text>
                         </Box>
                       </Box>
-                      {!myEventHandshake.user_has_reviewed && (
+                      {service?.status === 'Completed' && !myEventHandshake.user_has_reviewed && (
                         <Box as="button" w="full" py="11px" borderRadius="10px"
                           bg={AMBER} color={WHITE} fontSize="14px" fontWeight={700}
                           display="flex" alignItems="center" justifyContent="center" gap="7px"
@@ -1645,6 +1838,36 @@ export default function ServiceDetailPage() {
                         <FiMessageSquare size={14} /> Event Chat
                       </Box>
                     </Stack>
+                  ) : myEventHandshake?.status === 'no_show' ? (
+                    /* Was checked in but organizer closed event without marking attended */
+                    <Stack gap={2}>
+                      <Box bg={RED_LT} borderRadius="12px" p={4} border={`1px solid ${RED}30`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiAlertTriangle size={20} color={RED} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={RED}>Marked as No-Show</Text>
+                          <Text fontSize="12px" color="#991B1B" mt="2px">
+                            The event ended without your attendance being confirmed.
+                          </Text>
+                        </Box>
+                      </Box>
+                    </Stack>
+                  ) : myEventHandshake?.status === 'accepted' && service.status === 'Completed' ? (
+                    /* Joined but event completed without check-in */
+                    <Stack gap={2}>
+                      <Box bg={GRAY100} borderRadius="12px" p={4} border={`1px solid ${GRAY200}`}
+                        display="flex" alignItems="center" gap={3}
+                      >
+                        <FiCheckCircle size={20} color={GRAY400} />
+                        <Box>
+                          <Text fontSize="13px" fontWeight={700} color={GRAY700}>Event Completed</Text>
+                          <Text fontSize="12px" color={GRAY500} mt="2px">
+                            This event has been marked as completed.
+                          </Text>
+                        </Box>
+                      </Box>
+                    </Stack>
                   ) : myEventHandshake?.status === 'accepted' && isFutureEvent(service.scheduled_time) ? (
                     /* Joined — show leave or check-in based on lockdown */
                     <Stack gap={3}>
@@ -1652,20 +1875,36 @@ export default function ServiceDetailPage() {
                         <Text fontSize="13px" fontWeight={700} color={GRAY800}>You're registered ✓</Text>
                         <Text fontSize="12px" color={GRAY500} mt="2px">
                           {isWithinLockdownWindow(service.scheduled_time)
-                            ? 'Check-in is now open!'
-                            : 'Check-in opens 24 h before the event.'}
+                            ? (service.requires_qr_checkin
+                                ? 'Scan the QR code or enter the attendance code from the organizer.'
+                                : 'Check-in is now open!')
+                            : (service.requires_qr_checkin
+                                ? 'Attendance verification opens 24 h before the event.'
+                                : 'Check-in opens 24 h before the event.')}
                         </Text>
                       </Box>
                       {isWithinLockdownWindow(service.scheduled_time) ? (
-                        <Box as="button" w="full" py="12px" borderRadius="11px"
-                          bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
-                          display="flex" alignItems="center" justifyContent="center" gap="7px"
-                          onClick={handleCheckin}
-                          style={{ border: 'none', cursor: checkinLoading ? 'not-allowed' : 'pointer', opacity: checkinLoading ? 0.7 : 1, transition: 'opacity 0.15s' }}
-                        >
-                          <FiCheckCircle size={15} />
-                          {checkinLoading ? 'Checking in…' : 'Check In'}
-                        </Box>
+                        service.requires_qr_checkin ? (
+                          <Box as="button" w="full" py="12px" borderRadius="11px"
+                            bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+                            display="flex" alignItems="center" justifyContent="center" gap="7px"
+                            onClick={() => setQrCodeModalOpen(true)}
+                            style={{ border: 'none', cursor: 'pointer', transition: 'opacity 0.15s' }}
+                          >
+                            <FiCheckCircle size={15} />
+                            Enter Attendance Code
+                          </Box>
+                        ) : (
+                          <Box as="button" w="full" py="12px" borderRadius="11px"
+                            bg={GREEN} color={WHITE} fontSize="14px" fontWeight={700}
+                            display="flex" alignItems="center" justifyContent="center" gap="7px"
+                            onClick={() => handleCheckin()}
+                            style={{ border: 'none', cursor: checkinLoading ? 'not-allowed' : 'pointer', opacity: checkinLoading ? 0.7 : 1, transition: 'opacity 0.15s' }}
+                          >
+                            <FiCheckCircle size={15} />
+                            {checkinLoading ? 'Checking in…' : 'Check In'}
+                          </Box>
+                        )
                       ) : (
                         <Box as="button" w="full" py="12px" borderRadius="11px"
                           bg={RED_LT} color={RED} fontSize="14px" fontWeight={700}
@@ -1837,44 +2076,38 @@ export default function ServiceDetailPage() {
                       {incoming.length === 0 ? (
                         <Text fontSize="13px" color={GRAY400} textAlign="center" py={3}>No requests yet.</Text>
                       ) : (
-                        <Stack gap={2}>
-                          {incoming.map((h) => {
-                            const cfg    = HS_BADGE[h.status] ?? { label: h.status, bg: GRAY100, color: GRAY500 }
-                            const active = ['pending', 'accepted'].includes(h.status)
-                            return (
-                              <Flex key={h.id} align="center" justify="space-between"
-                                p={3} bg={GRAY50} borderRadius="10px" gap={2}
-                                opacity={active ? 1 : 0.6}
-                              >
-                                <Box flex={1} minW={0}>
-                                  <Text fontSize="13px" fontWeight={600} color={GRAY800}
-                                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                  >
-                                    {h.requester_name}
-                                  </Text>
-                                  <Text fontSize="11px" color={GRAY400}>
-                                    {new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                  </Text>
-                                </Box>
-                                <Flex align="center" gap={2} flexShrink={0}>
-                                  <Box px="7px" py="2px" borderRadius="full" fontSize="10px" fontWeight={700}
-                                    style={{ background: cfg.bg, color: cfg.color }}
-                                  >
-                                    {cfg.label}
-                                  </Box>
-                                  {active && (
-                                    <Box as="button" px="10px" py="5px" borderRadius="7px"
-                                      bg={GREEN} color={WHITE} fontSize="11px" fontWeight={700}
-                                      style={{ border: 'none', cursor: 'pointer' }}
-                                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigate(`/messages/${h.id}`) }}
-                                    >
-                                      Chat
-                                    </Box>
-                                  )}
-                                </Flex>
-                              </Flex>
-                            )
-                          })}
+                        <Stack gap={0}>
+                          {incoming.map((h) => (
+                            <InterestRequesterRow
+                              key={h.id}
+                              handshake={h}
+                              isOwner={isOwn}
+                              serviceLocationType={service.location_type}
+                              onAccept={canDirectlyAcceptHandshake(h.status, service.type)
+                                ? async () => {
+                                    try {
+                                      await handshakeAPI.accept(h.id)
+                                      setHandshakes(await handshakeAPI.list())
+                                    } catch { /* errors handled via toast elsewhere */ }
+                                  }
+                                : undefined}
+                              onReject={h.status === 'pending'
+                                ? async () => {
+                                    try {
+                                      await handshakeAPI.deny(h.id)
+                                      setHandshakes(await handshakeAPI.list())
+                                    } catch { /* errors handled via toast elsewhere */ }
+                                  }
+                                : undefined}
+                              onMarkComplete={
+                                h.status === 'accepted'
+                                && !h.provider_confirmed_complete
+                                && service.location_type === 'In-Person'
+                                  ? () => setMarkCompleteHandshakeId(h.id)
+                                  : undefined
+                              }
+                            />
+                          ))}
                         </Stack>
                       )}
 
@@ -1883,7 +2116,7 @@ export default function ServiceDetailPage() {
                         <Box as="button" w="full" py="10px" borderRadius="10px"
                           bg={RED_LT} color={RED} fontSize="13px" fontWeight={700}
                           display="flex" alignItems="center" justifyContent="center" gap="6px"
-                          onClick={handleRemoveListing}
+                          onClick={() => setShowRemoveModal(true)}
                           style={{ border: `1px solid ${RED}30`, cursor: removeLoading ? 'not-allowed' : 'pointer', opacity: removeLoading ? 0.65 : 1 }}
                         >
                           {removeLoading ? 'Removing…' : 'Remove Listing'}
@@ -1987,7 +2220,7 @@ export default function ServiceDetailPage() {
                             {evaluationWindow.label}
                           </Text>
                         </>
-                      ) : (
+                      ) : hideAlreadyReviewedNotice ? null : (
                         <Flex align="center" justify="center" gap={2} py={2} px={3} borderRadius="11px" bg={GRAY100} color={GRAY500}>
                           <FiCheckCircle size={14} color={GREEN} />
                           <Text fontSize="13px" fontWeight={600}>You already reviewed this exchange.</Text>
@@ -2223,7 +2456,7 @@ export default function ServiceDetailPage() {
       {showReport && (
         <ReportModal
           onClose={() => setShowReport(false)}
-          onSubmit={(reason) => handleReport(reason as ReportType)}
+          onSubmit={(reason, statement) => handleReport(reason as ReportType, statement)}
           loading={reportLoading}
           options={REPORT_OPTIONS}
           title="Report this listing"
@@ -2234,7 +2467,7 @@ export default function ServiceDetailPage() {
       {showEventReport && eventReportTarget && (
         <ReportModal
           onClose={closeEventReportModal}
-          onSubmit={(reason) => handleSubmitEventBehaviorReport(reason as EventBehaviorIssueType)}
+          onSubmit={(reason, statement) => handleSubmitEventBehaviorReport(reason as EventBehaviorIssueType, statement)}
           loading={reportingEventIssue}
           options={EVENT_BEHAVIOR_REPORT_OPTIONS}
           title={`Report ${eventReportTarget.targetLabel}`}
@@ -2252,7 +2485,7 @@ export default function ServiceDetailPage() {
         />
       )}
 
-      {isEvent && myEventHandshake?.status === 'attended' && !myEventHandshake.user_has_reviewed && (
+      {isEvent && service?.status === 'Completed' && myEventHandshake?.status === 'attended' && !myEventHandshake.user_has_reviewed && (
         <ServiceEvaluationModal
           isOpen={showEvaluationModal}
           onClose={() => setShowEvaluationModal(false)}
@@ -2281,6 +2514,152 @@ export default function ServiceDetailPage() {
         />
       )}
 
+      <VerificationRequiredModal
+        isOpen={verificationGate.open}
+        onClose={closeVerificationGate}
+        actionLabel={verificationGate.actionLabel}
+        email={user?.email}
+      />
+      {/* ── Attendance code entry modal (QR events) ── */}
+      {qrCodeModalOpen && (
+        <Box
+          position="fixed" inset={0} zIndex={1100}
+          bg="rgba(0,0,0,0.55)"
+          display="flex" alignItems="center" justifyContent="center"
+          p={4}
+          onClick={() => { setQrCodeModalOpen(false); setAttendanceCode('') }}
+        >
+          <Box
+            bg={WHITE} borderRadius="20px" w="100%" maxW="380px" p={8}
+            boxShadow="0 20px 60px rgba(0,0,0,0.2)"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
+            <Text fontSize="lg" fontWeight={700} color={GRAY800} mb={1} textAlign="center">
+              Enter Attendance Code
+            </Text>
+            <Text fontSize="13px" color={GRAY500} mb={5} textAlign="center">
+              Ask the organizer for the 6-character code
+            </Text>
+            <input
+              type="text"
+              maxLength={6}
+              value={attendanceCode}
+              onChange={(e) => setAttendanceCode(e.target.value.toUpperCase())}
+              placeholder="ABC123"
+              autoFocus
+              style={{
+                width: '100%',
+                textAlign: 'center',
+                fontSize: '28px',
+                fontWeight: 800,
+                letterSpacing: '0.2em',
+                fontFamily: 'monospace',
+                padding: '14px',
+                border: `2px solid ${GRAY200}`,
+                borderRadius: '12px',
+                outline: 'none',
+              }}
+              onFocus={(e) => { e.target.style.borderColor = GREEN }}
+              onBlur={(e) => { e.target.style.borderColor = GRAY200 }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && attendanceCode.length >= 4) handleCheckin(attendanceCode)
+              }}
+            />
+            <Box
+              as="button" w="100%" mt={4} py="12px" borderRadius="11px"
+              bg={attendanceCode.length >= 4 ? GREEN : GRAY200}
+              color={attendanceCode.length >= 4 ? WHITE : GRAY500}
+              fontSize="14px" fontWeight={700}
+              onClick={() => attendanceCode.length >= 4 && handleCheckin(attendanceCode)}
+              style={{
+                border: 'none',
+                cursor: attendanceCode.length >= 4 && !checkinLoading ? 'pointer' : 'not-allowed',
+                opacity: checkinLoading ? 0.7 : 1,
+                transition: 'background 0.15s, opacity 0.15s',
+              }}
+            >
+              {checkinLoading ? 'Verifying…' : 'Confirm Attendance'}
+            </Box>
+          </Box>
+        </Box>
+      )}
+
     </Box>
+
+    {/* ── Remove Listing confirmation modal (BUG-02) ─────────────────────── */}
+    <AdminConfirmModal
+      isOpen={showRemoveModal}
+      title="Remove Listing"
+      description="Are you sure you want to remove this listing?"
+      confirmLabel="Remove"
+      accent={RED} accentLt={RED_LT}
+      loading={removeLoading}
+      onConfirm={handleRemoveListing}
+      onClose={() => setShowRemoveModal(false)}
+    />
+
+    {/* ── Manual Mark-as-Complete fallback modal (#300 / FR-13m) ──────────── */}
+    <AdminConfirmModal
+      isOpen={markCompleteHandshakeId !== null}
+      title="Mark as Complete"
+      description="Mark this exchange as complete? The requester will still need to confirm on their side before the time credits transfer."
+      confirmLabel="Mark Complete"
+      accent={GREEN} accentLt={GREEN_LT}
+      loading={markingCompleteLoading}
+      onConfirm={handleMarkCompleteHandshake}
+      onClose={() => setMarkCompleteHandshakeId(null)}
+    />
+
+    {/* ── Cancel Event modal with required reason (BUG-03) ───────────────── */}
+    {showCancelModal && service && (() => {
+      const inLockdown = isWithinLockdownWindow(service.scheduled_time)
+      const hasParticipants = (service.participant_count ?? 0) > 0
+      const canConfirm = cancelReason.trim().length > 0
+      return (
+        <ModalBackdrop onClick={() => setShowCancelModal(false)}>
+          <ModalCard onClick={(e) => e.stopPropagation()}>
+            <ModalHeader
+              icon={<FiAlertTriangle size={15} />}
+              iconBg={RED_LT} iconColor={RED}
+              title="Cancel Event"
+              subtitle="This will notify all participants and cannot be undone."
+            />
+            <Box px={5} py={4}>
+              {inLockdown && hasParticipants && (
+                <Box bg="#FFF7ED" borderRadius="10px" p={3} mb={4} border="1px solid #FDBA74">
+                  <Text fontSize="12px" fontWeight={700} color="#C2410C">30-day ban applies</Text>
+                  <Text fontSize="12px" color="#92400E" mt="2px">
+                    You are within the 24-hour lockdown window with active participants. Cancelling will apply a 30-day event creation ban.
+                  </Text>
+                </Box>
+              )}
+              <ModalFieldLabel>Reason for cancellation (required)</ModalFieldLabel>
+              <textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                rows={4}
+                placeholder="Let participants know why this event is being cancelled…"
+                style={{
+                  width: '100%', resize: 'vertical', padding: '10px 12px',
+                  borderRadius: '10px', border: `1px solid ${GRAY200}`,
+                  background: GRAY50, fontSize: '13px', color: GRAY800,
+                  outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <Text fontSize="11px" color={GRAY400} mt="4px">{cancelReason.trim().length} chars</Text>
+            </Box>
+            <ModalFooter
+              onClose={() => setShowCancelModal(false)}
+              confirmLabel="Cancel Event"
+              accent={RED} accentLt={RED_LT}
+              onConfirm={handleCancelEvent}
+              loading={cancelLoading}
+              disabled={!canConfirm}
+            />
+          </ModalCard>
+        </ModalBackdrop>
+      )
+    })()}
+    </>
   )
 }

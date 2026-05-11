@@ -8,7 +8,9 @@ from django.db import transaction
 from api.models import User, Service, Handshake, TransactionHistory
 from api.utils import (
     can_user_post_offer, provision_timebank, complete_timebank_transfer,
-    cancel_timebank_transfer, get_provider_and_receiver, create_notification
+    cancel_timebank_transfer, get_provider_and_receiver, create_notification,
+    reserve_timebank_for_need_service, release_timebank_for_need_service,
+    ensure_accepted_handshake_reservation,
 )
 from api.tests.helpers.factories import (
     UserFactory, ServiceFactory, HandshakeFactory
@@ -93,6 +95,107 @@ class TestProvisionTimebank:
         assert handshake.provisioned_hours == Decimal('2.00')
         assert receiver.timebank_balance == Decimal('1.00')  # 3.00 - 2.00
 
+    def test_reserve_timebank_for_need_service(self):
+        """Need creation reserves hours at service level before a handshake is accepted."""
+        owner = UserFactory(timebank_balance=Decimal('3.00'))
+        service = ServiceFactory(user=owner, type='Need', duration=Decimal('2.00'))
+
+        reserve_timebank_for_need_service(service)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+
+        assert owner.timebank_balance == Decimal('1.00')
+        assert service.reserved_timebank_hours == Decimal('2.00')
+        assert TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=None,
+            transaction_type='provision',
+        ).exists()
+
+    def test_reserve_timebank_for_need_service_respects_debt_limit(self):
+        """Need creation can use available debt, but cannot exceed the -10h limit."""
+        owner = UserFactory(timebank_balance=Decimal('-9.00'))
+        service = ServiceFactory(user=owner, type='Need', duration=Decimal('2.00'))
+
+        with pytest.raises(ValueError, match='maximum debt limit'):
+            reserve_timebank_for_need_service(service)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+        assert owner.timebank_balance == Decimal('-9.00')
+        assert service.reserved_timebank_hours == Decimal('0.00')
+        assert not TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            transaction_type='provision',
+        ).exists()
+
+    def test_accepted_need_reuses_existing_service_reservation(self):
+        """Accepting a Need with an upfront reservation does not debit twice."""
+        owner = UserFactory(timebank_balance=Decimal('2.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('1.00'),
+            reserved_timebank_hours=Decimal('1.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='pending',
+            provisioned_hours=Decimal('1.00'),
+        )
+
+        ensure_accepted_handshake_reservation(handshake)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+        assert owner.timebank_balance == Decimal('2.00')
+        assert service.reserved_timebank_hours == Decimal('1.00')
+        assert TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=handshake,
+            transaction_type='provision',
+        ).count() == 0
+
+    def test_accepted_need_reservation_invalidates_conversations(
+        self,
+        monkeypatch,
+        django_capture_on_commit_callbacks,
+    ):
+        """Approving a Need with an existing reservation refreshes both inboxes."""
+        invalidated_conversations: list[str] = []
+        monkeypatch.setattr(
+            'api.utils.invalidate_conversations',
+            lambda user_id: invalidated_conversations.append(user_id),
+        )
+        monkeypatch.setattr('api.utils.invalidate_transactions', lambda _user_id: None)
+        monkeypatch.setattr('api.utils.invalidate_user_profile', lambda _user_id: None)
+
+        owner = UserFactory(timebank_balance=Decimal('2.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('1.00'),
+            reserved_timebank_hours=Decimal('1.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='pending',
+            provisioned_hours=Decimal('1.00'),
+        )
+
+        with django_capture_on_commit_callbacks(execute=True):
+            ensure_accepted_handshake_reservation(handshake)
+
+        assert set(invalidated_conversations) == {str(owner.id), str(helper.id)}
+
 
 @pytest.mark.django_db
 @pytest.mark.unit
@@ -125,6 +228,12 @@ class TestCompleteTimebankTransfer:
         ).exists()
 
     def test_group_one_time_offer_transfers_only_once_and_all_receivers_pay(self):
+        """Group one-time offer pays the provider on the FIRST completion.
+
+        Settlement is idempotent: completing handshake2 must not produce a
+        second transfer. Receivers pay per seat on accept and are not
+        refunded on completion (asymmetric system sink).
+        """
         provider = UserFactory(timebank_balance=Decimal('0.00'))
         receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
         receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
@@ -148,7 +257,8 @@ class TestCompleteTimebankTransfer:
         receiver1.refresh_from_db()
         receiver2.refresh_from_db()
 
-        assert provider.timebank_balance == Decimal('0.00')
+        # Provider is paid on the first completion, not the last.
+        assert provider.timebank_balance == Decimal('3.00')
         assert receiver1.timebank_balance == Decimal('2.00')
         assert receiver2.timebank_balance == Decimal('2.00')
 
@@ -159,6 +269,7 @@ class TestCompleteTimebankTransfer:
         receiver1.refresh_from_db()
         receiver2.refresh_from_db()
 
+        # Idempotent: balance unchanged, no second transfer row.
         assert provider.timebank_balance == Decimal('3.00')
         assert receiver1.timebank_balance == Decimal('2.00')
         assert receiver2.timebank_balance == Decimal('2.00')
@@ -167,6 +278,104 @@ class TestCompleteTimebankTransfer:
             transaction_type='transfer',
             handshake__service=service,
         ).count() == 1
+
+    def test_group_one_time_offer_trailing_cancel_only_refunds_the_canceller(self):
+        """Trailing cancellation refunds the canceller and is a no-op for
+        the provider.
+
+        After the first-completion settlement (sgunes review), the provider
+        is already paid by the time anyone cancels. The cancellation path
+        therefore only needs to release escrow for the cancelling receiver
+        and emit no second transfer.
+        """
+        provider = UserFactory(timebank_balance=Decimal('0.00'))
+        receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver3 = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('3.00'),
+            schedule_type='One-Time',
+            max_participants=3,
+        )
+        handshake1 = HandshakeFactory(service=service, requester=receiver1, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake2 = HandshakeFactory(service=service, requester=receiver2, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake3 = HandshakeFactory(service=service, requester=receiver3, status='accepted', provisioned_hours=Decimal('3.00'))
+
+        provision_timebank(handshake1)
+        provision_timebank(handshake2)
+        provision_timebank(handshake3)
+
+        with transaction.atomic():
+            complete_timebank_transfer(handshake1)
+
+        provider.refresh_from_db()
+        # First completion already settled the provider.
+        assert provider.timebank_balance == Decimal('3.00')
+
+        with transaction.atomic():
+            complete_timebank_transfer(handshake2)
+
+        provider.refresh_from_db()
+        # Second completion is idempotent — balance unchanged.
+        assert provider.timebank_balance == Decimal('3.00')
+
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake3)
+
+        provider.refresh_from_db()
+        receiver3.refresh_from_db()
+        handshake3.refresh_from_db()
+
+        # Cancellation refunds the trailing receiver only; provider is unchanged.
+        assert handshake3.status == 'cancelled'
+        assert receiver3.timebank_balance == Decimal('5.00')
+        assert provider.timebank_balance == Decimal('3.00')
+        assert TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).count() == 1
+
+    def test_group_one_time_offer_skips_payout_when_no_one_completed(self):
+        """If every participant cancels before completing, the provider must
+        not be paid. The payout is only owed when at least one receiver
+        actually completed the service.
+        """
+        provider = UserFactory(timebank_balance=Decimal('0.00'))
+        receiver1 = UserFactory(timebank_balance=Decimal('5.00'))
+        receiver2 = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=provider,
+            type='Offer',
+            duration=Decimal('3.00'),
+            schedule_type='One-Time',
+            max_participants=2,
+        )
+        handshake1 = HandshakeFactory(service=service, requester=receiver1, status='accepted', provisioned_hours=Decimal('3.00'))
+        handshake2 = HandshakeFactory(service=service, requester=receiver2, status='accepted', provisioned_hours=Decimal('3.00'))
+
+        provision_timebank(handshake1)
+        provision_timebank(handshake2)
+
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake1)
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake2)
+
+        provider.refresh_from_db()
+        receiver1.refresh_from_db()
+        receiver2.refresh_from_db()
+
+        assert provider.timebank_balance == Decimal('0.00')
+        assert receiver1.timebank_balance == Decimal('5.00')
+        assert receiver2.timebank_balance == Decimal('5.00')
+        assert not TransactionHistory.objects.filter(
+            user=provider,
+            transaction_type='transfer',
+            handshake__service=service,
+        ).exists()
 
 
 @pytest.mark.django_db
@@ -191,6 +400,63 @@ class TestCancelTimebankTransfer:
         
         receiver.refresh_from_db()
         assert receiver.timebank_balance == Decimal('3.00')  # 1.00 + 2.00 (refunded)
+
+    def test_release_timebank_for_need_service(self):
+        """Removing a Need before acceptance returns its service-level reservation."""
+        owner = UserFactory(timebank_balance=Decimal('1.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('2.00'),
+            reserved_timebank_hours=Decimal('2.00'),
+        )
+
+        release_timebank_for_need_service(service)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+
+        assert owner.timebank_balance == Decimal('3.00')
+        assert service.reserved_timebank_hours == Decimal('0.00')
+        assert TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=None,
+            transaction_type='refund',
+        ).exists()
+
+    def test_cancel_timebank_transfer_keeps_need_service_reservation(self):
+        """Cancelling an accepted Need agreement keeps the listing reservation."""
+        owner = UserFactory(timebank_balance=Decimal('1.00'))
+        helper = UserFactory(timebank_balance=Decimal('5.00'))
+        service = ServiceFactory(
+            user=owner,
+            type='Need',
+            duration=Decimal('2.00'),
+            reserved_timebank_hours=Decimal('2.00'),
+        )
+        handshake = HandshakeFactory(
+            service=service,
+            requester=helper,
+            status='accepted',
+            provisioned_hours=Decimal('2.00'),
+        )
+
+        with transaction.atomic():
+            cancel_timebank_transfer(handshake)
+
+        owner.refresh_from_db()
+        service.refresh_from_db()
+        handshake.refresh_from_db()
+        assert owner.timebank_balance == Decimal('1.00')
+        assert service.reserved_timebank_hours == Decimal('2.00')
+        assert handshake.status == 'cancelled'
+        assert not TransactionHistory.objects.filter(
+            user=owner,
+            service=service,
+            handshake=handshake,
+            transaction_type='refund',
+        ).exists()
 
 
 @pytest.mark.django_db

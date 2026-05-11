@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 import {
   createRequestForTimeShare,
-  getCurrentBalance,
+  expectBalanceToBe,
   loginAsUserWithBalanceAtLeast,
   openTimeActivity,
 } from '../helpers'
@@ -24,9 +24,8 @@ test('FR-07f: cancelling before completion returns reserved hours to the request
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 20_000 })
 
   // The reserved hour should be returned immediately and recorded as a refund entry.
-  const currentBalance = await getCurrentBalance(page)
-  expect(currentBalance).toBe(startingBalance)
+  await expectBalanceToBe(page, startingBalance)
 
   await openTimeActivity(page)
-  await expect(page.getByRole('button', { name: 'Shared' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Used' })).toBeVisible()
 })

@@ -14,9 +14,15 @@ from .authentication import CookieJWTAuthentication
 from .views import (
     UserRegistrationView,
     UserProfileView,
+    MeCalendarView,
     UserHistoryView,
+    MyReportsView,
     UserBadgeProgressView,
     UserVerifiedReviewsView,
+    SuggestedUsersView,
+    ActivityFeedView,
+    PulseStatsView,
+    PulseVisitView,
     UserFollowView,
     UserFollowersListView,
     UserFollowingListView,
@@ -56,7 +62,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .views import CustomTokenObtainPairView
 from .views import CustomTokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
-from .views_featured import FeaturedView
+from drf_spectacular.utils import extend_schema, OpenApiResponse
+from .views_featured import FeaturedChipsView, FeaturedView, PublicFeaturedView
 
 router = DefaultRouter()
 router.register(r'services', ServiceViewSet, basename='service')
@@ -71,6 +78,18 @@ router.register(r'admin/comments', AdminCommentViewSet, basename='admin-comment'
 router.register(r'admin/audit-logs', AdminAuditLogViewSet, basename='admin-audit-log')
 router.register(r'transactions', TransactionHistoryViewSet, basename='transaction')
 
+@extend_schema(
+    tags=['System'],
+    summary='Health check',
+    description='Verifies connectivity to PostgreSQL and Redis. Returns 200 when both dependencies are reachable, 503 otherwise. Body also includes basic counts (users, active services, pending handshakes) when the database is reachable.',
+    responses={
+        200: OpenApiResponse(description='All dependencies healthy.'),
+        503: OpenApiResponse(description='At least one dependency is unhealthy.'),
+    },
+)
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([permissions.AllowAny])
 def health_check(request):
     """
     Health check endpoint that verifies connectivity to all critical dependencies.
@@ -144,6 +163,16 @@ def health_check(request):
     return JsonResponse(health_status, status=status_code)
 
 
+@extend_schema(
+    tags=['System'],
+    summary='Aggregate metrics',
+    description='Aggregate platform counts for the admin dashboard. Requires moderator / admin / super_admin role.',
+    responses={
+        200: OpenApiResponse(description='Metrics payload.'),
+        401: OpenApiResponse(description='Missing or invalid JWT.'),
+        403: OpenApiResponse(description='Authenticated but not a moderator / admin / super_admin.'),
+    },
+)
 @api_view(['GET'])
 @authentication_classes([CookieJWTAuthentication, JWTAuthentication])
 @permission_classes([permissions.IsAuthenticated])
@@ -295,6 +324,9 @@ urlpatterns = [
     path('auth/send-verification/', SendVerificationEmailView.as_view(), name='send-verification'),
     path('auth/resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
     path('users/me/', UserProfileView.as_view(), name='user-profile'),
+    path('users/suggested/', SuggestedUsersView.as_view(), name='users-suggested'),
+    path('users/me/reports/', MyReportsView.as_view(), name='my-reports'),
+    path('users/me/calendar/', MeCalendarView.as_view(), name='user-calendar'),
     # Nested /users/<id>/… routes must be registered before the generic user-detail path
     # so paths like …/follow/ are never mistaken for detail (defensive ordering).
     path('users/<uuid:id>/follow/', UserFollowView.as_view(), name='user-follow'),
@@ -339,9 +371,19 @@ urlpatterns = [
     # E2E test utilities (only active when DJANGO_E2E=1)
     path('e2e/set-balance/', E2ESetBalanceView.as_view(), name='e2e-set-balance'),
 
+    # Activity feed (#482) — chronological events from followed actors and
+    # actors within the configured proximity radius of the viewer.
+    path('activity/feed/', ActivityFeedView.as_view(), name='activity-feed'),
+
+    # Pulse — personal stats row + visit tracking.
+    path('pulse/stats/', PulseStatsView.as_view(), name='pulse-stats'),
+    path('pulse/visit/', PulseVisitView.as_view(), name='pulse-visit'),
+
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
     path('featured/', FeaturedView.as_view(), name='featured'),
+    path('featured/chips/', FeaturedChipsView.as_view(), name='featured-chips'),
+    path('featured/public/', PublicFeaturedView.as_view(), name='featured-public'),
     path('', include(router.urls)),
 ]

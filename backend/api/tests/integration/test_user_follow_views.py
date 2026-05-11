@@ -15,6 +15,7 @@ from rest_framework import status
 from api.models import UserFollow, UserFollowEvent
 from api.tests.helpers.factories import UserFactory
 from api.tests.helpers.test_client import AuthenticatedAPIClient
+from api.tests.helpers.assertions import assert_api_response, assert_problem_detail
 
 
 # ---------------------------------------------------------------------------
@@ -33,7 +34,7 @@ class TestUserFollowViewPost:
 
         response = client.post(f'/api/users/{target.id}/follow/')
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert_api_response(response, 201)
 
     def test_follow_success_creates_userfollow_row(self):
         actor = UserFactory()
@@ -74,7 +75,7 @@ class TestUserFollowViewPost:
 
         response = client.post(f'/api/users/{actor.id}/follow/')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_follow_self_creates_no_rows(self):
         actor = UserFactory()
@@ -93,7 +94,7 @@ class TestUserFollowViewPost:
 
         response = client.post(f'/api/users/{target.id}/follow/')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_follow_already_following_creates_no_extra_row(self):
         actor = UserFactory()
@@ -111,7 +112,7 @@ class TestUserFollowViewPost:
 
         response = client.post(f'/api/users/{_uuid.uuid4()}/follow/')
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
     def test_follow_unauthenticated_returns_401(self):
         target = UserFactory()
@@ -119,7 +120,7 @@ class TestUserFollowViewPost:
 
         response = client.post(f'/api/users/{target.id}/follow/')
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +140,7 @@ class TestUserFollowViewDelete:
 
         response = client.delete(f'/api/users/{target.id}/follow/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_unfollow_success_deletes_userfollow_row(self):
         actor = UserFactory()
@@ -171,7 +172,7 @@ class TestUserFollowViewDelete:
 
         response = client.delete(f'/api/users/{actor.id}/follow/')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_unfollow_not_following_returns_400(self):
         actor = UserFactory()
@@ -180,7 +181,7 @@ class TestUserFollowViewDelete:
 
         response = client.delete(f'/api/users/{target.id}/follow/')
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert_problem_detail(response, 400)
 
     def test_unfollow_not_following_creates_no_event(self):
         actor = UserFactory()
@@ -197,7 +198,7 @@ class TestUserFollowViewDelete:
 
         response = client.delete(f'/api/users/{_uuid.uuid4()}/follow/')
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
     def test_unfollow_unauthenticated_returns_401(self):
         target = UserFactory()
@@ -205,7 +206,7 @@ class TestUserFollowViewDelete:
 
         response = client.delete(f'/api/users/{target.id}/follow/')
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +225,7 @@ class TestUserFollowersListView:
 
         response = client.get(f'/api/users/{user.id}/followers/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_followers_returns_correct_users(self):
         user = UserFactory()
@@ -260,7 +261,7 @@ class TestUserFollowersListView:
 
         response = client.get(f'/api/users/{_uuid.uuid4()}/followers/')
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
     def test_followers_unauthenticated_returns_401(self):
         user = UserFactory()
@@ -268,7 +269,7 @@ class TestUserFollowersListView:
 
         response = client.get(f'/api/users/{user.id}/followers/')
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +288,7 @@ class TestUserFollowingListView:
 
         response = client.get(f'/api/users/{user.id}/following/')
 
-        assert response.status_code == status.HTTP_200_OK
+        assert_api_response(response, 200)
 
     def test_following_returns_correct_users(self):
         user = UserFactory()
@@ -323,7 +324,7 @@ class TestUserFollowingListView:
 
         response = client.get(f'/api/users/{_uuid.uuid4()}/following/')
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert_problem_detail(response, 404)
 
     def test_following_unauthenticated_returns_401(self):
         user = UserFactory()
@@ -331,4 +332,58 @@ class TestUserFollowingListView:
 
         response = client.get(f'/api/users/{user.id}/following/')
 
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert_problem_detail(response, 401)
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestUserFollowNotification:
+    """A new follow edge should notify the followed user (#review).
+
+    The notification is created via `transaction.on_commit` inside the
+    signal, so the tests patch on_commit to fire synchronously rather than
+    requiring a transactional test database.
+    """
+
+    def test_follow_creates_notification_for_target(self):
+        from unittest.mock import patch
+        from api.models import Notification
+
+        actor = UserFactory(first_name='Mira')
+        target = UserFactory()
+        client = AuthenticatedAPIClient().authenticate_user(actor)
+
+        with patch(
+            'api.signals.transaction.on_commit',
+            side_effect=lambda callback: callback(),
+        ):
+            client.post(f'/api/users/{target.id}/follow/')
+
+        notes = Notification.objects.filter(user=target, type='user_followed')
+        assert notes.count() == 1
+        assert 'Mira' in notes.first().message
+
+    def test_unfollow_does_not_create_notification(self):
+        from unittest.mock import patch
+        from api.models import Notification
+
+        actor = UserFactory()
+        target = UserFactory()
+        with patch(
+            'api.signals.transaction.on_commit',
+            side_effect=lambda callback: callback(),
+        ):
+            UserFollow.objects.create(follower=actor, following=target)
+        Notification.objects.filter(user=target, type='user_followed').delete()
+
+        client = AuthenticatedAPIClient().authenticate_user(actor)
+        with patch(
+            'api.signals.transaction.on_commit',
+            side_effect=lambda callback: callback(),
+        ):
+            client.delete(f'/api/users/{target.id}/follow/')
+
+        assert not Notification.objects.filter(
+            user=target, type='user_followed',
+        ).exists()
+

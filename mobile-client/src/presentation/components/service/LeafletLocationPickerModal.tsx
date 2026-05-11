@@ -154,7 +154,7 @@ export default function LeafletLocationPickerModal({
       onRequestClose={onClose}
       presentationStyle="pageSheet"
     >
-      <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
+      <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
         <View style={styles.header}>
           <Pressable style={styles.iconButton} onPress={onClose}>
             <Ionicons name="close" size={22} color={colors.GRAY800} />
@@ -199,7 +199,7 @@ export default function LeafletLocationPickerModal({
           </Text>
         </View>
 
-        <View style={[styles.footer, { paddingBottom: Math.max(16, insets.bottom) }]}>
+        <View style={[styles.footer, { paddingBottom: Math.max(20, insets.bottom) }]}>
           <Pressable style={styles.secondaryButton} onPress={onClose}>
             <Text style={styles.secondaryButtonText}>Cancel</Text>
           </Pressable>
@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 16,
   },
   iconButton: {
     width: 40,
@@ -277,7 +277,7 @@ const styles = StyleSheet.create({
   infoCard: {
     marginHorizontal: 16,
     marginTop: 16,
-    padding: 16,
+    padding: 18,
     borderRadius: 20,
     backgroundColor: colors.WHITE,
     borderWidth: 1,
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 20,
   },
   secondaryButton: {
     flex: 1,

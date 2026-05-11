@@ -31,6 +31,7 @@ import { searchWikidata } from "../../../api/wikidata";
 import type { Tag } from "../../../api/types";
 import type { PostStackParamList } from "../../../navigation/PostStack";
 import { colors } from "../../../constants/colors";
+import { useAuth } from "../../../context/AuthContext";
 import {
   getMapboxToken,
   reverseGeocodeLocation,
@@ -104,6 +105,7 @@ export default function ServiceWizard({
   organizerBanText,
 }: ServiceWizardProps) {
   const navigation = useNavigation<NavProp>();
+  const { refreshUser } = useAuth();
   const accent =
     type === "Event" ? colors.AMBER : type === "Offer" ? colors.GREEN : colors.BLUE;
   const accentLight =
@@ -122,6 +124,7 @@ export default function ServiceWizard({
   const [maxParticipants, setMaxParticipants] = useState("1");
   const [locationType, setLocationType] = useState<"In-Person" | "Online">("In-Person");
   const [scheduleType, setScheduleType] = useState<"One-Time" | "Recurrent">("One-Time");
+  const [recurrenceIntervalDays, setRecurrenceIntervalDays] = useState("7");
   const [scheduleDetails, setScheduleDetails] = useState("");
   const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
   const [pickerMode, setPickerMode] = useState<"date" | "time" | null>(null);
@@ -208,6 +211,11 @@ export default function ServiceWizard({
         );
         setScheduleType(
           service.schedule_type === "Recurrent" ? "Recurrent" : "One-Time",
+        );
+        setRecurrenceIntervalDays(
+          service.recurrence_interval_days != null
+            ? String(service.recurrence_interval_days)
+            : "7",
         );
         setScheduleDetails(service.schedule_details ?? "");
         setScheduledAt(
@@ -615,7 +623,18 @@ export default function ServiceWizard({
       "max_participants",
       type === "Need" ? "1" : String(Number(maxParticipants || "1")),
     );
-    formData.append("schedule_type", type === "Event" ? "One-Time" : scheduleType);
+    // Only Events can be recurring. Offer/Need are always One-Time.
+    formData.append(
+      "schedule_type",
+      type === "Event" ? scheduleType : "One-Time",
+    );
+
+    if (type === "Event" && scheduleType === "Recurrent") {
+      const interval = parseInt(recurrenceIntervalDays, 10);
+      if (Number.isFinite(interval) && interval > 0) {
+        formData.append("recurrence_interval_days", String(interval));
+      }
+    }
 
     if (scheduleDetails.trim()) {
       formData.append("schedule_details", scheduleDetails.trim());
@@ -692,6 +711,9 @@ export default function ServiceWizard({
       const saved = serviceId
         ? await patchService(serviceId, buildFormData())
         : await createService(buildFormData());
+      if (type === "Need") {
+        await refreshUser({ force: true });
+      }
       Alert.alert(
         "Success",
         serviceId
@@ -833,17 +855,37 @@ export default function ServiceWizard({
         </Text>
       ) : null}
 
-      {type !== "Event" ? (
-        <SegmentRow
-          label="Schedule type"
-          value={scheduleType}
-          onChange={(value) => setScheduleType(value as "One-Time" | "Recurrent")}
-          options={[
-            { value: "One-Time", label: "One-time" },
-            { value: "Recurrent", label: "Recurring" },
-          ]}
-          accent={accent}
-        />
+      {type === "Event" ? (
+        <>
+          <SegmentRow
+            label="Schedule type"
+            value={scheduleType}
+            onChange={(value) => setScheduleType(value as "One-Time" | "Recurrent")}
+            options={[
+              { value: "One-Time", label: "One-time" },
+              { value: "Recurrent", label: "Recurring" },
+            ]}
+            accent={accent}
+          />
+          {scheduleType === "Recurrent" ? (
+            <InputLabel label="Repeat every (days)">
+              <TextInput
+                value={recurrenceIntervalDays}
+                onChangeText={(value) =>
+                  setRecurrenceIntervalDays(value.replace(/[^0-9]/g, ""))
+                }
+                keyboardType="number-pad"
+                placeholder="7"
+                placeholderTextColor={colors.GRAY400}
+                style={styles.input}
+              />
+              <Text style={styles.helperText}>
+                When this event is completed, a new copy will be reposted with
+                the date shifted forward by this many days.
+              </Text>
+            </InputLabel>
+          ) : null}
+        </>
       ) : null}
 
       {type === "Event" || isFixedGroupOffer ? (
@@ -872,21 +914,11 @@ export default function ServiceWizard({
           ) : null}
         </View>
       ) : (
-        <InputLabel
-          label={
-            scheduleType === "Recurrent"
-              ? "Schedule details"
-              : "Schedule details (optional)"
-          }
-        >
+        <InputLabel label="Schedule details (optional)">
           <TextInput
             value={scheduleDetails}
             onChangeText={setScheduleDetails}
-            placeholder={
-              scheduleType === "Recurrent"
-                ? "e.g. Every Tuesday 18:00–19:00"
-                : "e.g. Any weekend morning, flexible"
-            }
+            placeholder="e.g. Any weekend morning, flexible"
             placeholderTextColor={colors.GRAY400}
             style={styles.input}
           />
@@ -1241,7 +1273,13 @@ export default function ServiceWizard({
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      // The wizard always renders inside a SafeAreaView+topBar (PostOfferScreen
+      // / PostNeedScreen / PostEventScreen), so the KAV's reference frame is
+      // already below the header. A non-zero offset double-counted the header
+      // and pushed focused inputs UP into the keyboard rather than out from
+      // under it (#555). Keep the offset at 0 — the wrapping screen already
+      // paid for the safe area + top bar.
+      keyboardVerticalOffset={0}
     >
       <View style={styles.progressWrap}>
         {STEPS.map((item, index) => (
@@ -1284,11 +1322,27 @@ export default function ServiceWizard({
         </Pressable>
 
         {step < STEPS.length ? (
-          <Pressable style={[styles.nextButton, { backgroundColor: accent }]} onPress={goNext}>
+          <Pressable
+            testID="service-wizard-continue"
+            accessibilityRole="button"
+            accessibilityLabel="Continue to next step"
+            style={[styles.nextButton, { backgroundColor: accent }]}
+            onPress={goNext}
+          >
             <Text style={styles.nextButtonText}>Continue</Text>
           </Pressable>
         ) : (
           <Pressable
+            testID="service-wizard-submit"
+            accessibilityRole="button"
+            accessibilityLabel={
+              type === "Event"
+                ? "Create event"
+                : type === "Offer"
+                  ? "Post offer"
+                  : "Post need"
+            }
+            accessibilityState={{ disabled: submitting }}
             style={[
               styles.nextButton,
               { backgroundColor: accent },

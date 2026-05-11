@@ -12,7 +12,6 @@ Covers:
 from decimal import Decimal
 
 import pytest
-from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
 from api.models import Handshake, Notification, Service
@@ -56,45 +55,70 @@ def _pending_handshake(service, requester):
     )
 
 
+def _accept_via_approve_flow(handshake):
+    """Drive an Offer/Need handshake to 'accepted' via propose→approve.
+
+    Direct accept on Offer/Need is rejected by the backend (#521); the
+    canonical path is provider-initiate then requester-approve.
+    """
+    from datetime import timedelta
+    from django.utils import timezone
+    handshake.refresh_from_db()
+    handshake.exact_duration = handshake.service.duration
+    handshake.scheduled_time = timezone.now() + timedelta(days=1)
+    if handshake.service.location_type == 'In-Person':
+        handshake.exact_location = '123 Test Address'
+    handshake.provider_initiated = True
+    handshake.save()
+    HandshakeService.approve(handshake, handshake.requester)
+    handshake.refresh_from_db()
+    return handshake
+
+
 # ── 1. _capacity_statuses ─────────────────────────────────────────────────────
 
-class TestCapacityStatuses(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestCapacityStatuses:
 
     def test_one_time_excludes_pending(self):
         svc = _make_service(UserFactory(), 'One-Time')
         caps = HandshakeService._capacity_statuses(svc)
-        self.assertNotIn('pending', caps)
+        assert 'pending' not in caps
         for s in ('accepted', 'completed', 'reported', 'paused'):
-            self.assertIn(s, caps)
+            assert s in caps
 
     def test_recurrent_excludes_pending_and_completed(self):
         svc = _make_service(UserFactory(), 'Recurrent')
         caps = HandshakeService._capacity_statuses(svc)
-        self.assertNotIn('pending', caps)
-        self.assertNotIn('completed', caps)
+        assert 'pending' not in caps
+        assert 'completed' not in caps
         for s in ('accepted', 'reported', 'paused'):
-            self.assertIn(s, caps)
+            assert s in caps
 
     def test_existing_interest_one_time_includes_pending(self):
         svc = _make_service(UserFactory(), 'One-Time')
         ei = HandshakeService._existing_interest_statuses(svc)
-        self.assertIn('pending', ei)
-        self.assertIn('accepted', ei)
-        self.assertIn('completed', ei)
+        assert 'pending' in ei
+        assert 'accepted' in ei
+        assert 'completed' in ei
 
     def test_existing_interest_recurrent_includes_pending_excludes_completed(self):
         svc = _make_service(UserFactory(), 'Recurrent')
         ei = HandshakeService._existing_interest_statuses(svc)
-        self.assertIn('pending', ei)
-        self.assertIn('accepted', ei)
-        self.assertNotIn('completed', ei)
+        assert 'pending' in ei
+        assert 'accepted' in ei
+        assert 'completed' not in ei
 
 
 # ── 2. Pending does not block capacity ────────────────────────────────────────
 
-class TestPendingDoesNotConsumeSlot(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestPendingDoesNotConsumeSlot:
 
-    def setUp(self):
+    @pytest.fixture(autouse=True)
+    def _users(self):
         self.provider = UserFactory(timebank_balance=Decimal('10'))
         self.u2 = UserFactory(timebank_balance=Decimal('5'))
         self.u3 = UserFactory(timebank_balance=Decimal('5'))
@@ -106,22 +130,22 @@ class TestPendingDoesNotConsumeSlot(TestCase):
         _pending_handshake(svc, self.u3)
 
         ok, err = HandshakeService.can_express_interest(svc, self.u4)
-        self.assertTrue(ok, err)
+        assert ok, err
 
     def test_recurrent_multiple_pending_dont_fill_single_slot(self):
         svc = _make_service(self.provider, 'Recurrent', max_p=1)
         _pending_handshake(svc, self.u2)
 
         ok, err = HandshakeService.can_express_interest(svc, self.u3)
-        self.assertTrue(ok, err)
+        assert ok, err
 
     def test_one_time_accepted_fills_slot(self):
         svc = _make_service(self.provider, 'One-Time', max_p=1)
         _accepted_handshake(svc, self.u2)
 
         ok, err = HandshakeService.can_express_interest(svc, self.u3)
-        self.assertFalse(ok)
-        self.assertIn('maximum capacity', err)
+        assert not ok
+        assert 'maximum capacity' in err
 
     def test_group_offer_pending_does_not_prematurely_close_slots(self):
         """Group offer with max_p=3: three pending users should all fit."""
@@ -130,12 +154,14 @@ class TestPendingDoesNotConsumeSlot(TestCase):
         _pending_handshake(svc, self.u3)
 
         ok, err = HandshakeService.can_express_interest(svc, self.u4)
-        self.assertTrue(ok, err)
+        assert ok, err
 
 
 # ── 3. Recurrent: completed frees the slot ────────────────────────────────────
 
-class TestRecurrentSlotFreedAfterCompletion(TestCase):
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestRecurrentSlotFreedAfterCompletion:
 
     def test_completed_session_frees_slot(self):
         provider = UserFactory(timebank_balance=Decimal('10'))
@@ -147,7 +173,7 @@ class TestRecurrentSlotFreedAfterCompletion(TestCase):
                          provisioned_hours=svc.duration)
 
         ok, err = HandshakeService.can_express_interest(svc, u3)
-        self.assertTrue(ok, f"Expected slot available after completion, got: {err}")
+        assert ok, f"Expected slot available after completion, got: {err}"
 
     def test_completed_does_not_block_same_user_recurrent(self):
         """A user whose previous Recurrent session is completed can rejoin."""
@@ -158,7 +184,7 @@ class TestRecurrentSlotFreedAfterCompletion(TestCase):
                          provisioned_hours=svc.duration)
 
         ok, err = HandshakeService.can_express_interest(svc, u2)
-        self.assertTrue(ok, f"Recurrent re-join should be allowed after completion: {err}")
+        assert ok, f"Recurrent re-join should be allowed after completion: {err}"
 
     def test_one_time_completed_still_occupies_slot(self):
         """For One-Time services, completed handshake keeps the slot occupied."""
@@ -170,8 +196,8 @@ class TestRecurrentSlotFreedAfterCompletion(TestCase):
                          provisioned_hours=svc.duration)
 
         ok, err = HandshakeService.can_express_interest(svc, u3)
-        self.assertFalse(ok)
-        self.assertIn('maximum capacity', err)
+        assert not ok
+        assert 'maximum capacity' in err
 
 
 # ── 4. Auto-deny on accept (One-Time) ─────────────────────────────────────────
@@ -201,22 +227,14 @@ class TestAutoDenyOnAccept:
 
     def test_other_pending_become_denied_only_when_capacity_full(self):
         """h3 must be denied only AFTER all slots (max_p=1) are filled — i.e., after h2 is accepted."""
-        from rest_framework.test import APIClient
         provider, u2, u3, svc, h2, h3 = self._setup()  # max_p=1
-        client = APIClient()
-        client.force_authenticate(user=provider)
-
-        resp = client.post(f'/api/handshakes/{h2.id}/accept/')
-        assert resp.status_code == 200
+        _accept_via_approve_flow(h2)
 
         h3.refresh_from_db()
         assert h3.status == 'denied', f"Expected denied when capacity full, got {h3.status}"
 
     def test_pending_not_denied_while_slots_remain(self):
         """For a max_p=2 service, accepting the first should NOT deny the second pending."""
-        from api.utils import provision_timebank
-        from rest_framework.test import APIClient
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
         u3 = UserFactory(timebank_balance=Decimal('5'))
@@ -228,11 +246,8 @@ class TestAutoDenyOnAccept:
                                status='pending', provisioned_hours=Decimal('1'))
         h3 = HandshakeFactory(service=svc, requester=u3,
                                status='pending', provisioned_hours=Decimal('1'))
-        provision_timebank(h2)
 
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        client.post(f'/api/handshakes/{h2.id}/accept/')
+        _accept_via_approve_flow(h2)
 
         h3.refresh_from_db()
         assert h3.status == 'pending', (
@@ -241,30 +256,21 @@ class TestAutoDenyOnAccept:
 
     def test_denied_users_receive_notification_when_capacity_full(self):
         """Denied notification must be sent when the last slot is filled."""
-        from rest_framework.test import APIClient
         provider, u2, u3, svc, h2, h3 = self._setup()  # max_p=1
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        client.post(f'/api/handshakes/{h2.id}/accept/')
+        _accept_via_approve_flow(h2)
 
         notifs = Notification.objects.filter(user=u3, type='handshake_denied')
         assert notifs.exists(), "Denied user should receive a notification when capacity is full"
 
     def test_accepted_handshake_stays_accepted(self):
-        from rest_framework.test import APIClient
         provider, u2, u3, svc, h2, h3 = self._setup()
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        client.post(f'/api/handshakes/{h2.id}/accept/')
+        _accept_via_approve_flow(h2)
 
         h2.refresh_from_db()
         assert h2.status == 'accepted'
 
     def test_recurrent_does_not_auto_deny_others(self):
         """Recurrent services accept independently — no auto-deny ever."""
-        from api.utils import provision_timebank
-        from rest_framework.test import APIClient
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
         u3 = UserFactory(timebank_balance=Decimal('5'))
@@ -276,12 +282,8 @@ class TestAutoDenyOnAccept:
                                status='pending', provisioned_hours=Decimal('1'))
         h3 = HandshakeFactory(service=svc, requester=u3,
                                status='pending', provisioned_hours=Decimal('1'))
-        provision_timebank(h2)
 
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        resp = client.post(f'/api/handshakes/{h2.id}/accept/')
-        assert resp.status_code == 200
+        _accept_via_approve_flow(h2)
 
         h3.refresh_from_db()
         assert h3.status == 'pending', (
@@ -295,14 +297,7 @@ class TestAutoDenyOnAccept:
 class TestAgreedStatusTransitions:
 
     def _accept_handshake(self, provider, handshake):
-        from api.utils import provision_timebank
-        from rest_framework.test import APIClient
-        provision_timebank(handshake)
-        client = APIClient()
-        client.force_authenticate(user=provider)
-        resp = client.post(f'/api/handshakes/{handshake.id}/accept/')
-        assert resp.status_code == 200, resp.data
-        return resp
+        _accept_via_approve_flow(handshake)
 
     def test_one_time_service_becomes_agreed_when_full(self):
         provider = UserFactory(timebank_balance=Decimal('20'))
@@ -324,8 +319,6 @@ class TestAgreedStatusTransitions:
         Only when the last slot is filled should Agreed be set and remaining
         pending handshakes (if any) be denied.
         """
-        from api.utils import provision_timebank
-
         provider = UserFactory(timebank_balance=Decimal('20'))
         u2 = UserFactory(timebank_balance=Decimal('5'))
         u3 = UserFactory(timebank_balance=Decimal('5'))
@@ -346,7 +339,6 @@ class TestAgreedStatusTransitions:
         assert h3.status == 'pending', "Second pending should NOT be denied yet"
 
         # Accept second — 2/2 filled, service becomes Agreed
-        provision_timebank(h3)
         self._accept_handshake(provider, h3)
         svc.refresh_from_db()
         assert svc.status == 'Agreed', "Should be Agreed after all slots filled"
@@ -426,64 +418,65 @@ class TestAgreedStatusTransitions:
 
 # ── 6. participant_count serializer field ─────────────────────────────────────
 
-class TestParticipantCountSerializer(TestCase):
+def _serialize_participant_count(service):
+    """Serialize a service and return participant_count."""
+    factory = APIRequestFactory()
+    request = factory.get('/')
+    serializer = ServiceSerializer(service, context={'request': request})
+    return serializer.data['participant_count']
 
-    def _serialize(self, service):
-        """Serialize a service and return participant_count."""
-        factory = APIRequestFactory()
-        request = factory.get('/')
-        serializer = ServiceSerializer(service, context={'request': request})
-        return serializer.data['participant_count']
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestParticipantCountSerializer:
 
     def test_zero_when_no_handshakes(self):
         svc = _make_service(UserFactory(), 'One-Time')
-        self.assertEqual(self._serialize(svc), 0)
+        assert _serialize_participant_count(svc) == 0
 
     def test_pending_not_counted_one_time(self):
         svc = _make_service(UserFactory(), 'One-Time')
         _pending_handshake(svc, UserFactory())
-        self.assertEqual(self._serialize(svc), 0)
+        assert _serialize_participant_count(svc) == 0
 
     def test_accepted_counted_one_time(self):
         svc = _make_service(UserFactory(), 'One-Time', max_p=2)
         _accepted_handshake(svc, UserFactory())
-        self.assertEqual(self._serialize(svc), 1)
+        assert _serialize_participant_count(svc) == 1
 
     def test_completed_counted_one_time(self):
         svc = _make_service(UserFactory(), 'One-Time')
         HandshakeFactory(service=svc, requester=UserFactory(),
                          status='completed', provisioned_hours=svc.duration)
-        self.assertEqual(self._serialize(svc), 1)
+        assert _serialize_participant_count(svc) == 1
 
     def test_pending_not_counted_recurrent(self):
         svc = _make_service(UserFactory(), 'Recurrent')
         _pending_handshake(svc, UserFactory())
-        self.assertEqual(self._serialize(svc), 0)
+        assert _serialize_participant_count(svc) == 0
 
     def test_completed_not_counted_recurrent(self):
         svc = _make_service(UserFactory(), 'Recurrent')
         HandshakeFactory(service=svc, requester=UserFactory(),
                          status='completed', provisioned_hours=svc.duration)
-        self.assertEqual(self._serialize(svc), 0)
+        assert _serialize_participant_count(svc) == 0
 
     def test_accepted_counted_recurrent(self):
         svc = _make_service(UserFactory(), 'Recurrent', max_p=3)
         _accepted_handshake(svc, UserFactory())
         _accepted_handshake(svc, UserFactory())
-        self.assertEqual(self._serialize(svc), 2)
+        assert _serialize_participant_count(svc) == 2
 
     def test_mixed_statuses_correct_count(self):
         """Only capacity-consuming statuses should be counted."""
         svc = _make_service(UserFactory(), 'One-Time', max_p=5)
-        owner = svc.user
-        for status in ('pending', 'denied', 'cancelled'):
+        for status_value in ('pending', 'denied', 'cancelled'):
             HandshakeFactory(service=svc, requester=UserFactory(timebank_balance=Decimal('5')),
-                             status=status, provisioned_hours=svc.duration)
-        for status in ('accepted', 'completed'):
+                             status=status_value, provisioned_hours=svc.duration)
+        for status_value in ('accepted', 'completed'):
             HandshakeFactory(service=svc, requester=UserFactory(timebank_balance=Decimal('5')),
-                             status=status, provisioned_hours=svc.duration)
-        # Only accepted + completed should count → 2
-        self.assertEqual(self._serialize(svc), 2)
+                             status=status_value, provisioned_hours=svc.duration)
+        assert _serialize_participant_count(svc) == 2
 
     def test_uses_prefetched_capacity_handshakes(self):
         """When capacity_handshakes is prefetched, get_participant_count must
@@ -503,13 +496,8 @@ class TestParticipantCountSerializer(TestCase):
             )
         ).get(pk=svc.pk)
 
-        # Verify the prefetch path is taken and correct count is returned
         assert hasattr(svc_prefetched, 'capacity_handshakes'), (
             "Prefetch should attach capacity_handshakes attribute"
         )
-        count = svc_prefetched.capacity_handshakes
-        # Call get_participant_count directly to isolate the query count
-        from api.serializers import ServiceSerializer
         serializer = ServiceSerializer()
-        result = serializer.get_participant_count(svc_prefetched)
-        self.assertEqual(result, 2)
+        assert serializer.get_participant_count(svc_prefetched) == 2

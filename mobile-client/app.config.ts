@@ -43,12 +43,25 @@ const rootEnv = readRootEnv();
 const mobileConfig = baseConfig.expo;
 
 const apiUrl =
-  process.env.EXPO_PUBLIC_API_URL ||
-  rootEnv.EXPO_PUBLIC_API_URL ||
-  "https://apiary.selmangunes.com/api";
+  process.env.EXPO_PUBLIC_API_URL || rootEnv.EXPO_PUBLIC_API_URL;
 
+if (!apiUrl) {
+  throw new Error(
+    "EXPO_PUBLIC_API_URL is not set. Run `make env` at the repo root, or " +
+      "use `npm run ios` / `npm run android` which set it inline."
+  );
+}
+
+// Read process.env first so the token is embedded in the JS bundle for
+// every common build path:
+//   - EAS Build:  set with `eas secret:create --name EXPO_PUBLIC_MAPBOX_TOKEN ...`
+//   - local APK:  `EXPO_PUBLIC_MAPBOX_TOKEN=pk.xxx npm run build:android:local`
+//                 (or the gradle invocation directly, with the same prefix)
+//   - expo run:*: the npm scripts in package.json already export inline env.
+// Falling back to the repo-root .env keeps the existing `make env` flow
+// working untouched.
 const mapboxToken =
-  rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || rootEnv.VITE_MAPBOX_TOKEN || "";
+  process.env.EXPO_PUBLIC_MAPBOX_TOKEN || rootEnv.EXPO_PUBLIC_MAPBOX_TOKEN || "";
 
 module.exports = {
   ...mobileConfig,

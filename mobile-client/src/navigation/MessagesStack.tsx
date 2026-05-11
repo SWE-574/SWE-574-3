@@ -13,8 +13,9 @@ export type MessagesStackParamList = {
   MessagesList: undefined;
   Chat: {
     handshakeId: string;
+    notificationId?: string;
     serviceId?: string;
-    otherUserName: string;
+    otherUserName?: string;
     serviceTitle?: string;
     otherUserId?: string;
     otherUserAvatarUrl?: string;
@@ -38,7 +39,7 @@ export type MessagesStackParamList = {
     roomId: string;
     roomTitle?: string;
   };
-  UserPublicProfile: {
+  PublicProfile: {
     userId: string;
   };
   ServiceDetail: { id: string };
@@ -62,7 +63,7 @@ export default function MessagesStack() {
       <Stack.Screen
         name="MessagesList"
         component={MessagesScreen}
-        options={{ title: "Messages" }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Chat"
@@ -85,7 +86,7 @@ export default function MessagesStack() {
         options={{ headerShown: false }}
       />
       <Stack.Screen
-        name="UserPublicProfile"
+        name="PublicProfile"
         component={PublicProfileScreen}
         options={{ headerShown: false }}
       />

@@ -10,7 +10,8 @@ from api.cache_utils import (
     cache_service_list, get_cached_service_list, invalidate_service_lists,
     cache_service_detail, get_cached_service_detail, invalidate_service_detail,
     cache_hot_services, get_cached_hot_services, invalidate_hot_services,
-    invalidate_on_service_change, invalidate_on_user_change
+    invalidate_on_service_change, invalidate_on_user_change,
+    register_calendar_cache_key,
 )
 from api.tests.helpers.factories import UserFactory, ServiceFactory
 
@@ -165,3 +166,82 @@ class TestInvalidateOnChange:
         user.id = 'user-1'
         invalidate_on_user_change(user)
         mock_invalidate.assert_called_once_with(str(user.id))
+
+
+@pytest.mark.unit
+class TestRegisterCalendarCacheKey:
+    """Cover the read-modify-write retry loop in register_calendar_cache_key.
+
+    Regression: the original implementation had an unconditional `return`
+    inside the `for _ in range(3)` loop, so the retry never kicked in and
+    a racing writer could clobber the tracking set with a single-key set.
+
+    Each test mints its own user_id via uuid because pytest-xdist runs
+    these in parallel against a shared Redis on CI — a literal 'user-1'
+    would let workers trample each other's tracking sets, and a setup-
+    level `cache.clear()` would wreck other workers' in-flight state.
+    """
+
+    @pytest.fixture(autouse=True)
+    def clear_django_cache(self):
+        # Override the conftest-level autouse fixture for this class only.
+        # CI runs pytest-xdist against a shared Redis DB, where a parallel
+        # worker's `cache.clear()` would nuke this class's tracking set
+        # mid-read-modify-write and surface as a flaky empty-set assertion.
+        # uuid-prefixed user_ids already isolate this class's keys from
+        # other workers, so skipping the global clear is safe.
+        yield
+
+    def test_register_two_keys_for_same_user_keeps_both(self):
+        import uuid
+        from django.core.cache import cache as django_cache
+        user_id = f'cache-test-{uuid.uuid4().hex[:8]}'
+        register_calendar_cache_key(user_id, 'cal_key_a')
+        register_calendar_cache_key(user_id, 'cal_key_b')
+        tracked = django_cache.get(f'user_calendar_keys:{user_id}', set())
+        assert tracked == {'cal_key_a', 'cal_key_b'}
+
+    def test_register_idempotent_for_same_key(self):
+        import uuid
+        from django.core.cache import cache as django_cache
+        user_id = f'cache-test-{uuid.uuid4().hex[:8]}'
+        register_calendar_cache_key(user_id, 'cal_key_a')
+        register_calendar_cache_key(user_id, 'cal_key_a')
+        tracked = django_cache.get(f'user_calendar_keys:{user_id}', set())
+        assert tracked == {'cal_key_a'}
+
+    def test_register_recovers_when_first_set_was_clobbered(self, monkeypatch):
+        """If a racing caller landed between our get and set, the verify-then-
+        retry loop must re-read and merge instead of leaving the new key out."""
+        import uuid
+        from django.core import cache as cache_mod
+        cache = cache_mod.cache
+        user_id = f'cache-test-{uuid.uuid4().hex[:8]}'
+
+        register_calendar_cache_key(user_id, 'a')
+
+        original_set = cache.set
+        call_count = {'n': 0}
+        tracking_key = f'user_calendar_keys:{user_id}'
+
+        def racy_set(key, value, timeout=None, **kwargs):
+            # On the first set for our user's tracking key, simulate a racing
+            # writer that overwrote the value AFTER we read but BEFORE we
+            # write — i.e. our write lands first, then the racer's write
+            # immediately clobbers it. The retry must detect that and merge.
+            if key == tracking_key and call_count['n'] == 0:
+                call_count['n'] += 1
+                result = original_set(key, value, timeout=timeout, **kwargs)
+                # Simulate the racing clobber:
+                original_set(key, {'racer_only'}, timeout=timeout, **kwargs)
+                return result
+            return original_set(key, value, timeout=timeout, **kwargs)
+
+        monkeypatch.setattr(cache, 'set', racy_set)
+
+        register_calendar_cache_key(user_id, 'b')
+
+        tracked = cache.get(tracking_key, set())
+        assert 'b' in tracked, (
+            'After a racing clobber, the retry loop must re-add our key'
+        )

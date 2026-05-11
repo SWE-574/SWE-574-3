@@ -6,14 +6,40 @@ allowing users to find services by distance, semantic tags, and text.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime, time, timezone as dt_timezone
 from typing import Any
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
 from django.db.models import (
     Q, QuerySet, Case, When, Value, FloatField, Sum, Exists, OuterRef,
-    Subquery,
+    Subquery, F,
 )
+
+
+class InvalidSearchParam(ValueError):
+    """Raised when a query parameter is malformed (e.g. unparseable date).
+
+    Caught by ServiceViewSet.get_queryset and turned into a 400 with the
+    field name + reason, instead of silently ignoring the param (#285).
+    """
+
+    def __init__(self, field: str, message: str):
+        super().__init__(message)
+        self.field = field
+        self.message = message
+
+
+# Search ordering weights (FR-17g / FR-SEA-01 / #306, #324).
+# Title matches outrank tag matches outrank description-only matches.
+# Social proximity is gated on FR-DIS-05 (social graph) -- placeholder until then.
+TITLE_WEIGHT = 1.0
+TAG_WEIGHT = 0.8
+OWNER_WEIGHT = 0.6
+LOCATION_WEIGHT = 0.5
+DESC_WEIGHT = 0.4
+MIN_SEARCH_LENGTH = 2
+SOCIAL_PROXIMITY_WEIGHT = 0.0  # TODO: wire when social graph lands (FR-DIS-05)
 
 
 class SearchStrategy(ABC):
@@ -36,51 +62,114 @@ class SearchStrategy(ABC):
 
 class LocationStrategy(SearchStrategy):
     """
-    Filter services by distance from user location using PostGIS.
+    Apply user location to the queryset.
+
+    Two modes:
+
+    1. Signal-only (lat + lng, no `distance` param). Annotate every row with
+       its distance from the viewer for downstream sorting / proximity_factor
+       weighting in composite_score. NO rows are filtered out -- the smooth
+       proximity decay does the ranking work.
+    2. Hard radius cutoff (lat + lng + `distance`). In-person rows beyond the
+       radius are excluded; online services (location IS NULL) stay visible
+       regardless of slider position.
+
+    The signal-only mode is the default for the YouTube-style Browse layout:
+    enabling location should rank-by-closeness without hiding far cards.
+    The radius cutoff is opt-in via the More-filters slider.
 
     Parameters:
         - lat: User's latitude
         - lng: User's longitude
-        - distance: Maximum distance in kilometers (default: 10)
+        - distance: Optional. Maximum distance in kilometers; when omitted,
+          the queryset is annotated only.
     """
 
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
         lat = params.get('lat')
         lng = params.get('lng')
-        distance_km = params.get('distance', 10)
 
-        # Only apply if both lat and lng are provided
         if lat is None or lng is None:
             return queryset
 
         try:
             lat = float(lat)
             lng = float(lng)
-            distance_km = float(distance_km)
         except (ValueError, TypeError):
             return queryset
 
         # Create user location point (lng, lat order for PostGIS)
         user_location = Point(lng, lat, srid=4326)
 
-        # Filter by distance and annotate with calculated distance
-        # Only filter services that have a location set
-        queryset = queryset.filter(
-            location__isnull=False,
-            location__distance_lte=(user_location, D(km=distance_km))
-        ).annotate(
-            distance=Distance('location', user_location)
-        ).order_by('distance')
+        distance_param = params.get('distance')
+        distance_km: float | None = None
+        if distance_param is not None and distance_param != '':
+            try:
+                distance_km = float(distance_param)
+            except (ValueError, TypeError):
+                distance_km = None
 
-        return queryset
+        if distance_km is not None:
+            # Hard radius cutoff. In-person rows beyond `distance_km` drop;
+            # Online services (location IS NULL) stay visible -- otherwise a
+            # viewer with location enabled would lose every Online service the
+            # moment they narrowed the radius.
+            queryset = queryset.filter(
+                Q(location__isnull=True)
+                | Q(location__distance_lte=(user_location, D(km=distance_km)))
+            )
+
+        # Online services (location IS NULL) produce a NULL distance. PostgreSQL
+        # sorts NULLs FIRST under ASC by default, which used to put every Online
+        # row above every in-person row. Force NULLs to the end so the location
+        # filter actually surfaces the closest in-person services first.
+        return queryset.annotate(
+            distance=Distance('location', user_location)
+        ).order_by(F('distance').asc(nulls_last=True))
+
+
+def expand_tag_qids(tag_ids):
+    """Expand a set of Wikidata QIDs into the union of self + parents +
+    siblings, walking the local Tag table only (no Wikidata round-trips).
+
+    The expansion mirrors how viewers think about chip filters: picking
+    "Painting" surfaces Painting plus its peers under "Art" (Sculpture,
+    Drawing, ...) and the parent itself. Children are reached via the
+    `tags__parent_qid__in` clause at the call site, so this helper does
+    not enumerate descendants explicitly.
+
+    Returns a set of QID strings. Empty set if input is empty.
+    """
+    from .models import Tag
+
+    qids = {qid for qid in tag_ids if qid}
+    if not qids:
+        return set()
+
+    parents = set(
+        Tag.objects.filter(id__in=qids)
+        .exclude(parent_qid__isnull=True)
+        .values_list('parent_qid', flat=True)
+    )
+    if parents:
+        siblings = set(
+            Tag.objects.filter(parent_qid__in=parents).values_list('id', flat=True)
+        )
+    else:
+        siblings = set()
+    return qids | parents | siblings
 
 
 class TagStrategy(SearchStrategy):
     """
     Filter services by semantic tags (Wikidata IDs).
 
-    Supports hierarchical matching: a search for a parent tag QID will also
-    find services tagged with child tags (via parent_qid).
+    Hierarchical matching has two directions:
+      - parent -> children: services tagged with anything whose parent_qid
+        equals the requested qid.
+      - sibling expansion: when the requested qid has a parent in the local
+        Tag table, services tagged with peers under the same parent are
+        included too. Picking "Painting" surfaces Sculpture / Drawing.
 
     Parameters:
         - tags: List of tag IDs to filter by
@@ -97,9 +186,13 @@ class TagStrategy(SearchStrategy):
             tag_ids = list(tag_ids) + [single_tag]
 
         if tag_ids:
-            # Direct match OR parent_qid match (hierarchical traversal)
+            # Sibling expansion happens at filter time so the chip strip's
+            # "Painting" pick widens out to "Sculpture" / "Drawing" without
+            # any client-side change. Children are still reached via the
+            # parent_qid clause below.
+            expanded = expand_tag_qids(tag_ids)
             queryset = queryset.filter(
-                Q(tags__id__in=tag_ids) | Q(tags__parent_qid__in=tag_ids)
+                Q(tags__id__in=expanded) | Q(tags__parent_qid__in=expanded)
             ).distinct()
 
         # Entity type filtering
@@ -127,34 +220,186 @@ class TextStrategy(SearchStrategy):
             return queryset
 
         search = search.strip()
-        if not search:
+        if not search or len(search) < MIN_SEARCH_LENGTH:
             return queryset
 
-        # Search in title, description, and tag names
-        queryset = queryset.filter(
-            Q(title__icontains=search) |
-            Q(description__icontains=search) |
-            Q(tags__name__icontains=search)
-        ).distinct()
+        # Weighted scoring: title (1.0) > tag (0.8) > owner name (0.6) >
+        # location_area (0.5) > description (0.4). Tie-break by hot_score
+        # so Phase 2 still matters on equal-quality matches.
+        # FR-17g / FR-SEA-01 / #306, #324.
+        queryset = queryset.annotate(
+            _match_score=(
+                Case(
+                    When(title__icontains=search, then=Value(TITLE_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(tags__name__icontains=search, then=Value(TAG_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(
+                        Q(user__first_name__icontains=search)
+                        | Q(user__last_name__icontains=search),
+                        then=Value(OWNER_WEIGHT),
+                    ),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(location_area__icontains=search, then=Value(LOCATION_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+                + Case(
+                    When(description__icontains=search, then=Value(DESC_WEIGHT)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
+            )
+        ).filter(_match_score__gt=0).order_by('-_match_score', '-hot_score').distinct()
 
         return queryset
 
 
 class TypeStrategy(SearchStrategy):
     """
-    Filter services by type (Offer or Need).
+    Filter services by type (Offer, Need, or Event).
 
     Parameters:
-        - type: 'Offer' or 'Need'
+        - type:  'Offer' | 'Need' | 'Event' (single value, legacy)
+        - types: list of valid types, e.g. ['Offer', 'Need'] — used by Browse
+                 when multiple type chips are active.
+    """
+
+    VALID = {'Offer', 'Need', 'Event'}
+
+    def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        types_list = [t for t in (params.get('types') or []) if t in self.VALID]
+        if types_list:
+            return queryset.filter(type__in=types_list)
+
+        service_type = params.get('type')
+        if service_type and service_type in self.VALID:
+            queryset = queryset.filter(type=service_type)
+        return queryset
+
+
+class LocationTypeStrategy(SearchStrategy):
+    """
+    Filter services by location_type (Online / In-Person).
+
+    Parameters:
+        - location_types: list of values to keep. When empty or both values
+          are present, the filter is a no-op (equivalent to "all").
+    """
+
+    VALID = {'Online', 'In-Person'}
+
+    def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        values = [v for v in (params.get('location_types') or []) if v in self.VALID]
+        if not values or set(values) == self.VALID:
+            return queryset
+        return queryset.filter(location_type__in=values)
+
+
+class ScheduleFilterStrategy(SearchStrategy):
+    """
+    Filter services by schedule_type and/or weekend matching.
+
+    Parameters:
+        - schedule_type: 'One-Time' | 'Recurrent' (optional)
+        - weekend: bool — when true, restrict to services whose
+          schedule_details mention saturday / sunday / weekend.
+    """
+
+    VALID = {'One-Time', 'Recurrent'}
+
+    def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
+        schedule_type = params.get('schedule_type')
+        if schedule_type in self.VALID:
+            queryset = queryset.filter(schedule_type=schedule_type)
+        if params.get('weekend'):
+            queryset = queryset.filter(
+                schedule_details__iregex=r'(saturday|sunday|weekend)',
+            )
+        return queryset
+
+
+class DateRangeStrategy(SearchStrategy):
+    """
+    Filter Events by scheduled_time falling between date_from and date_to.
+
+    Both bounds are optional ISO-8601 dates (YYYY-MM-DD). The filter only
+    applies when the queryset is already scoped to type=Event — non-event
+    services have no meaningful scheduled_time, so we silently skip rather
+    than match-or-miss against a NULL column.
+
+    Parameters:
+        - type: must be 'Event' for the filter to fire
+        - date_from: inclusive lower bound (ISO-8601 date)
+        - date_to:   inclusive upper bound (ISO-8601 date)
+
+    Raises:
+        InvalidSearchParam — if either date is non-empty and unparseable.
+        ServiceViewSet should turn this into a 400 with the field name.
     """
 
     def apply(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:
-        service_type = params.get('type')
+        if params.get('type') != 'Event':
+            return queryset
 
-        if service_type and service_type in ['Offer', 'Need']:
-            queryset = queryset.filter(type=service_type)
+        date_from = self._parse(params.get('date_from'), 'date_from', end_of_day=False)
+        date_to = self._parse(params.get('date_to'), 'date_to', end_of_day=True)
+
+        if date_from is None and date_to is None:
+            return queryset
+
+        # When the filter is active, exclude rows without a scheduled_time
+        # entirely — they have no meaningful date.
+        queryset = queryset.filter(scheduled_time__isnull=False)
+
+        if date_from is not None:
+            queryset = queryset.filter(scheduled_time__gte=date_from)
+        if date_to is not None:
+            queryset = queryset.filter(scheduled_time__lte=date_to)
 
         return queryset
+
+    @staticmethod
+    def _parse(raw, field_name: str, end_of_day: bool) -> datetime | None:
+        if raw in (None, ''):
+            return None
+        if isinstance(raw, datetime):
+            return raw
+        text = str(raw).strip()
+        if not text:
+            return None
+
+        # Accept either bare date (YYYY-MM-DD) or full ISO datetime.
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            try:
+                parsed = datetime.strptime(text, '%Y-%m-%d')
+            except ValueError as exc:
+                raise InvalidSearchParam(
+                    field_name,
+                    f"Invalid date format for '{field_name}'. Expected ISO-8601 (YYYY-MM-DD).",
+                ) from exc
+
+        # Bare-date inputs default to midnight; date_to should cover the
+        # full target day so a user picking "today" sees today's events.
+        if parsed.time() == time(0, 0) and end_of_day:
+            parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999_999)
+
+        # Make naive datetimes UTC-aware so we can safely compare against
+        # Service.scheduled_time which is stored as timezone-aware.
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_timezone.utc)
+        return parsed
 
 
 class SearchEngine:
@@ -176,10 +421,13 @@ class SearchEngine:
     def __init__(self):
         """Initialize with default strategy order"""
         self.strategies: list[SearchStrategy] = [
-            TypeStrategy(),      # Filter by type first (most selective)
-            TagStrategy(),       # Then by tags
-            TextStrategy(),      # Then by text search
-            LocationStrategy(),  # Location last (adds ordering by distance)
+            TypeStrategy(),             # Filter by type first (most selective)
+            LocationTypeStrategy(),     # Online vs In-Person filter
+            ScheduleFilterStrategy(),   # schedule_type + weekend
+            DateRangeStrategy(),        # Event-only: scheduled_time window
+            TagStrategy(),              # Then by tags
+            TextStrategy(),             # Then by text search
+            LocationStrategy(),         # Location last (adds ordering by distance)
         ]
 
     def search(self, queryset: QuerySet, params: dict[str, Any]) -> QuerySet:

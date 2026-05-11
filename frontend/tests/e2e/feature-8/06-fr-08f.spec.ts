@@ -2,10 +2,10 @@ import { test, expect } from '@playwright/test'
 
 import {
   createPendingOfferExchange,
+  expectBalanceToBe,
   expectToast,
   fetchHandshake,
   findHandshakeId,
-  getCurrentBalance,
   initiateOnlineHandshakeViaApi,
   openConversationForService,
   pickUsersWithBalanceAtLeast,
@@ -63,6 +63,5 @@ test('FR-08f: declining a pending exchange cancels it and refunds reserved hours
   const handshake = await fetchHandshake(page, handshakeId)
   expect(handshake.status).toBe('cancelled')
 
-  const refundedBalance = await getCurrentBalance(page)
-  expect(refundedBalance).toBe(startingBalance)
+  await expectBalanceToBe(page, startingBalance)
 })
