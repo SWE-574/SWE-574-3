@@ -4,6 +4,7 @@
  */
 
 import { apiRequest } from './client';
+import { normalizeRuntimeUrl } from '../constants/env';
 import type { PaginatedResponse } from './types';
 
 export interface Handshake {
@@ -50,12 +51,30 @@ export interface HandshakesListParams {
   status?: string;
 }
 
-export function listHandshakes(params?: HandshakesListParams): Promise<PaginatedResponse<Handshake>> {
-  return apiRequest<PaginatedResponse<Handshake>>('/handshakes/', { params: params as Record<string, string | number | undefined> });
+/** Coerce relative `/media/...` avatar URLs into absolute, app-loadable ones. */
+function normalizeHandshake(h: Handshake): Handshake {
+  if (!h.counterpart) return h;
+  return {
+    ...h,
+    counterpart: {
+      ...h.counterpart,
+      avatar_url: normalizeRuntimeUrl(h.counterpart.avatar_url) ?? null,
+    },
+  };
 }
 
-export function getHandshake(id: string): Promise<Handshake> {
-  return apiRequest<Handshake>(`/handshakes/${id}/`);
+export async function listHandshakes(
+  params?: HandshakesListParams,
+): Promise<PaginatedResponse<Handshake>> {
+  const res = await apiRequest<PaginatedResponse<Handshake>>('/handshakes/', {
+    params: params as Record<string, string | number | undefined>,
+  });
+  return { ...res, results: (res.results ?? []).map(normalizeHandshake) };
+}
+
+export async function getHandshake(id: string): Promise<Handshake> {
+  const res = await apiRequest<Handshake>(`/handshakes/${id}/`);
+  return normalizeHandshake(res);
 }
 
 export function createHandshake(body: HandshakeRequest): Promise<Handshake> {

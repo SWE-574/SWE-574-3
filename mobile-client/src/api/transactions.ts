@@ -4,6 +4,7 @@
  */
 
 import { apiRequest } from "./client";
+import { normalizeRuntimeUrl } from "../constants/env";
 import type { PaginatedResponse } from "./types";
 
 export type TransactionDirection = "all" | "credit" | "debit" | "reservation";
@@ -101,7 +102,9 @@ function normalizeTransaction(raw: Partial<Transaction>): Transaction {
           ),
           email: String((raw.counterpart as TransactionCounterpart).email ?? ""),
           avatar_url:
-            (raw.counterpart as TransactionCounterpart).avatar_url ?? null,
+            normalizeRuntimeUrl(
+              (raw.counterpart as TransactionCounterpart).avatar_url,
+            ) ?? null,
         }
       : null,
     amount: toNumber(raw.amount),

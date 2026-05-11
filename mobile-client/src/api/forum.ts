@@ -7,6 +7,7 @@
  */
 
 import { apiRequest } from './client';
+import { normalizeRuntimeUrl } from '../constants/env';
 import type { PaginatedResponse } from './types';
 
 export interface ForumCategory {
@@ -92,6 +93,22 @@ export interface ForumActivity {
   open_topic_items: ForumTopic[];
 }
 
+/** Rewrite the author's avatar from a relative `/media/...` path into an
+ * absolute URL the mobile client can actually load. */
+function normalizeTopic(topic: ForumTopic): ForumTopic {
+  return {
+    ...topic,
+    author_avatar_url: normalizeRuntimeUrl(topic.author_avatar_url) ?? null,
+  };
+}
+
+function normalizePost(post: ForumPost): ForumPost {
+  return {
+    ...post,
+    author_avatar_url: normalizeRuntimeUrl(post.author_avatar_url) ?? null,
+  };
+}
+
 export function listCategories(): Promise<ForumCategory[]> {
   return apiRequest<ForumCategory[]>('/forum/categories/');
 }
@@ -114,64 +131,84 @@ export function deleteCategory(slug: string): Promise<void> {
 
 export type TopicSortOption = 'newest' | 'most_active';
 
-export function listTopics(params?: {
+export async function listTopics(params?: {
   page?: number;
   page_size?: number;
   category?: string;
   sort?: TopicSortOption;
 }): Promise<PaginatedResponse<ForumTopic>> {
-  return apiRequest<PaginatedResponse<ForumTopic>>(
+  const res = await apiRequest<PaginatedResponse<ForumTopic>>(
     '/forum/topics/',
-    { params: params as Record<string, string | number | undefined> }
+    { params: params as Record<string, string | number | undefined> },
   );
+  return { ...res, results: (res.results ?? []).map(normalizeTopic) };
 }
 
-export function getMyActivity(): Promise<ForumActivity> {
-  return apiRequest<ForumActivity>('/forum/my-activity/');
+export async function getMyActivity(): Promise<ForumActivity> {
+  const res = await apiRequest<ForumActivity>('/forum/my-activity/');
+  return {
+    ...res,
+    open_topic_items: (res.open_topic_items ?? []).map(normalizeTopic),
+  };
 }
 
-export function createTopic(body: TopicRequest): Promise<ForumTopic> {
-  return apiRequest<ForumTopic>('/forum/topics/', { method: 'POST', body });
+export async function createTopic(body: TopicRequest): Promise<ForumTopic> {
+  const res = await apiRequest<ForumTopic>('/forum/topics/', { method: 'POST', body });
+  return normalizeTopic(res);
 }
 
-export function getTopic(id: string): Promise<ForumTopic> {
-  return apiRequest<ForumTopic>(`/forum/topics/${id}/`);
+export async function getTopic(id: string): Promise<ForumTopic> {
+  const res = await apiRequest<ForumTopic>(`/forum/topics/${id}/`);
+  return normalizeTopic(res);
 }
 
-export function patchTopic(id: string, body: Partial<TopicRequest>): Promise<ForumTopic> {
-  return apiRequest<ForumTopic>(`/forum/topics/${id}/`, { method: 'PATCH', body });
+export async function patchTopic(id: string, body: Partial<TopicRequest>): Promise<ForumTopic> {
+  const res = await apiRequest<ForumTopic>(`/forum/topics/${id}/`, { method: 'PATCH', body });
+  return normalizeTopic(res);
 }
 
 export function deleteTopic(id: string): Promise<void> {
   return apiRequest<void>(`/forum/topics/${id}/`, { method: 'DELETE' });
 }
 
-export function lockTopic(id: string, body?: object): Promise<ForumTopic> {
-  return apiRequest<ForumTopic>(`/forum/topics/${id}/lock/`, { method: 'POST', body: body ?? {} });
+export async function lockTopic(id: string, body?: object): Promise<ForumTopic> {
+  const res = await apiRequest<ForumTopic>(`/forum/topics/${id}/lock/`, { method: 'POST', body: body ?? {} });
+  return normalizeTopic(res);
 }
 
-export function pinTopic(id: string, body?: object): Promise<ForumTopic> {
-  return apiRequest<ForumTopic>(`/forum/topics/${id}/pin/`, { method: 'POST', body: body ?? {} });
+export async function pinTopic(id: string, body?: object): Promise<ForumTopic> {
+  const res = await apiRequest<ForumTopic>(`/forum/topics/${id}/pin/`, { method: 'POST', body: body ?? {} });
+  return normalizeTopic(res);
 }
 
-export function listTopicPosts(topicId: string, params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<ForumPost>> {
-  return apiRequest<PaginatedResponse<ForumPost>>(`/forum/topics/${topicId}/posts/`, { params: params as Record<string, string | number | undefined> });
+export async function listTopicPosts(
+  topicId: string,
+  params?: { page?: number; page_size?: number },
+): Promise<PaginatedResponse<ForumPost>> {
+  const res = await apiRequest<PaginatedResponse<ForumPost>>(
+    `/forum/topics/${topicId}/posts/`,
+    { params: params as Record<string, string | number | undefined> },
+  );
+  return { ...res, results: (res.results ?? []).map(normalizePost) };
 }
 
-export function createTopicPost(topicId: string, body: PostRequest): Promise<ForumPost> {
-  return apiRequest<ForumPost>(`/forum/topics/${topicId}/posts/`, { method: 'POST', body });
+export async function createTopicPost(topicId: string, body: PostRequest): Promise<ForumPost> {
+  const res = await apiRequest<ForumPost>(`/forum/topics/${topicId}/posts/`, { method: 'POST', body });
+  return normalizePost(res);
 }
 
-export function patchPost(id: string, body: Partial<PostRequest>): Promise<ForumPost> {
-  return apiRequest<ForumPost>(`/forum/posts/${id}/`, { method: 'PATCH', body });
+export async function patchPost(id: string, body: Partial<PostRequest>): Promise<ForumPost> {
+  const res = await apiRequest<ForumPost>(`/forum/posts/${id}/`, { method: 'PATCH', body });
+  return normalizePost(res);
 }
 
 export function deletePost(id: string): Promise<void> {
   return apiRequest<void>(`/forum/posts/${id}/`, { method: 'DELETE' });
 }
 
-export function listRecentPosts(params?: { limit?: number }): Promise<ForumPost[]> {
-  return apiRequest<ForumPost[]>('/forum/posts/recent/', { params: params as Record<string, number | undefined> });
+export async function listRecentPosts(params?: { limit?: number }): Promise<ForumPost[]> {
+  const res = await apiRequest<ForumPost[]>('/forum/posts/recent/', { params: params as Record<string, number | undefined> });
+  return res.map(normalizePost);
 }
 
 export function reportTopic(id: string, body: ReportRequest): Promise<ReportResponse> {
