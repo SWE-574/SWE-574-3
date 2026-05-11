@@ -518,7 +518,7 @@ export default function ProfileScreen() {
               onPress={() => (navigation as any).navigate("Notifications")}
               style={styles.topBarIconButton}
               accessibilityRole="button"
-              accessibilityLabel="Notifications"
+              accessibilityLabel="Open notifications"
             >
               <Ionicons
                 name="notifications-outline"
@@ -584,20 +584,6 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
       ) : null}
-      <TouchableOpacity
-        testID="profile-notifications-bell"
-        accessibilityRole="button"
-        accessibilityLabel="Open notifications"
-        onPress={() => (navigation as any).navigate("Notifications")}
-        style={styles.notificationButton}
-      >
-        <Ionicons
-          name="notifications-outline"
-          size={22}
-          color={colors.GREEN}
-        />
-        <NotificationBadge count={unreadCount} />
-      </TouchableOpacity>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
