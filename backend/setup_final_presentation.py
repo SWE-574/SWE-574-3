@@ -259,7 +259,7 @@ def create_service(*, user, title, description, service_type, duration,
                    location_type, max_participants, schedule_type,
                    tags, location_area=None, location_lat=None, location_lng=None,
                    schedule_details=None, scheduled_time=None, status='Active',
-                   created_days_ago=0, requires_qr_checkin=False):
+                   created_days_ago=0, requires_qr_checkin=False, cover_url=None):
     svc = Service.objects.create(
         user=user,
         title=title,
@@ -285,7 +285,7 @@ def create_service(*, user, title, description, service_type, duration,
     ServiceMedia.objects.create(
         service=svc,
         media_type='image',
-        file_url=service_cover_url(title),
+        file_url=cover_url or service_cover_url(title),
         display_order=0,
     )
     print(f"  Service: {title}")
@@ -455,7 +455,7 @@ berk = create_user(
 
 ahmet = create_user(
     'ahmet@demo.com', 'Ahmet', 'Koç',
-    'Retired driving instructor in Beşiktaş. Happy to share practical skills with neighbours — manual transmission, parallel parking, the works.',
+    'Retired driving instructor in Beşiktaş. Happy to share practical skills with neighbours: manual transmission, parallel parking, the works.',
     balance=6, karma=38, date_joined_offset_days=1100,
     avatar_key='ahmet', location='Beşiktaş, Istanbul',
 )
@@ -476,7 +476,7 @@ kaan = create_user(
 
 yusuf = create_user(
     'yusuf@demo.com', 'Yusuf', 'Arslan',
-    'Financial and special risk underwriter at an insurance firm in Levent. Originally from İzmir — moved to Bebek three years ago and built my neighbourhood life here through The Hive. Photography on weekends, Turkish cooking when friends visit.',
+    'Three years ago I moved to Bebek from İzmir knowing nobody in the city. The Hive is how I found my neighbourhood. I work in financial risk in Levent, but my weekends here have been the real education: photography walks in Balat, tarhana Sundays in Can\'s kitchen, book circles, sunrise walks by the Bosphorus. Three years on, I know this neighbourhood by name. Happy to talk finance or share a recipe anytime.',
     balance=19,  # 3 starting + 16 earned over 3 years; transactions will net to ~14
     karma=87, date_joined_offset_days=1095,
     avatar_key='yusuf', location='Bebek, Istanbul',
@@ -485,7 +485,7 @@ yusuf.skills.set([photography_tag, cooking_tag, finance_tag])
 
 selman = create_user(
     'selman@demo.com', 'Selman', 'Demir',
-    'Software engineer by day, calculus and linear algebra tutor on weekends. Just moved to Beşiktaş from Ankara for a new job. ODTÜ Computer Engineering graduate.',
+    'New to İstanbul! Just moved to Beşiktaş from Ankara for a software job and still figuring out the neighbourhood. I help high school students with maths on weekends, happy to tutor geometry, algebra, whatever\'s giving them trouble. Also trying to learn how to cook properly for the first time in my life 🙂',
     balance=3, karma=0, date_joined_offset_days=3,
     avatar_key='selman', location='Beşiktaş, Istanbul',
     is_onboarded=False,
@@ -519,7 +519,7 @@ print("\n[6/9] Creating Yusuf's 3-year history...")
 # ------------------------------------------------------------------
 watch_party_hist = create_service(
     user=berk,
-    title='Türkiye Match Night — Watch Party at Kuruçeşme',
+    title='Türkiye Match Night: Watch Party at Kuruçeşme',
     description='Watch the Türkiye qualifier together on the outdoor screen by the Bosphorus at Kuruçeşme. Come for the match, stay for the crowd.',
     service_type='Event',
     duration='3.00',
@@ -607,7 +607,7 @@ print("  History 2: Manual Transmission (Oct 2023) — completed as learner")
 # ------------------------------------------------------------------
 balat_photo = create_service(
     user=murat_demo,
-    title='Street Photography Walk — Balat',
+    title='Street Photography Walk in Balat',
     description='A relaxed walk through Balat with a focus on composition, light, and respectful street photography. All camera types welcome.',
     service_type='Offer',
     duration='2.00',
@@ -635,7 +635,7 @@ print("  History 3: Street Photography Walk — Balat (Mar 2024) — completed a
 # ------------------------------------------------------------------
 book_circle_hist = create_service(
     user=selin_demo,
-    title='Book Circle: Hızlı ve Yavaş Düşünme — Session 5',
+    title='Book Circle: Hızlı ve Yavaş Düşünme, Session 5',
     description='We are reading Kahneman together, session by session. This week: chapters on cognitive ease and the availability heuristic. Come with notes or just curiosity.',
     service_type='Event',
     duration='2.00',
@@ -667,7 +667,7 @@ print("  History 4: Book Circle (Aug 2024) — attended")
 tarhana_offer = create_service(
     user=can_demo,
     title='Homemade Tarhana from Scratch',
-    description='A Sunday afternoon in my kitchen making fermented tarhana base together. You will leave with a jar and a recipe. No experience needed — just patience.',
+    description='A Sunday afternoon in my kitchen making fermented tarhana base together. You will leave with a jar and a recipe. No experience needed, just patience.',
     service_type='Offer',
     duration='2.00',
     location_type='In-Person',
@@ -695,7 +695,7 @@ print("  History 5: Tarhana from Scratch (Jan 2025) — completed as learner")
 aegean_offer = create_service(
     user=zeynep_demo,
     title='Plant-Based Aegean Cooking',
-    description='Olive oil, greens, legumes — the Aegean pantry. We cook four dishes in one afternoon session. No meat, no fuss, just good food.',
+    description='Olive oil, greens, legumes: the Aegean pantry. We cook four dishes in one afternoon session. No meat, no fuss, just good food.',
     service_type='Offer',
     duration='2.00',
     location_type='In-Person',
@@ -754,7 +754,7 @@ print("  History 6: Bebek Park Picnic (May 2025) — attended")
 coffee_finance = create_service(
     user=yusuf,
     title='Coffee & Finance: Smart Money Basics',
-    description='Not a financial product — just a neighbour who works in risk and is happy to spend an hour over coffee explaining accounts, funds, and how to think about the long term.',
+    description='Not a financial product, just a neighbour who works in risk and is happy to spend an hour over coffee explaining accounts, funds, and how to think about the long term.',
     service_type='Offer',
     duration='1.00',
     location_type='In-Person',
@@ -823,7 +823,7 @@ add_reputation(
 )
 add_reputation(
     hs_photo, murat_demo, yusuf, True, True, True,
-    'Yusuf already had a good eye — the walk just gave him a framework. Great student.',
+    'Yusuf already had a good eye, the walk just gave him a framework. Great student.',
 )
 add_reputation(
     hs_photo, yusuf, murat_demo, True, True, True,
@@ -835,7 +835,7 @@ add_reputation(
 )
 add_reputation(
     hs_tarhana, yusuf, can_demo, True, True, True,
-    'A Sunday afternoon in Can\'s kitchen making tarhana from scratch — exactly the kind of afternoon The Hive is for.',
+    'A Sunday afternoon in Can\'s kitchen making tarhana from scratch, exactly the kind of afternoon The Hive is for.',
 )
 add_reputation(
     hs_finance, leyla, yusuf, True, True, True,
@@ -852,15 +852,15 @@ add_reputation(
 # convenient to anchor to). These represent community recognition accumulated
 # over 3 years of participation — distributed across the timeline.
 event_rep_data = [
-    (ayse_demo,   now - timedelta(days=950),  'Punctual, thoughtful — always adds something real.'),
+    (ayse_demo,   now - timedelta(days=950),  'Punctual, thoughtful, always adds something real.'),
     (selin_demo,  now - timedelta(days=800),  'Yusuf brought warmth to every session he joined.'),
     (berk,        now - timedelta(days=700),  'Reliable neighbour. Shows up when he says he will.'),
     (emre_demo,   now - timedelta(days=600),  'Easy to organise with. Always on time, prepared.'),
     (can_demo,    now - timedelta(days=500),  'A genuine community member who makes others feel welcome.'),
     (zeynep_demo, now - timedelta(days=400),  'Reliable, thoughtful, and always present.'),
-    (levent_demo, now - timedelta(days=300),  'Warm and engaged — good to have at any gathering.'),
+    (levent_demo, now - timedelta(days=300),  'Warm and engaged, good to have at any gathering.'),
     (yasemin_demo,now - timedelta(days=200),  'Shows up, participates, and lifts the room.'),
-    (murat_demo,  now - timedelta(days=150),  'Patient and helpful — happy to learn at the right pace.'),
+    (murat_demo,  now - timedelta(days=150),  'Patient and helpful, happy to learn at the right pace.'),
     (burak_demo,  now - timedelta(days=100),  'Consistent and kind throughout the exchange.'),
     (elif_demo,   now - timedelta(days=50),   'A natural teacher who made the session feel easy.'),
 ]
@@ -882,11 +882,11 @@ print(f"  Added {len(event_rep_data)} community reputation records")
 # records for earlier provider sessions that are part of his 3-year history
 # but not narrated individually in the scenario (pre-history giving).
 giving_entries = [
-    (now - timedelta(days=900), Decimal('2.0'), 'Photography advice session — Bosphorus walk companion'),
-    (now - timedelta(days=750), Decimal('1.5'), 'Personal finance Q&A — neighbour coffee chat'),
+    (now - timedelta(days=900), Decimal('2.0'), 'Photography advice session, Bosphorus walk companion'),
+    (now - timedelta(days=750), Decimal('1.5'), 'Personal finance Q&A, neighbour coffee chat'),
     (now - timedelta(days=580), Decimal('2.0'), 'Insurance basics for a freelance neighbour'),
     (now - timedelta(days=310), Decimal('1.5'), 'Budgeting session for a young colleague'),
-    (now - timedelta(days=160), Decimal('2.0'), 'Cooking session — Aegean recipes shared with a neighbour'),
+    (now - timedelta(days=160), Decimal('2.0'), 'Cooking session, Aegean recipes shared with a neighbour'),
 ]
 for when, amount, description in giving_entries:
     TransactionHistory.objects.create(
@@ -908,50 +908,48 @@ print(f"  Badges checked for Yusuf (karma={yusuf.karma_score})")
 # ---------------------------------------------------------------------------
 print("\n[8/9] Creating active services for Pulse page...")
 
-# ── Bebek Park Spring Brunch — the live QR event (Scene 3) ──────────────────
-brunch_time = now + timedelta(hours=2)  # within 24h check-in window
+# ── Mother's Day Photo Morning — the live QR event (Scene 3) ────────────────
+# scheduled_time = now so the event is happening right now (check-in window is open)
+brunch_time = now + timedelta(minutes=15)  # starting imminently — check-in window open
 spring_brunch = create_service(
     user=yusuf,
-    title='Bebek Park Spring Brunch',
-    description='A relaxed Sunday brunch in Bebek Park overlooking the Bosphorus. Bring something to share — bread, cheese, fruit, whatever you have. I\'ll bring the çay. New faces welcome.',
+    title="Mother's Day Photo Morning: Print and Post from Bebek Park",
+    description="I'm bringing my portable photo printer to Bebek Park. If your mum lives in another city or another country, come with your phone, pick your favourite photo together, and we'll print it and write a postcard on the spot. I'll have envelopes and stamps. Free to join, no skills needed. Just show up and bring a photo you love.",
     service_type='Event',
     duration='3.00',
     location_type='In-Person',
     location_area='Beşiktaş',
     location_lat=Decimal('41.0777'),
     location_lng=Decimal('28.9984'),
-    max_participants=20,
+    max_participants=5,
     schedule_type='One-Time',
     scheduled_time=brunch_time,
-    schedule_details='Today at 11:00, Bebek Park seaside — look for the blue blanket',
-    tags=[cooking_tag],
+    schedule_details="Today at 11:00, Bebek Park seaside, look for the portable printer and the blue blanket",
+    tags=[photography_tag],
     created_days_ago=5,
     requires_qr_checkin=True,
+    cover_url='http://localhost:9010/hive-media/demo/mothers-day-event.png',
 )
 
-# RSVP 15 existing users → 15/20 registered → then Selman = 16/20 "Filling up"
+# RSVP 3 existing users = 3/5 registered
+# Selman will RSVP live during the presentation (Scene 3)
 cem_demo = User.objects.get(email='cem@demo.com')
-brunch_rsvp_users = [
-    elif_demo, cem_demo, ayse_demo,
-    can_demo, selin_demo, zeynep_demo, emre_demo, burak_demo, levent_demo,
-    yasemin_demo, murat_demo, deniz_demo, berk, ahmet, leyla,
-]
+brunch_rsvp_users = [ayse_demo, can_demo, cem_demo]
 for i, user in enumerate(brunch_rsvp_users):
     event_rsvp(spring_brunch, user, joined_days_ago=4 - (i % 4))
 
-selman_rsvp = event_rsvp(spring_brunch, selman, joined_days_ago=0)
 spring_brunch.refresh_from_db()
 rsvp_count = Handshake.objects.filter(
     service=spring_brunch,
     status__in=['accepted', 'checked_in', 'attended'],
 ).count()
-print(f"  Spring Brunch: {rsvp_count}/20 registered (QR check-in enabled)")
+print(f"  Mother's Day Photo Morning: {rsvp_count}/5 registered (QR check-in enabled)")
 
 # ── Türkiye Match Night — Watch Party at Kuruçeşme (active, upcoming) ───────
 watch_party_live = create_service(
     user=berk,
-    title='Türkiye Match Night — Watch Party at Kuruçeşme',
-    description='UEFA qualifier night. Outdoor screen by the Bosphorus at Kuruçeşme. Come early for a good spot — this one fills up fast.',
+    title='Türkiye Match Night: Watch Party at Kuruçeşme',
+    description='UEFA qualifier night. Outdoor screen by the Bosphorus at Kuruçeşme. Come early for a good spot, this one fills up fast.',
     service_type='Event',
     duration='2.00',
     location_type='In-Person',
@@ -973,8 +971,8 @@ print(f"  Watch Party live: active")
 # ── Book Circle: Hızlı ve Yavaş Düşünme — active session ───────────────────
 book_circle_live = create_service(
     user=selin_demo,
-    title='Book Circle: Hızlı ve Yavaş Düşünme — Session 5',
-    description='This week we continue with Kahneman — chapters on the availability heuristic and what it means for everyday decisions. Come with one story where your intuition was wrong.',
+    title='Book Circle: Hızlı ve Yavaş Düşünme, Session 5',
+    description='This week we continue with Kahneman, chapters on the availability heuristic and what it means for everyday decisions. Come with one story where your intuition was wrong.',
     service_type='Event',
     duration='2.00',
     location_type='In-Person',
@@ -995,7 +993,7 @@ print(f"  Book Circle live: 7/12 registered")
 # ── Friday Night LOL: 5v5 Casual Ranked ─────────────────────────────────────
 lol_event = create_service(
     user=kaan,
-    title='Friday Night LOL: 5v5 Casual Ranked — Online',
+    title='Friday Night LOL: 5v5 Casual Ranked, Online',
     description='A relaxed 5v5 evening for people who want to play together without the pressure of solo queue. Discord voice, no flame, good vibes. All ranks welcome.',
     service_type='Event',
     duration='3.00',
@@ -1003,7 +1001,7 @@ lol_event = create_service(
     max_participants=10,
     schedule_type='One-Time',
     scheduled_time=now + timedelta(days=1, hours=5),
-    schedule_details='Friday at 21:00 online — join Discord link sent after RSVP',
+    schedule_details='Friday at 21:00 online, join Discord link sent after RSVP',
     tags=[technology_tag],
     created_days_ago=2,
 )
@@ -1011,13 +1009,13 @@ for user in [deniz_demo, burak_demo, elif_demo, emre_demo, can_demo, murat_demo,
     event_rsvp(lol_event, user, joined_days_ago=1)
 print(f"  LOL Event: 8/10 registered")
 
-# ── Calculus & Linear Algebra Tutoring — Selman's offer ─────────────────────
+# ── High School Maths Help — Selman's offer ──────────────────────────────────
 selman_tutoring = create_service(
     user=selman,
-    title='Calculus & Linear Algebra Tutoring — Patient, University-Level',
-    description='ODTÜ Computer Engineering graduate. I tutor first and second year university students in calculus and linear algebra. Patient, clear explanations, practice problems. Beşiktaş or online.',
+    title='High School Maths Help: Algebra, Geometry and Exams',
+    description='I help high school students with maths: algebra, geometry, trigonometry, exam prep. Patient explanations, lots of practice problems. Beşiktaş or online. No question is too basic!',
     service_type='Offer',
-    duration='1.50',
+    duration='1.00',
     location_type='In-Person',
     location_area='Beşiktaş',
     location_lat=Decimal('41.0422'),
@@ -1025,16 +1023,35 @@ selman_tutoring = create_service(
     max_participants=1,
     schedule_type='One-Time',
     schedule_details='Weekends preferred, flexible timing',
-    tags=[education_tag, technology_tag],
+    tags=[education_tag],
     created_days_ago=1,
 )
-print(f"  Selman's Calculus tutoring: active")
+print(f"  Selman's maths tutoring: active")
+
+# ── Basic Home Cooking — Selman's Need ───────────────────────────────────────
+selman_cooking_need = create_service(
+    user=selman,
+    title='Teach Me to Cook: Simple Home Recipes for Beginners',
+    description='I have lived on takeaway for too long. Looking for someone patient to show me 3–4 simple, healthy recipes I can actually repeat on my own. Beşiktaş kitchen or yours.',
+    service_type='Need',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Beşiktaş',
+    location_lat=Decimal('41.0422'),
+    location_lng=Decimal('29.0089'),
+    max_participants=1,
+    schedule_type='One-Time',
+    schedule_details='Weekend afternoon, happy to travel nearby',
+    tags=[cooking_tag, education_tag],
+    created_days_ago=1,
+)
+print(f"  Selman's cooking need: active")
 
 # ── Beginner Guitar Lessons ──────────────────────────────────────────────────
 guitar_lessons = create_service(
     user=deniz_demo,
     title='Beginner Guitar Lessons',
-    description='Gentle introduction to guitar — tuning, basic chords, a first song. No experience needed, just enthusiasm. Bebek area, my flat.',
+    description='Gentle introduction to guitar: tuning, basic chords, a first song. No experience needed, just enthusiasm. Bebek area, my flat.',
     service_type='Offer',
     duration='1.00',
     location_type='In-Person',
@@ -1072,7 +1089,7 @@ print(f"  Botanical Watercolour: active")
 # ── Budget Meal Prep for Students (Zeynep, Nearby lane) ─────────────────────
 meal_prep = create_service(
     user=zeynep_demo,
-    title='Budget Meal Prep for Students — Beşiktaş',
+    title='Budget Meal Prep for Students, Beşiktaş',
     description='Plan a week of healthy, affordable meals in two hours. I share my shopping list strategy, prep routine, and five reliable recipes that scale easily.',
     service_type='Offer',
     duration='2.00',
@@ -1098,7 +1115,7 @@ selman.refresh_from_db()
 print(f"  Yusuf balance: {yusuf.timebank_balance}h, karma: {yusuf.karma_score}")
 print(f"  Yusuf badges: {', '.join(UserBadge.objects.filter(user=yusuf).values_list('badge__name', flat=True)) or 'none yet'}")
 print(f"  Selman balance: {selman.timebank_balance}h, onboarded: {selman.is_onboarded}")
-print(f"  Spring Brunch RSVPs: {Handshake.objects.filter(service=spring_brunch, status__in=['accepted', 'checked_in', 'attended']).count()}/20")
+print(f"  Mother's Day Photo Morning RSVPs: {Handshake.objects.filter(service=spring_brunch, status__in=['accepted', 'checked_in', 'attended']).count()}/5 (Selman joins live in Scene 3)")
 
 print("\n" + "=" * 60)
 print("Mother's Day seed complete.")
