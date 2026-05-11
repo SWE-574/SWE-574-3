@@ -311,6 +311,13 @@ _HOT_SCORE_RELEVANT_STATUSES = {
     'completed', 'accepted', 'checked_in', 'attended', 'no_show',
 }
 
+# Handshake fields that actually feed the hot_score formula. Saves that touch
+# only fields outside this set (e.g. evaluation_window_* timestamps written by
+# process_feedback_windows or test helpers) must not trigger a recompute,
+# because the formula has time-sensitive components and would produce a
+# different score even though no ranking input changed (#618).
+_HOT_SCORE_RELEVANT_FIELDS = {'status', 'provisioned_hours'}
+
 
 @receiver([post_save, post_delete], sender=Handshake)
 def update_hot_score_on_handshake_change(sender, instance, **kwargs):
@@ -323,6 +330,14 @@ def update_hot_score_on_handshake_change(sender, instance, **kwargs):
     every Phase 2 input feeds the persisted score in real time.
     """
     if instance.status not in _HOT_SCORE_RELEVANT_STATUSES:
+        return
+    # If the caller passed an explicit `update_fields`, only recompute when
+    # one of the fields that actually feeds the formula is in the set.
+    # Post-delete doesn't have update_fields, so this branch is post_save-only.
+    update_fields = kwargs.get('update_fields')
+    if update_fields is not None and not (
+        set(update_fields) & _HOT_SCORE_RELEVANT_FIELDS
+    ):
         return
     service = getattr(instance, 'service', None)
     if service is None:

@@ -2421,11 +2421,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     @track_performance
     def get_queryset(self):
-        # Owner edits/deletes must work for services in any status
-        # (Agreed/Completed/Cancelled/hidden). The list-time visibility filter
-        # below would otherwise hide them and produce a misleading 404.
-        # Authorization is enforced in perform_update / destroy.
-        if self.action in ('update', 'partial_update', 'destroy'):
+        # Owner edits/deletes and owner-only event management actions must
+        # work for services in any status (Agreed/Completed/Cancelled/hidden)
+        # and regardless of the list-time visibility/search filters below,
+        # which would otherwise hide the resource and produce a misleading
+        # 404. Authorization is enforced in the respective action methods
+        # (perform_update / destroy / EventHandshakeService.* checks).
+        if self.action in (
+            'update', 'partial_update', 'destroy',
+            'generate_qr_token', 'get_qr_token',
+        ):
             return (
                 Service.objects
                 .select_related('user', 'event_evaluation_summary')
@@ -2519,50 +2524,60 @@ class ServiceViewSet(viewsets.ModelViewSet):
             # Surface the field-level error instead of swallowing it.
             raise drf_serializers.ValidationError({exc.field: exc.message})
 
-        # Onboarding tag fallback (#478): when an onboarded viewer with
-        # declared skills hits the feed without an explicit tag filter,
-        # prefer services tagged with their skills and top up from the
-        # explore pool when too few match. Annotates `source` for the UI.
-        # Skipped when ?user= is set: profile pages must show every active
-        # service the owner has, regardless of whether the tags overlap the
-        # viewer's declared skills.
-        explicit_tag = (
-            self.request.query_params.get('tag')
-            or self.request.query_params.getlist('tags')
-        )
-        # Browse's "All" mode opts out of the implicit skills filter so the
-        # viewer sees the full active catalog instead of a skill-aware slice.
-        skip_onboarding_raw = self.request.query_params.get('skip_onboarding', '')
-        skip_onboarding = (
-            str(skip_onboarding_raw).strip().lower() in {'1', 'true', 'yes'}
-        )
-        if not explicit_tag and not user_param and not skip_onboarding:
-            from .ranking import apply_onboarding_fallback
-            queryset, _ = apply_onboarding_fallback(
-                queryset,
-                self.request.user,
-                getattr(settings, 'RANKING_ONBOARDING_MIN_RESULTS', 10),
+        # The feed-shaping filters below (onboarding tag fallback,
+        # explore_only, exclude_own) only make sense for the list view —
+        # they reshape the public catalogue. Detail actions like retrieve
+        # or @action(detail=True) endpoints (generate_qr_token,
+        # complete_event, cancel_event, …) target a specific pk and must
+        # not have their target silently dropped by feed shaping, or the
+        # caller sees a misleading 404. Status + is_visible filtering
+        # above still applies so genuinely non-public services 404 as they
+        # should.
+        if self.action == 'list':
+            # Onboarding tag fallback (#478): when an onboarded viewer with
+            # declared skills hits the feed without an explicit tag filter,
+            # prefer services tagged with their skills and top up from the
+            # explore pool when too few match. Annotates `source` for the UI.
+            # Skipped when ?user= is set: profile pages must show every active
+            # service the owner has, regardless of whether the tags overlap the
+            # viewer's declared skills.
+            explicit_tag = (
+                self.request.query_params.get('tag')
+                or self.request.query_params.getlist('tags')
             )
+            # Browse's "All" mode opts out of the implicit skills filter so the
+            # viewer sees the full active catalog instead of a skill-aware slice.
+            skip_onboarding_raw = self.request.query_params.get('skip_onboarding', '')
+            skip_onboarding = (
+                str(skip_onboarding_raw).strip().lower() in {'1', 'true', 'yes'}
+            )
+            if not explicit_tag and not user_param and not skip_onboarding:
+                from .ranking import apply_onboarding_fallback
+                queryset, _ = apply_onboarding_fallback(
+                    queryset,
+                    self.request.user,
+                    getattr(settings, 'RANKING_ONBOARDING_MIN_RESULTS', 10),
+                )
 
-        # explore_only=true (#480): restrict the feed to Phase 3 eligible
-        # services (cold-start, undershown quality, stale recurring) so the
-        # mobile "Try something new" carousel can fetch them in one call.
-        explore_only_raw = self.request.query_params.get('explore_only', '')
-        if str(explore_only_raw).strip().lower() in {'1', 'true', 'yes'}:
-            from .ranking import _eligible_exploration
-            sample = list(queryset[:200])
-            cold, under, stale = _eligible_exploration(sample)
-            eligible_ids = [s.id for s in (*cold, *under, *stale)]
-            queryset = queryset.filter(id__in=eligible_ids)
+            # explore_only=true (#480): restrict the feed to Phase 3 eligible
+            # services (cold-start, undershown quality, stale recurring) so the
+            # mobile "Try something new" carousel can fetch them in one call.
+            explore_only_raw = self.request.query_params.get('explore_only', '')
+            if str(explore_only_raw).strip().lower() in {'1', 'true', 'yes'}:
+                from .ranking import _eligible_exploration
+                sample = list(queryset[:200])
+                cold, under, stale = _eligible_exploration(sample)
+                eligible_ids = [s.id for s in (*cold, *under, *stale)]
+                queryset = queryset.filter(id__in=eligible_ids)
 
-        # Optional `exclude_own` toggle — Browse uses this so the viewer
-        # never sees their own services in the discovery feed.
-        exclude_own_raw = self.request.query_params.get('exclude_own', '')
-        if (
-            str(exclude_own_raw).strip().lower() in {'1', 'true', 'yes'}
-            and self.request.user.is_authenticated
-        ):
-            queryset = queryset.exclude(user=self.request.user)
+            # Optional `exclude_own` toggle — Browse uses this so the viewer
+            # never sees their own services in the discovery feed.
+            exclude_own_raw = self.request.query_params.get('exclude_own', '')
+            if (
+                str(exclude_own_raw).strip().lower() in {'1', 'true', 'yes'}
+                and self.request.user.is_authenticated
+            ):
+                queryset = queryset.exclude(user=self.request.user)
 
         # Filter by owner user (for profile pages)
         if user_param:
@@ -2616,24 +2631,30 @@ class ServiceViewSet(viewsets.ModelViewSet):
             half_life_km = getattr(settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0)
             if proximity_active and half_life_km > 0:
                 # PostGIS Distance annotation is in metres (srid=4326).
-                # Online services have `location IS NULL`, which makes the
-                # Distance annotation NULL and would propagate NULL all the
-                # way into composite_score. Postgres' default for `ORDER BY
-                # ... DESC` is NULLS FIRST, so every Online row used to land
-                # at the top of every location-aware feed regardless of
-                # hot_score. Coalesce a missing distance to 0 m so Online
-                # cards collapse to proximity_factor=1.0 and compete on
-                # hot_score with the closest in-person rows.
-                distance_metres = Coalesce(
-                    F('distance'), Value(0.0, output_field=FloatField())
-                )
-                proximity_expr = ExpressionWrapper(
+                # Online services have `location IS NULL` and therefore a
+                # NULL distance. The previous fix here Coalesced NULL → 0 m
+                # which gave Online rows proximity_factor=1.0 (the maximum)
+                # so they out-ranked legitimately-nearby in-person rows.
+                # Treat Online as proximity-neutral instead: a factor of 0.5
+                # (the value an in-person row at the half-life distance
+                # would get) so Online competes on hot_score without an
+                # unearned proximity boost, and without being banished to
+                # the bottom either.
+                inperson_proximity = ExpressionWrapper(
                     Value(1.0, output_field=FloatField()) / (
                         Value(1.0, output_field=FloatField())
-                        + distance_metres / Value(
+                        + F('distance') / Value(
                             1000.0 * half_life_km, output_field=FloatField()
                         )
                     ),
+                    output_field=FloatField(),
+                )
+                proximity_expr = Case(
+                    When(
+                        location__isnull=True,
+                        then=Value(0.5, output_field=FloatField()),
+                    ),
+                    default=inperson_proximity,
                     output_field=FloatField(),
                 )
             else:
@@ -2673,8 +2694,24 @@ class ServiceViewSet(viewsets.ModelViewSet):
             # Non-hot sorts with a location: distance-only ordering, as before.
             queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         else:
-            # Default: sort by latest (created_at descending)
-            queryset = queryset.order_by('-is_pinned', '-created_at')
+            # Default: pinned first, then a small boost for services from
+            # users the viewer follows (FR-19e), then newest. The follow
+            # boost only kicks in for authenticated viewers; anonymous
+            # viewers fall back to plain pinned + recency.
+            if self.request.user.is_authenticated:
+                from .models import UserFollow
+                queryset = queryset.annotate(
+                    is_from_followed_user=Exists(
+                        UserFollow.objects.filter(
+                            follower=self.request.user,
+                            following=OuterRef('user_id'),
+                        )
+                    ),
+                ).order_by(
+                    '-is_pinned', '-is_from_followed_user', '-created_at',
+                )
+            else:
+                queryset = queryset.order_by('-is_pinned', '-created_at')
 
         return queryset
 

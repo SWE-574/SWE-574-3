@@ -172,6 +172,7 @@ class TestAdminShowcaseFeatured:
 
 
 # ---------------------------------------------------------------------------
+# FR-19e — Follow system (green — UserFollow + endpoints + default-sort boost)
 # FR-19e — Follow system (green — UserFollow + follow endpoints implemented)
 # ---------------------------------------------------------------------------
 

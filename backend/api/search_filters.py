@@ -13,7 +13,7 @@ from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
 from django.db.models import (
     Q, QuerySet, Case, When, Value, FloatField, Sum, Exists, OuterRef,
-    Subquery,
+    Subquery, F,
 )
 
 
@@ -119,9 +119,13 @@ class LocationStrategy(SearchStrategy):
                 | Q(location__distance_lte=(user_location, D(km=distance_km)))
             )
 
+        # Online services (location IS NULL) produce a NULL distance. PostgreSQL
+        # sorts NULLs FIRST under ASC by default, which used to put every Online
+        # row above every in-person row. Force NULLs to the end so the location
+        # filter actually surfaces the closest in-person services first.
         return queryset.annotate(
             distance=Distance('location', user_location)
-        ).order_by('distance')
+        ).order_by(F('distance').asc(nulls_last=True))
 
 
 def expand_tag_qids(tag_ids):
