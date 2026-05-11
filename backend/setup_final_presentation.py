@@ -61,6 +61,17 @@ if seed_users.exists():
     print(f"  Removing data for {seed_users.count()} seed users...")
     user_ids = list(seed_users.values_list('id', flat=True))
     ServiceMedia.objects.filter(service__user_id__in=user_ids).delete()
+    # Delete TransactionHistory BEFORE handshakes: TransactionHistory.handshake/service
+    # are SET_NULL, so deleting handshakes would null the FK and leave orphaned ledger
+    # rows owned by demo users (not seed users) accumulating across runs.
+    _seed_hs_ids = list(
+        Handshake.objects.filter(
+            Q(requester_id__in=user_ids) | Q(service__user_id__in=user_ids)
+        ).values_list('id', flat=True)
+    )
+    TransactionHistory.objects.filter(
+        Q(user_id__in=user_ids) | Q(handshake_id__in=_seed_hs_ids)
+    ).delete()
     Handshake.objects.filter(Q(requester_id__in=user_ids) | Q(service__user_id__in=user_ids)).delete()
     Service.objects.filter(user_id__in=user_ids).delete()
     Notification.objects.filter(user_id__in=user_ids).delete()
@@ -70,7 +81,6 @@ if seed_users.exists():
     Comment.objects.filter(user_id__in=user_ids).delete()
     ChatMessage.objects.filter(sender_id__in=user_ids).delete()
     UserFollow.objects.filter(Q(follower_id__in=user_ids) | Q(following_id__in=user_ids)).delete()
-    TransactionHistory.objects.filter(user_id__in=user_ids).delete()
     seed_users.delete()
     print("  Done")
 else:
@@ -101,6 +111,8 @@ _demo_svc_hs_ids = list(
     Handshake.objects.filter(service__title__in=DEMO_USER_SERVICE_TITLES).values_list('id', flat=True)
 )
 if _demo_svc_hs_ids:
+    # Delete TransactionHistory first (SET_NULL on handshake FK — would survive service deletion)
+    TransactionHistory.objects.filter(handshake_id__in=_demo_svc_hs_ids).delete()
     ReputationRep.objects.filter(handshake_id__in=_demo_svc_hs_ids).delete()
     NegativeRep.objects.filter(handshake_id__in=_demo_svc_hs_ids).delete()
 deleted_count, _ = Service.objects.filter(title__in=DEMO_USER_SERVICE_TITLES).delete()
@@ -470,6 +482,21 @@ def add_reputation(handshake, giver, receiver, punctual=True, helpful=True, kind
     return rep
 
 
+def seed_chat(handshake, messages):
+    """Seed a list of (sender, body, offset_hours) tuples into a handshake thread.
+
+    offset_hours is measured from handshake.created_at so messages land
+    naturally in the conversation timeline. created_at is auto_now_add, so
+    each row is created first and then backdated with update().
+    """
+    base = handshake.created_at
+    for sender, body, offset_hours in messages:
+        msg = ChatMessage.objects.create(handshake=handshake, sender=sender, body=body)
+        ChatMessage.objects.filter(pk=msg.pk).update(
+            created_at=base + timedelta(hours=offset_hours)
+        )
+
+
 # ---------------------------------------------------------------------------
 # [3] Fetch existing demo users we reference in Yusuf's history
 # ---------------------------------------------------------------------------
@@ -632,6 +659,13 @@ hs_sourdough, _ = simulate_handshake_workflow(
     provider_initiated_days_ago=1014,
     completed_days_ago=1000,
 )
+seed_chat(hs_sourdough, [
+    (yusuf,        'Hi! Really looking forward to this. Should I bring anything?', 0.5),
+    (yasemin_demo, 'Just yourself and maybe an apron! I have everything we need.', 1.0),
+    (yusuf,        'Perfect. See you Sunday then.', 1.2),
+    (yasemin_demo, 'Great session today — your starter looked really healthy by the end!', 26.0),
+    (yusuf,        'It was amazing. Already fed it this morning. Thank you so much!', 26.5),
+])
 print("  History 1b: Sourdough & Fermentation Basics (Aug 2023) — completed as learner")
 
 # ------------------------------------------------------------------
@@ -660,6 +694,14 @@ hs_driving, _ = simulate_handshake_workflow(
     provider_initiated_days_ago=944,   # creation ~2 weeks before completion
     completed_days_ago=930,
 )
+seed_chat(hs_driving, [
+    (ahmet,  'Hey Yusuf! I can help. I learned on a '90s Renault so this should be fun.', 0.5),
+    (yusuf,  'Haha perfect, that is exactly the energy I need. When works for you?', 1.0),
+    (ahmet,  'Saturday morning? We can start in the Beşiktaş side streets, low traffic.', 1.3),
+    (yusuf,  'Saturday works great. Thank you for offering!', 1.6),
+    (yusuf,  'That was actually really fun. I stalled only three times!', 27.0),
+    (ahmet,  'Three times is basically a clean sheet for a first session. You did well!', 27.5),
+])
 print("  History 2: Manual Transmission (Oct 2023) — completed as learner")
 
 # ------------------------------------------------------------------
@@ -688,6 +730,13 @@ hs_photo, _ = simulate_handshake_workflow(
     provider_initiated_days_ago=789,   # creation ~2 weeks before completion
     completed_days_ago=775,
 )
+seed_chat(hs_photo, [
+    (yusuf,     'I have been wanting to do this walk for months. Phone camera only — is that okay?', 0.5),
+    (murat_demo, 'Absolutely, some of the best street shots I have ever seen were taken on a phone.', 0.8),
+    (yusuf,     'That is reassuring! See you at the ferry stop.', 1.0),
+    (murat_demo, 'Great morning, Yusuf. Your eye for light improved a lot by the second hour.', 25.0),
+    (yusuf,     'I learned so much. That tip about waiting for the shadow to move — game changer.', 25.4),
+])
 print("  History 3: Street Photography Walk — Balat (Mar 2024) — completed as learner")
 
 # ------------------------------------------------------------------
@@ -759,6 +808,13 @@ hs_tarhana, _ = simulate_handshake_workflow(
     provider_initiated_days_ago=504,   # creation ~2 weeks before completion
     completed_days_ago=490,
 )
+seed_chat(hs_tarhana, [
+    (yusuf,    'I have never made tarhana before but I eat it every winter. Excited for this!', 0.5),
+    (can_demo, 'It is easier than people think and incredibly satisfying. Bring an apron.', 0.9),
+    (yusuf,    'Will do. Sunday afternoon then!', 1.1),
+    (can_demo, 'Your tarhana is drying nicely! Give it two more days before storing.', 25.0),
+    (yusuf,    'It smells incredible. My grandmother would approve.', 25.5),
+])
 print("  History 5: Tarhana from Scratch (Jan 2025) — completed as learner")
 
 # ------------------------------------------------------------------
@@ -787,6 +843,13 @@ hs_aegean, _ = simulate_handshake_workflow(
     provider_initiated_days_ago=439,
     completed_days_ago=425,
 )
+seed_chat(hs_aegean, [
+    (yusuf,       'I love Aegean food. Looking forward to learning the proper ratios!', 0.5),
+    (zeynep_demo, 'There are no strict ratios in Aegean cooking — that is the whole lesson.', 0.9),
+    (yusuf,       'Ha! Okay, I am ready to unlearn everything then.', 1.1),
+    (zeynep_demo, 'You were a natural with the zeytinyağlı today. Come back for the summer menu!', 25.0),
+    (yusuf,       'Already thinking about it. I made the white bean dish for dinner tonight.', 25.5),
+])
 print("  History 5b: Plant-Based Aegean Cooking (Mar 2025) — completed as learner")
 
 # ------------------------------------------------------------------
@@ -855,6 +918,13 @@ hs_finance, _ = simulate_handshake_workflow(
     provider_initiated_days_ago=254,   # creation ~2 weeks before completion
     completed_days_ago=240,
 )
+seed_chat(hs_finance, [
+    (leyla,  'Hi Yusuf! I saw your listing and would love an hour to talk through investment funds.', 0.5),
+    (yusuf,  'Happy to help. Let us meet at the café by Beşiktaş square — Tuesday evening?', 0.9),
+    (leyla,  'Tuesday works perfectly. Thank you!', 1.1),
+    (leyla,  'That was genuinely the clearest explanation of index funds I have ever heard. Thank you!', 25.0),
+    (yusuf,  'Really glad it clicked. Feel free to message if questions come up later.', 25.4),
+])
 print("  History 7: Coffee & Finance (Sep 2025) — completed as provider")
 
 # ------------------------------------------------------------------
@@ -1036,6 +1106,14 @@ hs_finance_levent, _ = simulate_handshake_workflow(
     provider_initiated_days_ago=759,
     completed_days_ago=750,
 )
+seed_chat(hs_finance_levent, [
+    (levent_demo, 'Hi Yusuf, I found your listing — would love to talk through pension funds.', 0.5),
+    (yusuf,       'Of course! Let us meet somewhere quiet. Bebek café next week?', 0.9),
+    (levent_demo, 'Perfect. Thursday at 7pm?', 1.2),
+    (yusuf,       'Thursday works. See you then!', 1.4),
+    (levent_demo, 'Really helpful session. I finally understand why fees matter so much.', 25.0),
+    (yusuf,       'Glad it clicked. Small compounding differences are everything over 20 years.', 25.5),
+])
 
 finance_offer_burak = create_service(
     user=yusuf,
@@ -1057,6 +1135,15 @@ hs_finance_burak, _ = simulate_handshake_workflow(
     provider_initiated_days_ago=319,
     completed_days_ago=310,
 )
+seed_chat(hs_finance_burak, [
+    (burak_demo, 'Hey! I saw your budgeting session listing. I really need a reset on my finances.', 0.5),
+    (yusuf,      'Happy to help. It is easier than it looks once you have a simple system.', 0.8),
+    (burak_demo, 'When can we meet?', 1.0),
+    (yusuf,      'This weekend? Saturday morning in Beşiktaş?', 1.2),
+    (burak_demo, 'Saturday morning works. Thank you Yusuf!', 1.4),
+    (burak_demo, 'Already set up my first budget spreadsheet. This was exactly what I needed.', 25.0),
+    (yusuf,      'That is the hardest step done. Keep it simple and you will stick with it.', 25.5),
+])
 print("  Two extra provider sessions added (finance, real handshakes)")
 
 check_and_assign_badges(yusuf)
