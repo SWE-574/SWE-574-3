@@ -40,6 +40,10 @@ print("=" * 60)
 # ---------------------------------------------------------------------------
 # [1] Cleanup
 # ---------------------------------------------------------------------------
+from django.core.cache import cache as _cache
+_cache.clear()
+print("  Cache cleared")
+
 print("\n[1/9] Cleaning up existing Mother's Day seed data...")
 
 SEED_EMAILS = [
@@ -1181,6 +1185,33 @@ meal_prep = create_service(
     created_days_ago=2,
 )
 print(f"  Budget Meal Prep: active")
+
+# ---------------------------------------------------------------------------
+# Re-backdate all completed handshakes
+# auto_now=True on Handshake.updated_at means any .save() after our .update()
+# (badges, signals, hot-score recalc) resets it to now. Do a final bulk fix.
+# ---------------------------------------------------------------------------
+backdate_map = [
+    (watch_party_hist,     1065),
+    (sourdough_offer,      1000),
+    (driving_need,          930),
+    (balat_photo,           775),
+    (book_circle_hist,      640),
+    (tarhana_offer,         490),
+    (aegean_offer,          425),
+    (picnic_hist,           355),
+    (coffee_finance,        240),
+    (bosphorus_walk_hist,    95),
+]
+for svc, days_ago in backdate_map:
+    completion_time = now - timedelta(days=days_ago)
+    Handshake.objects.filter(
+        service=svc,
+        status__in=['completed', 'attended'],
+    ).update(updated_at=completion_time, scheduled_time=completion_time - timedelta(hours=2))
+    # Service.updated_at also has auto_now=True; the calendar uses it for completed services
+    Service.objects.filter(pk=svc.pk).update(updated_at=completion_time)
+print("  Completed handshakes + services re-backdated (auto_now override)")
 
 # ---------------------------------------------------------------------------
 # [9] Final summary
