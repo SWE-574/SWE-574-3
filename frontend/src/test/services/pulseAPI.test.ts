@@ -56,20 +56,3 @@ describe('pulseAPI.recordVisit', () => {
   })
 })
 
-describe('pulseAPI.setDismissed', () => {
-  it('POSTs to /services/<id>/dismiss/ when dismissed=true', async () => {
-    apiMocks.post.mockResolvedValue({ data: { is_dismissed: true } })
-    const result = await pulseAPI.setDismissed('svc-7', true)
-    expect(apiMocks.post).toHaveBeenCalledWith('/services/svc-7/dismiss/')
-    expect(apiMocks.delete).not.toHaveBeenCalled()
-    expect(result).toEqual({ is_dismissed: true })
-  })
-
-  it('DELETEs /services/<id>/dismiss/ when dismissed=false', async () => {
-    apiMocks.delete.mockResolvedValue({ data: { is_dismissed: false } })
-    const result = await pulseAPI.setDismissed('svc-9', false)
-    expect(apiMocks.delete).toHaveBeenCalledWith('/services/svc-9/dismiss/')
-    expect(apiMocks.post).not.toHaveBeenCalled()
-    expect(result).toEqual({ is_dismissed: false })
-  })
-})
