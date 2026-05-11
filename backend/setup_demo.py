@@ -1687,115 +1687,81 @@ elif_mending = create_demo_service(
 )
 
 # ─── #503: catalogue depth ──────────────────────────────────────────────────
-# Adds half a dozen more services so the catalogue feels lived-in for the
-# demo — including a few Recurrent rhythms so the schedule_type histogram
-# isn't 100% One-Time. Mix of Offers, Needs, and one Event; mix of
-# In-Person and Online; spread across users who currently have fewer
-# services. Voice and tone match the existing imece-leaning catalogue.
+# Four extra services that fill gaps in the existing catalogue rather than
+# rehash concepts that are already covered (reading circles, walks, board
+# games, meditation, recipe help, acoustic music etc. all already exist).
+# Mehmet covers a Need the rest of the catalogue can't address; Ayşe gets a
+# specifically civic Need; Levent gets a Turkish-folk-instrument intro his
+# bio nodded at but the catalogue never realised; Burak hosts a Recurrent
+# Event so the schedule_type histogram has at least one Recurrent row.
 
-selin_book_circle = create_demo_service(
-    user=selin,
-    title='Weekly Quiet Reading Circle in Cihangir',
-    description='Bring whatever you are reading and join a calm hour together. We share a sentence or two each, no expectations to finish anything, just steady company once a week for anyone who reads better around other people.',
+mehmet_ottoman_letters = create_demo_service(
+    user=mehmet,
+    title='Help Reading an Old Family Letter in Ottoman Script',
+    description='Bring a scan or photograph of an inherited letter, wedding card, or notebook. I can read enough Ottoman Turkish to give you a careful sentence-by-sentence pass, talk through the era it came from, and suggest where to look next if you want a full archival transcription.',
     service_type='Offer',
     duration='1.00',
-    location_type='In-Person',
-    location_area='Beyoğlu',
-    location_lat=Decimal('41.0312'),
-    location_lng=Decimal('28.9847'),
-    max_participants=6,
-    schedule_type='Recurrent',
-    scheduled_time=quarter_hour(now + timedelta(days=2, hours=4)),
-    schedule_details='Every Wednesday at 19:00 in my Cihangir flat',
-    tags=[education_tag, art_tag],
-    created_days_ago=14,
-)
-
-levent_acoustic = create_demo_service(
-    user=levent,
-    title='Acoustic Singalong on the Roof',
-    description='A gentle hour with guitar and tea on a Beyoğlu rooftop. I lead a few songs in Turkish and English, but mostly people join in or just listen — children and grandparents both welcome.',
-    service_type='Offer',
-    duration='1.50',
-    location_type='In-Person',
-    location_area='Beyoğlu',
-    location_lat=Decimal('41.0335'),
-    location_lng=Decimal('28.9836'),
-    max_participants=12,
-    schedule_type='Recurrent',
-    scheduled_time=quarter_hour(now + timedelta(days=5, hours=3)),
-    schedule_details='First Sunday of each month at 16:00 — message me for the building entrance',
-    tags=[music_tag],
-    created_days_ago=20,
-)
-
-emre_walks = create_demo_service(
-    user=emre,
-    title='Bosphorus Sunrise Walk for New Neighbors',
-    description='A relaxed early walk along the Üsküdar waterfront for people who are new to the neighborhood or just want gentler company in the morning. We stop for tea on the way back.',
-    service_type='Offer',
-    duration='1.00',
-    location_type='In-Person',
-    location_area='Üsküdar',
-    location_lat=Decimal('41.0238'),
-    location_lng=Decimal('29.0144'),
-    max_participants=8,
-    schedule_type='Recurrent',
-    scheduled_time=quarter_hour(now + timedelta(days=1, hours=6)),
-    schedule_details='Every Saturday at 06:30 — meet at Üsküdar ferry pier',
-    tags=[sports_tag],
-    created_days_ago=11,
-)
-
-yasemin_recipe = create_demo_service(
-    user=yasemin,
-    title='Need: Help Organizing Family Recipe Notes',
-    description='I have recipe cards, voice notes, and margin notes from older textbooks and want help turning them into something readable so I can share them with my nieces. Patience matters more than tech skill.',
-    service_type='Need',
-    duration='2.00',
     location_type='Online',
     max_participants=1,
     schedule_type='One-Time',
-    scheduled_time=quarter_hour(now + timedelta(days=4, hours=2)),
-    schedule_details='Flexible weeknight — any evening around 20:00 works',
-    tags=[cooking_tag, education_tag],
-    created_days_ago=2,
+    scheduled_time=quarter_hour(now + timedelta(days=4, hours=3)),
+    schedule_details='Weekday evenings — pick a slot that suits you',
+    tags=[education_tag],
+    created_days_ago=12,
 )
 
-ayse_morning_meditation = create_demo_service(
+ayse_stray_cat = create_demo_service(
     user=ayse,
-    title='Gentle Morning Meditation in the Park',
-    description='A quiet, beginner-friendly guided meditation in Cihangir park. No experience needed. We sit, breathe, and start the week with shared calm before the city wakes up.',
-    service_type='Event',
-    duration='1.00',
-    location_type='In-Person',
-    location_area='Beyoğlu',
-    location_lat=Decimal('41.0327'),
-    location_lng=Decimal('28.9832'),
-    max_participants=15,
-    schedule_type='One-Time',
-    scheduled_time=quarter_hour(now + timedelta(days=3, hours=7)),
-    schedule_details='Wednesday at 06:30 — entrance from Sıraselviler side',
-    tags=[sports_tag, education_tag],
-    created_days_ago=5,
-)
-
-burak_board_games = create_demo_service(
-    user=burak,
-    title='Need: Looking for a Small Weekend Board Game Group',
-    description='I miss low-pressure board game nights where the goal is conversation and consistency more than competition. Three or four regulars would be ideal. Catan, Codenames, Carcassonne — all welcome.',
+    title='Need: Help Catching a Friendly Stray for the Vet',
+    description='There is a black-and-white stray near our building who clearly needs a check-up. She is friendly with food but skittish about a carrier. Looking for one or two patient neighbors to help me box her gently and split a taxi to the vet on Saturday morning.',
     service_type='Need',
     duration='2.00',
     location_type='In-Person',
-    location_area='Kadıköy',
-    location_lat=Decimal('40.9876'),
-    location_lng=Decimal('29.0276'),
-    max_participants=1,
-    schedule_type='Recurrent',
+    location_area='Üsküdar',
+    location_lat=Decimal('41.0241'),
+    location_lng=Decimal('29.0138'),
+    max_participants=2,
+    schedule_type='One-Time',
+    scheduled_time=quarter_hour(now + timedelta(days=2, hours=2)),
+    schedule_details='Saturday around 10:00 — taxi to Üsküdar clinic',
+    tags=[sports_tag],
+    created_days_ago=3,
+)
+
+levent_baglama = create_demo_service(
+    user=levent,
+    title='Beginner Bağlama Hour: Tune, Hold, Try Three Notes',
+    description='No instrument required — I bring two bağlamas. We talk about how it is held and tuned, you try a few notes, and we listen to one or two short pieces together. This is a low-pressure first taste for anyone curious about Turkish folk strings.',
+    service_type='Offer',
+    duration='1.00',
+    location_type='In-Person',
+    location_area='Beyoğlu',
+    location_lat=Decimal('41.0341'),
+    location_lng=Decimal('28.9821'),
+    max_participants=3,
+    schedule_type='One-Time',
     scheduled_time=quarter_hour(now + timedelta(days=6, hours=5)),
-    schedule_details='Saturday evenings preferred — every other week',
-    tags=[education_tag],
-    created_days_ago=8,
+    schedule_details='Sunday afternoon at my Beyoğlu place',
+    tags=[music_tag, education_tag],
+    created_days_ago=9,
+)
+
+burak_seafront_ride = create_demo_service(
+    user=burak,
+    title='Saturday Seafront Group Ride for Casual Cyclists',
+    description='A slow group ride from Caddebostan to Bostancı and back, two stops for tea, no drops. Bring your own bike and a working helmet. Good for anyone who used to ride and wants a friendly reason to start again — children riding with a parent welcome too.',
+    service_type='Event',
+    duration='2.00',
+    location_type='In-Person',
+    location_area='Kadıköy',
+    location_lat=Decimal('40.9685'),
+    location_lng=Decimal('29.0589'),
+    max_participants=14,
+    schedule_type='Recurrent',
+    scheduled_time=quarter_hour(now + timedelta(days=1, hours=5)),
+    schedule_details='Every Saturday at 09:30 — meet at Caddebostan beach park',
+    tags=[sports_tag],
+    created_days_ago=15,
 )
 
 print(f"\n  Created {len(services)} services")
