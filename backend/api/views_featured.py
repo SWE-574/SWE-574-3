@@ -11,6 +11,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from drf_spectacular.utils import extend_schema, extend_schema_view
+
 from api.authentication import CookieJWTAuthentication
 from api.models import Handshake, SavedService, Service, Tag, User, UserFollow
 from api.ranking import calculate_hot_scores_batch
@@ -51,6 +53,13 @@ def _serialize_service(service, extra=None):
     return data
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Featured'],
+        summary='Featured services',
+        description='Authenticated featured surface: trending services, top providers, and personalised highlights.',
+    ),
+)
 class FeaturedView(APIView):
     authentication_classes = [CookieJWTAuthentication, JWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -235,6 +244,13 @@ class FeaturedView(APIView):
         ]
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Featured'],
+        summary='Featured discovery chips',
+        description='Compact category chips used by the discovery surface.',
+    ),
+)
 class FeaturedChipsView(APIView):
     """YouTube-style filter chip strip above the Browse feed.
 
@@ -328,6 +344,14 @@ class FeaturedChipsView(APIView):
         ]
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=['Featured'],
+        summary='Public featured services (deprecated)',
+        description='Deprecated pre-auth landing variant. Use `GET /api/featured/` (authenticated) instead.',
+        deprecated=True,
+    ),
+)
 class PublicFeaturedView(APIView):
     """Anonymous-safe subset of FeaturedView for the public landing page (#457).
 

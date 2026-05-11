@@ -62,6 +62,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .views import CustomTokenObtainPairView
 from .views import CustomTokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+from drf_spectacular.utils import extend_schema, OpenApiResponse
 from .views_featured import FeaturedChipsView, FeaturedView, PublicFeaturedView
 
 router = DefaultRouter()
@@ -77,6 +78,18 @@ router.register(r'admin/comments', AdminCommentViewSet, basename='admin-comment'
 router.register(r'admin/audit-logs', AdminAuditLogViewSet, basename='admin-audit-log')
 router.register(r'transactions', TransactionHistoryViewSet, basename='transaction')
 
+@extend_schema(
+    tags=['System'],
+    summary='Health check',
+    description='Verifies connectivity to PostgreSQL and Redis. Returns 200 when both dependencies are reachable, 503 otherwise. Body also includes basic counts (users, active services, pending handshakes) when the database is reachable.',
+    responses={
+        200: OpenApiResponse(description='All dependencies healthy.'),
+        503: OpenApiResponse(description='At least one dependency is unhealthy.'),
+    },
+)
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([permissions.AllowAny])
 def health_check(request):
     """
     Health check endpoint that verifies connectivity to all critical dependencies.
@@ -150,6 +163,15 @@ def health_check(request):
     return JsonResponse(health_status, status=status_code)
 
 
+@extend_schema(
+    tags=['System'],
+    summary='Aggregate metrics',
+    description='Aggregate platform counts for the admin dashboard. Requires moderator / admin / super_admin role.',
+    responses={
+        200: OpenApiResponse(description='Metrics payload.'),
+        403: OpenApiResponse(description='Caller is not a moderator / admin / super_admin.'),
+    },
+)
 @api_view(['GET'])
 @authentication_classes([CookieJWTAuthentication, JWTAuthentication])
 @permission_classes([permissions.IsAuthenticated])
