@@ -17,6 +17,10 @@ export interface TimeActivityAgreement {
   participant_count?: number;
   participants?: TimeActivityAgreement[];
   is_grouped_multi_use?: boolean;
+  // True when the provider has already received the asymmetric one-time
+  // group-offer payout for this service, so further completions or
+  // cancellations on sibling handshakes do not change the provider's balance.
+  provider_settled?: boolean;
 }
 
 export interface TimeActivityTransaction {
@@ -177,6 +181,7 @@ export function groupActiveAgreements<T extends TimeActivityAgreement>(agreement
     }
 
     const [primary] = participants;
+    const groupProviderSettled = participants.some((item) => item.provider_settled === true);
     output.push({
       ...primary,
       id: `group:${key}`,
@@ -185,10 +190,13 @@ export function groupActiveAgreements<T extends TimeActivityAgreement>(agreement
       counterpart_avatar_url: null,
       expected_delta: representativeDelta(participants.map((item) => item.expected_delta)),
       reserved_delta: representativeDelta(participants.map((item) => item.reserved_delta)),
-      note: `${participants.length} members in this group session`,
+      note: groupProviderSettled
+        ? "Provider already paid — no further change"
+        : `${participants.length} members in this group session`,
       participant_count: participants.length,
       participants,
       is_grouped_multi_use: true,
+      provider_settled: groupProviderSettled,
     });
   }
 

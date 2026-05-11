@@ -707,6 +707,19 @@ export default function ServiceDetailPage() {
     ? (isOwn ? evaluationHandshake.requester_name : evaluationHandshake.provider_name)
     : 'counterpart'
   const evaluationWindow = getEvaluationWindowInfo(evaluationHandshake)
+  // For one-time group offers, "You already reviewed this exchange." is
+  // premature while other slots are still in flight — the owner/requester
+  // will have more participants to review when those slots settle. Hold the
+  // message back until every slot reaches `completed`.
+  const isOneTimeGroupOffer =
+    !isEvent &&
+    service?.schedule_type === 'One-Time' &&
+    Number(service?.max_participants ?? 1) > 1
+  const allGroupSlotsCompleted =
+    isOneTimeGroupOffer &&
+    incoming.length > 0 &&
+    incoming.every((h) => h.status === 'completed')
+  const hideAlreadyReviewedNotice = isOneTimeGroupOffer && !allGroupSlotsCompleted
 
   // Event-specific derived value — must come after exId / isEvent
   const myEventHandshake = isEvent
@@ -1085,7 +1098,7 @@ export default function ServiceDetailPage() {
 
   return (
     <>
-    <Box bg={GRAY50} h="calc(100vh - 64px)" overflowY="auto"
+    <Box bg={GRAY50} minH="calc(100vh - 64px)"
       py={{ base: 0, md: '8px' }} px={{ base: 0, md: '12px' }}>
       <Box maxW="1440px" mx="auto" py={{ base: 4, md: 5 }} px={{ base: 4, md: 5 }}>
 
@@ -2207,7 +2220,7 @@ export default function ServiceDetailPage() {
                             {evaluationWindow.label}
                           </Text>
                         </>
-                      ) : (
+                      ) : hideAlreadyReviewedNotice ? null : (
                         <Flex align="center" justify="center" gap={2} py={2} px={3} borderRadius="11px" bg={GRAY100} color={GRAY500}>
                           <FiCheckCircle size={14} color={GREEN} />
                           <Text fontSize="13px" fontWeight={600}>You already reviewed this exchange.</Text>

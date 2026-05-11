@@ -55,6 +55,38 @@ describe("timeActivityGrouping", () => {
     ]);
   });
 
+  it("marks a grouped one-time group offer as provider-settled when any participant is already paid out", () => {
+    const grouped = groupActiveAgreements([
+      {
+        ...groupOfferAgreement,
+        id: "hs-zeynep",
+        counterpart_name: "Zeynep Arslan",
+        provider_settled: true,
+        expected_delta: 0,
+        reserved_delta: 0,
+        note: "Provider already paid — no further change",
+      },
+      {
+        ...groupOfferAgreement,
+        id: "hs-emre",
+        counterpart_name: "Emre Yilmaz",
+        provider_settled: true,
+        expected_delta: 0,
+        reserved_delta: 0,
+        note: "Provider already paid — no further change",
+      },
+    ]);
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]).toMatchObject({
+      counterpart_name: "2 members",
+      participant_count: 2,
+      expected_delta: 0,
+      reserved_delta: 0,
+      provider_settled: true,
+    });
+  });
+
   it("groups active event agreements into one visible row", () => {
     const grouped = groupActiveAgreements([
       {

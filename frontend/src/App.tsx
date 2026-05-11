@@ -188,11 +188,17 @@ function App() {
 
   // Allow the long create-topic form to use normal document scrolling.
   const isForumCreateTopicPage = location.pathname === '/forum/new'
+  // Service detail pages use document scroll — inner Box scroll feels slow
+  // on macOS wheel/touch because it bypasses the platform's fast-scroll path.
+  const isServiceDetailPage = location.pathname.startsWith('/service-detail/')
 
   // Lock/unlock body + html scroll for full-screen pages
-  const isFullScreenPage = !isForumCreateTopicPage && FULL_SCREEN_PREFIXES.some((p) =>
-    location.pathname === p || location.pathname.startsWith(p + '/')
-  )
+  const isFullScreenPage =
+    !isForumCreateTopicPage &&
+    !isServiceDetailPage &&
+    FULL_SCREEN_PREFIXES.some((p) =>
+      location.pathname === p || location.pathname.startsWith(p + '/')
+    )
   useEffect(() => {
     const el = document.documentElement
     const body = document.body
