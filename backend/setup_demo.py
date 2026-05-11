@@ -24,7 +24,7 @@ from api.models import (
     ChatMessage, ChatRoom, Handshake, Notification, ReputationRep, Comment,
     Service, Tag, User, UserBadge, ForumCategory, ForumTopic, ForumPost,
     Report, AdminAuditLog, ServiceMedia, PublicChatMessage, TransactionHistory,
-    ServiceGroupChatMessage, NegativeRep, UserFollow,
+    ServiceGroupChatMessage, NegativeRep, UserFollow, SavedService,
 )
 from api.achievement_utils import check_and_assign_badges
 from api.services import HandshakeService, EventHandshakeService, EventEvaluationService
@@ -37,7 +37,7 @@ from django.db.models import Q
 from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import quote
 import random
 
@@ -345,6 +345,47 @@ def is_fixed_group_offer(service):
     )
 
 
+# ─── Issue #503 helpers ──────────────────────────────────────────────────────
+
+def quarter_hour(dt: datetime) -> datetime:
+    """Floor dt to the nearest :00 / :15 / :30 / :45 boundary.
+
+    #503: every seeded scheduled_time must land on a clean quarter-hour so
+    demo calendars don't show oddly-aligned timeblocks.
+    """
+    minute = (dt.minute // 15) * 15
+    return dt.replace(minute=minute, second=0, microsecond=0)
+
+
+def schedule_details_from(scheduled_time: datetime, location_text: str) -> str:
+    """Derive the human-readable schedule_details string from scheduled_time
+    so the two can't drift. Group offers should not set schedule_details at
+    all (the form doesn't expose the field); use this only for non-groups
+    where we want a human one-liner alongside the structured time."""
+    return f"{scheduled_time:%a %d %b, %H:%M} — {location_text}"
+
+
+class _ScheduleConflictTracker:
+    """Per-user window registry. claim() registers a [start, end) span for
+    user_id; returns False if it overlaps an existing span. Used to keep
+    seeded handshakes and event RSVPs from putting the same user in two
+    places at the same time on the demo calendar."""
+
+    def __init__(self):
+        self._spans: dict = {}
+
+    def claim(self, user_id, start: datetime, end: datetime) -> bool:
+        spans = self._spans.setdefault(user_id, [])
+        for s, e in spans:
+            if start < e and end > s:
+                return False
+        spans.append((start, end))
+        return True
+
+
+_SCHEDULE = _ScheduleConflictTracker()
+
+
 FIXED_GROUP_AREA_ADDRESSES = {
     'Beşiktaş': 'Sinanpaşa Mahallesi, Şair Nedim Caddesi No: 28, Beşiktaş, İstanbul, Türkiye',
     'Kadıköy': 'Caferağa Mahallesi, Moda Caddesi No: 185, Kadıköy, İstanbul, Türkiye',
@@ -379,23 +420,56 @@ def fixed_group_location_guide(service):
 
 
 def apply_fixed_group_offer_seed_details(service):
-    if not is_fixed_group_offer(service) or service.location_type != 'In-Person':
+    if not is_fixed_group_offer(service):
         return
 
-    exact_address = FIXED_GROUP_AREA_ADDRESSES.get(
-        service.location_area,
-        f"{service.location_area or 'İstanbul'}, İstanbul, Türkiye",
+    # #503: group offers do not expose schedule_details in the form, so the
+    # seed must not pretend they do. The structured scheduled_time is the
+    # only schedule signal on a fixed group offer. This applies to ALL
+    # group offers (Online + In-Person).
+    service.schedule_details = ''
+    save_fields = ['schedule_details']
+
+    if service.location_type == 'In-Person':
+        exact_address = FIXED_GROUP_AREA_ADDRESSES.get(
+            service.location_area,
+            f"{service.location_area or 'İstanbul'}, İstanbul, Türkiye",
+        )
+        service.session_exact_location = exact_address
+        service.session_exact_location_lat = service.location_lat
+        service.session_exact_location_lng = service.location_lng
+        service.session_location_guide = fixed_group_location_guide(service)
+        save_fields.extend([
+            'session_exact_location',
+            'session_exact_location_lat',
+            'session_exact_location_lng',
+            'session_location_guide',
+        ])
+
+    service.save(update_fields=save_fields)
+
+
+def sync_schedule_details_from_scheduled_time(service):
+    """#503: for non-group services where both fields exist, the human
+    schedule_details copy must describe the same date/time as the
+    structured scheduled_time so they can't drift. We overwrite the field
+    with a helper-derived string. Title and description keep their warm
+    Turkish/imece voice — only this single structured field is normalized.
+    """
+    if is_fixed_group_offer(service):
+        return
+    if service.scheduled_time is None:
+        # No structured time to drift from — free-form text is fine.
+        return
+    if not service.schedule_details:
+        return
+    location_hint = service.location_area or (
+        'Online' if service.location_type == 'Online' else 'İstanbul'
     )
-    service.session_exact_location = exact_address
-    service.session_exact_location_lat = service.location_lat
-    service.session_exact_location_lng = service.location_lng
-    service.session_location_guide = fixed_group_location_guide(service)
-    service.save(update_fields=[
-        'session_exact_location',
-        'session_exact_location_lat',
-        'session_exact_location_lng',
-        'session_location_guide',
-    ])
+    service.schedule_details = schedule_details_from(
+        service.scheduled_time, location_hint,
+    )
+    service.save(update_fields=['schedule_details'])
 
 
 def create_or_update_user(
@@ -425,7 +499,6 @@ def create_or_update_user(
             'role': 'member',
             'is_verified': True,
             'is_onboarded': True,
-            'date_joined': timezone.now() - timedelta(days=date_joined_offset_days),
         }
     )
     if not created:
@@ -440,16 +513,23 @@ def create_or_update_user(
         user.is_verified = True
         user.is_onboarded = True
         user.set_password('demo123')
-        if date_joined_offset_days > 0:
-            user.date_joined = timezone.now() - timedelta(days=date_joined_offset_days)
         user.save()
+    # User.date_joined has auto_now_add=True, which silently overrides any
+    # value passed to get_or_create. Backdate via a direct .update() so the
+    # demo's staggered timeline (3 days to 620 days) actually lands in the
+    # DB on both fresh creates and re-runs.
+    if date_joined_offset_days > 0:
+        User.objects.filter(pk=user.pk).update(
+            date_joined=timezone.now() - timedelta(days=date_joined_offset_days),
+        )
+        user.refresh_from_db(fields=['date_joined'])
     print(f"  {'Created' if created else 'Updated'}: {email} ({first_name} {last_name}, Balance: {balance}h, Karma: {karma})")
     return user
 
 elif_user = create_or_update_user(
     'elif@demo.com', 'Elif', 'Yılmaz',
     'Freelance designer and cooking enthusiast living in Beşiktaş. I love hosting neighbor-friendly food circles and sharing practical kitchen skills people can reuse at home.',
-    Decimal('7.00'), 35, date_joined_offset_days=180,
+    Decimal('3.00'), 35, date_joined_offset_days=180,
     avatar_url=dicebear_avatar('elif'),
     banner_url=semantic_banner_image('community cooking kitchen gathering'),
     location='Beşiktaş, Istanbul',
@@ -458,7 +538,7 @@ elif_user = create_or_update_user(
 cem = create_or_update_user(
     'cem@demo.com', 'Cem', 'Demir',
     'University student in Kadıköy passionate about chess and genealogy research. Always happy to teach beginners and help trace family histories!',
-    Decimal('4.00'), 18, date_joined_offset_days=120,
+    Decimal('3.00'), 18, date_joined_offset_days=120,
     avatar_url=dicebear_avatar('cem'),
     banner_url=semantic_banner_image('chess books quiet learning'),
     location='Kadıköy, Istanbul',
@@ -467,7 +547,7 @@ cem = create_or_update_user(
 ayse = create_or_update_user(
     'ayse@demo.com', 'Ayşe', 'Kaya',
     'Gardening enthusiast and community organizer in Üsküdar. Passionate about sustainable living and urban farming. Love sharing knowledge about growing food in small spaces!',
-    Decimal('7.00'), 42, date_joined_offset_days=260,
+    Decimal('3.00'), 42, date_joined_offset_days=260,
     avatar_url=dicebear_avatar('ayse'),
     banner_url=semantic_banner_image('garden plants balcony workshop'),
     location='Üsküdar, Istanbul',
@@ -476,7 +556,7 @@ ayse = create_or_update_user(
 mehmet = create_or_update_user(
     'mehmet@demo.com', 'Mehmet', 'Özkan',
     'Retired teacher living in Şişli. I help neighbors navigate family archives, local history, and everyday digital tasks with patience and care.',
-    Decimal('9.00'), 55, date_joined_offset_days=430,
+    Decimal('3.00'), 55, date_joined_offset_days=430,
     avatar_url=dicebear_avatar('mehmet'),
     banner_url=semantic_banner_image('history books archive storytelling'),
     location='Şişli, Istanbul',
@@ -485,7 +565,7 @@ mehmet = create_or_update_user(
 zeynep = create_or_update_user(
     'zeynep@demo.com', 'Zeynep', 'Arslan',
     'Language teacher and cultural exchange enthusiast. Fluent in Turkish, English, and French. Love connecting people through language and helping others practice conversation in a friendly, relaxed setting.',
-    Decimal('9.00'), 68, date_joined_offset_days=370,
+    Decimal('3.00'), 68, date_joined_offset_days=370,
     avatar_url=dicebear_avatar('zeynep'),
     banner_url=semantic_banner_image('language exchange people conversation'),
     location='Beyoğlu, Istanbul',
@@ -494,7 +574,7 @@ zeynep = create_or_update_user(
 can = create_or_update_user(
     'can@demo.com', 'Can', 'Şahin',
     'Photography hobbyist based in Beşiktaş. I enjoy community photo walks, documenting neighborhood stories, and helping others feel confident behind the camera.',
-    Decimal('6.00'), 28, date_joined_offset_days=25,
+    Decimal('3.00'), 28, date_joined_offset_days=3,
     avatar_url=dicebear_avatar('can'),
     banner_url=semantic_banner_image('street photography city stories'),
     location='Beşiktaş, Istanbul',
@@ -503,7 +583,7 @@ can = create_or_update_user(
 deniz = create_or_update_user(
     'deniz@demo.com', 'Deniz', 'Aydın',
     'Tech-savvy professional in Kadıköy. Enjoy helping others with smartphones, apps, and basic tech troubleshooting. Patient teacher for all skill levels!',
-    Decimal('5.00'), 22, date_joined_offset_days=80,
+    Decimal('3.00'), 22, date_joined_offset_days=8,
     avatar_url=dicebear_avatar('deniz'),
     banner_url=semantic_banner_image('technology community help people'),
     location='Kadıköy, Istanbul',
@@ -512,7 +592,7 @@ deniz = create_or_update_user(
 burak = create_or_update_user(
     'burak@demo.com', 'Burak', 'Kurt',
     'Chess player and music lover. I like low-pressure skill swaps, practice sessions, and small group meetups where everyone leaves having learned something useful.',
-    Decimal('5.00'), 15, date_joined_offset_days=95,
+    Decimal('3.00'), 15, date_joined_offset_days=95,
     avatar_url=dicebear_avatar('burak'),
     banner_url=semantic_banner_image('music chess community evening'),
     location='Kadıköy, Istanbul',
@@ -521,7 +601,7 @@ burak = create_or_update_user(
 selin = create_or_update_user(
     'selin@demo.com', 'Selin', 'Aksoy',
     'Long-time community host in Cihangir who loves reading circles, quiet neighborhood gatherings, and helping newcomers feel included without pressure.',
-    Decimal('8.00'), 74, date_joined_offset_days=540,
+    Decimal('3.00'), 74, date_joined_offset_days=540,
     avatar_url=dicebear_avatar('selin'),
     banner_url=semantic_banner_image('books quiet community gathering'),
     location='Beyoğlu, Istanbul',
@@ -530,7 +610,7 @@ selin = create_or_update_user(
 emre = create_or_update_user(
     'emre@demo.com', 'Emre', 'Taş',
     'Urban walker and civic-minded neighbor who enjoys ferry routes, local history, and helping new residents feel more at home in the city.',
-    Decimal('6.00'), 31, date_joined_offset_days=220,
+    Decimal('3.00'), 31, date_joined_offset_days=220,
     avatar_url=dicebear_avatar('emre'),
     banner_url=semantic_banner_image('city ferry neighborhood walk'),
     location='Üsküdar, Istanbul',
@@ -539,7 +619,7 @@ emre = create_or_update_user(
 yasemin = create_or_update_user(
     'yasemin@demo.com', 'Yasemin', 'Ergin',
     'Parent, kitchen volunteer, and storyteller who loves gathering people around coffee, handwritten recipes, and warm community rituals.',
-    Decimal('8.00'), 63, date_joined_offset_days=300,
+    Decimal('3.00'), 63, date_joined_offset_days=300,
     avatar_url=dicebear_avatar('yasemin'),
     banner_url=semantic_banner_image('coffee recipe storytelling kitchen'),
     location='Fatih, Istanbul',
@@ -548,7 +628,7 @@ yasemin = create_or_update_user(
 murat = create_or_update_user(
     'murat@demo.com', 'Murat', 'Sezer',
     'Recently moved to Istanbul for remote work and is using The Hive to find low-pressure ways to meet people through board games, study sessions, and neighborhood routines.',
-    Decimal('7.00'), 11, date_joined_offset_days=45,
+    Decimal('3.00'), 11, date_joined_offset_days=5,
     avatar_url=dicebear_avatar('murat'),
     banner_url=semantic_banner_image('board games study session city'),
     location='Kadıköy, Istanbul',
@@ -557,7 +637,7 @@ murat = create_or_update_user(
 levent = create_or_update_user(
     'levent@demo.com', 'Levent', 'Yalçın',
     'Retired musician who enjoys acoustic singalongs, museum mornings, and gentle intergenerational meetups where everyone participates a little.',
-    Decimal('7.00'), 58, date_joined_offset_days=620,
+    Decimal('3.00'), 58, date_joined_offset_days=620,
     avatar_url=dicebear_avatar('levent'),
     banner_url=semantic_banner_image('music museum conversation community'),
     location='Beyoğlu, Istanbul',
@@ -759,10 +839,10 @@ borek_demo_time = now - timedelta(days=3, hours=1)
 gardening_demo_time = now - timedelta(days=2, hours=3)
 photography_demo_time = now - timedelta(days=1, hours=5)
 
-manti_seed_time = now + timedelta(days=2)
-borek_seed_time = now + timedelta(days=3)
-gardening_seed_time = now + timedelta(days=4)
-photography_seed_time = now + timedelta(days=5)
+manti_seed_time = quarter_hour(now + timedelta(days=2))
+borek_seed_time = quarter_hour(now + timedelta(days=3))
+gardening_seed_time = quarter_hour(now + timedelta(days=4))
+photography_seed_time = quarter_hour(now + timedelta(days=5))
 
 elif_manti = Service.objects.create(
     user=elif_user,
@@ -1068,7 +1148,7 @@ burak_guitar = Service.objects.create(
     location_lng=Decimal('29.0244'),
     max_participants=2,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=5, hours=2),
+    scheduled_time=quarter_hour(now + timedelta(days=5, hours=2)),
     schedule_details='Next Tuesday at 19:00 in Kadıköy',
     status='Active',
     created_at=timezone.now() - timedelta(days=11),
@@ -1109,7 +1189,7 @@ ayse_watercolor = Service.objects.create(
     location_lng=Decimal('29.0125'),
     max_participants=3,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=7, hours=1),
+    scheduled_time=quarter_hour(now + timedelta(days=7, hours=1)),
     schedule_details='Next Sunday at 13:00 in Üsküdar',
     status='Active',
     created_at=timezone.now() - timedelta(days=13),
@@ -1164,7 +1244,7 @@ emre_orientation_walk = create_demo_service(
     location_lng=Decimal('29.0154'),
     max_participants=4,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=6, hours=1),
+    scheduled_time=quarter_hour(now + timedelta(days=6, hours=1)),
     schedule_details='Next Saturday at 10:30 from Üsküdar pier',
     tags=[sports_tag, education_tag],
     created_days_ago=14,
@@ -1199,7 +1279,7 @@ yasemin_coffee_offer = create_demo_service(
     location_lng=Decimal('28.9647'),
     max_participants=3,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=4, hours=2),
+    scheduled_time=quarter_hour(now + timedelta(days=4, hours=2)),
     schedule_details='This Friday at 17:00 in Fatih',
     tags=[cooking_tag, education_tag],
     created_days_ago=18,
@@ -1245,7 +1325,7 @@ murat_boardgames_offer = create_demo_service(
     location_lng=Decimal('29.0280'),
     max_participants=4,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=9),
+    scheduled_time=quarter_hour(now + timedelta(days=9)),
     schedule_details='Next weekend in Yeldeğirmeni',
     tags=[chess_tag, education_tag],
     created_days_ago=4,
@@ -1297,7 +1377,7 @@ selin_reading_event = create_demo_service(
     location_lng=Decimal('28.9740'),
     max_participants=8,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=5, hours=3),
+    scheduled_time=quarter_hour(now + timedelta(days=5, hours=3)),
     schedule_details='Sunday at 15:00 in Cihangir',
     tags=[language_tag, education_tag, art_tag],
     created_days_ago=10,
@@ -1315,7 +1395,7 @@ emre_walk_event = create_demo_service(
     location_lng=Decimal('29.0154'),
     max_participants=10,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(hours=12),
+    scheduled_time=quarter_hour(now + timedelta(hours=12)),
     schedule_details='Tomorrow at sunrise from Üsküdar coast',
     tags=[sports_tag, photography_tag],
     created_days_ago=3,
@@ -1333,7 +1413,7 @@ yasemin_story_event = create_demo_service(
     location_lng=Decimal('28.9647'),
     max_participants=7,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=8, hours=1),
+    scheduled_time=quarter_hour(now + timedelta(days=8, hours=1)),
     schedule_details='Next Friday at 19:00 in Fatih',
     tags=[cooking_tag, education_tag, art_tag],
     created_days_ago=9,
@@ -1351,7 +1431,7 @@ levent_music_event = create_demo_service(
     location_lng=Decimal('28.9740'),
     max_participants=6,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=2, hours=4),
+    scheduled_time=quarter_hour(now + timedelta(days=2, hours=4)),
     schedule_details='This weekend at 18:00 in a Beyoğlu courtyard',
     tags=[music_tag, art_tag],
     created_days_ago=16,
@@ -1369,7 +1449,7 @@ elif_photo_event = create_demo_service(
     location_lng=Decimal('28.9350'),
     max_participants=4,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=7),  # was: now + timedelta(days=4, hours=7); set to +7d for calendar QA
+    scheduled_time=quarter_hour(now + timedelta(days=7)),  # was: now + timedelta(days=4, hours=7); set to +7d for calendar QA
     schedule_details='Saturday morning, meets at Eyüp Ferry Dock at 08:00',
     tags=[photography_tag, art_tag],
     created_days_ago=5,
@@ -1389,7 +1469,7 @@ elif_knitting = create_demo_service(
     location_lng=Decimal('29.0089'),
     max_participants=5,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=6, hours=3),
+    scheduled_time=quarter_hour(now + timedelta(days=6, hours=3)),
     schedule_details='Saturday afternoon at 15:00 in Beşiktaş',
     tags=[art_tag, education_tag],
     created_days_ago=6,
@@ -1407,7 +1487,7 @@ ayse_composting = create_demo_service(
     location_lng=Decimal('29.0125'),
     max_participants=3,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=5, hours=1),
+    scheduled_time=quarter_hour(now + timedelta(days=5, hours=1)),
     schedule_details='This weekend at 11:00 in Üsküdar',
     tags=[gardening_tag, education_tag],
     created_days_ago=4,
@@ -1442,7 +1522,7 @@ selin_meditation = create_demo_service(
     location_lng=Decimal('28.9740'),
     max_participants=6,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=3, hours=-2),
+    scheduled_time=quarter_hour(now + timedelta(days=3, hours=-2)),
     schedule_details='Wednesday at 07:30 in Cihangir park',
     tags=[sports_tag, education_tag],
     created_days_ago=7,
@@ -1474,7 +1554,7 @@ can_zine = create_demo_service(
     location_lng=Decimal('29.0089'),
     max_participants=3,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=8, hours=2),
+    scheduled_time=quarter_hour(now + timedelta(days=8, hours=2)),
     schedule_details='Next Sunday at 14:00 in Beşiktaş',
     tags=[photography_tag, art_tag],
     created_days_ago=3,
@@ -1492,7 +1572,7 @@ levent_vinyl = create_demo_service(
     location_lng=Decimal('28.9740'),
     max_participants=4,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=7, hours=4),
+    scheduled_time=quarter_hour(now + timedelta(days=7, hours=4)),
     schedule_details='Next Saturday at 19:00 in Beyoğlu',
     tags=[music_tag, art_tag],
     created_days_ago=12,
@@ -1558,7 +1638,7 @@ yasemin_potluck_event = create_demo_service(
     location_lng=Decimal('28.9647'),
     max_participants=12,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=10, hours=3),
+    scheduled_time=quarter_hour(now + timedelta(days=10, hours=3)),
     schedule_details='Next Friday evening at 19:30 in a Fatih courtyard',
     tags=[cooking_tag, art_tag],
     created_days_ago=8,
@@ -1576,7 +1656,7 @@ burak_openmic = create_demo_service(
     location_lng=Decimal('29.0244'),
     max_participants=10,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=6, hours=5),
+    scheduled_time=quarter_hour(now + timedelta(days=6, hours=5)),
     schedule_details='Saturday evening at 20:00 in Kadıköy',
     tags=[music_tag, art_tag],
     created_days_ago=5,
@@ -1594,7 +1674,7 @@ elif_mending = create_demo_service(
     location_lng=Decimal('29.0089'),
     max_participants=8,
     schedule_type='One-Time',
-    scheduled_time=now + timedelta(days=9, hours=2),
+    scheduled_time=quarter_hour(now + timedelta(days=9, hours=2)),
     schedule_details='Next Sunday at 14:00 in Beşiktaş community space',
     tags=[art_tag, education_tag],
     created_days_ago=4,
@@ -1604,6 +1684,7 @@ print(f"\n  Created {len(services)} services")
 
 for service in services:
     apply_fixed_group_offer_seed_details(service)
+    sync_schedule_details_from_scheduled_time(service)
 
 print("  Adding service cover images...")
 service_media_count = 0
@@ -1672,7 +1753,7 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
         handshake.exact_location = exact_locations.get(service.location_area, f'{service.location_area} area')
         handshake.exact_location_guide = None
         handshake.exact_duration = service.duration
-        handshake.scheduled_time = timezone.now() + timedelta(days=3)
+        handshake.scheduled_time = quarter_hour(timezone.now() + timedelta(days=3))
         handshake.exact_location_maps_url = build_google_maps_url(
             handshake.exact_location,
             service.location_lat,
@@ -1680,7 +1761,19 @@ def simulate_handshake_workflow(service, requester, provider_initiated_days_ago=
         )
     handshake.updated_at = created_at_time + timedelta(hours=2)
     handshake.save()
-    
+
+    # #503: register both sides of the handshake on the demo calendar so we
+    # notice overlapping time blocks for the same user.
+    if handshake.scheduled_time is not None and handshake.exact_duration:
+        start = handshake.scheduled_time
+        end = start + timedelta(hours=float(handshake.exact_duration))
+        for participant in (requester, service.user):
+            if not _SCHEDULE.claim(participant.id, start, end):
+                print(
+                    f"  [conflict] {participant.email} double-booked across "
+                    f"{start:%Y-%m-%d %H:%M}–{end:%H:%M} (handshake on {service.title!r})"
+                )
+
     provision_timebank(handshake)
     backdate_timebank_activity(
         created_at=created_at_time + timedelta(hours=3),
@@ -1758,6 +1851,7 @@ def sync_fixed_group_offer_time(service, scheduled_time):
         service.session_exact_location_lat,
         service.session_exact_location_lng,
     )
+    scheduled_time = quarter_hour(scheduled_time)
     Service.objects.filter(pk=service.pk).update(scheduled_time=scheduled_time)
     Handshake.objects.filter(
         service=service,
@@ -1774,6 +1868,7 @@ def sync_fixed_group_offer_time(service, scheduled_time):
         completed_schedule = scheduled_time
         if completed_schedule is None or completed_schedule >= completed_time:
             completed_schedule = completed_time - timedelta(hours=2)
+        completed_schedule = quarter_hour(completed_schedule)
         Handshake.objects.filter(pk=completed.pk).update(
             scheduled_time=completed_schedule,
             exact_location=exact_location,
@@ -1793,6 +1888,7 @@ def complete_seeded_handshake(handshake, *, completed_days_ago):
     scheduled_time = handshake.scheduled_time
     if scheduled_time is None or scheduled_time >= completion_time:
         scheduled_time = completion_time - timedelta(hours=2)
+    scheduled_time = quarter_hour(scheduled_time)
     with transaction.atomic():
         handshake.scheduled_time = scheduled_time
         handshake.provider_confirmed_complete = True
@@ -1887,12 +1983,22 @@ def event_rsvp(service, requester, joined_days_ago):
         updated_at=joined_at + timedelta(hours=2),
     )
     handshake.refresh_from_db()
+    # #503: register the participant's slot so we notice if the same user
+    # gets RSVPed to two overlapping events on the demo timeline.
+    if service.scheduled_time is not None and service.duration:
+        start = service.scheduled_time
+        end = start + timedelta(hours=float(service.duration))
+        if not _SCHEDULE.claim(requester.id, start, end):
+            print(
+                f"  [conflict] {requester.email} already booked across "
+                f"{start:%Y-%m-%d %H:%M}–{end:%H:%M} (event {service.title!r})"
+            )
     return handshake
 
 
 def backdate_completed_event(service, days_ago):
     completed_at = timezone.now() - timedelta(days=days_ago)
-    scheduled_at = completed_at - timedelta(hours=2)
+    scheduled_at = quarter_hour(completed_at - timedelta(hours=2))
     window_end = completed_at + timedelta(hours=48)
     Service.objects.filter(pk=service.pk).update(
         scheduled_time=scheduled_at,
@@ -2188,7 +2294,7 @@ elif_photo_event_3 = event_rsvp(elif_photo_event, mehmet, joined_days_ago=1)
 event_handshakes.extend([elif_photo_event_1, elif_photo_event_2, elif_photo_event_3])
 upcoming_event_handshakes.extend([elif_photo_event_1, elif_photo_event_2, elif_photo_event_3])
 
-Service.objects.filter(pk=levent_music_event.pk).update(scheduled_time=timezone.now() + timedelta(hours=10))
+Service.objects.filter(pk=levent_music_event.pk).update(scheduled_time=quarter_hour(timezone.now() + timedelta(hours=10)))
 levent_music_event.refresh_from_db(fields=['scheduled_time'])
 levent_event_1 = event_rsvp(levent_music_event, elif_user, joined_days_ago=7)
 levent_event_2 = event_rsvp(levent_music_event, yasemin, joined_days_ago=6)
@@ -2293,6 +2399,89 @@ print(
     f"{len(pending_handshakes)} pending, {len(cancelled_handshakes)} cancelled handshakes "
     f"and {len(event_handshakes)} event participations"
 )
+
+# #503: established users should have rich Time Activity history. Everyone
+# started from the 3h baseline; current handshakes have moved balances —
+# sometimes deep into negative territory for users who request more than
+# they provide in the seeded set. We backfill each established user with a
+# small number of synthetic 'earlier community exchange' transactions
+# representing off-screen activity before the seed timeline. The amounts
+# net to a positive balance proportional to date_joined age, giving the
+# Time Activity tab visible historical content on every established
+# profile.
+print("\n  Backfilling earlier-exchange history for established users...")
+_history_descriptions = [
+    "Earlier community exchange — language hour with neighbor",
+    "Earlier session — cooking circle in Kadıköy",
+    "Earlier hour exchanged at a Saturday photo walk",
+    "Earlier event check-in — neighborhood book circle",
+    "Earlier session — bağlama lesson for beginners",
+    "Earlier session — coffee + budget chat",
+    "Earlier exchange — ferry-route orientation walk",
+    "Earlier session — handwritten-recipe storytelling",
+]
+_backfill_seed = 0
+for user in all_users:
+    user.refresh_from_db(fields=['timebank_balance', 'date_joined'])
+    days_old = max(0, (timezone.now() - user.date_joined).days)
+    # Newcomers (≤14d) stay fresh — no synthetic 'earlier' history. The
+    # only adjustment they get is a defensive floor at 0h if the seeded
+    # handshakes happen to leave them negative (which would look broken
+    # in the UI). The floor is a single 'Welcome adjustment' row.
+    if days_old < 14:
+        if user.timebank_balance < 0:
+            shortfall = Decimal('0.00') - user.timebank_balance
+            new_balance = Decimal('0.00')
+            TransactionHistory.objects.create(
+                user=user,
+                transaction_type='adjustment',
+                amount=shortfall,
+                balance_after=new_balance,
+                description='Welcome adjustment — account balance reset to zero after onboarding seed.',
+            )
+            user.timebank_balance = new_balance
+            user.save(update_fields=['timebank_balance'])
+        continue
+    # Target balance: 3h baseline + 1h per ~60 days of membership, capped
+    # at +6h above the current handshake-derived balance, lower bound 4h.
+    earned_bonus = min(Decimal(str(days_old / 60.0)), Decimal('6.00'))
+    target_balance = max(Decimal('4.00'), user.timebank_balance + earned_bonus)
+    delta = target_balance - user.timebank_balance
+    if delta <= 0:
+        continue
+    # Spread the credit across 2-4 backdated rows for visible Time Activity.
+    n_rows = 2 + (days_old // 200)  # 2..5
+    n_rows = min(n_rows, 4)
+    per_row = (delta / n_rows).quantize(Decimal('0.01'))
+    running = user.timebank_balance
+    for i in range(n_rows):
+        amount = per_row if i < n_rows - 1 else (delta - per_row * (n_rows - 1))
+        running = running + amount
+        # Backdate older rows further into the past.
+        days_back = min(days_old - 1, 14 + i * 30)
+        TransactionHistory.objects.create(
+            user=user,
+            transaction_type='transfer',
+            amount=amount,
+            balance_after=running,
+            description=_history_descriptions[(_backfill_seed + i) % len(_history_descriptions)],
+        )
+        TransactionHistory.objects.filter(
+            user=user, balance_after=running,
+        ).update(created_at=timezone.now() - timedelta(days=days_back))
+    user.timebank_balance = running
+    user.save(update_fields=['timebank_balance'])
+    _backfill_seed += 1
+print(f"  Backfilled history for {_backfill_seed} established users")
+
+# FR-07i: pin Cem's final balance below the 10-hour threshold so E2E flows
+# that need a sub-10h demo account ("can't afford this Need" scenarios,
+# atomic-rollback checks) always have a deterministic fixture. Done after
+# every handshake-driven balance change so it isn't undone downstream.
+cem.refresh_from_db(fields=['timebank_balance'])
+cem.timebank_balance = Decimal('5.00')
+cem.save(update_fields=['timebank_balance'])
+print(f"  Pinned: Cem's TimeBank balance to 5.00h (FR-07i fixture)")
 
 print("\n[6/8] Adding reputation for completed handshakes...")
 
@@ -2900,6 +3089,39 @@ flagged_forum_post = ForumPost.objects.create(
 )
 ForumPost.objects.filter(pk=flagged_forum_post.pk).update(created_at=timezone.now() - timedelta(days=3, hours=8))
 
+# ─── Saved services (private bookmarks) ──────────────────────────────────────
+# #503: seed a small set of SavedService rows so the For You feed has some
+# engagement_signal to chew on (Jaccard of viewer's saved-service tags
+# against candidate tags). Viewers save services they didn't transact with —
+# a few across categories so the signal is non-trivial.
+print("\n[7b/8] Seeding saved services for ranking signals...")
+
+_save_pairs = [
+    (elif_user, ayse_gardening),
+    (elif_user, zeynep_language),
+    (cem, mehmet_genealogy),
+    (cem, can_photography),
+    (deniz, burak_guitar),
+    (deniz, ayse_watercolor),
+    (murat, burak_chess),
+    (murat, elif_borek),
+    (ayse, elif_manti),
+    (zeynep, mehmet_tech),
+    (yasemin, ayse_plant_advice),
+    (selin, can_photography),
+]
+_saves_created = 0
+for saver, saved_service in _save_pairs:
+    # Don't bookmark your own service — defensive guard.
+    if saved_service.user_id == saver.id:
+        continue
+    _, created = SavedService.objects.get_or_create(
+        user=saver, service=saved_service,
+    )
+    if created:
+        _saves_created += 1
+print(f"  Created {_saves_created} saved-service rows")
+
 print("\n[8/8] Assigning achievements and finalizing...")
 
 for user in all_users:
@@ -3162,185 +3384,6 @@ AdminAuditLog.objects.bulk_create([
 
 print(f"  Created 7 audit log entries")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DEMO SCENARIO: April 23rd Children's Festival (pre-seeded at 3 lifecycle stages)
-# ══════════════════════════════════════════════════════════════════════════════
-print("\n[DEMO] Seeding April 23rd Festival scenario events...")
-
-FESTIVAL_TITLE = 'April 23rd Children\'s Festival in the Park'
-FESTIVAL_DESC = (
-    'A neighborhood festival for families to celebrate together! '
-    'We will play traditional street games like sack races and tug-of-war, '
-    'have face painting for the kids, and share tea and snacks. '
-    'Everyone pitches in — this is a community effort (imece). '
-    'Bring your kids, your energy, and something to share!'
-)
-FESTIVAL_IMG = 'https://images.unsplash.com/photo-1472162072942-cd5147eb3902?auto=format&fit=crop&w=800&h=600&q=80'
-FESTIVAL_LAT = Decimal('41.1080')
-FESTIVAL_LNG = Decimal('28.9680')
-
-# ── Event 1: CHECK-IN READY (Scene 2 — 24h lockdown window open) ──────────
-# scheduled_time = 30 min from now → inside lockdown, before start
-demo_fest_checkin = Service.objects.create(
-    user=zeynep,
-    title=FESTIVAL_TITLE,
-    description=FESTIVAL_DESC,
-    type='Event',
-    duration=Decimal('3.00'),
-    location_type='In-Person',
-    location_area='Eyüpsultan',
-    location_lat=FESTIVAL_LAT,
-    location_lng=FESTIVAL_LNG,
-    max_participants=20,
-    schedule_type='One-Time',
-    scheduled_time=now + timedelta(minutes=30),
-    schedule_details='At the wide grassy area in the middle of the park, 14:00',
-    status='Active',
-    created_at=now - timedelta(days=8),
-)
-demo_fest_checkin.tags.set([education_tag, sports_tag])
-ServiceMedia.objects.create(
-    service=demo_fest_checkin, media_type='image',
-    file_url=FESTIVAL_IMG, display_order=0,
-)
-# Ayse, Burak, Cem joined
-for participant in [ayse, burak, cem]:
-    h = EventHandshakeService.join_event(demo_fest_checkin, participant)
-    Handshake.objects.filter(pk=h.pk).update(
-        created_at=now - timedelta(days=5),
-        updated_at=now - timedelta(days=5),
-    )
-# Group chat messages (imece conversation)
-add_group_chat_messages(demo_fest_checkin, [
-    (ayse, "I will bring the face painting supplies — I can paint the kids' faces!"),
-    (burak, "Great, I am coming with my car. I will get the sack race and tug-of-war materials from the warehouse."),
-    (cem, "We will take care of tea and plastic cups for everyone on our way."),
-    (zeynep, "Wonderful teamwork! See you at the wide grassy area in the middle of the park at 14:00."),
-], now - timedelta(days=4))
-print(f"  Created: {demo_fest_checkin.title} (check-in ready, 30 min from now)")
-
-# ── Event 2: READY TO CLOSE (Scene 4 — event happened, organizer can close) ─
-# scheduled_time = 3h ago → event happened, Ayse+Burak checked in, Cem did not
-demo_fest_close = Service.objects.create(
-    user=zeynep,
-    title=FESTIVAL_TITLE,
-    description=FESTIVAL_DESC,
-    type='Event',
-    duration=Decimal('3.00'),
-    location_type='In-Person',
-    location_area='Eyüpsultan',
-    location_lat=FESTIVAL_LAT,
-    location_lng=FESTIVAL_LNG,
-    max_participants=20,
-    schedule_type='One-Time',
-    scheduled_time=now - timedelta(hours=3),
-    schedule_details='At the wide grassy area in the middle of the park, 14:00',
-    status='Active',
-    created_at=now - timedelta(days=8),
-)
-demo_fest_close.tags.set([education_tag, sports_tag])
-ServiceMedia.objects.create(
-    service=demo_fest_close, media_type='image',
-    file_url=FESTIVAL_IMG, display_order=0,
-)
-# Directly create handshakes (bypassing join_event since scheduled_time is past)
-for participant in [ayse, burak, cem]:
-    Handshake.objects.create(
-        service=demo_fest_close, requester=participant,
-        status='accepted', provisioned_hours=0,
-        scheduled_time=demo_fest_close.scheduled_time,
-        created_at=now - timedelta(days=5),
-        updated_at=now - timedelta(days=5),
-    )
-for participant in [ayse, burak]:
-    Handshake.objects.filter(
-        service=demo_fest_close, requester=participant,
-    ).update(status='checked_in', updated_at=now - timedelta(hours=4))
-# Group chat with Cem's apology
-add_group_chat_messages(demo_fest_close, [
-    (ayse, "I will bring the face painting supplies — I can paint the kids' faces!"),
-    (burak, "Great, I am coming with my car. I will get the sack race and tug-of-war materials from the warehouse."),
-    (cem, "We will take care of tea and plastic cups for everyone on our way."),
-    (zeynep, "Wonderful teamwork! See you at the wide grassy area in the middle of the park at 14:00."),
-    (cem, "I am so sorry everyone. My son got a fever last night, we will not be able to make it to the park tomorrow. Happy holidays!"),
-    (zeynep, "Get well soon Cem, health comes first."),
-], now - timedelta(days=4))
-print(f"  Created: {demo_fest_close.title} (ready to close, Ayse+Burak checked in, Cem not)")
-
-# ── Event 3: COMPLETED (Scene 5 — event completed, evaluation window open) ───
-demo_fest_done = Service.objects.create(
-    user=zeynep,
-    title=FESTIVAL_TITLE,
-    description=FESTIVAL_DESC,
-    type='Event',
-    duration=Decimal('3.00'),
-    location_type='In-Person',
-    location_area='Eyüpsultan',
-    location_lat=FESTIVAL_LAT,
-    location_lng=FESTIVAL_LNG,
-    max_participants=20,
-    schedule_type='One-Time',
-    scheduled_time=now - timedelta(hours=4),
-    schedule_details='At the wide grassy area in the middle of the park, 14:00',
-    status='Active',
-    created_at=now - timedelta(days=8),
-)
-demo_fest_done.tags.set([education_tag, sports_tag])
-ServiceMedia.objects.create(
-    service=demo_fest_done, media_type='image',
-    file_url=FESTIVAL_IMG, display_order=0,
-)
-# Directly create handshakes and set final states (bypassing service layer)
-for participant in [ayse, burak, cem]:
-    Handshake.objects.create(
-        service=demo_fest_done, requester=participant,
-        status='accepted', provisioned_hours=0,
-        scheduled_time=demo_fest_done.scheduled_time,
-        created_at=now - timedelta(days=5),
-        updated_at=now - timedelta(days=5),
-    )
-# Mark Ayse + Burak as attended
-Handshake.objects.filter(
-    service=demo_fest_done, requester__in=[ayse, burak],
-).update(status='attended', updated_at=now - timedelta(minutes=30))
-# Mark Cem as no_show
-Handshake.objects.filter(
-    service=demo_fest_done, requester=cem,
-).update(status='no_show', updated_at=now - timedelta(minutes=30))
-# Complete the event and set evaluation windows
-completion_time = now - timedelta(minutes=30)
-window_end = completion_time + timedelta(hours=48)
-Service.objects.filter(pk=demo_fest_done.pk).update(
-    status='Completed', event_completed_at=completion_time,
-)
-Handshake.objects.filter(
-    service=demo_fest_done, status='attended',
-).update(
-    evaluation_window_starts_at=completion_time,
-    evaluation_window_ends_at=window_end,
-    evaluation_window_closed_at=None,
-)
-demo_fest_done.refresh_from_db()
-# Group chat
-add_group_chat_messages(demo_fest_done, [
-    (ayse, "I will bring the face painting supplies — I can paint the kids' faces!"),
-    (burak, "Great, I am coming with my car. I will get the sack race and tug-of-war materials from the warehouse."),
-    (cem, "We will take care of tea and plastic cups for everyone on our way."),
-    (zeynep, "Wonderful teamwork! See you at the wide grassy area in the middle of the park at 14:00."),
-    (cem, "I am so sorry everyone. My son got a fever last night, we will not be able to make it to the park tomorrow. Happy holidays!"),
-    (zeynep, "Get well soon Cem, health comes first."),
-], now - timedelta(days=4))
-print(f"  Created: {demo_fest_done.title} (completed, Ayse+Burak attended, Cem no-show, evaluation window open)")
-
-# FR-07i: pin Cem's final balance below the 10-hour threshold so E2E flows
-# that need a sub-10h demo account ("can't afford this Need" scenarios,
-# atomic-rollback checks) always have a deterministic fixture. Done after
-# every handshake-driven balance change so it isn't undone downstream.
-cem.refresh_from_db(fields=['timebank_balance'])
-cem.timebank_balance = Decimal('5.00')
-cem.save(update_fields=['timebank_balance'])
-print(f"  Pinned: Cem's TimeBank balance to 5.00h (FR-07i fixture)")
-
 print("\n" + "=" * 60)
 print("Demo setup complete!")
 print("=" * 60)
@@ -3364,8 +3407,12 @@ print(f"  Forum Topics: {ForumTopic.objects.count()}")
 print(f"  Forum Posts: {ForumPost.objects.count()}")
 print(f"  Reports: {Report.objects.count()} ({Report.objects.filter(status='pending').count()} pending)")
 print(f"  Audit Logs: {AdminAuditLog.objects.count()}")
+print(f"  Saved Services: {SavedService.objects.count()}")
+print(f"\nNewcomers (≤14 days since joining): can@demo.com, murat@demo.com, deniz@demo.com")
+print(f"All other demo users start from a 3h TimeBank baseline before seeded transactions modify it.")
 print(f"\nDemo Accounts (password: demo123):")
 print(f"  Admin:   {admin_email} / {admin_password}")
 for user in all_users:
+    user.refresh_from_db(fields=['timebank_balance', 'karma_score'])
     print(f"  {user.first_name} {user.last_name}: {user.email} (Balance: {user.timebank_balance}h, Karma: {user.karma_score})")
 print("\n" + "=" * 60)
