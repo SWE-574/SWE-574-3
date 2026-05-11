@@ -192,7 +192,7 @@ class TestFollowSystem:
 
         resp = client.post(f'/api/users/{followed.id}/follow/')
 
-        assert resp.status_code in (200, 201)
+        assert_api_response(resp, 201)
 
     def test_user_can_unfollow(self):
         """DELETE /api/users/{id}/follow/ should remove the follow relationship."""
@@ -204,7 +204,7 @@ class TestFollowSystem:
 
         resp = client.delete(f'/api/users/{followed.id}/follow/')
 
-        assert resp.status_code in (200, 204)
+        assert_api_response(resp, 200)
 
     def test_follow_is_idempotent(self):
         """Following the same user twice should not create a duplicate entry."""
@@ -226,7 +226,7 @@ class TestFollowSystem:
 
         resp = client.post(f'/api/users/{user.id}/follow/')
 
-        assert resp.status_code in (400, 403)
+        assert_problem_detail(resp, 400)
 
     @pytest.mark.xfail(
         reason="Follow boost in ranking is not wired up; ranking stays as-is per #579 scope",
@@ -275,7 +275,7 @@ class TestFollowSystem:
 
 
 # ---------------------------------------------------------------------------
-# NFR-19a — Discovery feed 2-second SLA (xfail — no benchmark enforced)
+# NFR-19a — Discovery feed 2-second SLA (green on the local test corpus)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db

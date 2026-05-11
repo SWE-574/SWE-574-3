@@ -126,6 +126,9 @@ class TestLocationBlurDeterminism:
         assert float(lat) == pytest.approx(float(real_lat), abs=1e-4), (
             "Owner received fuzzed latitude — owner bypass is broken."
         )
+        assert float(lng) == pytest.approx(float(real_lng), abs=1e-4), (
+            "Owner received fuzzed longitude — owner bypass is broken."
+        )
 
     def test_online_service_coordinates_not_fuzzed(self):
         """Online services have no physical location — no blur should be applied."""
@@ -195,7 +198,14 @@ class TestLocationBlurConditional:
 
         lat, lng = self._fetch_coords(service, requester)
 
-        assert float(lat) != pytest.approx(float(real_lat), abs=1e-4), (
+        # 2D offset — lat alone can be near-zero when the fuzz angle puts
+        # all the offset into longitude (or vice versa); compare combined
+        # distance so the assertion doesn't flake on hash angle.
+        total_offset = math.sqrt(
+            (float(lat) - float(real_lat)) ** 2
+            + (float(lng) - float(real_lng)) ** 2
+        )
+        assert total_offset > 1e-3, (
             "Requester with pending handshake received exact coordinates before acceptance."
         )
 
@@ -211,7 +221,11 @@ class TestLocationBlurConditional:
 
         lat, lng = self._fetch_coords(service, unrelated)
 
-        assert float(lat) != pytest.approx(float(real_lat), abs=1e-4)
+        total_offset = math.sqrt(
+            (float(lat) - float(real_lat)) ** 2
+            + (float(lng) - float(real_lng)) ** 2
+        )
+        assert total_offset > 1e-3
 
     def test_provider_always_sees_exact_coords_regardless_of_handshake(self):
         """Service owner should always see exact coordinates — handshake status is irrelevant."""
@@ -229,3 +243,4 @@ class TestLocationBlurConditional:
         lng = resp.data.get('location_lng')
 
         assert float(lat) == pytest.approx(float(real_lat), abs=1e-4)
+        assert float(lng) == pytest.approx(float(real_lng), abs=1e-4)
