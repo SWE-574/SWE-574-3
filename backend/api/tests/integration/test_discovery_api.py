@@ -4,7 +4,7 @@ Integration tests for Discovery API — FR-19c, FR-19e, FR-19h (blur), NFR-19a.
 Test classes and their status:
   TestAdminPinEvent             — green  (pin endpoint is implemented)
   TestAdminShowcaseFeatured     — xfail  (FR-19c: no showcase/featured concept)
-  TestFollowSystem              — xfail  (FR-19e: no follow model or endpoints)
+  TestFollowSystem              — green  (FR-19e: follow + default-sort boost landed)
   TestDiscoveryFeedPerformance  — xfail  (NFR-19a: no SLA test enforced)
   TestLocationBlurInFeed        — xfail  (FR-19h: feed distance values are not blurred)
 """
@@ -172,21 +172,16 @@ class TestAdminShowcaseFeatured:
 
 
 # ---------------------------------------------------------------------------
-# FR-19e — Follow system (xfail — not implemented)
+# FR-19e — Follow system (green — UserFollow + endpoints + default-sort boost)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason="FR-19e: no Follow model, no follow endpoints, no feed boost implemented",
-    strict=False,
-)
 class TestFollowSystem:
     """
-    FR-19e requires users to follow each other and for followed-user content to
-    receive a boost in the discovery feed.
-
-    These tests are xfail because no follow infrastructure exists in the codebase.
+    FR-19e: users can follow each other via POST /api/users/{id}/follow/.
+    UserFollow (migration 0051), follow endpoints, and the discovery-feed
+    boost (default sort tiebreaker after `-is_pinned`) are all wired up.
     """
 
     def test_user_can_follow_another_user(self):

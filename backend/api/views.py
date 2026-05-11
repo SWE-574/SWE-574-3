@@ -2421,11 +2421,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     @track_performance
     def get_queryset(self):
-        # Owner edits/deletes must work for services in any status
-        # (Agreed/Completed/Cancelled/hidden). The list-time visibility filter
-        # below would otherwise hide them and produce a misleading 404.
-        # Authorization is enforced in perform_update / destroy.
-        if self.action in ('update', 'partial_update', 'destroy'):
+        # Owner edits/deletes and owner-only event management actions must
+        # work for services in any status (Agreed/Completed/Cancelled/hidden)
+        # and regardless of the list-time visibility/search filters below,
+        # which would otherwise hide the resource and produce a misleading
+        # 404. Authorization is enforced in the respective action methods
+        # (perform_update / destroy / EventHandshakeService.* checks).
+        if self.action in (
+            'update', 'partial_update', 'destroy',
+            'generate_qr_token', 'get_qr_token',
+        ):
             return (
                 Service.objects
                 .select_related('user', 'event_evaluation_summary')
@@ -2616,24 +2621,30 @@ class ServiceViewSet(viewsets.ModelViewSet):
             half_life_km = getattr(settings, 'RANKING_PROXIMITY_HALF_LIFE_KM', 10.0)
             if proximity_active and half_life_km > 0:
                 # PostGIS Distance annotation is in metres (srid=4326).
-                # Online services have `location IS NULL`, which makes the
-                # Distance annotation NULL and would propagate NULL all the
-                # way into composite_score. Postgres' default for `ORDER BY
-                # ... DESC` is NULLS FIRST, so every Online row used to land
-                # at the top of every location-aware feed regardless of
-                # hot_score. Coalesce a missing distance to 0 m so Online
-                # cards collapse to proximity_factor=1.0 and compete on
-                # hot_score with the closest in-person rows.
-                distance_metres = Coalesce(
-                    F('distance'), Value(0.0, output_field=FloatField())
-                )
-                proximity_expr = ExpressionWrapper(
+                # Online services have `location IS NULL` and therefore a
+                # NULL distance. The previous fix here Coalesced NULL → 0 m
+                # which gave Online rows proximity_factor=1.0 (the maximum)
+                # so they out-ranked legitimately-nearby in-person rows.
+                # Treat Online as proximity-neutral instead: a factor of 0.5
+                # (the value an in-person row at the half-life distance
+                # would get) so Online competes on hot_score without an
+                # unearned proximity boost, and without being banished to
+                # the bottom either.
+                inperson_proximity = ExpressionWrapper(
                     Value(1.0, output_field=FloatField()) / (
                         Value(1.0, output_field=FloatField())
-                        + distance_metres / Value(
+                        + F('distance') / Value(
                             1000.0 * half_life_km, output_field=FloatField()
                         )
                     ),
+                    output_field=FloatField(),
+                )
+                proximity_expr = Case(
+                    When(
+                        location__isnull=True,
+                        then=Value(0.5, output_field=FloatField()),
+                    ),
+                    default=inperson_proximity,
                     output_field=FloatField(),
                 )
             else:
@@ -2673,8 +2684,24 @@ class ServiceViewSet(viewsets.ModelViewSet):
             # Non-hot sorts with a location: distance-only ordering, as before.
             queryset = queryset.order_by('-is_pinned', *queryset.query.order_by)
         else:
-            # Default: sort by latest (created_at descending)
-            queryset = queryset.order_by('-is_pinned', '-created_at')
+            # Default: pinned first, then a small boost for services from
+            # users the viewer follows (FR-19e), then newest. The follow
+            # boost only kicks in for authenticated viewers; anonymous
+            # viewers fall back to plain pinned + recency.
+            if self.request.user.is_authenticated:
+                from .models import UserFollow
+                queryset = queryset.annotate(
+                    is_from_followed_user=Exists(
+                        UserFollow.objects.filter(
+                            follower=self.request.user,
+                            following=OuterRef('user_id'),
+                        )
+                    ),
+                ).order_by(
+                    '-is_pinned', '-is_from_followed_user', '-created_at',
+                )
+            else:
+                queryset = queryset.order_by('-is_pinned', '-created_at')
 
         return queryset
 

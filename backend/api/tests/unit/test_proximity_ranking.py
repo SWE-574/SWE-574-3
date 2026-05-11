@@ -131,3 +131,55 @@ class TestProximityComposite:
             ordered_ids = list(qs.values_list('id', flat=True))
 
         assert ordered_ids.index(higher.id) < ordered_ids.index(lower.id)
+
+    def test_online_service_does_not_outrank_close_inperson_at_equal_hot_score(
+        self,
+    ):
+        """Regression: Coalesce(NULL distance, 0) used to give Online services
+        proximity_factor=1.0 — the maximum boost — so every Online row floated
+        above every in-person row, regardless of how close the in-person row
+        was to the viewer. Online should be proximity-neutral instead."""
+        from datetime import timedelta
+        from decimal import Decimal as Dec
+
+        from django.utils import timezone
+
+        from api.models import Service
+        from api.tests.helpers.factories import ServiceFactory, UserFactory
+        from api.views import ServiceViewSet
+
+        viewer = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+        owner = UserFactory(date_joined=timezone.now() - timedelta(days=200))
+
+        close_inperson = self._make_service_with(
+            owner, lat=0.001, lng=0.0, hot_score=5.0,
+        )
+        # Online: no coordinates, location field is NULL.
+        online = ServiceFactory(
+            user=owner, type='Offer', status='Active',
+            location_type='Online',
+            location_lat=None, location_lng=None,
+        )
+        Service.objects.filter(pk=online.id).update(hot_score=5.0)
+        online.refresh_from_db()
+
+        request = self._make_authenticated_request(
+            viewer,
+            {'sort': 'hot', 'lat': '0.0', 'lng': '0.0'},
+        )
+        viewset = ServiceViewSet()
+        viewset.action = 'list'
+        viewset.request = request
+        with override_settings(RANKING_PROXIMITY_HALF_LIFE_KM=10.0):
+            qs = viewset.get_queryset()
+            ordered_ids = list(qs.values_list('id', flat=True))
+
+        assert close_inperson.id in ordered_ids
+        assert online.id in ordered_ids
+        assert (
+            ordered_ids.index(close_inperson.id)
+            < ordered_ids.index(online.id)
+        ), (
+            'A close in-person service should outrank an equally-hot Online '
+            'service when location is enabled.'
+        )
