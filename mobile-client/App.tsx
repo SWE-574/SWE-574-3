@@ -7,10 +7,12 @@ import { AppErrorBoundary } from "./src/components/AppErrorBoundary";
 import RootNavigator from "./src/navigation/RootNavigator";
 import { Limelight } from "@getlimelight/sdk";
 
-try {
-  Limelight.connect(); // debug tool — must not crash app if SDK/native bridge fails
-} catch {
-  /* ignore */
+if (__DEV__ && process.env.EXPO_PUBLIC_LIMELIGHT === "1") {
+  try {
+    Limelight.connect(); // debug tool — must not crash app if SDK/native bridge fails
+  } catch {
+    /* ignore */
+  }
 }
 
 export default function App() {
