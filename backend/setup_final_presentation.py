@@ -2,11 +2,16 @@
 """
 Mother's Day presentation seed — The Hive
 Creates Yusuf Arslan (3-year member), Selman Demir (3-day newcomer),
-and all supporting data required by docs/mothers-day-scenario.md.
+and all supporting data required by SWE-574-3.wiki/mothers-day-scenario.md.
 
-Run: python setup_mothers_day.py
-Idempotent: deletes and recreates its own users on each run.
-Does NOT touch existing demo users.
+Run: python setup_final_presentation.py
+     or: make setup-final-presentation
+
+Idempotent: on each run the script deletes seed users (SEED_EMAILS) and all
+their related data, then recreates everything from scratch. It also deletes
+services whose titles are known to be created for existing demo users
+(e.g. Sourdough offer by yasemin, Book Circle by selin) so these do not
+accumulate across runs.
 """
 import os
 import django
@@ -70,6 +75,37 @@ if seed_users.exists():
     print("  Done")
 else:
     print("  No existing seed users found")
+
+# Services owned by existing demo users that this script creates — delete by
+# title so they don't accumulate across runs.
+DEMO_USER_SERVICE_TITLES = [
+    'Sourdough & Fermentation Basics',
+    'Street Photography Walk in Balat',
+    'Book Circle: Hızlı ve Yavaş Düşünme, Session 5',
+    'Homemade Tarhana from Scratch',
+    'Plant-Based Aegean Cooking',
+    'Bebek Park Picnic & Games',
+    'Early Morning Bosphorus Walk',
+    'Türkiye Match Night: Watch Party at Kuruçeşme',
+    'Friday Night LOL: 5v5 Casual Ranked, Online',
+    'Beginner Guitar Lessons',
+    'Botanical Watercolour for Beginners',
+    'Budget Meal Prep for Students, Beşiktaş',
+    'Personal Finance Q&A',
+    'Budgeting Basics: One Session',
+]
+# Remove reviews/comments tied to these services before deleting the services
+# themselves, so they don't accumulate across runs when the reviewer is a
+# demo user (not a seed user) and would otherwise survive the seed-user cleanup.
+_demo_svc_hs_ids = list(
+    Handshake.objects.filter(service__title__in=DEMO_USER_SERVICE_TITLES).values_list('id', flat=True)
+)
+if _demo_svc_hs_ids:
+    ReputationRep.objects.filter(handshake_id__in=_demo_svc_hs_ids).delete()
+    NegativeRep.objects.filter(handshake_id__in=_demo_svc_hs_ids).delete()
+deleted_count, _ = Service.objects.filter(title__in=DEMO_USER_SERVICE_TITLES).delete()
+if deleted_count:
+    print(f"  Removed {deleted_count} services owned by existing demo users")
 
 # ---------------------------------------------------------------------------
 # [2] Tags
@@ -448,6 +484,7 @@ try:
     elif_demo = User.objects.get(email='elif@demo.com')
     levent_demo = User.objects.get(email='levent@demo.com')
     yasemin_demo = User.objects.get(email='yasemin@demo.com')
+    cem_demo = User.objects.get(email='cem@demo.com')
     print("  All existing demo users found")
 except User.DoesNotExist as exc:
     print(f"  WARNING: {exc}")
@@ -973,27 +1010,51 @@ for giver, when, comment in event_rep_data:
     )
 print(f"  Added {len(event_rep_data)} community reputation records")
 
-# ── Time Giver Bronze: needs hours_given >= 10 ───────────────────────────────
-# Yusuf earned 1h from Coffee & Finance. We add direct TransactionHistory
-# records for earlier provider sessions that are part of his 3-year history
-# but not narrated individually in the scenario (pre-history giving).
-giving_entries = [
-    (now - timedelta(days=900), Decimal('2.0'), 'Photography advice session, Bosphorus walk companion'),
-    (now - timedelta(days=750), Decimal('1.0'), 'Personal finance Q&A, neighbour coffee chat'),
-    (now - timedelta(days=580), Decimal('2.0'), 'Insurance basics for a freelance neighbour'),
-    (now - timedelta(days=310), Decimal('1.0'), 'Budgeting session for a young colleague'),
-    (now - timedelta(days=160), Decimal('2.0'), 'Cooking session, Aegean recipes shared with a neighbour'),
-]
-for when, amount, description in giving_entries:
-    TransactionHistory.objects.create(
-        user=yusuf,
-        transaction_type='transfer',
-        amount=amount,
-        description=description,
-        created_at=when,
-        balance_after=Decimal('0'),  # not load-bearing for badge logic
-    )
-print(f"  Added {len(giving_entries)} historical giving records (hours_given)")
+# ── Two extra real provider sessions for Yusuf (Time Giver Bronze threshold) ─
+# Both are genuine completed handshakes: Yusuf gives finance advice to
+# neighbours, with real TransactionHistory rows and proper balance_after.
+finance_offer_levent = create_service(
+    user=yusuf,
+    title='Personal Finance Q&A',
+    description='One hour over coffee to talk through savings, funds, and long-term thinking. Honest answers, no products.',
+    service_type='Offer',
+    duration='1.00',
+    location_type='In-Person',
+    location_area='Beşiktaş',
+    location_lat=Decimal('41.0422'),
+    location_lng=Decimal('29.0089'),
+    max_participants=1,
+    schedule_type='One-Time',
+    tags=[finance_tag, education_tag],
+    created_days_ago=760,
+)
+hs_finance_levent, _ = simulate_handshake_workflow(
+    finance_offer_levent, levent_demo,
+    provider_initiated_days_ago=759,
+    completed_days_ago=750,
+)
+
+finance_offer_burak = create_service(
+    user=yusuf,
+    title='Budgeting Basics: One Session',
+    description='A relaxed one-on-one session on budgeting and saving. Good for anyone starting out or wanting a reset.',
+    service_type='Offer',
+    duration='1.00',
+    location_type='In-Person',
+    location_area='Beşiktaş',
+    location_lat=Decimal('41.0422'),
+    location_lng=Decimal('29.0089'),
+    max_participants=1,
+    schedule_type='One-Time',
+    tags=[finance_tag, education_tag],
+    created_days_ago=320,
+)
+hs_finance_burak, _ = simulate_handshake_workflow(
+    finance_offer_burak, burak_demo,
+    provider_initiated_days_ago=319,
+    completed_days_ago=310,
+)
+print("  Two extra provider sessions added (finance, real handshakes)")
 
 check_and_assign_badges(yusuf)
 yusuf.refresh_from_db()
@@ -1017,6 +1078,10 @@ spring_brunch = create_service(
     location_area='Beşiktaş',
     location_lat=Decimal('41.0777'),
     location_lng=Decimal('28.9984'),
+    # Intentionally small: 3 pre-seeded RSVPs leave 2 open slots so Selman's
+    # live RSVP during Scene 3 of the presentation visibly changes the count
+    # from 3/5 → 4/5. The "16/20" figure in the earlier scenario doc was from
+    # a prior version of the event before the capacity was reduced for demo clarity.
     max_participants=5,
     schedule_type='One-Time',
     scheduled_time=brunch_time,
@@ -1029,7 +1094,6 @@ spring_brunch = create_service(
 
 # RSVP 3 existing users = 3/5 registered
 # Selman will RSVP live during the presentation (Scene 3)
-cem_demo = User.objects.get(email='cem@demo.com')
 brunch_rsvp_users = [ayse_demo, can_demo, cem_demo]
 for i, user in enumerate(brunch_rsvp_users):
     event_rsvp(spring_brunch, user, joined_days_ago=4 - (i % 4))
@@ -1257,6 +1321,8 @@ backdate_map = [
     (picnic_hist,           355),
     (coffee_finance,        240),
     (bosphorus_walk_hist,    95),
+    (finance_offer_levent,  750),
+    (finance_offer_burak,   310),
 ]
 for svc, days_ago in backdate_map:
     completion_time = now - timedelta(days=days_ago)
