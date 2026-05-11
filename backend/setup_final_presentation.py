@@ -105,6 +105,13 @@ art_tag = tag_objects['Art']
 # ---------------------------------------------------------------------------
 # [3] Helper functions
 # ---------------------------------------------------------------------------
+from django.conf import settings as _settings
+# Base URL for seeded demo media — reads from Django settings so it works in
+# local dev (http://localhost:9010/hive-media/) and prod alike.
+DEMO_MEDIA_BASE = _settings.MEDIA_URL.rstrip('/')
+
+def demo_media_url(filename):
+    return f"{DEMO_MEDIA_BASE}/demo/{filename}"
 
 now = timezone.now()
 
@@ -859,57 +866,57 @@ print("\n[7/9] Adding reputation for Yusuf's completed exchanges...")
 add_reputation(
     hs_driving, ahmet, yusuf, True, True, True,
     'Yusuf was focused and picked it up quickly. Easy to teach when someone actually wants to learn.',
-    image_url='http://localhost:9010/hive-media/demo/history-driving.jpg',
+    image_url=demo_media_url('history-driving.jpg'),
 )
 add_reputation(
     hs_driving, yusuf, ahmet, True, True, True,
     'Ahmet was patient and clear. I drove a manual car home the same day.',
-    image_url='http://localhost:9010/hive-media/demo/history-driving-yusuf.jpg',
+    image_url=demo_media_url('history-driving-yusuf.jpg'),
 )
 add_reputation(
     hs_photo, murat_demo, yusuf, True, True, True,
     'Yusuf already had a good eye, the walk just gave him a framework. Great student.',
-    image_url='http://localhost:9010/hive-media/demo/history-photo-walk.jpg',
+    image_url=demo_media_url('history-photo-walk.jpg'),
 )
 add_reputation(
     hs_photo, yusuf, murat_demo, True, True, True,
     'Murat showed me how to see a street differently. The photographs from that morning are still some of my favourites.',
-    image_url='http://localhost:9010/hive-media/demo/history-photo-walk-yusuf.jpg',
+    image_url=demo_media_url('history-photo-walk-yusuf.jpg'),
 )
 add_reputation(
     hs_tarhana, can_demo, yusuf, True, True, True,
     'Yusuf is a natural in the kitchen. He went home with a full jar and is already planning to make it again.',
-    image_url='http://localhost:9010/hive-media/demo/history-tarhana.jpg',
+    image_url=demo_media_url('history-tarhana.jpg'),
 )
 add_reputation(
     hs_tarhana, yusuf, can_demo, True, True, True,
     'A Sunday afternoon in Can\'s kitchen making tarhana from scratch, exactly the kind of afternoon The Hive is for.',
-    image_url='http://localhost:9010/hive-media/demo/history-tarhana-yusuf.jpg',
+    image_url=demo_media_url('history-tarhana-yusuf.jpg'),
 )
 add_reputation(
     hs_finance, leyla, yusuf, True, True, True,
     'Yusuf made personal finance feel approachable for the first time. Left knowing what to actually do next.',
-    image_url='http://localhost:9010/hive-media/demo/history-finance.jpg',
+    image_url=demo_media_url('history-finance.jpg'),
 )
 add_reputation(
     hs_finance, yusuf, leyla, True, True, True,
     'Leyla asked sharp questions. A pleasure to explain things to someone genuinely curious.',
-    image_url='http://localhost:9010/hive-media/demo/history-finance-yusuf.jpg',
+    image_url=demo_media_url('history-finance-yusuf.jpg'),
 )
 
 # ── Event evaluations (so history shows Reviewed, not Evaluation Pending) ────
 add_reputation(hs_watch,  berk,       yusuf, True, True, True, 'Great energy at the match, glad he came.')
 add_reputation(hs_watch,  yusuf,      berk,  True, True, True, 'Berk organises these brilliantly. Atmosphere was electric.',
-               image_url='http://localhost:9010/hive-media/demo/history-watch-party.png')
+               image_url=demo_media_url('history-watch-party.png'))
 add_reputation(hs_book,   selin_demo, yusuf, True, True, True, 'Yusuf always comes prepared and adds to the discussion.')
 add_reputation(hs_book,   yusuf,      selin_demo, True, True, True, 'One of the best sessions in the series.',
-               image_url='http://localhost:9010/hive-media/demo/history-book-circle.png')
+               image_url=demo_media_url('history-book-circle.png'))
 add_reputation(hs_picnic, berk,       yusuf, True, True, True, 'Showed up early and helped set up. Exactly the kind of neighbour you want.')
 add_reputation(hs_picnic, yusuf,      berk,  True, True, True, 'Perfect afternoon by the Bosphorus. Berk makes everyone feel at home.',
-               image_url='http://localhost:9010/hive-media/demo/history-picnic-yusuf.jpg')
+               image_url=demo_media_url('history-picnic-yusuf.jpg'))
 add_reputation(hs_walk,   emre_demo,  yusuf, True, True, True, 'Yusuf was great company at sunrise. Quiet, present, good conversation.')
 add_reputation(hs_walk,   yusuf,      emre_demo, True, True, True, 'Emre picks the best spots. The light was perfect.',
-               image_url='http://localhost:9010/hive-media/demo/history-bosphorus-walk.png')
+               image_url=demo_media_url('history-bosphorus-walk.png'))
 
 # ── Other participants' reviews for past events ───────────────────────────────
 
@@ -1017,7 +1024,7 @@ spring_brunch = create_service(
     tags=[photography_tag],
     created_days_ago=5,
     requires_qr_checkin=True,
-    cover_url='http://localhost:9010/hive-media/demo/mothers-day-event.png',
+    cover_url=demo_media_url('mothers-day-event.png'),
 )
 
 # RSVP 3 existing users = 3/5 registered
