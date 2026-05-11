@@ -468,30 +468,6 @@ class TestEngagementSignal:
 
 
 # ---------------------------------------------------------------------------
-# dismissed_similarity (Round 3 — soft penalty)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-class TestDismissedSimilarity:
-    def test_empty_dismissed_set_returns_zero(self):
-        from api.ranking_personalized import dismissed_similarity
-
-        assert dismissed_similarity({'Q1', 'Q2'}, set()) == 0.0
-
-    def test_full_overlap_returns_one(self):
-        from api.ranking_personalized import dismissed_similarity
-
-        assert dismissed_similarity({'Q1'}, {'Q1'}) == 1.0
-
-    def test_partial_overlap_returns_jaccard(self):
-        from api.ranking_personalized import dismissed_similarity
-
-        # intersection {Q2}, union {Q1, Q2, Q3} -> 1/3
-        assert dismissed_similarity({'Q1', 'Q2'}, {'Q2', 'Q3'}) == pytest.approx(1.0 / 3.0)
-
-
-# ---------------------------------------------------------------------------
 # apply_mmr_diversification (Round 3 — diversity re-rank)
 # ---------------------------------------------------------------------------
 

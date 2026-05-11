@@ -35,11 +35,20 @@ Run all commands from `mobile-client/`.
 ### npm scripts (preferred)
 
 ```bash
-npm run build:android          # EAS cloud, production APK
-npm run build:android:local    # Local gradle release APK (android/app/build/outputs/apk/release/)
-npm run build:ios              # EAS cloud, production iOS
-npm run build:preview          # EAS cloud, preview build (Android + iOS)
+npm run build:android                  # EAS cloud, production APK
+npm run build:android:local            # Local gradle release APK, picks up backend URL + Mapbox token from .env
+npm run build:android:emulator         # Local APK forced to http://10.0.2.2:8000/api (Android emulator + local backend)
+npm run build:android:prod             # Local APK forced to https://apiary.selmangunes.com/api (sideloadable prod-config build)
+npm run build:android:emulator:clean   # Same as :emulator, plus wipes the JS bundle cache first
+npm run build:android:prod:clean       # Same as :prod, plus wipes the JS bundle cache first
+npm run clean:android:bundle           # Standalone: wipe just the JS bundle cache (use when env-var changes don't show up)
+npm run build:ios                      # EAS cloud, production iOS
+npm run build:preview                  # EAS cloud, preview build (Android + iOS)
 ```
+
+### When to use the `:clean` variants
+
+Gradle's `bundleReleaseJsAndAssets` task fingerprints input *files* but not environment variables. So if you build with one `EXPO_PUBLIC_API_URL` / `EXPO_PUBLIC_MAPBOX_TOKEN`, then re-run with different values, gradle marks the bundle task `UP-TO-DATE` and the APK still has the old values baked in. The `:clean` variants delete `android/app/build/{generated,intermediates}/{assets,bundle}` before invoking gradle, which forces a real re-bundle. Rule of thumb: if you're rebuilding without touching source code (typically because you're flipping env vars between emulator and prod runs), use the `:clean` variant.
 
 `make` wrappers exist at the repo root: `make mobile-build-android`, `make mobile-build-android-local`, `make mobile-build-ios`, `make mobile-build-preview`.
 
@@ -57,6 +66,16 @@ eas build -p ios --profile development
 
 Production Android builds are configured to output an **APK** (`eas.json` → `build.production.android.buildType: "apk"`).
 
+#### Mapbox token on EAS
+
+EAS Build does not see the local `.env` file. Make the token available to every build profile once with:
+
+```bash
+eas secret:create --name EXPO_PUBLIC_MAPBOX_TOKEN --value pk.YOUR_TOKEN --scope project
+```
+
+`app.config.ts` reads `process.env.EXPO_PUBLIC_MAPBOX_TOKEN` first, so the secret is picked up automatically; no `eas.json` edit needed. Verify with `eas secret:list`.
+
 ### Local Android build (no EAS)
 
 ```bash
@@ -65,6 +84,35 @@ npm run build:android:local
 ```
 
 Produces a release APK at `mobile-client/android/app/build/outputs/apk/release/app-release.apk`. Requires Android SDK, JDK 17, and the `android/` folder populated by `npm run prebuild` (already in the repo). Useful for sideloading on a test device without going through EAS.
+
+To embed the Mapbox token in this APK, pass it on the command line (the value is read into the JS bundle at build time via `app.config.ts`):
+
+```bash
+EXPO_PUBLIC_MAPBOX_TOKEN=pk.YOUR_TOKEN npm run build:android:local
+```
+
+If you used `make env` and a Mapbox token is already in `.env`, the token is picked up automatically — no inline export needed.
+
+#### Quick recipes
+
+```bash
+# Emulator + local backend (the demo path)
+npm run build:android:emulator
+
+# Real device on the same LAN as your dev machine + local backend
+# (EXPO_PUBLIC_API_URL in .env already points at http://<LAN_IP>:8000/api)
+npm run build:android:local
+
+# Prod-shaped APK without going through EAS — points at the deployed
+# backend at apiary.selmangunes.com. Hand this APK to a teammate /
+# tester for sideloading. Mapbox token comes from .env; if .env doesn't
+# have one yet, prefix EXPO_PUBLIC_MAPBOX_TOKEN=pk.… on the call.
+npm run build:android:prod
+```
+
+The third recipe is the answer to "I want a production-config APK without using EAS." Output lands at `android/app/build/outputs/apk/release/app-release.apk`. The APK is signed with the debug keystore (per `android/app/build.gradle`'s `signingConfigs.release`), which is fine for sideloading and internal QA but **not** for Play Store. For Play Store distribution, either wire a real release keystore into `signingConfigs.release` and re-run, or use `npm run build:android` (EAS handles signing).
+
+Without a token the Map tab shows a "Map unavailable" fallback. If the value is already in the repo-root `.env` (set by `make env`) you can skip the inline export — `app.config.ts` falls back to `.env` if `process.env` is empty.
 
 The APK is currently signed with the debug keystore (`android/app/build.gradle` → `release { signingConfig signingConfigs.debug }`), so it's fine for sideloading and internal QA but **not** suitable for Play Store distribution. For store-ready APKs, use `npm run build:android` (EAS handles signing) or wire a release keystore into `signingConfigs.release` first.
 

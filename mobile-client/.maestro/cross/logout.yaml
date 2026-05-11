@@ -1,0 +1,26 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+  - auth
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §5.4: Logout lands on the Login screen.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Profile(, tab,.*)?"
+- tapOn:
+    id: "profile-overflow"
+    optional: true
+- tapOn:
+    text: "Log out"
+- tapOn:
+    text: "Log out"
+    optional: true
+- tapOn:
+    text: "Confirm"
+    optional: true
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 10000

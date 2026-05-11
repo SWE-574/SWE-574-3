@@ -1,7 +1,7 @@
 .PHONY: help env \
         setup setup-demo dev dev-all stop reset install migrate makemigrations lint build clean \
         mobile mobile-setup \
-        mobile-build-android mobile-build-android-local mobile-build-ios mobile-build-preview \
+        mobile-build-android mobile-build-android-local mobile-build-android-emulator mobile-build-android-emulator-clean mobile-build-android-prod mobile-build-android-prod-clean mobile-build-ios mobile-build-preview \
         setup-final-presentation \
         db-shell db-time db-time-reset \
         infra-up infra-down infra-reset infra-demo \
@@ -10,7 +10,7 @@
         shell-backend shell-db shell-redis \
         test test-unit test-integration test-docker coverage coverage-backend coverage-frontend coverage-report \
         test-mutation test-mutation-html test-perf test-mobile-unit \
-        test-assert-sweep
+        test-assert-sweep test-cross-client
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ help: ## Show this help message
 	@grep -E '^shell-[^:]*:.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@printf '\033[1;4mTesting:\033[0m\n'
-	@grep -E '^(test|test-unit|test-integration|test-docker|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(test|test-unit|test-integration|test-docker|test-cross-client|coverage|coverage-backend|coverage-frontend|coverage-report):.*## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 
 
@@ -229,6 +229,18 @@ mobile-build-android: ## EAS production build for Android (APK)
 
 mobile-build-android-local: ## Local gradle release build (APK in android/app/build/outputs/apk/release/)
 	@cd mobile-client && npm run build:android:local
+
+mobile-build-android-emulator: ## Local gradle release APK pointed at 10.0.2.2 (Android emulator + local backend)
+	@cd mobile-client && npm run build:android:emulator
+
+mobile-build-android-prod: ## Local gradle release APK pointed at apiary.selmangunes.com (sideloadable; Mapbox token from .env)
+	@cd mobile-client && npm run build:android:prod
+
+mobile-build-android-prod-clean: ## Same as -prod, but wipes the JS bundle cache first (use after switching env vars)
+	@cd mobile-client && npm run build:android:prod:clean
+
+mobile-build-android-emulator-clean: ## Same as -emulator, but wipes the JS bundle cache first
+	@cd mobile-client && npm run build:android:emulator:clean
 
 mobile-build-ios: ## EAS production build for iOS
 	@cd mobile-client && npm run build:ios
@@ -383,6 +395,10 @@ test-perf: ## Run k6 perf gates against the running stack
 
 test-mobile-unit: ## Run mobile-client Jest test suite
 	@cd mobile-client && npm test -- --watchAll=false
+
+test-cross-client: ## Run cross-client (web↔mobile) integration tests against a live backend
+	$(call _log,"Cross-client tests (requires backend at http://localhost:8000)...")
+	@cd tests/cross-client && node --test
 
 test-assert-sweep: ## Lint guardrail: forbid raw status_code asserts and TestCase subclasses
 	$(call _log,"Checking for raw status_code asserts under api/tests/integration/...")

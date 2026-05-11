@@ -1,0 +1,33 @@
+appId: com.apiary.thehive
+tags:
+  - profile
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+  NEW_HEADLINE: Maestro probe headline
+---
+# Manual test plan §4.2: Profile edit.
+- runFlow: ../auth/login.yaml
+- tapOn:
+    text: "Profile(, tab,.*)?"
+# "Edit profile" button is rendered as a pill inside the profile header card.
+- tapOn:
+    text: "Edit profile"
+- extendedWaitUntil:
+    visible: "Edit profile"
+    timeout: 8000
+- tapOn:
+    text: "e.g. Graphic designer"
+    optional: true
+- inputText: ${NEW_HEADLINE}
+- hideKeyboard
+- tapOn:
+    text: "Save Changes"
+    optional: true
+- tapOn:
+    text: "Save"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: "Profile(, tab,.*)?"
+    timeout: 10000

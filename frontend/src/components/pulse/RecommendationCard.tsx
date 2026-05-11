@@ -14,14 +14,12 @@ import {
   FiClock,
   FiInfo,
   FiMapPin,
-  FiSlash,
   FiStar,
 } from 'react-icons/fi'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 
 import { Avatar } from '@/components/Avatar'
 import WhyThisPanel from '@/components/pulse/WhyThisPanel'
-import { pulseAPI } from '@/services/pulseAPI'
 import { serviceAPI } from '@/services/serviceAPI'
 import {
   AMBER, BLUE, GREEN, HERO_GRADIENT,
@@ -40,8 +38,9 @@ export type PulseLane =
 interface Props {
   service: Service
   lane: PulseLane
-  /** Removes the card from its parent list. Used for "Not interested". */
-  onDismissed?: (serviceId: string) => void
+  /** Called when the user removes the card from the parent list — currently
+   *  triggered when they unsave a service on the Saved page. */
+  onRemoved?: (serviceId: string) => void
   /** Visual variant — hero is bigger and uses a gradient stripe. */
   variant?: 'hero' | 'compact'
 }
@@ -89,7 +88,7 @@ const formatDuration = (d: number | string | null | undefined): string | null =>
 export default function RecommendationCard({
   service,
   lane,
-  onDismissed,
+  onRemoved,
   variant = 'compact',
 }: Props) {
   const navigate = useNavigate()
@@ -97,7 +96,6 @@ export default function RecommendationCard({
   const [savePending, setSavePending] = useState(false)
   const [requestPending, setRequestPending] = useState(false)
   const [requested, setRequested] = useState(false)
-  const [dismissPending, setDismissPending] = useState(false)
   const [whyOpen, setWhyOpen] = useState(false)
 
   const chip = chipForSignals(service.for_you_signals)
@@ -122,6 +120,9 @@ export default function RecommendationCard({
     setSavePending(true)
     try {
       await serviceAPI.setSaved(service.id, next)
+      // Unsaving on a list that shows only saved services should drop the
+      // card. The parent decides whether this matters via onRemoved.
+      if (!next) onRemoved?.(service.id)
     } catch (err) {
       setIsSaved(!next)
       console.error('RecommendationCard: save failed', err)
@@ -142,21 +143,6 @@ export default function RecommendationCard({
       navigate(detailHref)
     } finally {
       setRequestPending(false)
-    }
-  }
-
-  const handleDismiss = async (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (dismissPending) return
-    setDismissPending(true)
-    try {
-      await pulseAPI.setDismissed(service.id, true)
-      onDismissed?.(service.id)
-    } catch (err) {
-      console.error('RecommendationCard: dismiss failed', err)
-    } finally {
-      setDismissPending(false)
     }
   }
 
@@ -387,28 +373,6 @@ export default function RecommendationCard({
             style={{ opacity: savePending ? 0.7 : 1 }}
           >
             {savePending ? <Spinner size="xs" /> : <FiBookmark size={iconBtnIconSize} />}
-          </Box>
-          <Box
-            as="button"
-            onClick={(e) => handleDismiss(e as unknown as React.MouseEvent)}
-            aria-label="Not interested"
-            title="Not interested"
-            w={iconBtnSize}
-            h={iconBtnSize}
-            borderRadius="full"
-            bg="gray.50"
-            color="gray.600"
-            borderWidth="1px"
-            borderColor="gray.200"
-            display="inline-flex"
-            alignItems="center"
-            justifyContent="center"
-            cursor={dismissPending ? 'default' : 'pointer'}
-            transition="all 0.15s"
-            _hover={dismissPending ? undefined : { bg: 'red.50', color: 'red.600', borderColor: 'red.200' }}
-            style={{ opacity: dismissPending ? 0.7 : 1 }}
-          >
-            {dismissPending ? <Spinner size="xs" /> : <FiSlash size={iconBtnIconSize} />}
           </Box>
         </Flex>
       </Flex>

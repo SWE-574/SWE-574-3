@@ -7,13 +7,12 @@ import SavedServicesPage from '@/pages/SavedServicesPage'
 import system from '@/theme'
 import type { Service } from '@/types'
 
-const { listSavedMock, navigateMock, setSavedMock, setEndorsedMock, setDismissedMock, expressInterestMock } =
+const { listSavedMock, navigateMock, setSavedMock, setEndorsedMock, expressInterestMock } =
   vi.hoisted(() => ({
     listSavedMock: vi.fn(),
     navigateMock: vi.fn(),
     setSavedMock: vi.fn(),
     setEndorsedMock: vi.fn(),
-    setDismissedMock: vi.fn(),
     expressInterestMock: vi.fn(),
   }))
 
@@ -28,12 +27,6 @@ vi.mock('@/services/serviceAPI', () => ({
     setSaved: setSavedMock,
     setEndorsed: setEndorsedMock,
     expressInterest: expressInterestMock,
-  },
-}))
-
-vi.mock('@/services/pulseAPI', () => ({
-  pulseAPI: {
-    setDismissed: setDismissedMock,
   },
 }))
 
@@ -61,7 +54,7 @@ describe('SavedServicesPage', () => {
   beforeEach(() => {
     listSavedMock.mockReset()
     navigateMock.mockReset()
-    setDismissedMock.mockReset().mockResolvedValue({ is_dismissed: true })
+    setSavedMock.mockReset().mockResolvedValue({ is_saved: false })
   })
   afterEach(() => {
     vi.clearAllMocks()
@@ -108,15 +101,18 @@ describe('SavedServicesPage', () => {
     expect(screen.getByText('Bake bread together')).toBeInTheDocument()
   })
 
-  it('removes a card from the list when its dismiss action fires', async () => {
+  it('removes a card from the list when the user unsaves it', async () => {
     listSavedMock.mockResolvedValue([
       makeService('s1', 'First saved'),
       makeService('s2', 'Second saved'),
     ])
     renderPage()
     await waitFor(() => expect(screen.getByText('First saved')).toBeInTheDocument())
-    const dismissButtons = screen.getAllByLabelText(/Not interested/i)
-    fireEvent.click(dismissButtons[0])
+    // Each card is rendered with is_saved=true, so the toggle button is
+    // labelled "Unsave"; clicking it triggers the unsave path which fires
+    // onRemoved and drops the card from the list.
+    const unsaveButtons = screen.getAllByLabelText(/Unsave/i)
+    fireEvent.click(unsaveButtons[0])
     await waitFor(() => {
       expect(screen.queryByText('First saved')).not.toBeInTheDocument()
     })

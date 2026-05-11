@@ -1,0 +1,17 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+env:
+  TEST_EMAIL: elif@demo.com
+  TEST_PASSWORD: demo123
+---
+# Manual test plan §5.1: Cold start — relaunch lands on a usable Home feed
+# for an already-signed-in user. We sign in once, stop the app, then
+# relaunch without clearing state and assert the feed is reachable.
+- runFlow: ../auth/login.yaml
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      text: "Home(, tab,.*)?"
+    timeout: 15000
