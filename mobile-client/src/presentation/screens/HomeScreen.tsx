@@ -429,8 +429,8 @@ export default function HomeScreen() {
   const showLocationBanner = !userLocation && !resolvingLocation;
   const locationBannerMessage =
     locationStatus === "denied"
-      ? "Location off. Tap to grant for closer-first ranking."
-      : "Enable location for closer-first ranking.";
+      ? "Location off. Tap to grant for better recommendations."
+      : "Enable location for better recommendations.";
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
