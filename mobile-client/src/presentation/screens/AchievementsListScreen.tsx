@@ -149,13 +149,10 @@ export default function AchievementsListScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.intro}>
-          <Text style={styles.pageTitle}>Achievements</Text>
-          <Text style={styles.pageSubtitle}>
-            Track the milestones unlocked and what you can work toward next in
-            the community.
-          </Text>
-        </View>
+        <Text style={styles.pageSubtitle}>
+          Track the milestones unlocked and what you can work toward next in
+          the community.
+        </Text>
 
         <View style={styles.summaryRow}>
           <SummaryCard
@@ -690,19 +687,11 @@ const getStyles = (bottomInset: number) =>
       paddingTop: 12,
       paddingBottom: Math.max(24, bottomInset + 16),
     },
-    intro: {
-      marginBottom: 20,
-    },
-    pageTitle: {
-      fontSize: 26,
-      fontWeight: "800",
-      color: colors.GRAY800,
-      marginBottom: 8,
-    },
     pageSubtitle: {
       fontSize: 14,
       color: colors.GRAY500,
       lineHeight: 21,
+      marginBottom: 16,
     },
     summaryRow: {
       flexDirection: "row",

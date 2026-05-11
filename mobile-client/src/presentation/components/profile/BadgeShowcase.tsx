@@ -27,6 +27,7 @@ import {
   formatBadgeEarnedDate,
   getCompactBadgeTooltipText,
 } from "../../../utils/profileBadgeDisplay";
+import { getAchievementMeta } from "../../../utils/achievementMeta";
 
 
 /** Shape used in picker mode – represents every badge with progress info */
@@ -69,6 +70,7 @@ function CompactBadge({
   active: boolean;
   onPress: () => void;
 }) {
+  const meta = getAchievementMeta(badge.id);
   return (
     <Pressable
       onPress={onPress}
@@ -81,7 +83,12 @@ function CompactBadge({
       accessibilityLabel={`${badge.name} achievement`}
       accessibilityHint="Shows what this achievement means"
     >
-      <View style={compactStyles.iconWrapper}>
+      <View
+        style={[
+          compactStyles.iconWrapper,
+          !badge.icon_url && { backgroundColor: `${meta.color}88` },
+        ]}
+      >
         {badge.icon_url ? (
           <Image
             source={{ uri: badge.icon_url }}
@@ -90,7 +97,7 @@ function CompactBadge({
           />
         ) : (
           <View style={compactStyles.iconFallback}>
-            <Ionicons name="ribbon-outline" size={20} color={colors.GREEN} />
+            <Ionicons name={meta.icon} size={20} color={colors.WHITE} />
           </View>
         )}
       </View>
@@ -146,6 +153,7 @@ function PickerBadgeItem({
   onPress: () => void;
 }) {
   const isLocked = !badge.is_earned;
+  const meta = getAchievementMeta(badge.id);
 
   return (
     <Pressable
@@ -175,9 +183,9 @@ function PickerBadgeItem({
             ]}
           >
             <Ionicons
-              name={isLocked ? "lock-closed-outline" : "ribbon-outline"}
+              name={isLocked ? "lock-closed-outline" : meta.icon}
               size={22}
-              color={isLocked ? colors.GRAY400 : colors.GREEN}
+              color={isLocked ? colors.GRAY400 : meta.color}
             />
           </View>
         )}

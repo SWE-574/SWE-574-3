@@ -441,6 +441,13 @@ export default function TimeActivityScreen() {
   const [page, setPage] = useState(1);
   const [count, setCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  /**
+   * Until every screen-level loader (transactions, insights, agreements,
+   * event history) finishes once, we want the full-screen spinner instead of
+   * partial empty states. Toggles to false in the bootstrap effect after the
+   * first round completes.
+   */
+  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isAgreementsOpen, setIsAgreementsOpen] = useState(false);
@@ -761,14 +768,34 @@ export default function TimeActivityScreen() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (!hasInitiallyLoaded) return;
     void loadTransactions(1, "replace");
-  }, [direction, loadTransactions]);
+  }, [direction, hasInitiallyLoaded, loadTransactions]);
 
   useEffect(() => {
-    void loadAgreements();
-    void loadInsights();
-    void loadEventHistory();
-  }, [loadAgreements, loadEventHistory, loadInsights]);
+    if (hasInitiallyLoaded) return;
+    let cancelled = false;
+    setIsLoading(true);
+    void Promise.all([
+      loadTransactions(1, "replace"),
+      loadAgreements(),
+      loadInsights(),
+      loadEventHistory(),
+    ]).finally(() => {
+      if (!cancelled) {
+        setHasInitiallyLoaded(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasInitiallyLoaded,
+    loadAgreements,
+    loadEventHistory,
+    loadInsights,
+    loadTransactions,
+  ]);
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -901,6 +928,15 @@ export default function TimeActivityScreen() {
       [sectionType]: prev[sectionType] !== true,
     }));
   }, []);
+
+  if (!hasInitiallyLoaded) {
+    return (
+      <View style={[styles.container, styles.initialLoadingWrap]}>
+        <ActivityIndicator size="large" color={colors.GREEN} />
+        <Text style={styles.initialLoadingText}>Loading your time activity…</Text>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -2908,6 +2944,18 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
     alignItems: "center",
     justifyContent: "center",
+  },
+  initialLoadingWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    paddingHorizontal: 24,
+  },
+  initialLoadingText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.GRAY500,
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
