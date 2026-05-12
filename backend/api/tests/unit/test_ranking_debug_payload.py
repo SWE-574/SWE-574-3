@@ -264,7 +264,7 @@ class TestPhase1Trace:
             service_ids=[str(svc.id)],
             selected_service_id=str(svc.id),
             request_user=viewer,
-            active_filter='all',
+            active_filter='newest',
         )
         phase1 = payload['selected_service']['phase1']
 
@@ -375,7 +375,7 @@ class TestSortBlock:
             service_ids=[str(svc.id)],
             selected_service_id=str(svc.id),
             request_user=viewer,
-            active_filter='all',
+            active_filter='newest',
         )
         sort_block = payload['selected_service']['sort']
 
@@ -547,7 +547,7 @@ class TestDiagnosisLine:
             service_ids=[str(svc.id)],
             selected_service_id=str(svc.id),
             request_user=viewer,
-            active_filter='all',
+            active_filter='newest',
         )
         diagnosis = payload['selected_service']['diagnosis']
 

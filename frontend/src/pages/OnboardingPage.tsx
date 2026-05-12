@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box, Flex, Text, Button, Textarea, VStack, HStack, Avatar,
@@ -35,6 +35,12 @@ const OnboardingPage = () => {
 
   const [step, setStep]       = useState(1)
   const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    if (user?.is_onboarded) {
+      navigate('/dashboard', { replace: true })
+    }
+  }, [user?.is_onboarded, navigate])
 
   // Step 2
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
@@ -310,7 +316,7 @@ const OnboardingPage = () => {
         <Box w="full" maxW="520px">
           <Box bg={WHITE} borderRadius="16px" border={`1px solid ${GRAY200}`}
             boxShadow="0 4px 24px rgba(0,0,0,0.08)" p={8}
-            style={{ overflow: step === 4 ? 'visible' : 'hidden' }}>
+            style={{ overflow: (step === 2 || step === 4) ? 'visible' : 'hidden' }}>
             {renderStep()}
           </Box>
         </Box>
