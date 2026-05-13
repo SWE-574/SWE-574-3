@@ -218,7 +218,7 @@ def _sort_mode_for(active_filter: str) -> str:
     """Map the frontend ranking mode to the backend's actual sort behaviour.
 
     See ServiceViewSet.get_queryset (views.py around line 2435):
-      - sort='hot' (only 'nearby' sets this) -> composite_score order
+      - sort='hot' (the 'nearby' filter and the dashboard 'all' filter) -> composite_score order
       - explore_only feed (only 'discovery') -> Phase 3 rotation
       - everything else -> created_at desc
 
@@ -226,7 +226,7 @@ def _sort_mode_for(active_filter: str) -> str:
     diagnosis line that explains the truth and one that points at composite
     factors that had no bearing on the ordering.
     """
-    if active_filter == 'nearby':
+    if active_filter in ('nearby', 'all'):
         return 'composite'
     if active_filter == 'discovery':
         return 'explore_only'
