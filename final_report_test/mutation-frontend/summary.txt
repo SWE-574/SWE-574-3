@@ -1,0 +1,30 @@
+[CI — Mutation testing/frontend-stryker  ]   | src/services/api.ts:37:20
+[CI — Mutation testing/frontend-stryker  ]   | src/services/api.ts:155:16
+[CI — Mutation testing/frontend-stryker  ]   | src/services/api.ts:163:57
+[CI — Mutation testing/frontend-stryker  ]   | -           const knownTopKeys = new Set(['detail', 'code', 'field_errors', 'error', 'message', 'messages'])
+[CI — Mutation testing/frontend-stryker  ]   | src/services/api.ts:163:73
+[CI — Mutation testing/frontend-stryker  ]   | -           const knownTopKeys = new Set(['detail', 'code', 'field_errors', 'error', 'message', 'messages'])
+[CI — Mutation testing/frontend-stryker  ]   | +           const knownTopKeys = new Set(['detail', 'code', 'field_errors', "", 'message', 'messages'])
+[CI — Mutation testing/frontend-stryker  ]   | src/services/api.ts:175:24
+[CI — Mutation testing/frontend-stryker  ]   | src/services/api.ts:181:17
+[CI — Mutation testing/frontend-stryker  ]   | -               if (Array.isArray(errors)) fieldErrors.push(errors.join(', '))
+[CI — Mutation testing/frontend-stryker  ]   | +               if (true) fieldErrors.push(errors.join(', '))
+[CI — Mutation testing/frontend-stryker  ]   |     getErrorMessage renders field_errors keyed under that name
+[CI — Mutation testing/frontend-stryker  ]   | src/services/api.ts:58:3
+[CI — Mutation testing/frontend-stryker  ]   | src/services/api.ts:189:63
+[CI — Mutation testing/frontend-stryker  ]   |     getErrorMessage renders field_errors keyed under that name
+[CI — Mutation testing/frontend-stryker  ]   | src/services/api.ts:195:11
+[CI — Mutation testing/frontend-stryker  ]   | src/services/conversationAPI.ts:171:33
+[CI — Mutation testing/frontend-stryker  ]   | src/utils/dateTime.ts:8:53
+[CI — Mutation testing/frontend-stryker  ]   | src/utils/dateTime.ts:8:66
+[CI — Mutation testing/frontend-stryker  ]   | src/utils/dateTime.ts:61:9
+[CI — Mutation testing/frontend-stryker  ]   |                      | % Mutation score |          |           |            |          |          |
+[CI — Mutation testing/frontend-stryker  ]   | File                 |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+[CI — Mutation testing/frontend-stryker  ]   | All files            |  75.38 |   94.96 |      240 |         5 |         13 |       67 |      117 |
+[CI — Mutation testing/frontend-stryker  ]   |   api.ts             |  41.54 |   81.82 |       49 |         5 |         12 |       64 |       31 |
+[CI — Mutation testing/frontend-stryker  ]   |   conversationAPI.ts |  97.78 |  100.00 |       44 |         0 |          0 |        1 |       16 |
+[CI — Mutation testing/frontend-stryker  ]   |   cookies.ts         | 100.00 |  100.00 |       15 |         0 |          0 |        0 |        3 |
+[CI — Mutation testing/frontend-stryker  ]   |   dateTime.ts        |  91.67 |   97.06 |       33 |         0 |          1 |        2 |       13 |
+[CI — Mutation testing/frontend-stryker  ]   |   eventUtils.ts      | 100.00 |  100.00 |       99 |         0 |          0 |        0 |       54 |
+[CI — Mutation testing/frontend-stryker  ]   | [32m07:58:20 (154) INFO MutationTestReportHelper[39m Final mutation score of 75.38 is greater than or equal to break threshold 60
+[CI — Mutation testing/frontend-stryker  ]   | [32m07:58:20 (154) INFO MutationTestExecutor[39m Done in 29 minutes and 4 seconds.

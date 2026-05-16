@@ -1,0 +1,9 @@
+ci-backend: no-pr-context
+ci-docker: Job succeeded
+ci-e2e-nightly: no-pr-context
+ci-e2e: Job succeeded
+ci-frontend: Job succeeded
+ci-makefile: Job succeeded
+ci-mobile: Job succeeded
+ci-mutation: no-pr-context
+ci-publish: Job succeeded

@@ -1,0 +1,27 @@
+appId: com.apiary.thehive
+tags:
+  - smoke
+---
+# Smoke test: app reachable, home loaded, primary tabs visible.
+# Skips clearState because the dev-client launcher swallows it; relies on
+# whatever logged-in state the emulator already holds.
+- assertVisible:
+    text: "Home(, tab,.*)?"
+- assertVisible:
+    text: "Map(, tab,.*)?"
+- assertVisible:
+    text: "Forum(, tab,.*)?"
+- assertVisible:
+    text: "Messages(, tab,.*)?"
+- assertVisible:
+    text: "Profile(, tab,.*)?"
+# Switch tabs and back to verify navigation works.
+- tapOn:
+    text: "Forum(, tab,.*)?"
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    text: "Home(, tab,.*)?"
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Home"

@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuites>
+  <testsuite name="Test Suite" device="Pixel_3a_API_35_extension_level_13_arm64-v8a" tests="1" failures="0" time="37.0">
+    <testcase id="maestro-smoke" name="maestro-smoke" classname="maestro-smoke" time="37.0" status="SUCCESS">
+      <properties>
+        <property name="tags" value="smoke"/>
+      </properties>
+    </testcase>
+  </testsuite>
+</testsuites>

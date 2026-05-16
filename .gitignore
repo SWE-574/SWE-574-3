@@ -249,3 +249,4 @@ mobile-client/.idea/
 
 # Coverage artifacts
 frontend/coverage/
+backend/mutants/
