@@ -1,24 +1,5 @@
 # Final Test Report
 
-<<<<<<< Updated upstream
-Tests were executed on **2026-05-16** against branch `final-report-test-branch`.
-The stack ran natively (Django daphne `:8000`, Vite `:5173`) on top of the dockerised infra (Postgres / Redis / MinIO).
-
-## Open the HTML reports
-
-```bash
-open final_report_test/backend/pytest-report.html           # backend unit + integration
-open final_report_test/backend/coverage/html/index.html     # backend coverage
-open final_report_test/frontend/coverage/index.html         # frontend coverage (vitest)
-open final_report_test/mobile/coverage/index.html           # mobile coverage (jest)
-open final_report_test/e2e/playwright-report/index.html     # e2e (playwright)
-open final_report_test/lint/eslint-report.html              # frontend lint (eslint)
-open final_report_test/mutation-frontend/index.html         # frontend mutation (Stryker) — JSON rendered via mutation-testing-elements
-open final_report_test/maestro/auth-login.html              # maestro (failed login flow, dev-client launcher issue)
-```
-
-Plain-text artefacts live next to each report (e.g. `pytest-output.log`, `vitest-output.log`, `jest-output.log`, `playwright-output.log`, `output.log` per non-HTML suite).
-=======
 Tests were executed on **2026-05-16** against branch [`final-report-test-branch`](https://github.com/SWE-574/SWE-574-3/tree/final-report-test-branch).
 The stack ran natively (Django daphne `:8000`, Vite `:5173`) on top of the dockerised infra (Postgres / Redis / MinIO).
 
@@ -39,7 +20,6 @@ All artefacts live under [`final_report_test`](https://github.com/SWE-574/SWE-57
 | CI workflows (`act`) | — | [workflow-dryrun.txt](https://github.com/SWE-574/SWE-574-3/blob/final-report-test-branch/final_report_test/act/workflow-dryrun.txt) |
 
 > Note: GitHub doesn't render HTML files inline. Click "Raw" or clone the branch and open the HTML files locally to view the interactive reports.
->>>>>>> Stashed changes
 
 ## Tool inventory (from `Makefile`, `requirements*.txt`, `package.json`)
 
@@ -61,19 +41,11 @@ All artefacts live under [`final_report_test`](https://github.com/SWE-574/SWE-57
 | Cross-client | node native test runner | **2 passed, 0 failed** | n/a | `handshake.test.mjs` + `service-discovery.test.mjs` against live backend (~2 s total). |
 | Assert-sweep | Python codemod + grep | **clean** | n/a | Confirms no raw `status_code` asserts in integration tests and no `TestCase` subclasses in unit tests. |
 | k6 perf gates | k6 0.x | **all SLAs met** (see below) | n/a | 3 scripts × 60 s each; all checks 100 %. |
-<<<<<<< Updated upstream
-| Frontend lint | ESLint flat config (eslint.config.js) | **0 errors, 0 warnings** | n/a | `coverage/`, `tests/reports/`, `playwright-report/`, `.stryker-tmp` added to `globalIgnores` so artefacts don't poison `npm run lint`. |
-| Frontend type check | `tsc -b` | **clean** | n/a | All TS project refs build. |
-| Frontend mutation | Stryker 9 (vitest-runner) | **mutation score 75.38 % (gate ≥ 60)** | — | Locally blocked by an `@exodus/bytes` ESM/CJS issue in `.stryker-tmp` sandbox; re-run inside the CI workflow container via `act -W ci-mutation.yml -j frontend-stryker --container-architecture linux/amd64`. **240 killed, 13 survived, 5 timeout, 67 no-coverage, 117 errors** across 5 files / 448 mutants in 29:04. Per-file: `cookies.ts` 100 %, `eventUtils.ts` 100 %, `conversationAPI.ts` 97.78 %, `dateTime.ts` 91.67 %, `api.ts` 41.54 % (the weak spot — 12 survivors, 64 no-coverage). |
-| Backend mutation | mutmut 3 | **blocked locally** | — | Known issue documented in `backend/pyproject.toml` (the `[tool.mutmut]` block): pytest-django session setup raises `RuntimeError: context has already been set` inside mutmut's sub-runs. All 469 candidate mutants on `badge_utils.py` end up "not checked" (`mutation-backend/mutmut-cicd-stats.json`). CI's `ci-mutation.yml` `backend-mutmut` job is wired the same way and is gated by Python 3.11 + a fresh container — the local Python 3.14 env reproduces the bootstrap failure. |
-| Maestro mobile | Maestro CLI 2.5.1 | **smoke flow passed (37 s)** | — | CLI works (`~/.maestro/bin/maestro`); emulator-5554 has the dev-client build of `com.apiary.thehive` installed, not a production APK, so the seeded `.maestro/auth/login.yaml` flow trips on `clearState: true` (per `.maestro/README.md`: dev launcher swallows clearState). After pointing the dev client at Metro and connecting, a custom smoke flow (`maestro/smoke.yaml` — asserts the 5 nav tabs + navigates Forum ↔ Home) **passed in 37 s**. Full pre-seeded flows (`auth/`, `browse/`, `forum/`, `handshake/`, `map/`, `messages/`, `post/`, `profile/`, `qr/`) need a release APK (`npm run build:android:emulator:clean`). |
-=======
 | Frontend lint | ESLint flat config (`eslint.config.js`) | **0 errors, 0 warnings** | n/a | `coverage/`, `tests/reports/`, `playwright-report/`, `.stryker-tmp` added to `globalIgnores` so artefacts don't poison `npm run lint`. |
 | Frontend type check | `tsc -b` | **clean** | n/a | All TS project refs build. |
 | Frontend mutation | Stryker 9 (vitest-runner) | **mutation score 75.38 % (gate ≥ 60)** | — | Locally blocked by an `@exodus/bytes` ESM/CJS issue in `.stryker-tmp` sandbox; re-run inside the CI workflow container via `act -W ci-mutation.yml -j frontend-stryker --container-architecture linux/amd64`. **240 killed, 13 survived, 5 timeout, 67 no-coverage, 117 errors** across 5 files / 448 mutants in 29:04. Per-file: `cookies.ts` 100 %, `eventUtils.ts` 100 %, `conversationAPI.ts` 97.78 %, `dateTime.ts` 91.67 %, `api.ts` 41.54 % (the weak spot — 12 survivors, 64 no-coverage). |
 | Backend mutation | mutmut 3 | **blocked locally** | — | Known issue documented in `backend/pyproject.toml` (the `[tool.mutmut]` block): pytest-django session setup raises `RuntimeError: context has already been set` inside mutmut's sub-runs. All 469 candidate mutants on `badge_utils.py` end up "not checked" (`mutation-backend/mutmut-cicd-stats.json`). CI's `ci-mutation.yml` `backend-mutmut` job is wired the same way and is gated by Python 3.11 + a fresh container — the local Python 3.14 env reproduces the bootstrap failure. |
 | Maestro mobile | Maestro CLI 2.5.1 | **smoke flow passed (37 s)** | — | CLI works (`~/.maestro/bin/maestro`); emulator-5554 has the dev-client build of `com.apiary.thehive` installed, not a production APK, so the seeded `.maestro/auth/login.yaml` flow trips on `clearState: true` (per `.maestro/README.md`: dev launcher swallows clearState). After pointing the dev client at Metro and connecting, a custom smoke flow ([`maestro/smoke.yaml`](https://github.com/SWE-574/SWE-574-3/blob/final-report-test-branch/final_report_test/maestro/smoke.yaml) — asserts the 5 nav tabs + navigates Forum ↔ Home) **passed in 37 s**. Full pre-seeded flows (`auth/`, `browse/`, `forum/`, `handshake/`, `map/`, `messages/`, `post/`, `profile/`, `qr/`) need a release APK (`npm run build:android:emulator:clean`). |
->>>>>>> Stashed changes
 
 ### What do `xfailed` / `xpassed` mean? (backend only)
 
@@ -98,11 +70,7 @@ Error-rate gates (`rate < 0.01`-`0.02`) all read **0.00 %**.
 
 ## act — CI workflow validation
 
-<<<<<<< Updated upstream
-`act` was run from the repo root with `--container-architecture linux/amd64` on macOS arm64.
-=======
 `act` was run from the repo root with `--container-architecture linux/amd64` on macOS arm64. Full per-workflow status: [`act/workflow-dryrun.txt`](https://github.com/SWE-574/SWE-574-3/blob/final-report-test-branch/final_report_test/act/workflow-dryrun.txt).
->>>>>>> Stashed changes
 
 | Workflow | Status (dry-run) | Notes |
 |---|---|---|
@@ -111,46 +79,26 @@ Error-rate gates (`rate < 0.01`-`0.02`) all read **0.00 %**.
 | `ci-e2e.yml` | dry-run OK | covered by direct Playwright run. |
 | `ci-e2e-nightly.yml` | needs PR / schedule context | full Playwright + a11y + perf. Covered by direct Playwright + k6 runs. |
 | `ci-frontend.yml` | dry-run OK | covered by direct eslint + tsc + vitest. |
-<<<<<<< Updated upstream
-| `ci-makefile.yml` | **full run OK** | actually executed under act — `make help` validated all `.PHONY` targets reachable. Log in `act/ci-makefile.log`. |
-| `ci-mobile.yml` | dry-run OK | covered by direct Jest run. |
-| `ci-mutation.yml` | needs PR context | running in background under act (Node 20 / Linux) since local Stryker is blocked. Result appended to `act/` when finished. |
-=======
 | `ci-makefile.yml` | **full run OK** | actually executed under act — `make help` validated all `.PHONY` targets reachable. |
 | `ci-mobile.yml` | dry-run OK | covered by direct Jest run. |
 | `ci-mutation.yml` | needs PR context | running in background under act (Node 20 / Linux) since local Stryker is blocked. |
->>>>>>> Stashed changes
 | `ci-publish.yml` | dry-run OK | only fires on `main` push; not executed. |
 
 Workflow yaml is structurally valid for all 9 files. Local equivalent test runs cover the same surface.
 
 ## E2E failure analysis
 
-<<<<<<< Updated upstream
-Each failing test was inspected via the error stack in `e2e/playwright-output.log`.
-Failures group into four buckets — only one of them points at a missing feature; the rest are test-suite drift.
-
-### 1. Stale test selectors — UI copy duplicated (5 tests, **suite out of date**)
-Playwright runs in strict mode, so when a label is rendered twice the selector throws.
-The product still works, the spec just needs a tighter selector.
-=======
 Each failing test was inspected via the error stack in the Playwright HTML report. Failures group into four buckets — only one of them points at a missing feature; the rest are test-suite drift.
 
 ### 1. Stale test selectors — UI copy duplicated (5 tests, **suite out of date**)
 Playwright runs in strict mode, so when a label is rendered twice the selector throws. The product still works, the spec just needs a tighter selector.
->>>>>>> Stashed changes
 
 - `email-verification-gate.spec.ts` × 3 — `getByText(/Email sent/i)` resolves to 2 elements
 - `follow-system/01-self-profile-follow-lists.spec.ts` — `Following` exact resolves to 2 elements (nav link + modal title)
 - `follow-system/02-self-profile-followers-list.spec.ts` — same for `Followers`
 
 ### 2. Seed / demo data drift (11 tests, **suite out of date**)
-<<<<<<< Updated upstream
-The specs hard-code titles from an older demo dataset; those rows are no longer present in `setup_demo.py`.
-Feature works — the locator just can't find the fixture row.
-=======
 The specs hard-code titles from an older demo dataset; those rows are no longer present in `setup_demo.py`. Feature works — the locator just can't find the fixture row.
->>>>>>> Stashed changes
 
 - `feature-7/02,04,05,07-fr-07*` — *"Pending handshake not found for service … / Elif Yılmaz"* (test helper can't find the seeded handshake)
 - `group-chat.spec.ts` × 5 — *"Neighborhood Manti Cooking Circle"* service missing
@@ -194,50 +142,15 @@ The locator points at a label/route that no longer exists on the page. In most c
 
 So roughly **~27 / 34** failures are test-suite drift (copy, fixtures, routes), and **~7 / 34** are worth a manual look before being closed.
 
-<<<<<<< Updated upstream
-## Folder layout
-=======
 ## Folder layout on the branch
 
 Browse: [`final_report_test/` on `final-report-test-branch`](https://github.com/SWE-574/SWE-574-3/tree/final-report-test-branch/final_report_test)
->>>>>>> Stashed changes
 
 ```
 final_report_test/
 ├── README.md                          ← this file
 ├── backend/
 │   ├── pytest-report.html             ← HTML pytest report
-<<<<<<< Updated upstream
-│   ├── coverage/html/index.html       ← HTML coverage
-│   ├── junit.xml
-│   └── pytest-output.log
-├── frontend/
-│   ├── coverage/index.html            ← v8 HTML coverage
-│   └── vitest-output.log
-├── mobile/
-│   ├── coverage/index.html            ← istanbul HTML coverage
-│   └── jest-output.log
-├── e2e/
-│   ├── playwright-report/index.html   ← Playwright HTML
-│   ├── playwright-junit.xml
-│   └── playwright-output.log
-├── cross-client/output.log
-├── assert-sweep/output.log
-├── perf/output.log                    ← k6 console + threshold summary
-├── lint/
-│   ├── eslint-report.html             ← HTML lint
-│   ├── eslint.log
-│   └── tsc-build.log
-├── mutation-frontend/
-│   ├── index.html                     ← interactive Stryker report (renders mutation.json via mutation-testing-elements CDN)
-│   ├── mutation.json                  ← raw Stryker JSON report (75.38 % mutation score)
-│   ├── summary.txt                    ← per-file score table extracted from the act log
-│   ├── act-stryker.log                ← full Stryker run output inside the CI docker container
-│   ├── stryker-attempt1.log           ← local default config — vitest threads worker spawn failure
-│   └── stryker-final.log              ← local retry after patching runner to pool=forks — same root cause
-├── mutation-backend/
-│   ├── mutmut-output.log              ← pytest-django context-already-set bootstrap failure
-=======
 │   ├── coverage/coverage.json         ← coverage JSON (HTML viewable after clone)
 │   └── junit.xml
 ├── frontend/
@@ -254,21 +167,10 @@ final_report_test/
 │   ├── mutation.json                  ← raw Stryker JSON report (75.38 % mutation score)
 │   └── summary.txt                    ← per-file score table extracted from the act log
 ├── mutation-backend/
->>>>>>> Stashed changes
 │   ├── mutmut-results.txt             ← every mutant listed as "not checked"
 │   └── mutmut-cicd-stats.json         ← 469 total / 0 killed / 0 survived
 ├── maestro/
 │   ├── smoke.yaml                     ← custom flow that doesn't require clearState
-<<<<<<< Updated upstream
-│   ├── smoke.log                      ← passed in 37 s
-│   ├── smoke-junit.xml                ← junit output
-│   ├── auth-login.html                ← original auth/login.yaml run (dev-launcher blocks clearState)
-│   └── auth-login-failed.log
-└── act/
-    ├── ci-makefile.log                ← full run under act, succeeded
-    └── workflow-dryrun.txt            ← yaml dry-run status per workflow
-```
-=======
 │   ├── smoke-junit.xml                ← junit output (passed in 37 s)
 │   └── auth-login.html                ← original auth/login.yaml run (dev-launcher blocks clearState)
 └── act/
@@ -289,4 +191,3 @@ open final_report_test/lint/eslint-report.html
 open final_report_test/mutation-frontend/index.html
 open final_report_test/maestro/auth-login.html
 ```
->>>>>>> Stashed changes
