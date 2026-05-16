@@ -1,0 +1,160 @@
+<testsuites id="" name="" tests="30" failures="0" skipped="30" errors="0" time="0.189808">
+<testsuite name="feature-13/01-fr-13a.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13a: detail page shows core listing details including schedule, capacity, tags, and creation metadata" classname="feature-13/01-fr-13a.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/02-fr-13b.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13b: detail page shows the poster profile summary with name, karma, and member-since data" classname="feature-13/02-fr-13b.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/03-fr-13c.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13c: authenticated non-owners see Express Interest on active offer pages while capacity is available" classname="feature-13/03-fr-13c.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/04-fr-13d.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13d: authenticated non-owners see Respond on request pages when they have not initiated an exchange yet" classname="feature-13/04-fr-13d.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/05-fr-13e.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13e: triggering the detail-page action creates a pending exchange and opens the private chat thread" classname="feature-13/05-fr-13e.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/06-fr-13f.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13f: anonymous users do not see protected action buttons and are redirected to login for protected interactions" classname="feature-13/06-fr-13f.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/07-fr-13g.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13g: owner view shows an Interests panel with interested users and their exchange statuses" classname="feature-13/07-fr-13g.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/08-fr-13h.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="2" failures="0" skipped="2" time="0" errors="0">
+<testcase name="FR-13h: owner sees Interests panel with requester profile links" classname="feature-13/08-fr-13h.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="FR-13h: non-owner does NOT see the Interests panel" classname="feature-13/08-fr-13h.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/09-fr-13i.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13i: pending requests do not consume capacity, but accepted capacity blocks the offer action" classname="feature-13/09-fr-13i.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/10-fr-13j.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13j: detail page exposes a public discussion tab and authenticated users can post comments" classname="feature-13/10-fr-13j.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/11-fr-13k.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13k: in-person pre-accepted detail views show only approximate location and hide the precise address" classname="feature-13/11-fr-13k.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/12-fr-13l.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13l: the meeting link is disclosed only to parties whose exchange reaches accepted state" classname="feature-13/12-fr-13l.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/13-fr-13m.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="FR-13m: owner Interests panel includes a manual Mark as Complete fallback for eligible accepted in-person exchanges" classname="feature-13/13-fr-13m.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/14-nfr-13a.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="NFR-13a: detail page loads within 2 seconds under normal load" classname="feature-13/14-nfr-13a.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/15-nfr-13b.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="NFR-13b: owner-only Interests panel data is not visible to other regular users" classname="feature-13/15-nfr-13b.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/16-nfr-13c.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="NFR-13c: precise location data is not transmitted to clients whose status is below accepted" classname="feature-13/16-nfr-13c.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/17-nfr-13d.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="1" failures="0" skipped="1" time="0" errors="0">
+<testcase name="NFR-13d: detail layout remains usable on desktop and mobile viewports" classname="feature-13/17-nfr-13d.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="feature-13/h-interests-public-profile-link.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="4" failures="0" skipped="4" time="0" errors="0">
+<testcase name="Interests panel — public-profile link (#298) › owner sees Interests panel when there is a pending requester" classname="feature-13/h-interests-public-profile-link.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="Interests panel — public-profile link (#298) › clicking avatar+name link navigates to /public-profile/{requesterId}" classname="feature-13/h-interests-public-profile-link.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="Interests panel — public-profile link (#298) › clicking [View profile] button navigates to /public-profile/{requesterId}" classname="feature-13/h-interests-public-profile-link.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="Interests panel — public-profile link (#298) › non-owner does NOT see the Interests panel" classname="feature-13/h-interests-public-profile-link.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="profile/calendar-upcoming.spec.ts" timestamp="2026-05-05T11:38:14.491Z" hostname="chromium" tests="8" failures="0" skipped="8" time="0" errors="0">
+<testcase name="UpcomingSchedule — calendar view (#446) › profile page renders the UPCOMING section card" classname="profile/calendar-upcoming.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="UpcomingSchedule — calendar view (#446) › empty calendar state renders the empty message" classname="profile/calendar-upcoming.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="UpcomingSchedule — calendar view (#446) › expand toggle reveals month grid" classname="profile/calendar-upcoming.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="UpcomingSchedule — calendar view (#446) › collapse button hides month grid" classname="profile/calendar-upcoming.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="UpcomingSchedule — calendar view (#446) › demo user sees seeded Offer service session in agenda preview" classname="profile/calendar-upcoming.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="UpcomingSchedule — calendar view (#446) › clicking expand then clicking a day filters the agenda list" classname="profile/calendar-upcoming.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="UpcomingSchedule — calendar view (#446) › mobile viewport renders single-column layout in expanded mode" classname="profile/calendar-upcoming.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="UpcomingSchedule — calendar view (#446) › conflict overlay renders when two items overlap (unit-level fallback)" classname="profile/calendar-upcoming.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+</testsuites>

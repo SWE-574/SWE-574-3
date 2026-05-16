@@ -1,0 +1,116 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - navigation [ref=e4]:
+      - generic [ref=e5]:
+        - link "The Hive" [ref=e6] [cursor=pointer]:
+          - /url: /dashboard
+          - generic [ref=e7]:
+            - img [ref=e8]
+            - paragraph [ref=e12]: The Hive
+        - generic [ref=e13]:
+          - link "Browse" [ref=e14] [cursor=pointer]:
+            - /url: /dashboard
+            - img [ref=e15]
+            - text: Browse
+          - link "Forum" [ref=e20] [cursor=pointer]:
+            - /url: /forum
+            - img [ref=e21]
+            - text: Forum
+          - link "Messages" [ref=e23] [cursor=pointer]:
+            - /url: /messages
+            - img [ref=e24]
+            - text: Messages
+        - generic [ref=e26]:
+          - button "9+" [ref=e29] [cursor=pointer]:
+            - img [ref=e30]
+            - generic [ref=e33]: 9+
+          - button "Take a tour" [ref=e34] [cursor=pointer]:
+            - img [ref=e35]
+          - generic [ref=e41] [cursor=pointer]:
+            - img "avatar" [ref=e43]
+            - img [ref=e44]
+    - generic [ref=e47]:
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - generic [ref=e53]:
+            - paragraph [ref=e54]: Yasemin Ergin
+            - paragraph [ref=e55]: yasemin@demo.com
+            - paragraph [ref=e57]: Member
+          - button "Your Time 3.00 hours 128 karma" [ref=e58] [cursor=pointer]:
+            - generic [ref=e60]:
+              - img [ref=e61]
+              - paragraph [ref=e63]: Your Time
+            - generic [ref=e64]:
+              - paragraph [ref=e65]: "3.00"
+              - paragraph [ref=e66]: hours
+            - generic [ref=e67]:
+              - img [ref=e68]
+              - paragraph [ref=e71]: 128 karma
+          - generic [ref=e72]:
+            - generic [ref=e73]:
+              - paragraph [ref=e74]: "0"
+              - paragraph [ref=e75]: Pending
+            - generic [ref=e76]:
+              - paragraph [ref=e77]: "0"
+              - paragraph [ref=e78]: Active
+            - generic [ref=e79]:
+              - paragraph [ref=e80]: "2"
+              - paragraph [ref=e81]: Done
+            - button "4 Achievements" [ref=e82] [cursor=pointer]:
+              - generic [ref=e83]:
+                - paragraph [ref=e84]: "4"
+                - paragraph [ref=e85]: Achievements
+        - generic [ref=e86]:
+          - paragraph [ref=e87]: Post a Service
+          - generic [ref=e88]:
+            - button "Offer" [ref=e89]:
+              - img [ref=e90]
+              - text: Offer
+            - button "Need" [ref=e91]:
+              - img [ref=e92]
+              - text: Need
+            - button "Event" [ref=e96]:
+              - img [ref=e97]
+              - text: Event
+        - generic [ref=e99]:
+          - paragraph [ref=e100]: Location
+          - button "Location on" [ref=e101] [cursor=pointer]:
+            - img [ref=e102]
+            - text: Location on
+          - paragraph [ref=e105]: Permission denied
+      - generic [ref=e106]:
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - img [ref=e110]
+            - textbox "Search services, skills, tags…" [ref=e113]
+          - generic [ref=e114]:
+            - generic [ref=e115]:
+              - button "Offers" [ref=e116] [cursor=pointer]: Offers
+              - button "Needs" [ref=e118] [cursor=pointer]: Needs
+              - button "Events" [ref=e120] [cursor=pointer]: Events
+            - button "Filters" [ref=e123] [cursor=pointer]:
+              - img [ref=e124]
+              - text: Filters
+        - generic [ref=e125]:
+          - generic [ref=e127]:
+            - region "Map" [ref=e129]
+            - generic:
+              - generic:
+                - generic: Offers
+                - generic: Wants
+                - generic: Events
+          - button "Hide map" [ref=e130]:
+            - generic [ref=e131]:
+              - img [ref=e132]
+              - paragraph [ref=e134]: Hide map
+        - generic [ref=e136]:
+          - button "All" [ref=e137]
+          - button "Education" [ref=e138]
+          - button "Art" [ref=e139]
+          - button "Cooking" [ref=e140]
+          - button "Gardening" [ref=e141]
+  - region "Notifications alt+T"
+```

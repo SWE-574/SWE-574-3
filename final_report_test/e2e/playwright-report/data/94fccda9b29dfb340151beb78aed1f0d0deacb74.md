@@ -1,0 +1,114 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - navigation [ref=e4]:
+      - generic [ref=e5]:
+        - link "The Hive" [ref=e6] [cursor=pointer]:
+          - /url: /dashboard
+          - generic [ref=e7]:
+            - img [ref=e8]
+            - paragraph [ref=e12]: The Hive
+        - generic [ref=e13]:
+          - link "Browse" [ref=e14] [cursor=pointer]:
+            - /url: /dashboard
+            - img [ref=e15]
+            - text: Browse
+          - link "Forum" [ref=e20] [cursor=pointer]:
+            - /url: /forum
+            - img [ref=e21]
+            - text: Forum
+          - link "Messages" [ref=e23] [cursor=pointer]:
+            - /url: /messages
+            - img [ref=e24]
+            - text: Messages
+        - generic [ref=e26]:
+          - generic [ref=e30] [cursor=pointer]:
+            - img [ref=e31]
+            - text: Post Service
+            - img [ref=e33]
+          - button "⏱ 6.0h" [ref=e35] [cursor=pointer]:
+            - generic [ref=e36]: ⏱
+            - text: 6.0h
+          - button "9+" [ref=e39] [cursor=pointer]:
+            - img [ref=e40]
+            - generic [ref=e43]: 9+
+          - generic [ref=e47] [cursor=pointer]:
+            - img "avatar" [ref=e49]
+            - img [ref=e50]
+    - generic [ref=e54]:
+      - button "Back" [ref=e55] [cursor=pointer]:
+        - img [ref=e56]
+        - text: Back
+      - generic [ref=e61]:
+        - img [ref=e63]
+        - generic [ref=e65]:
+          - paragraph [ref=e66]: Post an Offer
+          - paragraph [ref=e67]: Share a skill or service you can provide to the community
+      - generic [ref=e70]:
+        - generic [ref=e71]:
+          - generic [ref=e72]:
+            - img [ref=e74]
+            - paragraph [ref=e76]: Basic Info
+          - generic [ref=e77]:
+            - generic [ref=e78]:
+              - paragraph [ref=e79]: Title*
+              - textbox "e.g. Guitar lessons for beginners" [ref=e80]: FR-13m Manual Complete 1778912472528
+            - generic [ref=e81]:
+              - paragraph [ref=e82]: Description*
+              - textbox "Describe what you're offering or what you need in detail…" [ref=e83]: Playwright creates FR-13m Manual Complete 1778912472528 for Feature 7 verification.
+        - generic [ref=e85]:
+          - generic [ref=e86]:
+            - img [ref=e88]
+            - paragraph [ref=e91]: Time & Place
+          - generic [ref=e92]:
+            - generic [ref=e93]:
+              - generic [ref=e94]:
+                - paragraph [ref=e95]: Duration (hours)*
+                - spinbutton [ref=e96]: "1"
+              - generic [ref=e97]:
+                - paragraph [ref=e98]: Max participants*
+                - spinbutton [ref=e99]: "1"
+            - generic [ref=e100]:
+              - paragraph [ref=e101]: Location*
+              - generic [ref=e102]:
+                - button "In-Person" [ref=e103] [cursor=pointer]
+                - button "Online" [ref=e104] [cursor=pointer]
+            - generic [ref=e105]:
+              - generic [ref=e106]:
+                - paragraph [ref=e107]:
+                  - img [ref=e108]
+                  - text: Address*
+                - button "Use my location" [ref=e112] [cursor=pointer]:
+                  - img [ref=e113]
+                  - text: Use my location
+              - generic [ref=e115]:
+                - generic [ref=e117]:
+                  - img [ref=e118]
+                  - textbox "Search address — e.g. Bağdat Caddesi, Kadıköy" [ref=e121]
+                - paragraph [ref=e122]: Please search and select a location
+            - generic [ref=e123]:
+              - paragraph [ref=e124]: Schedule details (optional)
+              - textbox "e.g. This weekend, flexible timing" [ref=e125]
+        - generic [ref=e127]:
+          - generic [ref=e128]:
+            - img [ref=e130]
+            - paragraph [ref=e132]: Tags
+          - generic [ref=e133]:
+            - textbox "Search Wikidata tags…" [ref=e135]
+            - paragraph [ref=e136]: Add up to 10 tags to help others find your offer
+        - generic [ref=e138]:
+          - generic [ref=e139]:
+            - img [ref=e141]
+            - paragraph [ref=e145]: Photos
+          - generic [ref=e147] [cursor=pointer]:
+            - img [ref=e149]
+            - paragraph [ref=e153]: Click to upload photos
+            - paragraph [ref=e154]: Up to 5 photos · PNG, JPG up to 10 MB each
+            - paragraph [ref=e155]: First photo will be the cover image
+        - generic [ref=e156]:
+          - button "Cancel" [ref=e157] [cursor=pointer]
+          - button "Post Offer" [active] [ref=e158] [cursor=pointer]
+  - region "Notifications alt+T"
+```
