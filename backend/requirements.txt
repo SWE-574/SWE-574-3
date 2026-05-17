@@ -28,4 +28,4 @@ freezegun>=1.4.0
 mutmut>=2.4.0
 factory-boy>=3.3.0
 faker>=19.0.0
-exponent-server-sdk>=2.1.0
+exponent-server-sdk>=2.2.0
