@@ -1,3 +1,3 @@
 -r requirements.txt
-libcst>=1.4
+libcst>=1.8.6
 pytest-repeat>=0.9
