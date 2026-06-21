@@ -43,7 +43,7 @@ jobs:
 
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────────────
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # full history needed for git diff in test selection
 
