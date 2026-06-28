@@ -25,7 +25,7 @@ jobs:
           node-version: "20"
 
       - name: Cache node_modules
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: frontend/node_modules
           key: node-${{ hashFiles('frontend/package-lock.json') }}
