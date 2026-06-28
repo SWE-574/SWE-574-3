@@ -30,7 +30,7 @@ jobs:
           node-version: "20"
 
       - name: Cache node_modules
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: mobile-client/node_modules
           key: mobile-node-${{ hashFiles('mobile-client/package-lock.json') }}
@@ -86,7 +86,7 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Cache node_modules
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: mobile-client/node_modules
           key: mobile-node-${{ hashFiles('mobile-client/package-lock.json') }}

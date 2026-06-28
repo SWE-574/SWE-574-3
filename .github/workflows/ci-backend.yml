@@ -152,7 +152,7 @@ jobs:
             gdal-bin libgdal-dev libgeos-dev
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: pip-${{ hashFiles('backend/requirements.txt') }}

@@ -65,7 +65,7 @@ jobs:
           node-version: "20"
 
       - name: Cache npm packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-e2e-${{ hashFiles('frontend/package-lock.json') }}
@@ -78,7 +78,7 @@ jobs:
         run: npm ci --prefer-offline --no-audit
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('frontend/package-lock.json') }}
